@@ -1,0 +1,18 @@
+{
+    "name": "aws-c-s3",
+    "targets": {
+        "android": {
+            "enabled": false,
+            "_comment": "disabled until we need to support it. LibCrypto needs to be configured on build machine."
+        }
+    },
+    "upstream": [
+        { "name": "aws-c-auth" },
+        { "name": "aws-c-http" }
+    ],
+    "downstream": [
+    ],
+    "test_steps": [
+        "test"
+    ]
+}
