@@ -6,7 +6,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/common/byte_buf.h>
 #include <aws/common/common.h>
 #include <aws/io/logging.h>
 #include <aws/s3/exports.h>
@@ -14,9 +13,8 @@
 #define AWS_C_S3_PACKAGE_ID 9
 
 enum aws_s3_errors {
-    AWS_S3_CHANNEL_ERROR_ERROR_CANT_ACCEPT_INPUT = AWS_ERROR_ENUM_BEGIN_RANGE(AWS_C_S3_PACKAGE_ID),
-    AWS_S3_PLACEHOLDER_ERROR,
-    AWS_S3_ERROR_END_RANGE = AWS_ERROR_ENUM_END_RANGE(AWS_C_S3_PACKAGE_ID)
+    AWS_ERROR_S3_FAILED_RESPONSE_STATUS = AWS_ERROR_ENUM_BEGIN_RANGE(AWS_C_S3_PACKAGE_ID),
+    AWS_ERROR_S3_END_RANGE = AWS_ERROR_ENUM_END_RANGE(AWS_C_S3_PACKAGE_ID)
 };
 
 enum aws_s3_subject {
@@ -44,4 +42,4 @@ void aws_s3_library_clean_up(void);
 
 AWS_EXTERN_C_END
 
-#endif
+#endif /* AWS_S3_H */

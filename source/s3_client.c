@@ -4,10 +4,8 @@
  */
 
 #include "aws/s3/private/s3_client_impl.h"
-#include "aws/s3/private/s3_request_context.h"
 #include "aws/s3/private/s3_request_impl.h"
-#include "aws/s3/s3_client_config.h"
-#include "aws/s3/s3_request.h"
+#include "aws/s3/s3_request_context.h"
 #include "aws/s3/s3_request_result.h"
 
 #include <aws/common/clock.h>
@@ -54,7 +52,9 @@ static int s_s3_client_incoming_body(
     void *user_data);
 static void s_s3_client_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
 
-struct aws_s3_client *aws_s3_client_new(struct aws_allocator *allocator, struct aws_s3_client_config *client_config) {
+struct aws_s3_client *aws_s3_client_new(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client_config *client_config) {
 
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
@@ -173,9 +173,8 @@ error_clean_up:
     return NULL;
 }
 
-int aws_s3_client_acquire(struct aws_s3_client *client) {
+void aws_s3_client_acquire(struct aws_s3_client *client) {
     aws_atomic_fetch_add(&client->ref_count, 1);
-    return AWS_OP_SUCCESS;
 }
 
 void aws_s3_client_release(struct aws_s3_client *client) {
@@ -477,6 +476,8 @@ static void s_s3_client_stream_complete(struct aws_http_stream *stream, int erro
     struct aws_s3_request *request = aws_s3_request_context_get_request(context);
 
     aws_s3_request_stream_complete(request, context, error_code);
+
+    aws_s3_request_finish(request, context, error_code);
 
     aws_s3_request_context_destroy(context);
     context = NULL;

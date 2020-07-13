@@ -7,7 +7,6 @@
  */
 
 #include "aws/s3/s3_client.h"
-
 #include <aws/common/atomics.h>
 
 struct aws_s3_client {
@@ -26,4 +25,4 @@ struct aws_s3_client {
     struct aws_atomic_var shutdown_wait_count;
 };
 
-#endif
+#endif /* AWS_S3_CLIENT_IMPL_H */

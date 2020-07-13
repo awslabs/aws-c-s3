@@ -14,8 +14,8 @@
 /* clang-format off */
 static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_AUTH(
-        AWS_S3_PLACEHOLDER_ERROR,
-        "Placeholder error - remove once there are other errors.")
+        AWS_ERROR_S3_FAILED_RESPONSE_STATUS,
+        "Request HTTP response status did not reflect success")
 };
 /* clang-format on */
 

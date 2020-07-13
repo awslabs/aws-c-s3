@@ -26,6 +26,6 @@ struct aws_s3_request_get_object_options {
 
 struct aws_s3_request *aws_s3_request_get_object_new(
     struct aws_allocator *allocator,
-    struct aws_s3_request_get_object_options *options);
+    const struct aws_s3_request_get_object_options *options);
 
-#endif
+#endif /* AWS_S3_REQUEST_GET_OBJECT_H */

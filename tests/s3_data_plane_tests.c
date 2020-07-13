@@ -12,13 +12,13 @@
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
 
-#include <aws/s3/model/s3_get_object_request.h>
-#include <aws/s3/model/s3_get_object_result.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
-#include <aws/s3/s3_client_config.h>
 #include <aws/s3/s3_request.h>
 #include <aws/s3/s3_request_result.h>
+
+#include "s3_get_object_request.h"
+#include "s3_get_object_result.h"
 
 struct aws_s3_tester {
     struct aws_logger logger;
@@ -86,7 +86,6 @@ static int s_test_s3_get_object_body_callback(
 static void s_test_s3_get_object_finish(
     struct aws_s3_request *request,
     struct aws_s3_request_result *result,
-    int error_code,
     void *user_data) {
     (void)result;
 
@@ -94,7 +93,7 @@ static void s_test_s3_get_object_finish(
 
     aws_mutex_lock(&tester->lock);
     tester->received_finish_callback = true;
-    tester->finish_error_code = error_code;
+    tester->finish_error_code = aws_s3_request_result_get_error_code(result);
     aws_mutex_unlock(&tester->lock);
 
     aws_condition_variable_notify_one(&tester->signal);

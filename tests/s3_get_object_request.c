@@ -3,13 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/model/s3_get_object_request.h"
-#include "aws/s3/model/s3_get_object_result.h"
-#include "aws/s3/private/s3_request_context.h"
-#include "aws/s3/private/s3_request_impl.h"
-#include "aws/s3/private/s3_request_result_impl.h"
+#include "s3_get_object_request.h"
+#include "s3_get_object_result.h"
+
 #include "aws/s3/s3_client.h"
 #include "aws/s3/s3_request.h"
+#include "aws/s3/s3_request_context.h"
 #include "aws/s3/s3_request_result.h"
 
 #include <aws/common/string.h>
@@ -23,18 +22,18 @@ struct aws_s3_request_get_object {
     struct aws_s3_request s3_request;
 
     struct aws_string *key;
-
     aws_s3_request_get_object_body_callback *body_callback;
 };
 
 static struct aws_s3_request_result *s_s3_request_get_object_result_new(
     struct aws_s3_request *request,
     struct aws_allocator *allocator);
+
 static int s_s3_request_get_object_build_http_request(
     struct aws_s3_request *request,
     struct aws_s3_request_context *context,
     struct aws_http_message *message);
-static int s_s3_request_get_object_cancel(struct aws_s3_request *request);
+
 static void s_s3_request_get_object_destroy(struct aws_s3_request *request);
 
 static int s_s3_request_get_object_incoming_headers(
@@ -59,19 +58,24 @@ static void s_s3_request_get_object_stream_complete(
     struct aws_s3_request_context *context,
     int error_code);
 
+static void s_s3_request_get_object_finish(
+    struct aws_s3_request *request,
+    struct aws_s3_request_context *context,
+    int error_code);
+
 static struct aws_s3_request_vtable s_s3_request_get_object_vtable = {
     .request_result_new = s_s3_request_get_object_result_new,
     .build_http_request = s_s3_request_get_object_build_http_request,
-    .cancel = s_s3_request_get_object_cancel,
     .destroy = s_s3_request_get_object_destroy,
     .incoming_headers = s_s3_request_get_object_incoming_headers,
     .incoming_header_block_done = s_s3_request_get_object_incoming_header_block_done,
     .incoming_body = s_s3_request_get_object_incoming_body,
-    .stream_complete = s_s3_request_get_object_stream_complete};
+    .stream_complete = s_s3_request_get_object_stream_complete,
+    .request_finish = s_s3_request_get_object_finish};
 
 struct aws_s3_request *aws_s3_request_get_object_new(
     struct aws_allocator *allocator,
-    struct aws_s3_request_get_object_options *options) {
+    const struct aws_s3_request_get_object_options *options) {
 
     struct aws_s3_request_get_object *get_object =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_request_get_object));
@@ -140,11 +144,6 @@ static struct aws_s3_request_result *s_s3_request_get_object_result_new(
     return aws_s3_request_result_get_object_new(allocator);
 }
 
-static int s_s3_request_get_object_cancel(struct aws_s3_request *request) {
-    (void)request;
-    return AWS_OP_SUCCESS;
-}
-
 static void s_s3_request_get_object_destroy(struct aws_s3_request *request) {
     struct aws_s3_request_get_object *get_object = (struct aws_s3_request_get_object *)request->impl;
 
@@ -167,15 +166,17 @@ static int s_s3_request_get_object_incoming_headers(
     (void)header_block;
 
     struct aws_s3_request_result *result = aws_s3_request_context_get_request_result(context);
-    struct aws_s3_request_result_get_object_output *output =
-        (struct aws_s3_request_result_get_object_output *)aws_s3_request_result_get_output(result);
+
+    struct aws_s3_request_result_get_object *request_result_get_object =
+        (struct aws_s3_request_result_get_object *)result->impl;
+    struct aws_s3_request_result_get_object_output *output = &request_result_get_object->output;
 
     for (size_t i = 0; i < headers_count; ++i) {
         const struct aws_byte_cursor *name = &headers[i].name;
         const struct aws_byte_cursor *value = &headers[i].value;
 
         if (aws_byte_cursor_eq_c_str(name, "Content-Type")) {
-            output->content_type = aws_string_new_from_array(result->allocator, value->ptr, value->len);
+            output->content_type = aws_string_new_from_array(context->allocator, value->ptr, value->len);
 
             AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Content-Type: %s", (const char *)output->content_type->bytes);
         } else if (aws_byte_cursor_eq_c_str(name, "Content-Length")) {
@@ -219,4 +220,24 @@ static void s_s3_request_get_object_stream_complete(
     (void)request;
     (void)context;
     (void)error_code;
+}
+
+static void s_s3_request_get_object_finish(
+    struct aws_s3_request *request,
+    struct aws_s3_request_context *context,
+    int error_code) {
+    struct aws_s3_request_result *result = aws_s3_request_context_get_request_result(context);
+
+    if (error_code != AWS_ERROR_SUCCESS) {
+        return;
+    }
+
+    aws_s3_request_result_set_error_code(result, error_code);
+
+    int32_t response_status = aws_s3_request_result_get_response_status(result);
+
+    if (response_status != 200) {
+        aws_raise_error(AWS_ERROR_S3_FAILED_RESPONSE_STATUS);
+        aws_s3_request_result_set_error_code(result, AWS_ERROR_S3_FAILED_RESPONSE_STATUS);
+    }
 }

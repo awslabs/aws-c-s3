@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_request_context.h"
+#include "aws/s3/s3_request_context.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/s3_request.h"
 #include "aws/s3/s3_request_result.h"
@@ -39,29 +39,18 @@ struct aws_s3_request_context *aws_s3_request_context_new(
     context->impl = context_private;
     context->allocator = allocator;
 
-    if (aws_s3_client_acquire(client)) {
-        goto error_clean_up;
-    }
+    aws_s3_client_acquire(client);
 
     context_private->client = client;
 
-    if (aws_s3_request_acquire(request)) {
-        goto error_clean_up;
-    }
+    aws_s3_request_acquire(request);
 
     context_private->request = request;
 
-    if (aws_s3_request_result_acquire(result)) {
-        goto error_clean_up;
-    }
+    aws_s3_request_result_acquire(result);
 
     context_private->result = result;
     return context;
-
-error_clean_up:
-    aws_s3_request_context_destroy(context);
-    aws_mem_release(allocator, context_private);
-    return NULL;
 }
 
 void aws_s3_request_context_destroy(struct aws_s3_request_context *context) {

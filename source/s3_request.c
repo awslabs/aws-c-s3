@@ -5,13 +5,13 @@
 
 #include "aws/s3/s3_request.h"
 #include "aws/s3/private/s3_request_impl.h"
-#include "aws/s3/private/s3_request_result_impl.h"
+#include "aws/s3/s3_request_result.h"
 
 #include <aws/common/assert.h>
 
 int aws_s3_request_init(
     struct aws_s3_request *request,
-    struct aws_s3_request_options *request_options,
+    const struct aws_s3_request_options *request_options,
     struct aws_allocator *allocator,
     struct aws_s3_request_vtable *vtable,
     void *impl) {
@@ -40,13 +40,8 @@ int aws_s3_request_build_http_request(
     return request->vtable->build_http_request(request, context, message);
 }
 
-int aws_s3_request_cancel(struct aws_s3_request *request) {
-    return request->vtable->cancel(request);
-}
-
-int aws_s3_request_acquire(struct aws_s3_request *request) {
+void aws_s3_request_acquire(struct aws_s3_request *request) {
     aws_atomic_fetch_add(&request->ref_count, 1);
-    return AWS_OP_SUCCESS;
 }
 
 void aws_s3_request_release(struct aws_s3_request *request) {
@@ -91,13 +86,14 @@ void aws_s3_request_stream_complete(
     aws_http_stream_get_incoming_response_status(context->stream, &result->response_status);
 
     request->vtable->stream_complete(request, context, error_code);
-
-    aws_s3_request_finish(request, context, error_code);
 }
 
 void aws_s3_request_finish(struct aws_s3_request *request, struct aws_s3_request_context *context, int error_code) {
+
+    request->vtable->request_finish(request, context, error_code);
+
     if (request->finish_callback != NULL) {
         struct aws_s3_request_result *result = aws_s3_request_context_get_request_result(context);
-        request->finish_callback(request, result, error_code, request->user_data);
+        request->finish_callback(request, result, request->user_data);
     }
 }
