@@ -5,76 +5,45 @@
 
 #include <aws/common/byte_buf.h>
 #include <aws/common/common.h>
-#include <aws/common/condition_variable.h>
-#include <aws/common/logging.h>
+
 #include <aws/testing/aws_test_harness.h>
 
-#include <aws/io/event_loop.h>
-#include <aws/io/host_resolver.h>
+#include <aws/http/request_response.h>
+#include <aws/io/stream.h>
 
-#include <aws/s3/s3.h>
-#include <aws/s3/s3_client.h>
-#include <aws/s3/s3_request.h>
-#include <aws/s3/s3_request_result.h>
+#include <inttypes.h>
 
-#include "s3_get_object_request.h"
-#include "s3_get_object_result.h"
+#include "s3_tester.h"
 
-struct aws_s3_tester {
-    struct aws_logger logger;
+AWS_STATIC_STRING_FROM_LITERAL(s_test_body_stream_str, "This is an S3 test.  This is an S3 test.");
+static struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 
-    struct aws_mutex lock;
-    struct aws_condition_variable signal;
-    bool received_finish_callback;
-    bool clean_up_finished;
-    int finish_error_code;
-};
+static struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
+static struct aws_byte_cursor s_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
 
-static int init_tester(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
-    (void)allocator;
-
-    AWS_ZERO_STRUCT(*tester);
-
-    struct aws_logger_standard_options logger_options = {.level = AWS_LOG_LEVEL_INFO, .file = stderr};
-
-    ASSERT_SUCCESS(aws_logger_init_standard(&tester->logger, allocator, &logger_options));
-    aws_logger_set(&tester->logger);
-
-    if (aws_mutex_init(&tester->lock)) {
-        return AWS_OP_ERR;
-    }
-
-    if (aws_condition_variable_init(&tester->signal)) {
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
+static struct aws_input_stream *s_create_test_body_stream(struct aws_allocator *allocator) {
+    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_string(s_test_body_stream_str);
+    return aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
 }
 
-static void clean_up_tester(struct aws_s3_tester *tester) {
-    aws_condition_variable_clean_up(&tester->signal);
-    aws_mutex_clean_up(&tester->lock);
+static struct aws_http_message *s_make_get_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor key);
 
-    aws_logger_set(NULL);
-    aws_logger_clean_up(&tester->logger);
-}
-
-static bool s_has_tester_received_finish_callback(void *user_data) {
-    struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
-    return tester->received_finish_callback;
-}
-
-static bool s_has_tester_clean_up_finished(void *user_data) {
-    struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
-    return tester->clean_up_finished;
-}
+static struct aws_http_message *s_make_put_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor content_type,
+    struct aws_byte_cursor key,
+    struct aws_input_stream *body_stream);
 
 static int s_test_s3_get_object_body_callback(
-    struct aws_s3_request_get_object *request,
+    struct aws_s3_accel_context *context,
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *body,
     void *user_data) {
-    (void)request;
+    (void)context;
     (void)stream;
     (void)user_data;
 
@@ -83,91 +52,248 @@ static int s_test_s3_get_object_body_callback(
     return AWS_OP_SUCCESS;
 }
 
-static void s_test_s3_get_object_finish(
-    struct aws_s3_request *request,
-    struct aws_s3_request_result *result,
-    void *user_data) {
-    (void)result;
+static void s_test_s3_get_object_finish(const struct aws_s3_accel_context *context, int error_code, void *user_data) {
+    (void)context;
 
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
 
-    aws_mutex_lock(&tester->lock);
-    tester->received_finish_callback = true;
-    tester->finish_error_code = aws_s3_request_result_get_error_code(result);
-    aws_mutex_unlock(&tester->lock);
-
-    aws_condition_variable_notify_one(&tester->signal);
-}
-
-static void s_tester_clean_up_finished(void *user_data) {
-    struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
-
-    aws_mutex_lock(&tester->lock);
-    tester->clean_up_finished = true;
-    aws_mutex_unlock(&tester->lock);
-
-    aws_condition_variable_notify_one(&tester->signal);
+    aws_s3_tester_notify_finished(tester, error_code);
 }
 
 AWS_TEST_CASE(test_s3_get_object, s_test_s3_get_object)
 static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
+
     aws_s3_library_init(allocator);
 
     struct aws_s3_tester tester;
-    init_tester(allocator, &tester);
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, s_test_bucket_name, s_test_s3_region));
 
-    struct aws_event_loop_group el_group;
-    ASSERT_SUCCESS(aws_event_loop_group_default_init(&el_group, allocator, 1));
+    struct aws_s3_client_config client_config = {
+        .el_group = &tester.el_group,
+        .host_resolver = &tester.host_resolver,
+        .region = s_test_s3_region,
+        .bucket_name = s_test_bucket_name,
+        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
 
-    struct aws_host_resolver host_resolver;
-    AWS_ZERO_STRUCT(host_resolver);
-    ASSERT_SUCCESS(aws_host_resolver_init_default(&host_resolver, allocator, 10, &el_group));
-
-    struct aws_s3_client_config client_config = {.el_group = &el_group,
-                                                 .host_resolver = &host_resolver,
-                                                 .region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2"),
-                                                 .bucket_name =
-                                                     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc"),
-                                                 .shutdown_callback = s_tester_clean_up_finished,
-                                                 .shutdown_callback_user_data = &tester};
+    aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_http_message *message =
+        s_make_get_object_request(allocator, aws_byte_cursor_from_string(tester.endpoint), test_object_path);
 
-    struct aws_s3_request_get_object_options get_object_options = {
-        .key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt"),
-        .body_callback = s_test_s3_get_object_body_callback,
-        .request_options.user_data = &tester,
-        .request_options.finish_callback = s_test_s3_get_object_finish};
+    struct aws_s3_accel_request_options options;
+    AWS_ZERO_STRUCT(options);
+    options.message = message;
+    options.user_data = &tester;
+    options.body_callback = s_test_s3_get_object_body_callback;
+    options.finish_callback = s_test_s3_get_object_finish;
 
-    struct aws_s3_request *request = aws_s3_request_get_object_new(allocator, &get_object_options);
-    ASSERT_NOT_NULL(request);
+    struct aws_s3_accel_context *context = aws_s3_client_accel_request(client, &options);
 
-    ASSERT_SUCCESS(aws_s3_client_execute_request(client, request));
+    ASSERT_TRUE(context != NULL);
 
-    aws_mutex_lock(&tester.lock);
-    aws_condition_variable_wait_pred(&tester.signal, &tester.lock, s_has_tester_received_finish_callback, &tester);
-    aws_mutex_unlock(&tester.lock);
-
+    aws_s3_tester_wait_for_finish(&tester);
     ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
 
-    aws_s3_request_release(request);
-    request = NULL;
+    aws_s3_accel_context_release(context);
 
-    aws_s3_client_release(client);
-    client = NULL;
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
 
-    aws_mutex_lock(&tester.lock);
-    aws_condition_variable_wait_pred(&tester.signal, &tester.lock, s_has_tester_clean_up_finished, &tester);
-    aws_mutex_unlock(&tester.lock);
+    if (client != NULL) {
+        aws_s3_client_release(client);
+        client = NULL;
+    }
 
-    aws_host_resolver_clean_up(&host_resolver);
-    aws_event_loop_group_clean_up(&el_group);
+    aws_s3_tester_wait_for_clean_up(&tester);
 
-    clean_up_tester(&tester);
-
+    aws_s3_tester_clean_up(&tester);
     aws_s3_library_clean_up();
 
     return 0;
+}
+
+static void s_test_s3_put_object_finish(const struct aws_s3_accel_context *context, int error_code, void *user_data) {
+    (void)context;
+    struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
+    aws_s3_tester_notify_finished(tester, error_code);
+}
+
+AWS_TEST_CASE(test_s3_put_object, s_test_s3_put_object)
+static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_put_object.txt");
+
+    aws_s3_library_init(allocator);
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, s_test_bucket_name, s_test_s3_region));
+
+    struct aws_s3_client_config client_config = {
+        .el_group = &tester.el_group,
+        .host_resolver = &tester.host_resolver,
+        .region = s_test_s3_region,
+        .bucket_name = s_test_bucket_name,
+        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
+
+    aws_s3_tester_bind_client_shutdown(&tester, &client_config);
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_input_stream *input_stream = s_create_test_body_stream(allocator);
+
+    struct aws_http_message *message = s_make_put_object_request(
+        allocator,
+        aws_byte_cursor_from_string(tester.endpoint),
+        test_object_path,
+        s_test_body_content_type,
+        input_stream);
+
+    struct aws_s3_accel_request_options options;
+    AWS_ZERO_STRUCT(options);
+    options.message = message;
+    options.user_data = &tester;
+    options.finish_callback = s_test_s3_put_object_finish;
+
+    struct aws_s3_accel_context *context = aws_s3_client_accel_request(client, &options);
+
+    ASSERT_TRUE(context != NULL);
+
+    aws_s3_tester_wait_for_finish(&tester);
+    ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
+
+    aws_s3_accel_context_release(context);
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    if (client != NULL) {
+        aws_s3_client_release(client);
+        client = NULL;
+    }
+
+    if (input_stream != NULL) {
+        aws_input_stream_destroy(input_stream);
+        input_stream = NULL;
+    }
+
+    aws_s3_tester_wait_for_clean_up(&tester);
+
+    aws_s3_tester_clean_up(&tester);
+    aws_s3_library_clean_up();
+
+    return 0;
+}
+
+static struct aws_http_message *s_make_get_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor key) {
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    struct aws_http_header host_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("host"), .value = host};
+
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_method(message, aws_http_method_get)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_path(message, key)) {
+        goto error_clean_up_message;
+    }
+
+    return message;
+
+error_clean_up_message:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+static struct aws_http_message *s_make_put_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor key,
+    struct aws_byte_cursor content_type,
+    struct aws_input_stream *body_stream) {
+
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(body_stream);
+
+    int64_t body_stream_length = 0;
+
+    if (aws_input_stream_get_length(body_stream, &body_stream_length)) {
+        return NULL;
+    }
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    struct aws_http_header host_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("host"), .value = host};
+
+    struct aws_http_header content_type_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("content-type"),
+                                                  .value = content_type};
+
+    char content_length_buffer[64] = "";
+    sprintf(content_length_buffer, "%" PRId64 "", body_stream_length);
+
+    struct aws_http_header content_length_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("content-length"),
+                                                    .value = aws_byte_cursor_from_c_str(content_length_buffer)};
+
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_add_header(message, content_type_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_add_header(message, content_length_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_method(message, aws_http_method_put)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_path(message, key)) {
+        goto error_clean_up_message;
+    }
+
+    aws_http_message_set_body_stream(message, body_stream);
+
+    return message;
+
+error_clean_up_message:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
 }

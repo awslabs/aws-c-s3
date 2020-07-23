@@ -25,4 +25,6 @@ struct aws_s3_client {
     struct aws_atomic_var shutdown_wait_count;
 };
 
+int s3_client_make_request(struct aws_s3_client *client, struct aws_s3_request *request);
+
 #endif /* AWS_S3_CLIENT_IMPL_H */

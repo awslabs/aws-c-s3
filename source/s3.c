@@ -14,8 +14,8 @@
 /* clang-format off */
 static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_AUTH(
-        AWS_ERROR_S3_FAILED_RESPONSE_STATUS,
-        "Request HTTP response status did not reflect success")
+        AWS_ERROR_S3_PLACEHOLDER,
+        "Placeholder") // TODO
 };
 /* clang-format on */
 
@@ -26,8 +26,8 @@ static struct aws_error_info_list s_error_list = {
 
 static struct aws_log_subject_info s_s3_log_subject_infos[] = {
     DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_GENERAL, "S3General", "Subject for aws-c-s3 logging that defies categorization."),
-    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_CLIENT, "S3General", "Subject for aws-c-s3 logging from a client."),
-    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_REQUEST, "S3General", "Subject for aws-c-s3 logging from a request."),
+    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_CLIENT, "S3Client", "Subject for aws-c-s3 logging from a client."),
+    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_REQUEST, "S3Request", "Subject for aws-c-s3 logging from a request."),
     DEFINE_LOG_SUBJECT_INFO(
         AWS_LS_S3_REQUEST_RESULT,
         "S3General",

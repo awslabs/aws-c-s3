@@ -7,12 +7,23 @@
  */
 
 #include <aws/s3/s3.h>
+#include <aws/s3/s3_accel_context.h>
 
 struct aws_allocator;
 
+struct aws_http_stream;
+struct aws_http_message;
+
 struct aws_s3_client;
 struct aws_s3_request;
+struct aws_s3_accel_context;
 
+typedef int(aws_s3_accel_receive_body_callback)(
+    struct aws_s3_accel_context *context,
+    struct aws_http_stream *stream,
+    const struct aws_byte_cursor *body,
+    void *user_data);
+typedef void(aws_s3_accel_request_finish)(const struct aws_s3_accel_context *context, int error_code, void *user_data);
 typedef void(aws_s3_client_shutdown_complete_callback)(void *user_data);
 
 struct aws_s3_client_config {
@@ -20,9 +31,17 @@ struct aws_s3_client_config {
     struct aws_host_resolver *host_resolver;
     struct aws_byte_cursor region;
     struct aws_byte_cursor bucket_name;
+    struct aws_byte_cursor endpoint;
 
     aws_s3_client_shutdown_complete_callback *shutdown_callback;
     void *shutdown_callback_user_data;
+};
+
+struct aws_s3_accel_request_options {
+    struct aws_http_message *message;
+    void *user_data;
+    aws_s3_accel_receive_body_callback *body_callback;
+    aws_s3_accel_request_finish *finish_callback;
 };
 
 AWS_EXTERN_C_BEGIN
@@ -39,7 +58,9 @@ AWS_S3_API
 void aws_s3_client_release(struct aws_s3_client *client);
 
 AWS_S3_API
-int aws_s3_client_execute_request(struct aws_s3_client *client, struct aws_s3_request *request);
+struct aws_s3_accel_context *aws_s3_client_accel_request(
+    struct aws_s3_client *client,
+    const struct aws_s3_accel_request_options *options);
 
 AWS_EXTERN_C_END
 
