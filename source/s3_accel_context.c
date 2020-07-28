@@ -22,8 +22,11 @@ struct aws_s3_accel_context *aws_s3_accel_context_new(
     }
 
     context->allocator = allocator;
+
+    /* The caller gets one initial reference */
     aws_atomic_init_int(&context->ref_count, 1);
 
+    /* Grab a reference to passed in client and store it*/
     aws_s3_client_acquire(client);
     context->client = client;
 

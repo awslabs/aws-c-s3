@@ -55,6 +55,7 @@ struct aws_s3_request *aws_s3_put_object_request_new(
 
     struct aws_s3_request *s3_request = &put_object->s3_request;
 
+    /* Initialize the base type. */
     if (aws_s3_request_init(s3_request, allocator, &s_s3_put_object_request_vtable, put_object, options)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not initialize base aws_s3_request type", (void *)s3_request);
         goto error_clean_up_request;

@@ -9,6 +9,7 @@
 #include "aws/s3/s3_client.h"
 #include <aws/common/atomics.h>
 
+/* Stores state for an instance of a high performance s3 client */
 struct aws_s3_client {
     struct aws_allocator *allocator;
     struct aws_atomic_var ref_count;
@@ -16,6 +17,7 @@ struct aws_s3_client {
     struct aws_string *region;
     struct aws_string *bucket_name;
     struct aws_string *endpoint;
+
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
     struct aws_http_connection_manager *connection_manager;

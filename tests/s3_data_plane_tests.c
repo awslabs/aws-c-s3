@@ -83,6 +83,8 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
         s_make_get_object_request(allocator, aws_byte_cursor_from_string(tester.endpoint), test_object_path);
 
@@ -93,10 +95,12 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     options.body_callback = s_test_s3_get_object_body_callback;
     options.finish_callback = s_test_s3_get_object_finish;
 
+    /* Trigger accelerating of our Get Object request. */
     struct aws_s3_accel_context *context = aws_s3_client_accel_request(client, &options);
 
     ASSERT_TRUE(context != NULL);
 
+    /* Wait for the request to finish. */
     aws_s3_tester_wait_for_finish(&tester);
     ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
 
@@ -112,9 +116,11 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
         client = NULL;
     }
 
+    /* Wait for systems to clean up. */
     aws_s3_tester_wait_for_clean_up(&tester);
 
     aws_s3_tester_clean_up(&tester);
+
     aws_s3_library_clean_up();
 
     return 0;
@@ -150,6 +156,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_input_stream *input_stream = s_create_test_body_stream(allocator);
 
+    /* Put together a simple S3 Put Object request. */
     struct aws_http_message *message = s_make_put_object_request(
         allocator,
         aws_byte_cursor_from_string(tester.endpoint),
@@ -163,10 +170,12 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     options.user_data = &tester;
     options.finish_callback = s_test_s3_put_object_finish;
 
+    /* Wait for the request to finish. */
     struct aws_s3_accel_context *context = aws_s3_client_accel_request(client, &options);
 
     ASSERT_TRUE(context != NULL);
 
+    /* Wait for the request to finish. */
     aws_s3_tester_wait_for_finish(&tester);
     ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
 
@@ -187,9 +196,11 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
         input_stream = NULL;
     }
 
+    /* Wait for systems to clean up. */
     aws_s3_tester_wait_for_clean_up(&tester);
 
     aws_s3_tester_clean_up(&tester);
+    
     aws_s3_library_clean_up();
 
     return 0;

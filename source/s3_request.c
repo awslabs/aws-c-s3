@@ -33,8 +33,10 @@ int aws_s3_request_init(
     request->vtable = vtable;
     request->impl = impl;
 
+    /* Initialize to 1 so the caller gets an initial reference. */
     aws_atomic_init_int(&request->ref_count, 1);
 
+    /* Increase reference count of the client and message to ensure they stay around. */
     aws_s3_client_acquire(options->client);
     request->client = options->client;
 

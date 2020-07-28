@@ -26,6 +26,8 @@ typedef int(aws_s3_request_body_callback)(
 
 typedef void(aws_s3_request_finish_callback)(struct aws_s3_request *request, int error_code, void *user_data);
 
+/* VTable for s3 requests.  Right now, these are mostly HTTP handlers to allow different behavior per request type
+ * during a request. */
 struct aws_s3_request_vtable {
 
     void (*destroy)(struct aws_s3_request *request);
@@ -57,6 +59,8 @@ struct aws_s3_request_result {
     int32_t response_status;
 };
 
+/* Base type for an s3 request.  This holds onto state about a particular request, as well as some state that is mutable
+ * throughout a requests lifetime, and also stores a request result state. */
 struct aws_s3_request {
     struct aws_allocator *allocator;
     struct aws_s3_request_vtable *vtable;

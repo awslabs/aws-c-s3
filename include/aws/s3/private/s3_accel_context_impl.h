@@ -11,6 +11,10 @@
 #include "aws/s3/s3_accel_context.h"
 #include "aws/s3/s3_client.h"
 
+/* This represents one "accelerated" request, ie, file transfer.  Anything needed across different calls for an
+ * acceleration of one particular S3 request will be stored here.  It doesn't currently track any aws_s3_request's, but
+ * in the future it will likely keep track of any additional aws_s3_requests needed for accelerating a single request.
+ */
 struct aws_s3_accel_context {
     struct aws_allocator *allocator;
     struct aws_atomic_var ref_count;

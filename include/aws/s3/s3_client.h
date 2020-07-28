@@ -26,6 +26,7 @@ typedef int(aws_s3_accel_receive_body_callback)(
 typedef void(aws_s3_accel_request_finish)(const struct aws_s3_accel_context *context, int error_code, void *user_data);
 typedef void(aws_s3_client_shutdown_complete_callback)(void *user_data);
 
+/* Options for a new client. */
 struct aws_s3_client_config {
     struct aws_event_loop_group *el_group;
     struct aws_host_resolver *host_resolver;

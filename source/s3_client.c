@@ -33,6 +33,9 @@ static void s_s3_client_connection_manager_shutdown_callback(void *user_data);
 static void s_s3_client_signing_complete(struct aws_signing_result *result, int error_code, void *user_data);
 static void s_s3_client_on_acquire_connection(struct aws_http_connection *connection, int error_code, void *user_data);
 
+/* For making requests, the client uses these callbacks for HTTP requests, which will call into the actual
+ * aws_s3_request functions.  We could potentially call the s3-request functions directly, but this will allow us to do
+ * any client level processing per request if needed. */
 static void s_s3_client_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
 static int s_s3_client_incoming_headers(
     struct aws_http_stream *stream,
@@ -77,6 +80,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
     aws_atomic_init_int(&client->shutdown_wait_count, 0);
 
+    /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
     if (client->region == NULL) {
@@ -84,6 +88,7 @@ struct aws_s3_client *aws_s3_client_new(
         goto error_clean_up;
     }
 
+    /* Make a copy of the endpoint string. */
     client->endpoint = aws_string_new_from_array(allocator, client_config->endpoint.ptr, client_config->endpoint.len);
 
     if (client->endpoint == NULL) {
@@ -91,6 +96,7 @@ struct aws_s3_client *aws_s3_client_new(
         goto error_clean_up;
     }
 
+    /* Make a copy of the bucket name. */
     client->bucket_name =
         aws_string_new_from_array(allocator, client_config->bucket_name.ptr, client_config->bucket_name.len);
 
@@ -99,7 +105,7 @@ struct aws_s3_client *aws_s3_client_new(
         goto error_clean_up;
     }
 
-    /* Client Bootstrap */
+    /* Setup the client boot strap. */
     {
         struct aws_client_bootstrap_options bootstrap_options;
         AWS_ZERO_STRUCT(bootstrap_options);
@@ -119,7 +125,7 @@ struct aws_s3_client *aws_s3_client_new(
         aws_atomic_fetch_add(&client->shutdown_wait_count, 1);
     }
 
-    /* Connection Manager */
+    /* Setup the connection manager */
     {
         const uint16_t port = 80;       // TODO
         const int max_connections = 10; // TODO
@@ -156,7 +162,7 @@ struct aws_s3_client *aws_s3_client_new(
         aws_atomic_fetch_add(&client->shutdown_wait_count, 1);
     }
 
-    /* Credentials Provider */
+    /* Setup the credentials provider */
     {
         struct aws_credentials_provider_chain_default_options credentials_config;
         AWS_ZERO_STRUCT(credentials_config);
@@ -238,6 +244,7 @@ static void s_s3_client_dec_shutdown_wait_count(struct aws_s3_client *client) {
 
     size_t new_count = aws_atomic_fetch_sub(&client->shutdown_wait_count, 1) - 1;
 
+    /* If there are still systems shutting down, don't trigger the shutdown callback yet. */
     if (new_count > 0) {
         return;
     }

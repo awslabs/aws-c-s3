@@ -39,12 +39,14 @@ struct aws_s3_accel_context *aws_s3_client_accel_request(
         return NULL;
     }
 
+    /* Spin up a new context for this acceleration */
     struct aws_s3_accel_context *context = aws_s3_accel_context_new(client->allocator, client, options);
 
     if (context == NULL) {
         goto context_create_failed;
     }
 
+    /* Grab an additional reference for the request_options below. */
     aws_s3_accel_context_acquire(context);
 
     struct aws_s3_request_options request_options;
@@ -67,6 +69,7 @@ struct aws_s3_accel_context *aws_s3_client_accel_request(
         goto request_create_failed;
     }
 
+    /* Go ahead and just make the request for now.  Later, we'll be doing some actual acceleration here. */
     if (s3_client_make_request(client, request)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not issue S3 Request", (void *)client);
         goto make_request_failed;
@@ -84,6 +87,10 @@ make_request_failed:
 request_create_failed:
 
     if (context != NULL) {
+        /* Remove the reference added for the request. */
+        aws_s3_accel_context_release(context);
+
+        /* Remove the initial reference added to completel clean up the context. */
         aws_s3_accel_context_release(context);
         context = NULL;
     }
@@ -106,6 +113,8 @@ int s_s3_client_accel_incoming_body(
 
     struct aws_s3_accel_context *context = user_data;
 
+    /* Use the callback passed into the acceleration request if there is one.  (This callback will likely live in the
+     * language bindings one day.) */
     if (context->body_callback != NULL) {
         return context->body_callback(context, stream, body, context->user_data);
     }
@@ -122,6 +131,8 @@ void s_s3_client_accel_object_finished(struct aws_s3_request *request, int error
 
     struct aws_s3_accel_context *context = user_data;
 
+    /* Use the finish callback passed into the acceleration request if there is one.  (This callback will likely live in
+     * the language bindings one day.) */
     if (context->finish_callback != NULL) {
         context->finish_callback(context, error_code, context->user_data);
     }

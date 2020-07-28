@@ -17,6 +17,7 @@ struct aws_s3_get_object_result {
     struct aws_s3_get_object_result_output output;
 };
 
+/* A get-object request, derived from the type aws_s3_request*/
 struct aws_s3_get_object_request {
     struct aws_s3_request s3_request;
 

@@ -8,6 +8,7 @@
 
 #include "aws/s3/private/s3_request.h"
 
+/* A put-object request derived from an aws_s3_request. */
 struct aws_s3_put_object_request {
     struct aws_s3_request s3_request;
 };

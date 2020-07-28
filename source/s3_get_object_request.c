@@ -55,6 +55,7 @@ struct aws_s3_request *aws_s3_get_object_request_new(
 
     struct aws_s3_request *s3_request = &get_object->s3_request;
 
+    /* Initialize the base type. */
     if (aws_s3_request_init(s3_request, allocator, &s_s3_get_object_request_vtable, get_object, options)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not initialize base aws_s3_request type", (void *)s3_request);
         goto error_clean_up_request;
@@ -96,7 +97,7 @@ static int s_s3_get_object_request_incoming_headers(
 
     (void)header_block;
 
-    // TODO look at removing in the future--these particular headers likely don't need to be get_object specific
+    /* TODO look at removing in the future--these particular headers likely don't need to be get_object specific */
     struct aws_s3_get_object_request *get_object_request = request->impl;
     struct aws_s3_get_object_result *get_object_result = &get_object_request->result;
     struct aws_s3_get_object_result_output *output = &get_object_result->output;
