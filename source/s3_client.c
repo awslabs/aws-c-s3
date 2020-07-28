@@ -121,7 +121,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     /* Connection Manager */
     {
-        const int port = 80;            // TODO
+        const uint16_t port = 80;       // TODO
         const int max_connections = 10; // TODO
         const int timeout_seconds = 3;  // TODO
 
@@ -279,15 +279,18 @@ int s3_client_make_request(struct aws_s3_client *client, struct aws_s3_request *
     struct aws_date_time now;
     aws_date_time_init_now(&now);
 
-    struct aws_signing_config_aws signing_config = {
-        .config_type = AWS_SIGNING_CONFIG_AWS,
-        .algorithm = AWS_SIGNING_ALGORITHM_V4,
-        .credentials_provider = client->credentials_provider,
-        .region = aws_byte_cursor_from_array(client->region->bytes, client->region->len),
-        .service = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3"),
-        .date = now,
-        .signed_body_value = AWS_SBVT_UNSIGNED_PAYLOAD,
-        .signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256};
+    struct aws_byte_cursor service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
+
+    struct aws_signing_config_aws signing_config;
+    AWS_ZERO_STRUCT(signing_config);
+    signing_config.config_type = AWS_SIGNING_CONFIG_AWS;
+    signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4;
+    signing_config.credentials_provider = client->credentials_provider;
+    signing_config.region = aws_byte_cursor_from_array(client->region->bytes, client->region->len);
+    signing_config.service = service_name;
+    signing_config.date = now;
+    signing_config.signed_body_value = AWS_SBVT_UNSIGNED_PAYLOAD;
+    signing_config.signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
 
     if (aws_sign_request_aws(
             client->allocator,
