@@ -102,6 +102,8 @@ int s_s3_client_accel_incoming_body(
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(user_data);
 
+    (void)request;
+
     struct aws_s3_accel_context *context = user_data;
 
     if (context->body_callback != NULL) {
@@ -115,6 +117,8 @@ void s_s3_client_accel_object_finished(struct aws_s3_request *request, int error
 
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(user_data);
+
+    (void)request;
 
     struct aws_s3_accel_context *context = user_data;
 

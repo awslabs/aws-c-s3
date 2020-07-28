@@ -123,23 +123,26 @@ static int s_s3_get_object_request_incoming_header_block_done(
     struct aws_s3_request *request,
     enum aws_http_header_block header_block) {
     AWS_PRECONDITION(request);
+    (void)request;
     (void)header_block;
     return AWS_OP_SUCCESS;
 }
 
 static int s_s3_get_object_request_incoming_body(struct aws_s3_request *request, const struct aws_byte_cursor *data) {
     AWS_PRECONDITION(request);
+    (void)request;
     (void)data;
     return AWS_OP_SUCCESS;
 }
 
 static void s_s3_get_object_request_stream_complete(struct aws_s3_request *request, int error_code) {
     AWS_PRECONDITION(request);
+    (void)request;
     (void)error_code;
 }
 
 static void s_s3_get_object_request_finish(struct aws_s3_request *request, int error_code) {
     AWS_PRECONDITION(request);
-    AWS_PRECONDITION(request->client);
+    (void)request;
     (void)error_code;
 }
