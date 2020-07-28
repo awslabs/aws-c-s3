@@ -200,7 +200,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     aws_s3_tester_wait_for_clean_up(&tester);
 
     aws_s3_tester_clean_up(&tester);
-    
+
     aws_s3_library_clean_up();
 
     return 0;

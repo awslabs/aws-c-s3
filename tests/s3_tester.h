@@ -18,6 +18,7 @@
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
 
+/* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
     struct aws_logger logger;
 

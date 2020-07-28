@@ -34,18 +34,21 @@ int aws_s3_tester_init(
         goto condition_variable_failed;
     }
 
+    /* Make a copy of the bucket name string. */
     tester->bucket_name = aws_string_new_from_array(allocator, bucket_name.ptr, bucket_name.len);
 
     if (tester->bucket_name == NULL) {
         goto bucket_name_failed;
     }
 
+    /* Make a copy of the region string. */
     tester->region = aws_string_new_from_array(allocator, region.ptr, region.len);
 
     if (tester->region == NULL) {
         goto region_name_failed;
     }
 
+    /* Compute an S3 endpoint given a bucket name and region. */
     struct aws_byte_cursor endpoint_url_part0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".s3.");
     struct aws_byte_cursor endpoint_url_part1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".amazonaws.com");
     size_t endpoint_buffer_len =
@@ -71,6 +74,7 @@ int aws_s3_tester_init(
 
     aws_mem_release(allocator, endpoint_buffer);
 
+    /* Setup an event loop group and host resolver. */
     ASSERT_SUCCESS(aws_event_loop_group_default_init(&tester->el_group, allocator, 1));
     ASSERT_SUCCESS(aws_host_resolver_init_default(&tester->host_resolver, allocator, 10, &tester->el_group));
 
