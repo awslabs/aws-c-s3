@@ -16,10 +16,10 @@
 #include "s3_tester.h"
 
 AWS_STATIC_STRING_FROM_LITERAL(s_test_body_stream_str, "This is an S3 test.  This is an S3 test.");
-static struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
+static const struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 
-static struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
-static struct aws_byte_cursor s_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
+static const struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
+static const struct aws_byte_cursor s_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
 
 static struct aws_input_stream *s_create_test_body_stream(struct aws_allocator *allocator) {
     struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_string(s_test_body_stream_str);
