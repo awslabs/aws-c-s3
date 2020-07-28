@@ -19,7 +19,8 @@ AWS_STATIC_STRING_FROM_LITERAL(s_test_body_stream_str, "This is an S3 test.  Thi
 static const struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 
 static const struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
-static const struct aws_byte_cursor s_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
+static const struct aws_byte_cursor s_test_bucket_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
 
 static struct aws_input_stream *s_create_test_body_stream(struct aws_allocator *allocator) {
     struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_string(s_test_body_stream_str);
@@ -64,7 +65,7 @@ AWS_TEST_CASE(test_s3_get_object, s_test_s3_get_object)
 static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
 
     aws_s3_library_init(allocator);
 
@@ -129,7 +130,7 @@ AWS_TEST_CASE(test_s3_put_object, s_test_s3_put_object)
 static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_put_object.txt");
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_put_object.txt");
 
     aws_s3_library_init(allocator);
 
