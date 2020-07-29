@@ -37,28 +37,12 @@ file(GLOB AWS_S3_ROOT_HEADERS
         "include/aws/s3/*.h"
         )
 
-file(GLOB AWS_S3_MODEL_HEADERS
-        "include/aws/s3/model/*.h"
-        )
-
 file(GLOB AWS_S3_PRIVATE_HEADERS
         "include/aws/s3/private/*.h"
         )
 
-file(GLOB AWS_S3_EXTERNAL_HEADERS
-        "include/aws/s3/external/*.h"
-        )
-
 file(GLOB AWS_S3_ROOT_SRC
         "source/*.c"
-        )
-
-file(GLOB AWS_S3_MODEL_SRC
-        "source/model/*.c"
-        )
-
-file(GLOB AWS_S3_EXTERNAL_SRC
-        "source/external/*.c"
         )
 
 if (WIN32)
