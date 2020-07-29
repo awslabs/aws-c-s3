@@ -10,13 +10,13 @@
 
 #include <aws/http/request_response.h>
 
-static int s_s3_client_accel_incoming_body(
+static int s_s3_client_meta_request_incoming_body(
     struct aws_s3_request *request,
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *body,
     void *user_data);
 
-static void s_s3_client_accel_object_finished(struct aws_s3_request *request, int error_code, void *user_data);
+static void s_s3_client_meta_request_object_finished(struct aws_s3_request *request, int error_code, void *user_data);
 
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
@@ -26,7 +26,10 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_PRECONDITION(options);
 
     if (options->message == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Cannot accelerate request; options are invalid.", (void *)client);
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; message provided in options is invalid.",
+            (void *)client);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -54,8 +57,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     request_options.client = client;
     request_options.message = options->message;
     request_options.user_data = meta_request;
-    request_options.body_callback = s_s3_client_accel_incoming_body;
-    request_options.finish_callback = s_s3_client_accel_object_finished;
+    request_options.body_callback = s_s3_client_meta_request_incoming_body;
+    request_options.finish_callback = s_s3_client_meta_request_object_finished;
 
     struct aws_s3_request *request = NULL;
 
@@ -100,7 +103,7 @@ meta_request_create_failed:
     return NULL;
 }
 
-int s_s3_client_accel_incoming_body(
+int s_s3_client_meta_request_incoming_body(
     struct aws_s3_request *request,
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *body,
@@ -122,7 +125,7 @@ int s_s3_client_accel_incoming_body(
     return AWS_OP_SUCCESS;
 }
 
-void s_s3_client_accel_object_finished(struct aws_s3_request *request, int error_code, void *user_data) {
+void s_s3_client_meta_request_object_finished(struct aws_s3_request *request, int error_code, void *user_data) {
 
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(user_data);

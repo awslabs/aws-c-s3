@@ -22,8 +22,8 @@ struct aws_s3_meta_request {
     struct aws_s3_client *client;
 
     void *user_data;
-    aws_s3_accel_receive_body_callback_fn *body_callback;
-    aws_s3_accel_request_finish_fn *finish_callback;
+    aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    aws_s3_meta_request_request_finish_fn *finish_callback;
 };
 
 struct aws_s3_meta_request *aws_s3_meta_request_new(

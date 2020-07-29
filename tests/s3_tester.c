@@ -7,7 +7,7 @@
 #include <aws/io/channel_bootstrap.h>
 #include <aws/testing/aws_test_harness.h>
 
-/* Wait for the cleanup notification.  This, adn the s_tester_notify_clean_up_signal function are meant to be used for
+/* Wait for the cleanup notification.  This, and the s_tester_notify_clean_up_signal function are meant to be used for
  * sequential clean up only, and should not overlap with the "finish" callback.  (Both currently use the same
  * mutex/signal.) */
 static void s_s3_tester_wait_for_clean_up_signal(struct aws_s3_tester *tester);
