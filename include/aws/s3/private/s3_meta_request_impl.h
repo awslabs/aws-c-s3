@@ -1,5 +1,5 @@
-#ifndef AWS_S3_ACCEL_CONTEXT_IMPL_H
-#define AWS_S3_ACCEL_CONTEXT_IMPL_H
+#ifndef AWS_S3_META_REQUEST_IMPL_H
+#define AWS_S3_META_REQUEST_IMPL_H
 
 /**
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -8,14 +8,14 @@
 
 #include <aws/common/atomics.h>
 
-#include "aws/s3/s3_accel_context.h"
+#include "aws/s3/s3_meta_request.h"
 #include "aws/s3/s3_client.h"
 
 /* This represents one "accelerated" request, ie, file transfer.  Anything needed across different calls for an
  * acceleration of one particular S3 request will be stored here.  It doesn't currently track any aws_s3_request's, but
  * in the future it will likely keep track of any additional aws_s3_requests needed for accelerating a single request.
  */
-struct aws_s3_accel_context {
+struct aws_s3_meta_request {
     struct aws_allocator *allocator;
     struct aws_atomic_var ref_count;
     struct aws_s3_client *client;
@@ -25,9 +25,9 @@ struct aws_s3_accel_context {
     aws_s3_accel_request_finish_fn *finish_callback;
 };
 
-struct aws_s3_accel_context *aws_s3_accel_context_new(
+struct aws_s3_meta_request *aws_s3_meta_request_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
-    const struct aws_s3_accel_request_options *options);
+    const struct aws_s3_meta_request_options *options);
 
-#endif
+#endif /* AWS_S3_META_REQUEST_IMPL_H */

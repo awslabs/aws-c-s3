@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_accel_context_impl.h"
+#include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_get_object_request.h"
 #include "aws/s3/private/s3_put_object_request.h"
@@ -18,9 +18,9 @@ static int s_s3_client_accel_incoming_body(
 
 static void s_s3_client_accel_object_finished(struct aws_s3_request *request, int error_code, void *user_data);
 
-struct aws_s3_accel_context *aws_s3_client_accel_request(
+struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
-    const struct aws_s3_accel_request_options *options) {
+    const struct aws_s3_meta_request_options *options) {
 
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
@@ -39,21 +39,21 @@ struct aws_s3_accel_context *aws_s3_client_accel_request(
         return NULL;
     }
 
-    /* Spin up a new context for this acceleration */
-    struct aws_s3_accel_context *context = aws_s3_accel_context_new(client->allocator, client, options);
+    /* Spin up a new meta request for this acceleration */
+    struct aws_s3_meta_request *meta_request = aws_s3_meta_request_new(client->allocator, client, options);
 
-    if (context == NULL) {
-        goto context_create_failed;
+    if (meta_request == NULL) {
+        goto meta_request_create_failed;
     }
 
     /* Grab an additional reference for the request_options below. */
-    aws_s3_accel_context_acquire(context);
+    aws_s3_meta_request_acquire(meta_request);
 
     struct aws_s3_request_options request_options;
     AWS_ZERO_STRUCT(request_options);
     request_options.client = client;
     request_options.message = options->message;
-    request_options.user_data = context;
+    request_options.user_data = meta_request;
     request_options.body_callback = s_s3_client_accel_incoming_body;
     request_options.finish_callback = s_s3_client_accel_object_finished;
 
@@ -75,7 +75,7 @@ struct aws_s3_accel_context *aws_s3_client_accel_request(
         goto make_request_failed;
     }
 
-    return context;
+    return meta_request;
 
 make_request_failed:
 
@@ -86,16 +86,16 @@ make_request_failed:
 
 request_create_failed:
 
-    if (context != NULL) {
-        /* Remove the reference added for the request. */
-        aws_s3_accel_context_release(context);
+    if (meta_request != NULL) {
+        /* Remove the reference added for the aws_s3_request. */
+        aws_s3_meta_request_release(meta_request);
 
-        /* Remove the initial reference added to completel clean up the context. */
-        aws_s3_accel_context_release(context);
-        context = NULL;
+        /* Remove the initial reference added to completel clean up the aws_s3_meta_request. */
+        aws_s3_meta_request_release(meta_request);
+        meta_request = NULL;
     }
 
-context_create_failed:
+meta_request_create_failed:
 
     return NULL;
 }
@@ -111,12 +111,12 @@ int s_s3_client_accel_incoming_body(
 
     (void)request;
 
-    struct aws_s3_accel_context *context = user_data;
+    struct aws_s3_meta_request *meta_request = user_data;
 
     /* Use the callback passed into the acceleration request if there is one.  (This callback will likely live in the
      * language bindings one day.) */
-    if (context->body_callback != NULL) {
-        return context->body_callback(context, stream, body, context->user_data);
+    if (meta_request->body_callback != NULL) {
+        return meta_request->body_callback(meta_request, stream, body, meta_request->user_data);
     }
 
     return AWS_OP_SUCCESS;
@@ -129,14 +129,14 @@ void s_s3_client_accel_object_finished(struct aws_s3_request *request, int error
 
     (void)request;
 
-    struct aws_s3_accel_context *context = user_data;
+    struct aws_s3_meta_request *meta_request = user_data;
 
     /* Use the finish callback passed into the acceleration request if there is one.  (This callback will likely live in
      * the language bindings one day.) */
-    if (context->finish_callback != NULL) {
-        context->finish_callback(context, error_code, context->user_data);
+    if (meta_request->finish_callback != NULL) {
+        meta_request->finish_callback(meta_request, error_code, meta_request->user_data);
     }
 
     aws_s3_request_release(request);
-    aws_s3_accel_context_release(context);
+    aws_s3_meta_request_release(meta_request);
 }

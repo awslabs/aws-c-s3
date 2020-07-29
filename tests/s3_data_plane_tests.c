@@ -40,11 +40,11 @@ static struct aws_http_message *s_make_put_object_request(
     struct aws_input_stream *body_stream);
 
 static int s_test_s3_get_object_body_callback(
-    struct aws_s3_accel_context *context,
+    struct aws_s3_meta_request *meta_request,
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *body,
     void *user_data) {
-    (void)context;
+    (void)meta_request;
     (void)stream;
     (void)user_data;
 
@@ -53,8 +53,8 @@ static int s_test_s3_get_object_body_callback(
     return AWS_OP_SUCCESS;
 }
 
-static void s_test_s3_get_object_finish(const struct aws_s3_accel_context *context, int error_code, void *user_data) {
-    (void)context;
+static void s_test_s3_get_object_finish(const struct aws_s3_meta_request *meta_request, int error_code, void *user_data) {
+    (void)meta_request;
 
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
 
@@ -88,7 +88,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     struct aws_http_message *message =
         s_make_get_object_request(allocator, aws_byte_cursor_from_string(tester.endpoint), test_object_path);
 
-    struct aws_s3_accel_request_options options;
+    struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
     options.message = message;
     options.user_data = &tester;
@@ -96,15 +96,15 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     options.finish_callback = s_test_s3_get_object_finish;
 
     /* Trigger accelerating of our Get Object request. */
-    struct aws_s3_accel_context *context = aws_s3_client_accel_request(client, &options);
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
 
-    ASSERT_TRUE(context != NULL);
+    ASSERT_TRUE(meta_request != NULL);
 
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_finish(&tester);
     ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
 
-    aws_s3_accel_context_release(context);
+    aws_s3_meta_request_release(meta_request);
 
     if (message != NULL) {
         aws_http_message_release(message);
@@ -126,8 +126,8 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
-static void s_test_s3_put_object_finish(const struct aws_s3_accel_context *context, int error_code, void *user_data) {
-    (void)context;
+static void s_test_s3_put_object_finish(const struct aws_s3_meta_request *meta_request, int error_code, void *user_data) {
+    (void)meta_request;
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
     aws_s3_tester_notify_finished(tester, error_code);
 }
@@ -164,22 +164,22 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
         s_test_body_content_type,
         input_stream);
 
-    struct aws_s3_accel_request_options options;
+    struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
     options.message = message;
     options.user_data = &tester;
     options.finish_callback = s_test_s3_put_object_finish;
 
     /* Wait for the request to finish. */
-    struct aws_s3_accel_context *context = aws_s3_client_accel_request(client, &options);
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
 
-    ASSERT_TRUE(context != NULL);
+    ASSERT_TRUE(meta_request != NULL);
 
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_finish(&tester);
     ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
 
-    aws_s3_accel_context_release(context);
+    aws_s3_meta_request_release(meta_request);
 
     if (message != NULL) {
         aws_http_message_release(message);
