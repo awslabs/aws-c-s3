@@ -20,13 +20,11 @@
 #include <aws/http/request_response.h>
 
 #include <aws/common/atomics.h>
-#include <aws/io/channel_bootstrap.h>
 #include <aws/io/socket.h>
 
 #include <inttypes.h>
 
 static void s_s3_client_dec_shutdown_wait_count(struct aws_s3_client *client);
-static void s_s3_client_client_bootstrap_shutdown_callback(void *user_data);
 static void s_s3_client_credentials_provider_shutdown_callback(void *user_data);
 static void s_s3_client_connection_manager_shutdown_callback(void *user_data);
 
@@ -60,7 +58,7 @@ struct aws_s3_client *aws_s3_client_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client_config);
 
-    if (client_config->el_group == NULL || client_config->host_resolver == NULL) {
+    if (client_config->client_bootstrap == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cannot create client from client_config; options are invalid.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
@@ -75,6 +73,8 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->allocator = allocator;
     aws_atomic_init_int(&client->ref_count, 1);
+
+    client->client_bootstrap = client_config->client_bootstrap;
 
     client->shutdown_callback = client_config->shutdown_callback;
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
@@ -94,35 +94,6 @@ struct aws_s3_client *aws_s3_client_new(
     if (client->endpoint == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not allocate aws_s3_client endpoint string", (void *)client);
         goto error_clean_up;
-    }
-
-    /* Make a copy of the bucket name. */
-    client->bucket_name =
-        aws_string_new_from_array(allocator, client_config->bucket_name.ptr, client_config->bucket_name.len);
-
-    if (client->bucket_name == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not allocate aws_s3_client bucket name string", (void *)client);
-        goto error_clean_up;
-    }
-
-    /* Setup the client boot strap. */
-    {
-        struct aws_client_bootstrap_options bootstrap_options;
-        AWS_ZERO_STRUCT(bootstrap_options);
-        bootstrap_options.event_loop_group = client_config->el_group;
-        bootstrap_options.host_resolver = client_config->host_resolver;
-        bootstrap_options.on_shutdown_complete = s_s3_client_client_bootstrap_shutdown_callback;
-        bootstrap_options.user_data = client;
-
-        client->client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
-
-        if (client->client_bootstrap == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT, "id=%p: Could not allocate aws_s3_client client bootstrap", (void *)client);
-            goto error_clean_up;
-        }
-
-        aws_atomic_fetch_add(&client->shutdown_wait_count, 1);
     }
 
     /* Setup the connection manager */
@@ -217,12 +188,6 @@ void aws_s3_client_release(struct aws_s3_client *client) {
         client->connection_manager = NULL;
     }
 
-    if (client->client_bootstrap != NULL) {
-        // TODO should we be waiting until the connection manager is shutdown to call this?
-        aws_client_bootstrap_release(client->client_bootstrap);
-        client->client_bootstrap = NULL;
-    }
-
     if (client->region != NULL) {
         aws_string_destroy(client->region);
         client->region = NULL;
@@ -231,11 +196,6 @@ void aws_s3_client_release(struct aws_s3_client *client) {
     if (client->endpoint != NULL) {
         aws_string_destroy(client->endpoint);
         client->endpoint = NULL;
-    }
-
-    if (client->bucket_name != NULL) {
-        aws_string_destroy(client->bucket_name);
-        client->bucket_name = NULL;
     }
 }
 
@@ -256,10 +216,6 @@ static void s_s3_client_dec_shutdown_wait_count(struct aws_s3_client *client) {
     client = NULL;
 
     shutdown_callback(shutdown_user_data);
-}
-
-static void s_s3_client_client_bootstrap_shutdown_callback(void *user_data) {
-    s_s3_client_dec_shutdown_wait_count(user_data);
 }
 
 static void s_s3_client_credentials_provider_shutdown_callback(void *user_data) {

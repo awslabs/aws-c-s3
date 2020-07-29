@@ -18,6 +18,8 @@
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
 
+struct aws_client_bootstrap;
+
 /* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
     struct aws_logger logger;
@@ -27,14 +29,17 @@ struct aws_s3_tester {
 
     struct aws_event_loop_group el_group;
     struct aws_host_resolver host_resolver;
+    struct aws_client_bootstrap *client_bootstrap;
 
     struct aws_string *bucket_name;
     struct aws_string *region;
     struct aws_string *endpoint;
 
-    bool received_finish_callback;
-    bool clean_up_finished;
     int finish_error_code;
+
+    bool received_finish_callback;
+    bool bound_to_client_shutdown;
+    bool clean_up_flag;
 };
 
 struct aws_s3_client_config;
@@ -45,14 +50,19 @@ int aws_s3_tester_init(
     const struct aws_byte_cursor region,
     const struct aws_byte_cursor bucket_name);
 
+/* Wait for aws_s3_tester_notify_finished to be called */
 void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester);
 
-void aws_s3_tester_wait_for_clean_up(struct aws_s3_tester *tester);
-
+/* Notify the tester that an operation has finished and that anyway waiting with aws_s3_tester_wait_for_finish can
+ * continue */
 void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, int error_code);
 
-void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
-
+/* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
+ * client to clean up. */
 void aws_s3_tester_bind_client_shutdown(struct aws_s3_tester *tester, struct aws_s3_client_config *config);
+
+/* Handle cleaning up the tester.  If aws_s3_tester_bind_client_shutdown was used, then it will wait for the client to
+ * finish shutting down before releasing any resources. */
+void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
 #endif /* AWS_S3_TESTER_H */

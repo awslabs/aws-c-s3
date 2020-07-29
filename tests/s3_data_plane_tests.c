@@ -53,7 +53,10 @@ static int s_test_s3_get_object_body_callback(
     return AWS_OP_SUCCESS;
 }
 
-static void s_test_s3_get_object_finish(const struct aws_s3_meta_request *meta_request, int error_code, void *user_data) {
+static void s_test_s3_get_object_finish(
+    const struct aws_s3_meta_request *meta_request,
+    int error_code,
+    void *user_data) {
     (void)meta_request;
 
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
@@ -74,10 +77,8 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, s_test_bucket_name, s_test_s3_region));
 
     struct aws_s3_client_config client_config = {
-        .el_group = &tester.el_group,
-        .host_resolver = &tester.host_resolver,
+        .client_bootstrap = tester.client_bootstrap,
         .region = s_test_s3_region,
-        .bucket_name = s_test_bucket_name,
         .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
@@ -116,9 +117,6 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
         client = NULL;
     }
 
-    /* Wait for systems to clean up. */
-    aws_s3_tester_wait_for_clean_up(&tester);
-
     aws_s3_tester_clean_up(&tester);
 
     aws_s3_library_clean_up();
@@ -126,7 +124,10 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
-static void s_test_s3_put_object_finish(const struct aws_s3_meta_request *meta_request, int error_code, void *user_data) {
+static void s_test_s3_put_object_finish(
+    const struct aws_s3_meta_request *meta_request,
+    int error_code,
+    void *user_data) {
     (void)meta_request;
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
     aws_s3_tester_notify_finished(tester, error_code);
@@ -144,10 +145,8 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, s_test_bucket_name, s_test_s3_region));
 
     struct aws_s3_client_config client_config = {
-        .el_group = &tester.el_group,
-        .host_resolver = &tester.host_resolver,
+        .client_bootstrap = tester.client_bootstrap,
         .region = s_test_s3_region,
-        .bucket_name = s_test_bucket_name,
         .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
@@ -195,9 +194,6 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
         aws_input_stream_destroy(input_stream);
         input_stream = NULL;
     }
-
-    /* Wait for systems to clean up. */
-    aws_s3_tester_wait_for_clean_up(&tester);
 
     aws_s3_tester_clean_up(&tester);
 

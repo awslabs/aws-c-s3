@@ -16,7 +16,7 @@ AWS_S3_API
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
-void aws_s3_meta_request_release(struct aws_s3_meta_request *context);
+void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request);
 
 AWS_EXTERN_C_END
 

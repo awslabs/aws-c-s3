@@ -29,11 +29,9 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
 /* Options for a new client. */
 struct aws_s3_client_config {
-    struct aws_event_loop_group *el_group;
-    struct aws_host_resolver *host_resolver;
     struct aws_byte_cursor region;
-    struct aws_byte_cursor bucket_name;
     struct aws_byte_cursor endpoint;
+    struct aws_client_bootstrap *client_bootstrap;
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
