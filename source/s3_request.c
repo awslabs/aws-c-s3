@@ -24,13 +24,15 @@ int aws_s3_request_init(
     AWS_PRECONDITION(options);
 
     if (options->client == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cannot not allocate aws_s3_get_object_request; client provided in options is invalid.");
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT, "Cannot not allocate aws_s3_get_object_request; client provided in options is invalid.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return AWS_OP_ERR;
     }
 
     if (options->message == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cannot not allocate aws_s3_get_object_request; message provided in options is invalid.");
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT, "Cannot not allocate aws_s3_get_object_request; message provided in options is invalid.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return AWS_OP_ERR;
     }

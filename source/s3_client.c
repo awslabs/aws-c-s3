@@ -59,7 +59,9 @@ struct aws_s3_client *aws_s3_client_new(
     AWS_PRECONDITION(client_config);
 
     if (client_config->client_bootstrap == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cannot create client from client_config; client_bootstrap provided in options is invalid.");
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; client_bootstrap provided in options is invalid.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
