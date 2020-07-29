@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_get_object_request.h"
+#include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_put_object_request.h"
 
 #include <aws/http/request_response.h>

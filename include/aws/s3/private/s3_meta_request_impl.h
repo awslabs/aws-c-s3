@@ -8,8 +8,8 @@
 
 #include <aws/common/atomics.h>
 
-#include "aws/s3/s3_meta_request.h"
 #include "aws/s3/s3_client.h"
+#include "aws/s3/s3_meta_request.h"
 
 /* This represents one "accelerated" request, ie, file transfer.  Anything needed across different calls for an
  * acceleration of one particular S3 request will be stored here.  It doesn't currently track any aws_s3_request's, but
