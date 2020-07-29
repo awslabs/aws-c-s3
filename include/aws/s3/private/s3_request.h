@@ -18,13 +18,13 @@ struct aws_signable;
 struct aws_http_message;
 struct aws_http_stream;
 
-typedef int(aws_s3_request_body_callback)(
+typedef int(aws_s3_request_body_callback_fn)(
     struct aws_s3_request *request,
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *body,
     void *user_data);
 
-typedef void(aws_s3_request_finish_callback)(struct aws_s3_request *request, int error_code, void *user_data);
+typedef void(aws_s3_request_finish_callback_fn)(struct aws_s3_request *request, int error_code, void *user_data);
 
 /* VTable for s3 requests.  Right now, these are mostly HTTP handlers to allow different behavior per request type
  * during a request. */
@@ -50,8 +50,8 @@ struct aws_s3_request_vtable {
 struct aws_s3_request_options {
     struct aws_s3_client *client;
     struct aws_http_message *message;
-    aws_s3_request_body_callback *body_callback;
-    aws_s3_request_finish_callback *finish_callback;
+    aws_s3_request_body_callback_fn *body_callback;
+    aws_s3_request_finish_callback_fn *finish_callback;
     void *user_data;
 };
 
@@ -69,8 +69,8 @@ struct aws_s3_request {
 
     struct aws_s3_client *client;
     struct aws_http_message *message;
-    aws_s3_request_body_callback *body_callback;
-    aws_s3_request_finish_callback *finish_callback;
+    aws_s3_request_body_callback_fn *body_callback;
+    aws_s3_request_finish_callback_fn *finish_callback;
     void *user_data;
 
     struct aws_signable *signable;

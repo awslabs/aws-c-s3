@@ -249,7 +249,7 @@ static void s_s3_client_dec_shutdown_wait_count(struct aws_s3_client *client) {
         return;
     }
 
-    aws_s3_client_shutdown_complete_callback *shutdown_callback = client->shutdown_callback;
+    aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
     aws_mem_release(client->allocator, client);

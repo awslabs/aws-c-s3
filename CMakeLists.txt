@@ -33,10 +33,6 @@ include(AwsSharedLibSetup)
 include(AwsSanitizers)
 include(AwsFindPackage)
 
-option(BUILD_RELOCATABLE_BINARIES
-        "Build Relocatable Binaries, this will turn off features that will fail on older kernels than used for the build."
-        OFF)
-
 file(GLOB AWS_S3_ROOT_HEADERS
         "include/aws/s3/*.h"
         )
@@ -92,7 +88,7 @@ file(GLOB S3_SRC
         ${AWS_S3_EXTERNAL_SRC}
         )
 
-add_library(${PROJECT_NAME} ${LIBTYPE} ${S3_HEADERS} ${S3_SRC})
+add_library(${PROJECT_NAME} ${S3_HEADERS} ${S3_SRC})
 aws_set_common_properties(${PROJECT_NAME})
 aws_prepare_symbol_visibility_args(${PROJECT_NAME} "AWS_S3")
 aws_check_headers(${PROJECT_NAME} ${S3_HEADERS})
@@ -105,18 +101,13 @@ set_target_properties(${PROJECT_NAME} PROPERTIES SOVERSION 0unstable)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DCJSON_HIDE_SYMBOLS)
 
-if (BUILD_RELOCATABLE_BINARIES)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE "-DCOMPAT_MODE")
-endif()
-
 target_include_directories(${PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
 aws_use_package(aws-c-auth)
-aws_use_package(aws-c-http)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_AWS_LIBS} ${PLATFORM_LIBS})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_AWS_LIBS})
 
 aws_prepare_shared_lib_exports(${PROJECT_NAME})
 

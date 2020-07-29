@@ -21,8 +21,8 @@ struct aws_s3_accel_context {
     struct aws_s3_client *client;
 
     void *user_data;
-    aws_s3_accel_receive_body_callback *body_callback;
-    aws_s3_accel_request_finish *finish_callback;
+    aws_s3_accel_receive_body_callback_fn *body_callback;
+    aws_s3_accel_request_finish_fn *finish_callback;
 };
 
 struct aws_s3_accel_context *aws_s3_accel_context_new(
