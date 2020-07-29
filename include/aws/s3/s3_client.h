@@ -34,6 +34,7 @@ struct aws_s3_client_config {
     struct aws_byte_cursor region;
     struct aws_byte_cursor endpoint;
     struct aws_client_bootstrap *client_bootstrap;
+    struct aws_credentials_provider *credentials_provider;
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;

@@ -78,6 +78,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_client_config client_config = {
         .client_bootstrap = tester.client_bootstrap,
+        .credentials_provider = tester.credentials_provider,
         .region = s_test_s3_region,
         .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
 
@@ -146,6 +147,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_client_config client_config = {
         .client_bootstrap = tester.client_bootstrap,
+        .credentials_provider = tester.credentials_provider,
         .region = s_test_s3_region,
         .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
 

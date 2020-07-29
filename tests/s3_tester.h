@@ -19,6 +19,7 @@
 #include <aws/io/host_resolver.h>
 
 struct aws_client_bootstrap;
+struct aws_credentials_provider;
 
 /* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
@@ -30,6 +31,7 @@ struct aws_s3_tester {
     struct aws_event_loop_group el_group;
     struct aws_host_resolver host_resolver;
     struct aws_client_bootstrap *client_bootstrap;
+    struct aws_credentials_provider *credentials_provider;
 
     struct aws_string *bucket_name;
     struct aws_string *region;

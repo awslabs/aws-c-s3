@@ -4,6 +4,7 @@
  */
 
 #include "s3_tester.h"
+#include <aws/auth/credentials.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/testing/aws_test_harness.h>
 
@@ -107,7 +108,28 @@ int aws_s3_tester_init(
         }
     }
 
+    /* Setup the credentials provider */
+    {
+        struct aws_credentials_provider_chain_default_options credentials_config;
+        AWS_ZERO_STRUCT(credentials_config);
+        credentials_config.bootstrap = tester->client_bootstrap;
+        credentials_config.shutdown_options.shutdown_callback = s_tester_notify_clean_up_signal;
+        credentials_config.shutdown_options.shutdown_user_data = tester;
+        tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
+
+        if (tester->credentials_provider == NULL) {
+            goto credentials_provider_alloc_failed;
+        }
+    }
+
     return AWS_OP_SUCCESS;
+
+credentials_provider_alloc_failed:
+
+    if (tester->client_bootstrap != NULL) {
+        aws_client_bootstrap_release(tester->client_bootstrap);
+        tester->client_bootstrap = NULL;
+    }
 
 client_bootstrap_alloc_failed:
 

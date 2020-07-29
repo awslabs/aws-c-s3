@@ -19,6 +19,7 @@ struct aws_s3_client {
 
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
+
     struct aws_http_connection_manager *connection_manager;
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;

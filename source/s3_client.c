@@ -25,7 +25,6 @@
 #include <inttypes.h>
 
 static void s_s3_client_dec_shutdown_wait_count(struct aws_s3_client *client);
-static void s_s3_client_credentials_provider_shutdown_callback(void *user_data);
 static void s_s3_client_connection_manager_shutdown_callback(void *user_data);
 
 static void s_s3_client_signing_complete(struct aws_signing_result *result, int error_code, void *user_data);
@@ -78,6 +77,9 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->client_bootstrap = client_config->client_bootstrap;
 
+    client->credentials_provider = client_config->credentials_provider;
+    aws_credentials_provider_acquire(client->credentials_provider);
+
     client->shutdown_callback = client_config->shutdown_callback;
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
     aws_atomic_init_int(&client->shutdown_wait_count, 0);
@@ -129,24 +131,6 @@ struct aws_s3_client *aws_s3_client_new(
         if (client->connection_manager == NULL) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT, "id=%p: Could not allocate aws_s3_client connection manager", (void *)client);
-            goto error_clean_up;
-        }
-
-        aws_atomic_fetch_add(&client->shutdown_wait_count, 1);
-    }
-
-    /* Setup the credentials provider */
-    {
-        struct aws_credentials_provider_chain_default_options credentials_config;
-        AWS_ZERO_STRUCT(credentials_config);
-        credentials_config.bootstrap = client->client_bootstrap;
-        credentials_config.shutdown_options.shutdown_callback = s_s3_client_credentials_provider_shutdown_callback;
-        credentials_config.shutdown_options.shutdown_user_data = client;
-        client->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
-
-        if (client->credentials_provider == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT, "id=%p: Could not allocate aws_s3_client credentials manager", (void *)client);
             goto error_clean_up;
         }
 
@@ -218,10 +202,6 @@ static void s_s3_client_dec_shutdown_wait_count(struct aws_s3_client *client) {
     client = NULL;
 
     shutdown_callback(shutdown_user_data);
-}
-
-static void s_s3_client_credentials_provider_shutdown_callback(void *user_data) {
-    s_s3_client_dec_shutdown_wait_count(user_data);
 }
 
 static void s_s3_client_connection_manager_shutdown_callback(void *user_data) {
