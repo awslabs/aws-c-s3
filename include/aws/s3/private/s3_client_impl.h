@@ -24,6 +24,8 @@ struct aws_s3_client {
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
+
+    /* How many systems we currently need to wait for before shutting down the client itself. */
     struct aws_atomic_var shutdown_wait_count;
 };
 
