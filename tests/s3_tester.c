@@ -199,6 +199,13 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
         s_s3_tester_wait_for_clean_up_signal(tester);
     }
 
+    if (tester->credentials_provider != NULL) {
+        aws_credentials_provider_release(tester->credentials_provider);
+        tester->credentials_provider = NULL;
+
+        s_s3_tester_wait_for_clean_up_signal(tester);
+    }
+
     if (tester->region != NULL) {
         aws_string_destroy(tester->region);
         tester->region = NULL;

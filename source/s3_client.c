@@ -65,6 +65,14 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
+    if (client_config->credentials_provider == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; credentials_provider provided in options is invalid.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     if (client == NULL) {
