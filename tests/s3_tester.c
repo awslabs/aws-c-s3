@@ -33,6 +33,8 @@ int aws_s3_tester_init(
 
     AWS_ZERO_STRUCT(*tester);
 
+    tester->allocator = allocator;
+
     struct aws_logger_standard_options logger_options = {.level = AWS_LOG_LEVEL_INFO, .file = stderr};
 
     ASSERT_SUCCESS(aws_logger_init_standard(&tester->logger, allocator, &logger_options));
@@ -89,7 +91,7 @@ int aws_s3_tester_init(
     }
 
     /* Setup an event loop group and host resolver. */
-    ASSERT_SUCCESS(aws_event_loop_group_default_init(&tester->el_group, allocator, 1));
+    ASSERT_SUCCESS(aws_event_loop_group_default_init(&tester->el_group, allocator, 0));
     ASSERT_SUCCESS(aws_host_resolver_init_default(&tester->host_resolver, allocator, 10, &tester->el_group));
 
     /* Setup the client boot strap. */

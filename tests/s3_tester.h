@@ -23,6 +23,7 @@ struct aws_credentials_provider;
 
 /* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
+    struct aws_allocator *allocator;
     struct aws_logger logger;
 
     struct aws_mutex lock;

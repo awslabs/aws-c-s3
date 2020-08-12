@@ -14,29 +14,12 @@
 
 static void s_s3_put_object_request_destroy(struct aws_s3_request *request);
 
-static int s_s3_put_object_request_incoming_headers(
-    struct aws_s3_request *request,
-    enum aws_http_header_block header_block,
-    const struct aws_http_header *headers,
-    size_t headers_count);
-
-static int s_s3_put_object_request_incoming_header_block_done(
-    struct aws_s3_request *request,
-    enum aws_http_header_block header_block);
-
-static int s_s3_put_object_request_incoming_body(struct aws_s3_request *request, const struct aws_byte_cursor *data);
-
-static void s_s3_put_object_request_stream_complete(struct aws_s3_request *request, int error_code);
-
-static void s_s3_put_object_request_finish(struct aws_s3_request *request, int error_code);
-
-static struct aws_s3_request_vtable s_s3_put_object_request_vtable = {
-    .destroy = s_s3_put_object_request_destroy,
-    .incoming_headers = s_s3_put_object_request_incoming_headers,
-    .incoming_header_block_done = s_s3_put_object_request_incoming_header_block_done,
-    .incoming_body = s_s3_put_object_request_incoming_body,
-    .stream_complete = s_s3_put_object_request_stream_complete,
-    .request_finish = s_s3_put_object_request_finish};
+static struct aws_s3_request_vtable s_s3_put_object_request_vtable = {.destroy = s_s3_put_object_request_destroy,
+                                                                      .incoming_headers = NULL,
+                                                                      .incoming_header_block_done = NULL,
+                                                                      .incoming_body = NULL,
+                                                                      .stream_complete = NULL,
+                                                                      .request_finish = NULL};
 
 struct aws_s3_request *aws_s3_put_object_request_new(
     struct aws_allocator *allocator,
@@ -78,46 +61,4 @@ static void s_s3_put_object_request_destroy(struct aws_s3_request *request) {
 
     struct aws_s3_put_object_request *put_object = request->impl;
     aws_mem_release(request->allocator, put_object);
-}
-
-static int s_s3_put_object_request_incoming_headers(
-    struct aws_s3_request *request,
-    enum aws_http_header_block header_block,
-    const struct aws_http_header *headers,
-    size_t headers_count) {
-
-    AWS_PRECONDITION(request);
-    (void)request;
-    (void)header_block;
-    (void)headers;
-    (void)headers_count;
-    return AWS_OP_SUCCESS;
-}
-
-static int s_s3_put_object_request_incoming_header_block_done(
-    struct aws_s3_request *request,
-    enum aws_http_header_block header_block) {
-    AWS_PRECONDITION(request);
-    (void)request;
-    (void)header_block;
-    return AWS_OP_SUCCESS;
-}
-
-static int s_s3_put_object_request_incoming_body(struct aws_s3_request *request, const struct aws_byte_cursor *data) {
-    AWS_PRECONDITION(request);
-    (void)request;
-    (void)data;
-    return AWS_OP_SUCCESS;
-}
-
-static void s_s3_put_object_request_stream_complete(struct aws_s3_request *request, int error_code) {
-    AWS_PRECONDITION(request);
-    (void)request;
-    (void)error_code;
-}
-
-static void s_s3_put_object_request_finish(struct aws_s3_request *request, int error_code) {
-    AWS_PRECONDITION(request);
-    (void)request;
-    (void)error_code;
 }

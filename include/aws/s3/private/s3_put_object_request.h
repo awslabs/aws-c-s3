@@ -13,6 +13,7 @@ struct aws_s3_put_object_request {
     struct aws_s3_request s3_request;
 };
 
+/* Allocate a new put object request. */
 struct aws_s3_request *aws_s3_put_object_request_new(
     struct aws_allocator *allocator,
     const struct aws_s3_request_options *options);

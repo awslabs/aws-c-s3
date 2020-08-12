@@ -4,15 +4,15 @@
  */
 
 #include <aws/common/byte_buf.h>
+#include <aws/common/clock.h>
 #include <aws/common/common.h>
-
-#include <aws/testing/aws_test_harness.h>
-
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
+#include <aws/testing/aws_test_harness.h>
 
 #include <inttypes.h>
 
+#include "aws/s3/private/s3_client_impl.h"
 #include "s3_tester.h"
 
 AWS_STATIC_STRING_FROM_LITERAL(s_test_body_stream_str, "This is an S3 test.  This is an S3 test.");
@@ -53,10 +53,7 @@ static int s_test_s3_get_object_body_callback(
     return AWS_OP_SUCCESS;
 }
 
-static void s_test_s3_get_object_finish(
-    const struct aws_s3_meta_request *meta_request,
-    int error_code,
-    void *user_data) {
+static void s_test_s3_get_object_finish(struct aws_s3_meta_request *meta_request, int error_code, void *user_data) {
     (void)meta_request;
 
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
@@ -92,6 +89,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
+    options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
     options.message = message;
     options.user_data = &tester;
     options.body_callback = s_test_s3_get_object_body_callback;
@@ -125,10 +123,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
-static void s_test_s3_put_object_finish(
-    const struct aws_s3_meta_request *meta_request,
-    int error_code,
-    void *user_data) {
+static void s_test_s3_put_object_finish(struct aws_s3_meta_request *meta_request, int error_code, void *user_data) {
     (void)meta_request;
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
     aws_s3_tester_notify_finished(tester, error_code);
@@ -167,6 +162,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
+    options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
     options.message = message;
     options.user_data = &tester;
     options.finish_callback = s_test_s3_put_object_finish;

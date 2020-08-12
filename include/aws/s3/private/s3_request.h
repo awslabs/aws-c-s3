@@ -7,6 +7,7 @@
  */
 
 #include <aws/common/atomics.h>
+#include <aws/common/linked_list.h>
 #include <aws/http/request_response.h>
 #include <aws/s3/s3.h>
 
@@ -48,7 +49,6 @@ struct aws_s3_request_vtable {
 };
 
 struct aws_s3_request_options {
-    struct aws_s3_client *client;
     struct aws_http_message *message;
     aws_s3_request_body_callback_fn *body_callback;
     aws_s3_request_finish_callback_fn *finish_callback;
@@ -65,9 +65,11 @@ struct aws_s3_request {
     struct aws_allocator *allocator;
     struct aws_s3_request_vtable *vtable;
     void *impl;
-    struct aws_atomic_var ref_count;
 
-    struct aws_s3_client *client;
+    struct aws_atomic_var ref_count;
+    struct aws_linked_list_node node;
+
+    struct aws_s3_meta_request *meta_request;
     struct aws_http_message *message;
     aws_s3_request_body_callback_fn *body_callback;
     aws_s3_request_finish_callback_fn *finish_callback;
@@ -89,6 +91,8 @@ int aws_s3_request_init(
     struct aws_s3_request_vtable *vtable,
     void *impl,
     const struct aws_s3_request_options *options);
+
+void aws_s3_request_set_meta_request(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
 int aws_s3_request_incoming_header_block_done(struct aws_s3_request *request, enum aws_http_header_block header_block);
 
