@@ -21,8 +21,9 @@ enum aws_s3_meta_request_type { AWS_S3_META_REQUEST_TYPE_GET_OBJECT, AWS_S3_META
 
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     struct aws_s3_meta_request *meta_request,
-    struct aws_http_stream *stream,
     const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    uint64_t range_end,
     void *user_data);
 
 typedef void(

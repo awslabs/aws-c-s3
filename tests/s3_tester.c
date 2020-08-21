@@ -230,6 +230,32 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     aws_logger_clean_up(&tester->logger);
 }
 
+struct aws_string *aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size) {
+    struct aws_byte_cursor test_string = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("This is an S3 test.");
+
+    char *buffer = aws_mem_acquire(allocator, buffer_size);
+
+    for (size_t buffer_pos = 0; buffer_pos < buffer_size; buffer_pos += test_string.len) {
+        size_t buffer_size_remaining = buffer_size - buffer_pos;
+        size_t string_copy_size = test_string.len;
+
+        if (buffer_size_remaining < string_copy_size) {
+            string_copy_size = buffer_size_remaining;
+        }
+
+        for (size_t test_string_pos = 0; test_string_pos < string_copy_size; ++test_string_pos) {
+            buffer[buffer_pos + test_string_pos] = test_string.ptr[test_string_pos];
+        }
+    }
+
+    struct aws_string *str = aws_string_new_from_array(allocator, (const uint8_t *)buffer, buffer_size);
+
+    aws_mem_release(allocator, buffer);
+    buffer = NULL;
+
+    return str;
+}
+
 void aws_s3_tester_bind_client_shutdown(struct aws_s3_tester *tester, struct aws_s3_client_config *config) {
     AWS_PRECONDITION(tester);
     AWS_PRECONDITION(config);

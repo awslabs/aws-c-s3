@@ -18,4 +18,6 @@ struct aws_s3_request *aws_s3_put_object_request_new(
     struct aws_allocator *allocator,
     const struct aws_s3_request_options *options);
 
+extern struct aws_s3_request_vtable g_aws_s3_put_object_request_vtable;
+
 #endif /* AWS_S3_REQUEST_GET_OBJECT_H */

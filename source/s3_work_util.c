@@ -6,196 +6,320 @@
 #include "aws/s3/private/s3_work_util.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
-#include "aws/s3/private/s3_vip.h"
 #include "aws/s3/private/s3_vip_connection.h"
 #include "aws/s3/s3.h"
 
 #include <aws/io/event_loop.h>
+#include <stdarg.h>
 
-static void s_s3_async_work_destroy(struct aws_s3_async_work *async_work);
-static void s_s3_async_work_process(struct aws_task *task, void *arg, enum aws_task_status task_status);
-static void s_s3_async_work_controller_clean_up(struct aws_s3_async_work_controller *work_controller);
-static void s_s3_async_work_controller_clean_up_task(
-    struct aws_task *task,
-    void *arg,
-    enum aws_task_status task_status);
+#define AWS_S3_WORK_UTIL_MAX_ARGS 3
 
-void aws_s3_async_work_controller_init(
-    struct aws_s3_async_work_controller *work_controller,
-    struct aws_s3_async_work_controller_options *options) {
-    AWS_PRECONDITION(work_controller);
+/* Allocated work which essentially wraps a task. */
+struct aws_s3_task_util_work {
+
+    /* Number of arguments actualy used. */
+    uint32_t num_args;
+
+    /* Arguments for this operation. */
+    void *args[AWS_S3_WORK_UTIL_MAX_ARGS];
+
+    /* Function that will process the work. */
+    aws_s3_task_util_task_fn *task_fn;
+
+    /* Task util that will be processing this operation. */
+    struct aws_s3_task_util *task_util;
+
+    /* The actual task itself. */
+    struct aws_task task;
+};
+
+/* The task util structure, which handles scheduling tasks and facilitates shutdown. */
+struct aws_s3_task_util {
+    struct aws_allocator *allocator;
+    struct aws_event_loop *event_loop;
+
+    struct {
+        struct aws_mutex lock;
+        size_t num_tasks_in_flight;
+        uint32_t shutting_down : 1;
+    } synced_data;
+
+    /* Callback and it's associated user data for when the work controller has finished shutting down. */
+    aws_s3_task_util_shutdown_fn *shutdown_callback;
+    void *shutdown_user_data;
+};
+
+/* Manage the mutex lock for our synced data.*/
+static void s_s3_task_util_lock_synced_data(struct aws_s3_task_util *task_util);
+static void s_s3_task_util_unlock_synced_data(struct aws_s3_task_util *task_util);
+
+/* Allocate a new task work structure */
+static struct aws_s3_task_util_work *s_s3_task_util_work_new(
+    struct aws_s3_task_util *task_util,
+    uint32_t num_args,
+    aws_s3_task_util_task_fn *task_fn);
+
+/* Destroys a task-util-work structure. */
+static void s_s3_task_util_work_destroy(struct aws_s3_task_util_work *task_util_work);
+
+/* Initiate asynchrounous clean up of the task utility. */
+static void s_s3_task_util_clean_up(struct aws_s3_task_util *task_util);
+
+/* Task that actually cleans up a task utility. */
+static void s_s3_task_util_clean_up_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
+/* Task that processes an individual task-util-work object. */
+static void s_s3_task_util_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
+static void s_s3_task_util_lock_synced_data(struct aws_s3_task_util *task_util) {
+    aws_mutex_lock(&task_util->synced_data.lock);
+}
+
+static void s_s3_task_util_unlock_synced_data(struct aws_s3_task_util *task_util) {
+    aws_mutex_unlock(&task_util->synced_data.lock);
+}
+
+/* Allocate and setup a new task util. */
+struct aws_s3_task_util *aws_s3_task_util_new(
+    struct aws_allocator *allocator,
+    struct aws_s3_task_util_options *options) {
+    AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->allocator);
     AWS_PRECONDITION(options->event_loop);
-    AWS_PRECONDITION(options->work_fn);
 
-    AWS_ZERO_STRUCT(*work_controller);
+    struct aws_s3_task_util *task_util = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_task_util));
 
-    work_controller->allocator = options->allocator;
-    work_controller->event_loop = options->event_loop;
-    work_controller->work_fn = options->work_fn;
-    aws_mutex_init(&work_controller->lock);
-    work_controller->shutdown_callback = options->shutdown_callback;
-    work_controller->shutdown_user_data = options->shutdown_user_data;
+    task_util->allocator = options->allocator;
+    task_util->event_loop = options->event_loop;
+
+    aws_mutex_init(&task_util->synced_data.lock);
+
+    task_util->shutdown_callback = options->shutdown_callback;
+    task_util->shutdown_user_data = options->shutdown_user_data;
+
+    return task_util;
 }
 
-void aws_s3_async_work_controller_shutdown(struct aws_s3_async_work_controller *work_controller) {
-    (void)work_controller;
-
+/* Initiate destruction of the task util structure. Once there are no more tasks in flight, it will clean up its state
+ * and trigger the shutdown callback.  Any additional requests after shutdown will be ignored. */
+void aws_s3_task_util_destroy(struct aws_s3_task_util *task_util) {
     bool clean_up = false;
 
-    aws_mutex_lock(&work_controller->lock);
-    work_controller->shutting_down = true;
+    s_s3_task_util_lock_synced_data(task_util);
 
-    if (work_controller->num_work_in_flight == 0) {
+    task_util->synced_data.shutting_down = true;
+
+    /* If we have nothing in flight, we can initiate clean up immediately. */
+    if (task_util->synced_data.num_tasks_in_flight == 0) {
         clean_up = true;
     }
 
-    aws_mutex_unlock(&work_controller->lock);
+    s_s3_task_util_unlock_synced_data(task_util);
 
     if (clean_up) {
-        s_s3_async_work_controller_clean_up(work_controller);
+        s_s3_task_util_clean_up(task_util);
     }
 }
 
-static void s_s3_async_work_controller_clean_up(struct aws_s3_async_work_controller *work_controller) {
-    AWS_PRECONDITION(work_controller);
+/* Allocate a new task-util-work. */
+static struct aws_s3_task_util_work *s_s3_task_util_work_new(
+    struct aws_s3_task_util *task_util,
+    uint32_t num_args,
+    aws_s3_task_util_task_fn task_fn) {
+    struct aws_s3_task_util_work *task_util_work =
+        aws_mem_acquire(task_util->allocator, sizeof(struct aws_s3_task_util_work));
 
-    struct aws_task *clean_up_task = aws_mem_acquire(work_controller->allocator, sizeof(struct aws_task));
+    if (task_util_work == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_TASK_UTIL, "id=%p Could not allocate aws_s3_task_util_work structure.", (void *)task_util);
+        return NULL;
+    }
+
+    task_util_work->num_args = num_args;
+    task_util_work->task_fn = task_fn;
+    task_util_work->task_util = task_util;
+
+    aws_task_init(
+        &task_util_work->task, s_s3_task_util_process_work_task, task_util_work, "s3_task_util_process_work_task");
+
+    return task_util_work;
+}
+
+/* Destroys a task-util-work structure. */
+static void s_s3_task_util_work_destroy(struct aws_s3_task_util_work *task_util_work) {
+    AWS_PRECONDITION(task_util_work);
+    AWS_PRECONDITION(task_util_work->task_util);
+    AWS_PRECONDITION(task_util_work->task_util->allocator);
+
+    aws_mem_release(task_util_work->task_util->allocator, task_util_work);
+}
+
+/* Initiate asynchrounous clean up of the task utility. */
+static void s_s3_task_util_clean_up(struct aws_s3_task_util *task_util) {
+    AWS_PRECONDITION(task_util);
+
+    struct aws_task *clean_up_task = aws_mem_acquire(task_util->allocator, sizeof(struct aws_task));
 
     if (clean_up_task == NULL) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_ASYNC_WORK,
-            "id=%p s_s3_async_work_controller_clean_up could not allocate aws_task for scheduling clean up.",
-            (void *)work_controller);
+            AWS_LS_S3_TASK_UTIL,
+            "id=%p s_s3_task_util_clean_up could not allocate aws_task for scheduling clean up.",
+            (void *)task_util);
         return;
     }
 
-    aws_task_init(
-        clean_up_task,
-        s_s3_async_work_controller_clean_up_task,
-        work_controller,
-        "s3_async_work_controller_clean_up_task");
-    aws_event_loop_schedule_task_now(work_controller->event_loop, clean_up_task);
+    aws_task_init(clean_up_task, s_s3_task_util_clean_up_task, task_util, "s3_task_util_clean_up_task");
+
+    aws_event_loop_schedule_task_now(task_util->event_loop, clean_up_task);
 }
 
-static void s_s3_async_work_controller_clean_up_task(
-    struct aws_task *task,
-    void *arg,
-    enum aws_task_status task_status) {
+/* Task that actually cleans up a task utility. */
+static void s_s3_task_util_clean_up_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     AWS_PRECONDITION(task);
     AWS_PRECONDITION(arg);
 
-    struct aws_s3_async_work_controller *work_controller = arg;
+    struct aws_s3_task_util *task_util = arg;
+
+    aws_mem_release(task_util->allocator, task);
+    task = NULL;
 
     if (task_status != AWS_TASK_STATUS_RUN_READY) {
-        goto task_clean_up;
+        return;
     }
 
-    aws_mutex_clean_up(&work_controller->lock);
+    aws_mutex_clean_up(&task_util->synced_data.lock);
 
-    if (work_controller->shutdown_callback != NULL) {
-        work_controller->shutdown_callback(work_controller->shutdown_user_data);
+    aws_s3_task_util_shutdown_fn *shutdown_callback = task_util->shutdown_callback;
+    void *shutdown_user_data = task_util->shutdown_user_data;
+
+    aws_mem_release(task_util->allocator, task_util);
+    task_util = NULL;
+
+    if (shutdown_callback != NULL) {
+        shutdown_callback(shutdown_user_data);
     }
-
-task_clean_up:
-
-    aws_mem_release(work_controller->allocator, task);
-    task = NULL;
 }
 
-int aws_s3_async_work_dispatch(struct aws_s3_async_work_options *options) {
-    AWS_PRECONDITION(options);
+/* Trigegr an async operation, wraping it in a task. */
+int aws_s3_task_util_create_task(
+    struct aws_s3_task_util *task_util,
+    aws_s3_task_util_task_fn *task_fn,
+    uint64_t delay_ns,
+    uint32_t num_args,
+    ...) {
 
-    struct aws_s3_async_work_controller *work_controller = options->work_controller;
-    AWS_PRECONDITION(work_controller);
-    AWS_PRECONDITION(work_controller->allocator);
-    AWS_PRECONDITION(work_controller->event_loop);
-    AWS_PRECONDITION(work_controller->work_fn);
+    AWS_PRECONDITION(task_util);
+    AWS_PRECONDITION(task_util->allocator);
+    AWS_PRECONDITION(task_util->event_loop);
+    AWS_PRECONDITION(task_fn);
+    AWS_PRECONDITION(num_args <= AWS_S3_WORK_UTIL_MAX_ARGS);
 
-    aws_mutex_lock(&work_controller->lock);
+    s_s3_task_util_lock_synced_data(task_util);
 
-    if (work_controller->shutting_down) {
-        // TODO would be nice to have a action-to-string function to make log output like this more helpful.
-        AWS_LOGF_WARN(
-            AWS_LS_S3_ASYNC_WORK,
-            "id=%p aws_s3_async_work_dispatch called on a work controller that is shutting down.",
-            (void *)work_controller);
-
-        aws_mutex_unlock(&work_controller->lock);
-
-        return AWS_OP_SUCCESS;
-    }
-
-    ++work_controller->num_work_in_flight;
-
-    aws_mutex_unlock(&work_controller->lock);
-
-    struct aws_s3_async_work *async_work =
-        aws_mem_calloc(work_controller->allocator, 1, sizeof(struct aws_s3_async_work));
-
-    if (async_work == NULL) {
+    /* If we're shutting down, nothing else is allowed to be done. */
+    if (task_util->synced_data.shutting_down) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_ASYNC_WORK, "id=%p Could not allocate aws_s3_async_work structure.", (void *)work_controller);
-        return AWS_OP_ERR;
+            AWS_LS_S3_TASK_UTIL,
+            "id=%p aws_s3_task_util_create_task called on a task util that is shutting down.",
+            (void *)task_util);
+
+        s_s3_task_util_unlock_synced_data(task_util);
+
+        goto error_result;
     }
 
-    async_work->work_controller = options->work_controller;
-    async_work->action = options->action;
+    ++task_util->synced_data.num_tasks_in_flight;
 
-    memcpy(async_work->params, options->params, sizeof(void *) * AWS_S3_WORK_UTIL_MAX_PARAMS);
+    s_s3_task_util_unlock_synced_data(task_util);
 
-    aws_task_init(&async_work->task, s_s3_async_work_process, async_work, "s3_async_work");
+    struct aws_s3_task_util_work *task_util_work = s_s3_task_util_work_new(task_util, num_args, task_fn);
 
-    if (options->schedule_time_offset_ns == 0) {
-        aws_event_loop_schedule_task_now(work_controller->event_loop, &async_work->task);
+    if (task_util_work == NULL) {
+        goto error_result;
+    }
+
+    va_list option_args;
+    va_start(option_args, num_args);
+
+    /* Copy our args out of the VA List. */
+    for (uint32_t arg_index = 0; arg_index < num_args; ++arg_index) {
+        task_util_work->args[arg_index] = va_arg(option_args, void *);
+    }
+
+    /* Null out anything unused. */
+    for (uint32_t arg_index = num_args; arg_index < AWS_S3_WORK_UTIL_MAX_ARGS; ++arg_index) {
+        task_util_work->args[arg_index] = NULL;
+    }
+
+    va_end(option_args);
+
+    if (delay_ns == 0) {
+        aws_event_loop_schedule_task_now(task_util->event_loop, &task_util_work->task);
     } else {
-        uint64_t now;
-        aws_event_loop_current_clock_time(work_controller->event_loop, &now);
+        uint64_t now = 0;
 
-        aws_event_loop_schedule_task_future(
-            work_controller->event_loop, &async_work->task, now + options->schedule_time_offset_ns);
+        if (aws_event_loop_current_clock_time(task_util->event_loop, &now)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_TASK_UTIL,
+                "id=%p aws_s3_task_util_create_task could not get current time for delayed task, not scheduling task.",
+                (void *)task_util);
+
+            goto error_clean_up_work;
+        }
+
+        aws_event_loop_schedule_task_future(task_util->event_loop, &task_util_work->task, now + delay_ns);
     }
 
     return AWS_OP_SUCCESS;
+
+error_clean_up_work:
+
+    if (task_util_work != NULL) {
+        s_s3_task_util_work_destroy(task_util_work);
+        task_util_work = NULL;
+    }
+
+error_result:
+
+    return AWS_OP_ERR;
 }
 
-static void s_s3_async_work_destroy(struct aws_s3_async_work *async_work) {
-    AWS_PRECONDITION(async_work);
-    AWS_PRECONDITION(async_work->work_controller);
-    AWS_PRECONDITION(async_work->work_controller->allocator);
-
-    aws_mem_release(async_work->work_controller->allocator, async_work);
-}
-
-static void s_s3_async_work_process(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+/* Task that processes an individual task-util-work object. */
+static void s_s3_task_util_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     AWS_PRECONDITION(arg);
 
-    struct aws_s3_async_work *async_work = arg;
-    bool clean_up_work_controller = false;
-    struct aws_s3_async_work_controller *async_work_controller = async_work->work_controller;
+    struct aws_s3_task_util_work *task_util_work = arg;
+    struct aws_s3_task_util *task_util = task_util_work->task_util;
 
-    AWS_PRECONDITION(async_work_controller);
+    AWS_PRECONDITION(task_util);
 
-    if (task_status == AWS_TASK_STATUS_RUN_READY) {
-        async_work_controller->work_fn(async_work);
+    if (task_status != AWS_TASK_STATUS_RUN_READY) {
+        return;
     }
 
-    aws_mutex_lock(&async_work_controller->lock);
-    --async_work_controller->num_work_in_flight;
+    /* Call the user's passed in task function. */
+    task_util_work->task_fn(task_util_work->num_args, task_util_work->args);
 
-    if (async_work_controller->shutting_down && async_work_controller->num_work_in_flight == 0) {
-        clean_up_work_controller = true;
+    /* Clean up the task work. */
+    s_s3_task_util_work_destroy(task_util_work);
+    task_util_work = NULL;
+
+    bool clean_up_task_util = false;
+
+    s_s3_task_util_lock_synced_data(task_util);
+
+    --task_util->synced_data.num_tasks_in_flight;
+
+    /* If the task utility is shutting down, and this was the last thing in flight, then we can initiate clean up. */
+    if (task_util->synced_data.shutting_down && task_util->synced_data.num_tasks_in_flight == 0) {
+        clean_up_task_util = true;
     }
-    aws_mutex_unlock(&async_work_controller->lock);
 
-    if (async_work != NULL) {
-        s_s3_async_work_destroy(async_work);
-        async_work = NULL;
-    }
+    s_s3_task_util_unlock_synced_data(task_util);
 
-    if (clean_up_work_controller) {
-        s_s3_async_work_controller_clean_up(async_work_controller);
+    if (clean_up_task_util) {
+        s_s3_task_util_clean_up(task_util);
     }
 }

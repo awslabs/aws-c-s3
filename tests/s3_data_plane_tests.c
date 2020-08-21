@@ -13,19 +13,14 @@
 #include <inttypes.h>
 
 #include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_util.h"
 #include "s3_tester.h"
 
-AWS_STATIC_STRING_FROM_LITERAL(s_test_body_stream_str, "This is an S3 test.  This is an S3 test.");
 static const struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 
 static const struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
 static const struct aws_byte_cursor s_test_bucket_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
-
-static struct aws_input_stream *s_create_test_body_stream(struct aws_allocator *allocator) {
-    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_string(s_test_body_stream_str);
-    return aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
-}
 
 static struct aws_http_message *s_make_get_object_request(
     struct aws_allocator *allocator,
@@ -41,12 +36,15 @@ static struct aws_http_message *s_make_put_object_request(
 
 static int s_test_s3_get_object_body_callback(
     struct aws_s3_meta_request *meta_request,
-    struct aws_http_stream *stream,
     const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    uint64_t range_end,
     void *user_data) {
     (void)meta_request;
-    (void)stream;
+    (void)range_start;
+    (void)range_end;
     (void)user_data;
+    (void)body;
 
     AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Body of response: %s", (const char *)body->ptr);
 
@@ -77,7 +75,8 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
         .client_bootstrap = tester.client_bootstrap,
         .credentials_provider = tester.credentials_provider,
         .region = s_test_s3_region,
-        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
+        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len),
+        .part_size = 16 * 1024};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
@@ -133,7 +132,7 @@ AWS_TEST_CASE(test_s3_put_object, s_test_s3_put_object)
 static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_put_object.txt");
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
 
     aws_s3_library_init(allocator);
 
@@ -150,7 +149,9 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    struct aws_input_stream *input_stream = s_create_test_body_stream(allocator);
+    struct aws_string *test_body = aws_s3_create_test_buffer(allocator, 1 * 1024 * 1024);
+    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_string(test_body);
+    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *message = s_make_put_object_request(
@@ -193,6 +194,11 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
         input_stream = NULL;
     }
 
+    if (test_body != NULL) {
+        aws_string_destroy(test_body);
+        test_body = NULL;
+    }
+
     aws_s3_tester_clean_up(&tester);
 
     aws_s3_library_clean_up();
@@ -211,7 +217,7 @@ static struct aws_http_message *s_make_get_object_request(
         return NULL;
     }
 
-    struct aws_http_header host_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("host"), .value = host};
+    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
 
     if (aws_http_message_add_header(message, host_header)) {
         goto error_clean_up_message;
@@ -259,15 +265,14 @@ static struct aws_http_message *s_make_put_object_request(
         return NULL;
     }
 
-    struct aws_http_header host_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("host"), .value = host};
+    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
 
-    struct aws_http_header content_type_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("content-type"),
-                                                  .value = content_type};
+    struct aws_http_header content_type_header = {.name = g_content_type_header_name, .value = content_type};
 
     char content_length_buffer[64] = "";
     sprintf(content_length_buffer, "%" PRId64 "", body_stream_length);
 
-    struct aws_http_header content_length_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("content-length"),
+    struct aws_http_header content_length_header = {.name = g_content_length_header_name,
                                                     .value = aws_byte_cursor_from_c_str(content_length_buffer)};
 
     if (aws_http_message_add_header(message, host_header)) {
