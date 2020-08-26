@@ -8,7 +8,7 @@
 
 /* This structure represents the HTTP processing (called here a "pipeline") of an S3 request, from signing, to acquiring
  * a connection, to handling HTTP callbacks, etc..  We setup a pipeline execution through
- * aws_s3_request_pipeline_setup_execute, and when we are ready (which should be soon thereafter), call
+ * aws_s3_request_pipeline_setup, and when we are ready (which should be soon thereafter), call
  * aws_s3_request_pipeline_execute.
  */
 
@@ -81,7 +81,7 @@ struct aws_s3_request_pipeline_exec_options {
     struct aws_s3_request_pipeline_listener listener;
 };
 
-void aws_s3_request_pipeline_setup_execute(
+void aws_s3_request_pipeline_setup(
     struct aws_s3_request_pipeline *pipeline,
     struct aws_s3_request_pipeline_exec_options *options);
 

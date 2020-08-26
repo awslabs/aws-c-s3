@@ -25,8 +25,8 @@ enum aws_s3_vip_connection_state {
     AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP,
     AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_WAIT_FOR_IDLE,
     AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_IDLE_FINISHED,
-    AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_UTIL,
-    AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_UTIL_FINISHED,
+    AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_MANAGER,
+    AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_MANAGER_FINISHED,
     AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_FINISH
 };
 
@@ -37,7 +37,7 @@ enum aws_s3_vip_connection_processing_state {
     AWS_S3_VIP_CONNECTION_PROCESSING_STATE_ACTIVE
 };
 
-struct aws_s3_task_util;
+struct aws_s3_task_manager;
 
 struct aws_s3_vip_connection {
     struct aws_allocator *allocator;
@@ -47,7 +47,7 @@ struct aws_s3_vip_connection {
     void *vip_identifier;
 
     /* Used to simplify task set up and shutdown. */
-    struct aws_s3_task_util *task_util;
+    struct aws_s3_task_manager *task_manager;
 
     /* The request pipeline that this VIP connection will use to process requests. */
     struct aws_s3_request_pipeline *request_pipeline;
@@ -130,7 +130,7 @@ static void s_s3_vip_connection_set_state_synced(
     enum aws_s3_vip_connection_state state);
 
 /* Triggered when the VIP connection's work controller shuts down. */
-static void s_s3_task_util_shutdown_callback(void *user_data);
+static void s_s3_task_manager_shutdown_callback(void *user_data);
 
 static void s_s3_vip_connection_lock_synced_data(struct aws_s3_vip_connection *vip_connection) {
     aws_mutex_lock(&vip_connection->synced_data.lock);
@@ -163,13 +163,13 @@ struct aws_s3_vip_connection *aws_s3_vip_connection_new(
     /* Copy over any options relevant for copy */
     vip_connection->allocator = options->allocator;
 
-    struct aws_s3_task_util_options task_util_options = {.allocator = vip_connection->allocator,
-                                                         .event_loop = options->event_loop,
-                                                         .shutdown_callback = s_s3_task_util_shutdown_callback,
-                                                         .shutdown_user_data = vip_connection};
+    struct aws_s3_task_manager_options task_manager_options = {.allocator = vip_connection->allocator,
+                                                               .event_loop = options->event_loop,
+                                                               .shutdown_callback = s_s3_task_manager_shutdown_callback,
+                                                               .shutdown_user_data = vip_connection};
 
     /* Initialize our work controller so that we can do async actions */
-    vip_connection->task_util = aws_s3_task_util_new(allocator, &task_util_options);
+    vip_connection->task_manager = aws_s3_task_manager_new(allocator, &task_manager_options);
 
     struct aws_s3_request_pipeline_options request_pipeline_options = {
         .credentials_provider = options->credentials_provider,
@@ -244,8 +244,8 @@ void aws_s3_vip_connection_release(struct aws_s3_vip_connection *vip_connection)
 static void s_s3_vip_connection_destroy(struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(vip_connection);
 
-    if (aws_s3_task_util_create_task(
-            vip_connection->task_util, s_s3_vip_connection_destroy_task, 0, 1, vip_connection)) {
+    if (aws_s3_task_manager_create_task(
+            vip_connection->task_manager, s_s3_vip_connection_destroy_task, 0, 1, vip_connection)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_VIP_CONNECTION,
             "id=%p Could not initiate clean up for s3 vip connection.",
@@ -313,8 +313,8 @@ int aws_s3_vip_connection_push_meta_request(
 
     aws_s3_meta_request_acquire(meta_request);
 
-    return aws_s3_task_util_create_task(
-        vip_connection->task_util, s_s3_vip_connection_push_meta_request_task, 0, 2, vip_connection, meta_request);
+    return aws_s3_task_manager_create_task(
+        vip_connection->task_manager, s_s3_vip_connection_push_meta_request_task, 0, 2, vip_connection, meta_request);
 }
 
 /* Task function for pushing a meta request. */
@@ -370,8 +370,8 @@ int aws_s3_vip_connection_remove_meta_request(
 
     aws_s3_meta_request_acquire(meta_request);
 
-    return aws_s3_task_util_create_task(
-        vip_connection->task_util, s_s3_vip_connection_remove_meta_request_task, 0, 2, vip_connection, meta_request);
+    return aws_s3_task_manager_create_task(
+        vip_connection->task_manager, s_s3_vip_connection_remove_meta_request_task, 0, 2, vip_connection, meta_request);
 }
 
 /* Task funciton for removing a meta request. */
@@ -463,8 +463,8 @@ static void s_s3_vip_connection_set_processing_state_synced(
 
 /* Asynchronously try find a request that can be processed and passes it thorugh the pipeline. */
 static int s_s3_vip_connection_process_meta_requests(struct aws_s3_vip_connection *vip_connection) {
-    return aws_s3_task_util_create_task(
-        vip_connection->task_util, s_s3_vip_connection_process_meta_requests_task, 0, 1, vip_connection);
+    return aws_s3_task_manager_create_task(
+        vip_connection->task_manager, s_s3_vip_connection_process_meta_requests_task, 0, 1, vip_connection);
 }
 
 /* Task function for trying find a request that can be processed and passes it thorugh the pipeline. */
@@ -531,8 +531,8 @@ static void s_s3_vip_connection_process_meta_requests_task(uint32_t num_args, vo
         uint64_t time_offset_ns = aws_timestamp_convert(
             s_vip_connection_processing_retry_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
 
-        aws_s3_task_util_create_task(
-            vip_connection->task_util,
+        aws_s3_task_manager_create_task(
+            vip_connection->task_manager,
             s_s3_vip_connection_process_meta_requests_task,
             time_offset_ns,
             1,
@@ -555,15 +555,15 @@ static void s_s3_vip_connection_pipeline_finished(
     s_s3_vip_connection_process_meta_requests_task(1, (void **)&vip_connection);
 }
 
-static void s_s3_task_util_shutdown_callback(void *user_data) {
+static void s_s3_task_manager_shutdown_callback(void *user_data) {
     AWS_PRECONDITION(user_data);
 
     struct aws_s3_vip_connection *vip_connection = user_data;
 
     s_s3_vip_connection_lock_synced_data(vip_connection);
 
-    AWS_FATAL_ASSERT(vip_connection->synced_data.state == AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_UTIL);
-    s_s3_vip_connection_set_state_synced(vip_connection, AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_UTIL_FINISHED);
+    AWS_FATAL_ASSERT(vip_connection->synced_data.state == AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_MANAGER);
+    s_s3_vip_connection_set_state_synced(vip_connection, AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_MANAGER_FINISHED);
 
     s_s3_vip_connection_unlock_synced_data(vip_connection);
 }
@@ -598,18 +598,18 @@ static void s_s3_vip_connection_set_state_synced(
             break;
         }
         case AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_IDLE_FINISHED: {
-            s_s3_vip_connection_set_state_synced(vip_connection, AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_UTIL);
+            s_s3_vip_connection_set_state_synced(vip_connection, AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_MANAGER);
             break;
         }
-        case AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_UTIL: {
+        case AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_MANAGER: {
 
-            if (vip_connection->task_util != NULL) {
-                aws_s3_task_util_destroy(vip_connection->task_util);
-                vip_connection->task_util = NULL;
+            if (vip_connection->task_manager != NULL) {
+                aws_s3_task_manager_destroy(vip_connection->task_manager);
+                vip_connection->task_manager = NULL;
             }
             break;
         }
-        case AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_UTIL_FINISHED: {
+        case AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_TASK_MANAGER_FINISHED: {
             s_s3_vip_connection_set_state_synced(vip_connection, AWS_S3_VIP_CONNECTION_STATE_CLEAN_UP_FINISH);
             break;
         }

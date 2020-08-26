@@ -201,7 +201,7 @@ int aws_s3_meta_request_pop_request(
                      .user_data = NULL}};
 
     if (request != NULL) {
-        aws_s3_request_pipeline_setup_execute(pipeline, &options);
+        aws_s3_request_pipeline_setup(pipeline, &options);
     }
 
     if (out_found_request) {

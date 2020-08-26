@@ -24,8 +24,8 @@ enum aws_s3_client_state {
     AWS_S3_CLIENT_STATE_CLEAN_UP_RESOLVE_FINISHED,
     AWS_S3_CLIENT_STATE_CLEAN_UP_VIPS,
     AWS_S3_CLIENT_STATE_CLEAN_UP_VIPS_FINISHED,
-    AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_UTIL,
-    AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_UTIL_FINISHED,
+    AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_MANAGER,
+    AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_MANAGER_FINISHED,
     AWS_S3_CLIENT_STATE_CLEAN_UP_FINISH_RELEASE
 };
 
@@ -99,7 +99,7 @@ struct aws_s3_client {
     } synced_data;
 
     /* Utility used that tries to simplify task creation and provides an off-switch/shutdown path for tasks issued. */
-    struct aws_s3_task_util *task_util;
+    struct aws_s3_task_manager *task_manager;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;

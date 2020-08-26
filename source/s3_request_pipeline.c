@@ -157,7 +157,7 @@ void aws_s3_request_pipeline_destroy(struct aws_s3_request_pipeline *request_pip
 /* Setup for a pipeline execution.  This provides all necessary options for processing a request, which includes the
  * request itself and its owning meta request.  Currently, it is not allowed to setup a new pipeline execution until a
  * the previously set up execution has been processed. */
-void aws_s3_request_pipeline_setup_execute(
+void aws_s3_request_pipeline_setup(
     struct aws_s3_request_pipeline *pipeline,
     struct aws_s3_request_pipeline_exec_options *options) {
 

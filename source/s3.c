@@ -43,7 +43,10 @@ static struct aws_log_subject_info s_s3_log_subject_infos[] = {
         AWS_LS_S3_VIP_CONNECTION,
         "S3VIPConnection",
         "Subject for aws-c-s3 logging from an aws_s3_vip_connection."),
-    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_TASK_UTIL, "S3TaskUtil", "Subject for aws-c-s3 logging from task util.")};
+    DEFINE_LOG_SUBJECT_INFO(
+        AWS_LS_S3_TASK_MANAGER,
+        "S3TaskManager",
+        "Subject for aws-c-s3 logging from task manager.")};
 
 static struct aws_log_subject_info_list s_s3_log_subject_list = {
     .subject_list = s_s3_log_subject_infos,

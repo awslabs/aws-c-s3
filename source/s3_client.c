@@ -83,7 +83,7 @@ static void s_s3_client_set_state_synced(struct aws_s3_client *client, enum aws_
 
 static void s_s3_client_resolved_address_callback(struct aws_host_address *host_address, void *user_data);
 
-static void s_s3_task_util_shutdown_callback(void *user_data);
+static void s_s3_task_manager_shutdown_callback(void *user_data);
 
 static void s_s3_client_vip_connection_shutdown_callback(void *user_data);
 static void s_s3_client_vip_connection_shutdown_callback_task(uint32_t num_args, void **args);
@@ -239,12 +239,12 @@ struct aws_s3_client *aws_s3_client_new(
         goto error_clean_up;
     }
 
-    struct aws_s3_task_util_options task_util_options = {.allocator = client->allocator,
-                                                         .event_loop = client->event_loop,
-                                                         .shutdown_callback = s_s3_task_util_shutdown_callback,
-                                                         .shutdown_user_data = client};
+    struct aws_s3_task_manager_options task_manager_options = {.allocator = client->allocator,
+                                                               .event_loop = client->event_loop,
+                                                               .shutdown_callback = s_s3_task_manager_shutdown_callback,
+                                                               .shutdown_user_data = client};
 
-    client->task_util = aws_s3_task_util_new(client->allocator, &task_util_options);
+    client->task_manager = aws_s3_task_manager_new(client->allocator, &task_manager_options);
 
     /* Initialize shutdown options and tracking. */
     client->shutdown_callback = client_config->shutdown_callback;
@@ -441,7 +441,7 @@ void aws_s3_client_release(struct aws_s3_client *client) {
 static int s_s3_client_destroy(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
-    return aws_s3_task_util_create_task(client->task_util, s_s3_client_destroy_task, 0, 1, client);
+    return aws_s3_task_manager_create_task(client->task_manager, s_s3_client_destroy_task, 0, 1, client);
 }
 
 static void s_s3_client_destroy_task(uint32_t num_args, void **args) {
@@ -482,7 +482,8 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, struct aws_byte_cur
     struct aws_string *copied_host_address =
         aws_string_new_from_array(client->allocator, host_address.ptr, host_address.len);
 
-    return aws_s3_task_util_create_task(client->task_util, s_s3_client_add_vip_task, 0, 2, client, copied_host_address);
+    return aws_s3_task_manager_create_task(
+        client->task_manager, s_s3_client_add_vip_task, 0, 2, client, copied_host_address);
 }
 
 static void s_s3_client_add_vip_task(uint32_t num_args, void **args) {
@@ -529,8 +530,8 @@ static int s_s3_client_remove_vip(struct aws_s3_client *client, struct aws_byte_
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not allocate host address string copy.", (void *)client);
     }
 
-    return aws_s3_task_util_create_task(
-        client->task_util, s_s3_client_remove_vip_task, 0, 2, client, copied_host_address);
+    return aws_s3_task_manager_create_task(
+        client->task_manager, s_s3_client_remove_vip_task, 0, 2, client, copied_host_address);
 }
 
 static void s_s3_client_remove_vip_task(uint32_t num_args, void **args) {
@@ -568,8 +569,8 @@ static void s_s3_client_remove_vip_task(uint32_t num_args, void **args) {
 static int s_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_acquire(meta_request);
 
-    return aws_s3_task_util_create_task(
-        client->task_util, s_s3_client_push_meta_request_task, 0, 2, client, meta_request);
+    return aws_s3_task_manager_create_task(
+        client->task_manager, s_s3_client_push_meta_request_task, 0, 2, client, meta_request);
 }
 
 static void s_s3_client_push_meta_request_task(uint32_t num_args, void **args) {
@@ -613,8 +614,8 @@ static int s_s3_client_remove_meta_request(struct aws_s3_client *client, struct 
 
     aws_s3_meta_request_acquire(meta_request);
 
-    return aws_s3_task_util_create_task(
-        client->task_util, s_s3_client_remove_meta_request_task, 0, 2, client, meta_request);
+    return aws_s3_task_manager_create_task(
+        client->task_manager, s_s3_client_remove_meta_request_task, 0, 2, client, meta_request);
 }
 
 static void s_s3_client_remove_meta_request_task(uint32_t num_args, void **args) {
@@ -722,13 +723,13 @@ static void s_s3_client_meta_request_finished_callback(
 }
 
 /* Shutdown callback for our async work controller. */
-static void s_s3_task_util_shutdown_callback(void *user_data) {
+static void s_s3_task_manager_shutdown_callback(void *user_data) {
     AWS_PRECONDITION(user_data);
 
     struct aws_s3_client *client = user_data;
 
     s_s3_client_lock_synced_data(client);
-    s_s3_client_set_state_synced(client, AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_UTIL_FINISHED);
+    s_s3_client_set_state_synced(client, AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_MANAGER_FINISHED);
     s_s3_client_unlock_synced_data(client);
 }
 
@@ -754,8 +755,8 @@ static void s_s3_client_vip_connection_shutdown_callback(void *user_data) {
 
     struct aws_s3_client *client = user_data;
 
-    if (aws_s3_task_util_create_task(
-            client->task_util, s_s3_client_vip_connection_shutdown_callback_task, 0, 1, client)) {
+    if (aws_s3_task_manager_create_task(
+            client->task_manager, s_s3_client_vip_connection_shutdown_callback_task, 0, 1, client)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p: Shutdown for client failed during vip connection shutdown callback.",
@@ -789,8 +790,8 @@ static void s_s3_client_vip_http_connection_manager_shutdown_callback(void *user
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    if (aws_s3_task_util_create_task(
-            client->task_util, s_s3_client_vip_http_connection_manager_shutdown_callback_task, 0, 1, client)) {
+    if (aws_s3_task_manager_create_task(
+            client->task_manager, s_s3_client_vip_http_connection_manager_shutdown_callback_task, 0, 1, client)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p: Shutdown for client failed during http connection manager shutdown callback.",
@@ -864,17 +865,17 @@ static void s_s3_client_set_state_synced(struct aws_s3_client *client, enum aws_
             break;
         }
         case AWS_S3_CLIENT_STATE_CLEAN_UP_VIPS_FINISHED: {
-            s_s3_client_set_state_synced(client, AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_UTIL);
+            s_s3_client_set_state_synced(client, AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_MANAGER);
             break;
         }
-        case AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_UTIL: {
-            if (client->task_util != NULL) {
-                aws_s3_task_util_destroy(client->task_util);
-                client->task_util = NULL;
+        case AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_MANAGER: {
+            if (client->task_manager != NULL) {
+                aws_s3_task_manager_destroy(client->task_manager);
+                client->task_manager = NULL;
             }
             break;
         }
-        case AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_UTIL_FINISHED: {
+        case AWS_S3_CLIENT_STATE_CLEAN_UP_TASK_MANAGER_FINISHED: {
             s_s3_client_set_state_synced(client, AWS_S3_CLIENT_STATE_CLEAN_UP_FINISH_RELEASE);
             break;
         }
