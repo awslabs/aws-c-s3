@@ -4,6 +4,7 @@
 
 const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
 const struct aws_byte_cursor g_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Range");
+const struct aws_byte_cursor g_etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
 const struct aws_byte_cursor g_content_length_header_name_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
 const struct aws_byte_cursor g_content_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Range");
@@ -32,3 +33,27 @@ int aws_s3_is_stream_response_status_success(struct aws_http_stream *stream, boo
 
     return AWS_OP_SUCCESS;
 }
+
+/*
+static const size_t s_meta_request_list_initial_capacity = 16;
+static const size_t s_out_of_order_removal_list_initial_capacity = 16;
+static const uint64_t s_vip_connection_processing_retry_offset_ms = 50;
+
+static size_t s_s3_find_meta_request(
+    const struct aws_array_list *meta_requests,
+    const struct aws_s3_meta_request *meta_request) {
+    size_t num_meta_requests = aws_array_list_length(meta_requests);
+
+    for (size_t meta_request_index = 0; meta_request_index < num_meta_requests; ++meta_request_index) {
+
+        struct aws_s3_meta_request *meta_request_item = NULL;
+
+        aws_array_list_get_at(meta_requests, &meta_request_item, meta_request_index);
+
+        if (meta_request_item == meta_request) {
+            return meta_request_index;
+        }
+    }
+    return (size_t)-1;
+}
+*/

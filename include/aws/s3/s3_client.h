@@ -26,8 +26,9 @@ typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     uint64_t range_end,
     void *user_data);
 
-typedef void(
-    aws_s3_meta_request_request_finish_fn)(struct aws_s3_meta_request *meta_request, int error_code, void *user_data);
+typedef void(aws_s3_meta_request_finish_fn)(struct aws_s3_meta_request *meta_request, int error_code, void *user_data);
+
+typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
@@ -82,7 +83,10 @@ struct aws_s3_meta_request_options {
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
 
     /* Callback for when the meta request is completely finished. */
-    aws_s3_meta_request_request_finish_fn *finish_callback;
+    aws_s3_meta_request_finish_fn *finish_callback;
+
+    /* Callback for when the meta request has completely cleaned up. */
+    aws_s3_meta_request_shutdown_fn *shutdown_callback;
 };
 
 AWS_EXTERN_C_BEGIN

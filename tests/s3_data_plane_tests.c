@@ -46,7 +46,7 @@ static int s_test_s3_get_object_body_callback(
     (void)user_data;
     (void)body;
 
-    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Body of response: %s", (const char *)body->ptr);
+    //AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Body of response: %s", (const char *)body->ptr);
 
     return AWS_OP_SUCCESS;
 }
@@ -132,7 +132,7 @@ AWS_TEST_CASE(test_s3_put_object, s_test_s3_put_object)
 static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object2.txt");
 
     aws_s3_library_init(allocator);
 
@@ -143,13 +143,14 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
         .client_bootstrap = tester.client_bootstrap,
         .credentials_provider = tester.credentials_provider,
         .region = s_test_s3_region,
-        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len)};
+        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len),
+        .part_size = 5 * 1024 * 1024};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    struct aws_string *test_body = aws_s3_create_test_buffer(allocator, 1 * 1024 * 1024);
+    struct aws_string *test_body = aws_s3_create_test_buffer(allocator, 10 * 1024 * 1024);
     struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_string(test_body);
     struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
 

@@ -3,62 +3,115 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_put_object_request.h"
+#include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request.h"
-#include "aws/s3/s3_client.h"
-
+#include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
-static void s_s3_put_object_request_destroy(struct aws_s3_request *request);
+extern struct aws_s3_request_vtable g_aws_s3_put_object_request_vtable;
 
-struct aws_s3_request_vtable g_aws_s3_put_object_request_vtable = {.destroy = s_s3_put_object_request_destroy,
-                                                                   .incoming_headers = NULL,
-                                                                   .incoming_header_block_done = NULL,
-                                                                   .incoming_body = NULL,
-                                                                   .stream_complete = NULL,
-                                                                   .request_finish = NULL};
+static int s_s3_put_object_prepare_for_send(struct aws_s3_request *request);
 
-struct aws_s3_request *aws_s3_put_object_request_new(
-    struct aws_allocator *allocator,
-    const struct aws_s3_request_options *options) {
+static int s_s3_put_object_incoming_headers(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    const struct aws_http_header *headers,
+    size_t headers_count,
+    void *user_data);
 
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(options);
+struct aws_s3_request_vtable g_aws_s3_put_object_request_vtable = {.prepare_for_send = s_s3_put_object_prepare_for_send,
+                                                                   .incoming_headers =
+                                                                       s_s3_put_object_incoming_headers};
 
-    struct aws_s3_put_object_request *put_object =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_put_object_request));
+static int s_s3_put_object_prepare_for_send(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(request->part_buffer);
 
-    if (put_object == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Could not allocate aws_s3_put_object_request");
-        return NULL;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_http_message *message =
+        aws_s3_request_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message);
+
+    if (message == NULL) {
+        return AWS_OP_ERR;
     }
 
-    struct aws_s3_request *s3_request = &put_object->s3_request;
+    if (request->part_number > 0) {
 
-    /* Initialize the base type. */
-    if (aws_s3_request_init(s3_request, allocator, AWS_S3_REQUEST_TYPE_PUT_OBJECT, options)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not initialize base aws_s3_request type", (void *)s3_request);
-        goto error_clean_up_request;
+        if (aws_s3_request_util_set_multipart_request_path(
+                meta_request->allocator, meta_request, request->part_number, message)) {
+            goto error_clean_up;
+        }
+
+        if (aws_s3_meta_request_copy_part_to_part_buffer(meta_request, request->part_number, request->part_buffer)) {
+            goto error_clean_up;
+        }
+
+        request->input_stream =
+            aws_s3_request_util_assign_body(meta_request->allocator, &request->part_buffer->buffer, message);
+
+        if (request->input_stream == NULL) {
+            goto error_clean_up;
+        }
     }
 
-    return s3_request;
+    request->message = message;
 
-error_clean_up_request:
+    return AWS_OP_SUCCESS;
 
-    if (s3_request != NULL) {
-        aws_s3_request_destroy(s3_request);
-        s3_request = NULL;
+error_clean_up:
+
+    if (message != NULL) {
+        aws_http_message_destroy(message);
+        message = NULL;
     }
 
-    return NULL;
+    return AWS_OP_ERR;
 }
 
-static void s_s3_put_object_request_destroy(struct aws_s3_request *request) {
-    AWS_PRECONDITION(request);
+static int s_s3_put_object_incoming_headers(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    const struct aws_http_header *headers,
+    size_t headers_count,
+    void *user_data) {
 
-    struct aws_s3_put_object_request *put_object = (struct aws_s3_put_object_request *)request;
-    aws_mem_release(request->allocator, put_object);
+    AWS_PRECONDITION(stream);
+    AWS_PRECONDITION(user_data);
+
+    struct aws_s3_request *request = user_data;
+
+    (void)stream;
+    (void)header_block;
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_allocator *allocator = meta_request->allocator;
+    AWS_PRECONDITION(allocator);
+
+    /* Find the ETag header if it exists and cache it. */
+    for (size_t i = 0; i < headers_count; ++i) {
+        const struct aws_byte_cursor *name = &headers[i].name;
+        const struct aws_byte_cursor *value = &headers[i].value;
+
+        if (aws_http_header_name_eq(*name, g_etag_header_name)) {
+            struct aws_byte_cursor value_within_quotes = *value;
+
+            if (value_within_quotes.len >= 2) {
+                value_within_quotes.len -= 2;
+                value_within_quotes.ptr++;
+            }
+
+            request->etag = aws_string_new_from_cursor(allocator, &value_within_quotes);
+            break;
+        }
+    }
+
+    return AWS_OP_SUCCESS;
 }

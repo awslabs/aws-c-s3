@@ -4,9 +4,6 @@
  */
 
 #include "aws/s3/private/s3_work_util.h"
-#include "aws/s3/private/s3_client_impl.h"
-#include "aws/s3/private/s3_meta_request_impl.h"
-#include "aws/s3/private/s3_vip_connection.h"
 #include "aws/s3/s3.h"
 
 #include <aws/io/event_loop.h>
