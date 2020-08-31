@@ -17,7 +17,9 @@
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
 #endif
 
+struct aws_allocator;
 struct aws_http_stream;
+struct aws_event_loop;
 
 enum aws_s3_response_status {
     AWS_S3_RESPONSE_STATUS_SUCCESS = 200,
@@ -33,8 +35,14 @@ extern const struct aws_byte_cursor g_content_type_header_name;
 extern const struct aws_byte_cursor g_content_length_header_name;
 extern const struct aws_byte_cursor g_etag_header_name;
 
-bool aws_s3_is_response_status_success(int response_status);
+typedef void(aws_s3_task_util_task_fn)(void **args);
 
-int aws_s3_is_stream_response_status_success(struct aws_http_stream *stream, bool *out_is_success);
+int aws_s3_task_util_new_task(
+    struct aws_allocator *allocator,
+    struct aws_event_loop *event_loop,
+    aws_s3_task_util_task_fn *task_fn,
+    uint64_t delay_ns,
+    uint32_t num_args,
+    ...);
 
 #endif /* AWS_S3_UTIL_H */

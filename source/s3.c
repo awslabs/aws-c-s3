@@ -14,10 +14,10 @@
 /* clang-format off */
 static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER, "S3 Response missing required Content-Range header."),
-    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_META_REQUEST, "Meta request was required but no specified"),
-    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_REQUEST, "Request was required but not specified"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INTERNAL_ERROR, "Response code indicates internal server error"),
-    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_RESPONSE_STATUS, "Invalid response status from request")
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_RESPONSE_STATUS, "Invalid response status from request"),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_UPLOAD_ID, "Upload Id not found in create-multipart-upload response"),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_NO_PART_BUFFER, "No part buffer was available for use")
 };
 /* clang-format on */
 
@@ -31,10 +31,6 @@ static struct aws_log_subject_info s_s3_log_subject_infos[] = {
     DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_CLIENT, "S3Client", "Subject for aws-c-s3 logging from an aws_s3_client."),
     DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_REQUEST, "S3Request", "Subject for aws-c-s3 logging from an aws_s3_request."),
     DEFINE_LOG_SUBJECT_INFO(
-        AWS_LS_S3_REQUEST_PIPELINE,
-        "S3RequestPipeline",
-        "Subject for aws-c-s3 logging for a aws_s3_request_pipeline"),
-    DEFINE_LOG_SUBJECT_INFO(
         AWS_LS_S3_META_REQUEST,
         "S3MetaRequest",
         "Subject for aws-c-s3 logging from an aws_s3_meta_request."),
@@ -42,11 +38,7 @@ static struct aws_log_subject_info s_s3_log_subject_infos[] = {
     DEFINE_LOG_SUBJECT_INFO(
         AWS_LS_S3_VIP_CONNECTION,
         "S3VIPConnection",
-        "Subject for aws-c-s3 logging from an aws_s3_vip_connection."),
-    DEFINE_LOG_SUBJECT_INFO(
-        AWS_LS_S3_TASK_MANAGER,
-        "S3TaskManager",
-        "Subject for aws-c-s3 logging from task manager.")};
+        "Subject for aws-c-s3 logging from an aws_s3_vip_connection.")};
 
 static struct aws_log_subject_info_list s_s3_log_subject_list = {
     .subject_list = s_s3_log_subject_infos,

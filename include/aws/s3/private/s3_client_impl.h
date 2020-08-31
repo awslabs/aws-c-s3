@@ -6,19 +6,21 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_request.h"
 #include "aws/s3/s3_client.h"
 
 #include <aws/common/array_list.h>
 #include <aws/common/atomics.h>
 #include <aws/common/byte_buf.h>
 #include <aws/common/mutex.h>
+#include <aws/common/task_scheduler.h>
 
 struct aws_http_connection_manager;
 struct aws_htttp_connection;
 
 struct aws_s3_part_buffer {
     struct aws_linked_list_node node;
+
+    struct aws_s3_client *client;
 
     uint64_t range_start;
 
@@ -40,29 +42,6 @@ struct aws_s3_vip {
     struct aws_http_connection_manager *http_connection_manager;
 };
 
-/* We need a payload of data to pass through a series of callbacks for setting up/making request which knows about the
- * vip connection and client. This is that payload.  It should not be touched outside of the processing of a request
- * while processing is taking place.  This data does not need a lock as long as that rule is abided by. */
-struct aws_s3_vip_connection_make_request_state {
-    uint32_t request_count;
-
-    struct aws_s3_client *client;
-
-    struct aws_s3_vip_connection *vip_connection;
-
-    struct aws_s3_meta_request *meta_request;
-
-    struct aws_s3_request *request;
-
-    /* HTTP connection currently in use by this pipeline.  A single connection is re-used until
-     * connection_request_count is hit. */
-    struct aws_http_connection *http_connection;
-
-    struct aws_http_stream *http_stream;
-
-    struct aws_signable *signable;
-};
-
 struct aws_s3_vip_connection {
     struct aws_linked_list_node node;
 
@@ -78,7 +57,15 @@ struct aws_s3_vip_connection {
 
     uint32_t pending_destruction : 1;
 
-    struct aws_s3_vip_connection_make_request_state make_request_state;
+    uint32_t request_count;
+
+    struct aws_http_connection *http_connection;
+
+    struct {
+
+        struct aws_s3_client *client;
+
+    } transient_active_request_args;
 };
 
 /* Stores state for an instance of a high performance s3 client */
@@ -86,6 +73,8 @@ struct aws_s3_client {
     struct aws_allocator *allocator;
 
     struct aws_atomic_var ref_count;
+
+    struct aws_atomic_var internal_ref_count;
 
     struct aws_client_bootstrap *client_bootstrap;
 
@@ -118,20 +107,11 @@ struct aws_s3_client {
     /* The calculated ideal number of VIP's based on throughput target and throughput per vip. */
     uint32_t ideal_vip_count;
 
-    /* Utility used that tries to simplify task creation and provides an off-switch/shutdown path for tasks issued. */
-    struct aws_s3_task_manager *task_manager;
+    struct aws_atomic_var resolving_hosts;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
-
-    /* Number of connection managers that are still allocated by the client's VIP's. */
-    struct aws_atomic_var num_http_conn_managers_allocated;
-
-    /* Number of VIP connections that are still alocated by the client's VIP's.*/
-    struct aws_atomic_var num_vip_connections_allocated;
-
-    struct aws_atomic_var resolving_hosts;
 
     struct {
         struct aws_mutex lock;
@@ -153,8 +133,27 @@ struct aws_s3_client {
     } synced_data;
 };
 
-struct aws_s3_part_buffer *aws_s3_client_get_part_buffer(struct aws_s3_client *client);
+typedef void(aws_s3_client_get_http_connection_callback)(
+    struct aws_http_connection *http_connection,
+    int error_code,
+    void *user_data);
 
-void aws_s3_client_release_part_buffer(struct aws_s3_client *client, struct aws_s3_part_buffer *part_buffer);
+typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
+
+int aws_s3_client_sign_message(
+    struct aws_s3_client *client,
+    struct aws_http_message *message,
+    aws_s3_client_sign_callback *callback,
+    void *user_data);
+
+int aws_s3_client_get_http_connection(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    aws_s3_client_get_http_connection_callback *callback,
+    void *user_data);
+
+struct aws_s3_part_buffer *aws_s3_client_get_part_buffer(struct aws_s3_client *client, uint32_t part_number);
+
+void aws_s3_part_buffer_release(struct aws_s3_part_buffer *part_buffer);
 
 #endif /* AWS_S3_CLIENT_IMPL_H */

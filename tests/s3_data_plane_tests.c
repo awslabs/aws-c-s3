@@ -41,12 +41,10 @@ static int s_test_s3_get_object_body_callback(
     uint64_t range_end,
     void *user_data) {
     (void)meta_request;
-    (void)range_start;
-    (void)range_end;
     (void)user_data;
     (void)body;
 
-    //AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Body of response: %s", (const char *)body->ptr);
+    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_end);
 
     return AWS_OP_SUCCESS;
 }
@@ -76,7 +74,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
         .credentials_provider = tester.credentials_provider,
         .region = s_test_s3_region,
         .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len),
-        .part_size = 16 * 1024};
+        .part_size = 64 * 1024};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 

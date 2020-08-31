@@ -10,26 +10,73 @@
 #include <aws/common/linked_list.h>
 #include <aws/common/mutex.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/http/request_response.h>
 
-#include "aws/s3/private/s3_request.h"
 #include "aws/s3/s3_client.h"
 
 struct aws_s3_client;
 struct aws_s3_meta_request;
 struct aws_s3_request_options;
 
-enum aws_s3_meta_request_gen_ranged_flag {
-    AWS_S3_META_REQUEST_GEN_RANGED_FLAG_SKIP_FIRST = 0x00000001,
-    AWS_S3_META_REQUEST_GEN_RANGED_FLAG_QUEUING_DONE = 0x00000002
+typedef void(
+    aws_s3_meta_request_stopped_callback_fn)(struct aws_s3_meta_request *meta_request, int error_code, void *user_data);
+
+typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
+
+struct aws_s3_request_desc {
+    struct aws_linked_list_node node;
+    uint32_t part_number;
+    uint32_t request_tag;
 };
 
-enum s3_push_new_request_flag { S3_PUSH_NEW_REQUEST_FLAG_QUEUING_DONE = 0x00000001 };
+struct aws_s3_request {
+    struct aws_http_message *message;
+    struct aws_s3_part_buffer *part_buffer;
+};
+
+struct aws_s3_send_request_options {
+    struct aws_s3_client *client;
+    struct aws_s3_vip_connection *vip_connection;
+    aws_s3_request_finished_callback_fn *finished_callback;
+    void *user_data;
+};
+
+struct aws_s3_send_request_work {
+    struct aws_s3_client *client;
+    struct aws_s3_vip_connection *vip_connection;
+    struct aws_s3_meta_request *meta_request;
+    struct aws_s3_request_desc *request_desc;
+    struct aws_s3_request *request;
+
+    aws_s3_request_finished_callback_fn *finished_callback;
+    void *user_data;
+};
 
 struct aws_s3_meta_request_internal_options {
     const struct aws_s3_meta_request_options *options;
     void *user_data;
 
+    struct aws_s3_client *client;
+    aws_s3_meta_request_stopped_callback_fn *stopped_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
+};
+
+struct aws_s3_meta_request_vtable {
+
+    int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc **request_desc);
+
+    struct aws_s3_request *(*request_factory)(
+        struct aws_s3_meta_request *meta_request,
+        struct aws_s3_client *client,
+        struct aws_s3_request_desc *request_desc);
+
+    aws_http_on_incoming_headers_fn *incoming_headers;
+    aws_http_on_incoming_header_block_done_fn *incoming_headers_block_done;
+    aws_http_on_incoming_body_fn *incoming_body;
+
+    void (*stream_complete)(struct aws_http_stream *stream, int error_code, void *user_data);
+
+    void (*destroy)(struct aws_s3_meta_request *);
 };
 
 /* This represents one meta request, ie, one accelerated file transfer.  Anything needed across different calls for an
@@ -38,8 +85,8 @@ struct aws_s3_meta_request_internal_options {
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
     struct aws_atomic_var ref_count;
-
-    struct aws_s3_client *client;
+    void *impl;
+    struct aws_s3_meta_request_vtable *vtable;
 
     /* Initial HTTP Message that this meta request is based on. Immutable after creation until destruction. */
     struct aws_http_message *initial_request_message;
@@ -48,7 +95,7 @@ struct aws_s3_meta_request {
      * creation. */
     uint64_t part_size;
 
-    struct aws_string *upload_id;
+    struct aws_event_loop *event_loop;
 
     /* User data to be passed to each callback.*/
     void *user_data;
@@ -62,85 +109,67 @@ struct aws_s3_meta_request {
      * around the customer specified callbacks. */
     void *internal_user_data;
     aws_s3_meta_request_finish_fn *internal_finish_callback;
+    aws_s3_meta_request_stopped_callback_fn *internal_stopped_callback;
+
+    struct aws_atomic_var work_ref_count;
+    struct aws_atomic_var finished_error_code;
+    struct aws_atomic_var issued_finish_callback;
 
     struct {
         struct aws_mutex lock;
 
-        /* Flag that is set when no other s3 requests will be queued. */
-        uint32_t queue_finished_populating : 1;
+        uint32_t stopped : 1;
+        uint32_t processing_write_queue : 1;
 
-        uint32_t is_writing_to_caller : 1;
-
-        uint32_t cleaning_up : 1;
-
-        /* Number of requests popped from queue but not finished yet.*/
-        uint32_t in_flight_requests;
-
-        /* S3 Requests for this file transfer. This can change as the meta request progresses.  Once there are no other
-         * requests to push, queue_finished_populating must be set. */
-        struct aws_linked_list pending_request_queue;
-
-        struct aws_linked_list finished_requests;
-
-        struct aws_linked_list write_queue;
-
-        struct aws_task write_to_caller_task;
-
+        struct aws_linked_list retry_queue;
         struct aws_input_stream *initial_body_stream;
+        struct aws_linked_list write_queue;
 
     } synced_data;
 };
 
-/* Create a new s3 meta request given a client and options. */
-struct aws_s3_meta_request *aws_s3_meta_request_new(
+struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
-    struct aws_s3_client *client,
     const struct aws_s3_meta_request_internal_options *options);
 
-int aws_s3_meta_requests_get_total_object_size(
+struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
+    struct aws_allocator *allocator,
+    const struct aws_s3_meta_request_internal_options *options);
+
+int aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
-    int64_t *out_total_object_size);
+    struct aws_s3_send_request_options *options,
+    bool *out_found_work);
 
-int aws_s3_meta_request_set_upload_id(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_byte_cursor *upload_id_cursor);
+/* BEGIN - Should only be called by derived types */
+int aws_s3_meta_request_init_base(
+    struct aws_allocator *allocator,
+    const struct aws_s3_meta_request_internal_options *options,
+    void *impl,
+    struct aws_s3_meta_request_vtable *vtable,
+    struct aws_s3_meta_request *base_type);
 
-struct aws_string *aws_s3_meta_request_get_upload_id(struct aws_s3_meta_request *meta_request);
-
-int aws_s3_meta_request_copy_part_to_part_buffer(
-    struct aws_s3_meta_request *meta_request,
-    uint32_t part_number,
-    struct aws_s3_part_buffer *dest_part_buffer);
-
-void aws_s3_meta_request_write_part_buffer_to_caller(
+int aws_s3_meta_request_write_part_buffer_to_caller(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_part_buffer *part_buffer);
 
-/* Pop a request from the queue onto the given pipeline.. */
-struct aws_s3_request *aws_s3_meta_request_pop_request(struct aws_s3_meta_request *meta_request);
-
-int aws_s3_meta_request_generate_ranged_requests(
+struct aws_s3_request_desc *aws_s3_request_desc_new(
     struct aws_s3_meta_request *meta_request,
-    enum aws_s3_request_type request_type,
-    uint64_t range_start,
-    uint64_t range_end,
-    uint32_t flags);
+    uint32_t tag,
+    uint32_t part_number);
 
-int aws_s3_meta_request_push_new_request(
+void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc);
+
+struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_options *request_options,
-    uint32_t flags);
+    struct aws_s3_request_desc *request_desc,
+    struct aws_http_message *message);
 
-void aws_s3_meta_request_finish_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request,
-    int error_code);
+void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
-typedef void(aws_s3_iterate_finished_requests_callback_fn)(struct aws_s3_request *request, void *user_data);
+int aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc **in_out_desc);
 
-void aws_s3_meta_request_iterate_finished_requests(
-    struct aws_s3_meta_request *meta_request,
-    aws_s3_iterate_finished_requests_callback_fn *callback,
-    void *user_data);
+void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int error_code);
+/* END - Should only be called by derived types */
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */
