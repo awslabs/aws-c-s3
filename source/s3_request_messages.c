@@ -236,9 +236,6 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        struct aws_byte_cursor buf_cursor = aws_byte_cursor_from_buf(buffer);
-        AWS_LOGF_INFO(AWS_LS_S3_REQUEST, "%s", buf_cursor.ptr);
-
         s_s3_message_util_assign_body(allocator, buffer, message);
     }
 

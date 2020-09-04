@@ -15,11 +15,10 @@
 #include <aws/common/mutex.h>
 #include <aws/common/string.h>
 
-#include <aws/io/event_loop.h>
-#include <aws/io/host_resolver.h>
-
 struct aws_client_bootstrap;
 struct aws_credentials_provider;
+struct aws_event_loop_group;
+struct aws_host_resolver;
 
 /* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
@@ -29,8 +28,8 @@ struct aws_s3_tester {
     struct aws_mutex lock;
     struct aws_condition_variable signal;
 
-    struct aws_event_loop_group el_group;
-    struct aws_host_resolver host_resolver;
+    struct aws_event_loop_group *el_group;
+    struct aws_host_resolver *host_resolver;
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
 

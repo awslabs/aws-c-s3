@@ -210,7 +210,7 @@ static int s_s3_auto_ranged_get_next_request(
     }
 
     if (request_desc != NULL) {
-        AWS_LOGF_INFO(
+        AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Returning request desc for part %d of %d",
             (void *)meta_request,
@@ -304,7 +304,7 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
     request->part_buffer = part_buffer;
     aws_http_message_release(message);
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Created request %p for part %d",
         (void *)meta_request,
@@ -486,7 +486,7 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
     ++auto_ranged_get->synced_data.num_parts_completed;
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: %d out of %d parts have completed.",
         (void *)meta_request,

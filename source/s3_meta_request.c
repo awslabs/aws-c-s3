@@ -377,7 +377,7 @@ int aws_s3_meta_request_send_next_request(
         return AWS_OP_SUCCESS;
     }
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p Initiating send for request with request tag %d, request desc %p",
         (void *)meta_request,
@@ -437,7 +437,7 @@ static void s_s3_meta_request_create_request_task(void **args) {
     AWS_PRECONDITION(work->request_desc);
     AWS_PRECONDITION(work->client);
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p Creating request with tag %d, request desc %p",
         (void *)work->meta_request,
@@ -465,7 +465,7 @@ static void s_s3_meta_request_create_request_task(void **args) {
 
     AWS_FATAL_ASSERT(work->request->message != NULL);
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)work->meta_request, (void *)work->request);
 
     /* Sign the newly created message. */
@@ -499,7 +499,7 @@ static void s_s3_meta_request_request_on_signed(int error_code, void *user_data)
         return;
     }
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p Getting HTTP connection for request %p",
         (void *)work->meta_request,
@@ -557,7 +557,7 @@ static void s_s3_meta_request_send_http_request(
         return;
     }
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)work->meta_request, (void *)work->request);
 
     if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
@@ -599,7 +599,7 @@ static void s_s3_meta_request_send_request_work_finish(
     AWS_PRECONDITION(vtable);
     AWS_PRECONDITION(vtable->stream_complete);
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Sending of request desc %p finished with error code %d",
         (void *)work->meta_request,

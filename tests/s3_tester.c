@@ -6,6 +6,8 @@
 #include "s3_tester.h"
 #include <aws/auth/credentials.h>
 #include <aws/io/channel_bootstrap.h>
+#include <aws/io/event_loop.h>
+#include <aws/io/host_resolver.h>
 #include <aws/testing/aws_test_harness.h>
 
 /* Wait for the cleanup notification.  This, and the s_tester_notify_clean_up_signal function are meant to be used for
@@ -34,6 +36,8 @@ int aws_s3_tester_init(
     AWS_ZERO_STRUCT(*tester);
 
     tester->allocator = allocator;
+
+    aws_s3_library_init(allocator);
 
     struct aws_logger_standard_options logger_options = {.level = AWS_LOG_LEVEL_INFO, .file = stderr};
 
@@ -91,16 +95,18 @@ int aws_s3_tester_init(
     }
 
     /* Setup an event loop group and host resolver. */
-    ASSERT_SUCCESS(aws_event_loop_group_default_init(&tester->el_group, allocator, 0));
-    ASSERT_SUCCESS(aws_host_resolver_init_default(&tester->host_resolver, allocator, 10, &tester->el_group));
+    tester->el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
+    ASSERT_TRUE(tester->el_group != NULL);
+
+    tester->host_resolver = aws_host_resolver_new_default(allocator, 10, tester->el_group, NULL);
+    ASSERT_TRUE(tester->host_resolver != NULL);
 
     /* Setup the client boot strap. */
     {
         struct aws_client_bootstrap_options bootstrap_options;
         AWS_ZERO_STRUCT(bootstrap_options);
-        bootstrap_options.event_loop_group = &tester->el_group;
-        bootstrap_options.host_resolver = &tester->host_resolver;
-        bootstrap_options.on_shutdown_complete = s_tester_notify_clean_up_signal;
+        bootstrap_options.event_loop_group = tester->el_group;
+        bootstrap_options.host_resolver = tester->host_resolver;
         bootstrap_options.user_data = tester;
 
         tester->client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
@@ -115,8 +121,6 @@ int aws_s3_tester_init(
         struct aws_credentials_provider_chain_default_options credentials_config;
         AWS_ZERO_STRUCT(credentials_config);
         credentials_config.bootstrap = tester->client_bootstrap;
-        credentials_config.shutdown_options.shutdown_callback = s_tester_notify_clean_up_signal;
-        credentials_config.shutdown_options.shutdown_user_data = tester;
         tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
 
         if (tester->credentials_provider == NULL) {
@@ -191,21 +195,24 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
         tester->bound_to_client_shutdown = false;
     }
 
-    aws_host_resolver_clean_up(&tester->host_resolver);
-    aws_event_loop_group_clean_up(&tester->el_group);
+    if (tester->el_group != NULL) {
+        aws_event_loop_group_release(tester->el_group);
+        tester->el_group = NULL;
+    }
+
+    if (tester->host_resolver != NULL) {
+        aws_host_resolver_release(tester->host_resolver);
+        tester->host_resolver = NULL;
+    }
 
     if (tester->client_bootstrap != NULL) {
         aws_client_bootstrap_release(tester->client_bootstrap);
         tester->client_bootstrap = NULL;
-
-        s_s3_tester_wait_for_clean_up_signal(tester);
     }
 
     if (tester->credentials_provider != NULL) {
         aws_credentials_provider_release(tester->credentials_provider);
         tester->credentials_provider = NULL;
-
-        s_s3_tester_wait_for_clean_up_signal(tester);
     }
 
     if (tester->region != NULL) {
@@ -226,8 +233,12 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     aws_condition_variable_clean_up(&tester->signal);
     aws_mutex_clean_up(&tester->lock);
 
+    aws_s3_library_clean_up();
+    
     aws_logger_set(NULL);
     aws_logger_clean_up(&tester->logger);
+
+    aws_global_thread_creator_shutdown_wait_for(10);
 }
 
 struct aws_string *aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size) {

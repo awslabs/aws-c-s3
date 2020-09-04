@@ -407,7 +407,9 @@ static void s_s3_client_internal_release(struct aws_s3_client *client) {
     aws_mem_release(client->allocator, client);
     client = NULL;
 
-    shutdown_callback(shutdown_user_data);
+    if (shutdown_callback != NULL) {
+        shutdown_callback(shutdown_user_data);
+    }
 }
 
 static void s_s3_client_vip_http_connection_manager_shutdown_callback(void *user_data) {
@@ -511,7 +513,7 @@ static void s_s3_client_vip_clean_up_synced(struct aws_s3_client *client, struct
 
             if (vip_connection->vip_id == (void *)vip->host_address) {
 
-                AWS_LOGF_INFO(
+                AWS_LOGF_DEBUG(
                     AWS_LS_S3_CLIENT,
                     "id=%p VIP Connection %p is active, not immediately destroying it for vip %p",
                     (void *)client,
@@ -537,7 +539,7 @@ static void s_s3_client_vip_clean_up_synced(struct aws_s3_client *client, struct
 
             if (vip_connection->vip_id == (void *)vip->host_address) {
 
-                AWS_LOGF_INFO(
+                AWS_LOGF_DEBUG(
                     AWS_LS_S3_CLIENT,
                     "id=%p VIP Connection %p is idle, immediately destroying it for vip %p",
                     (void *)client,

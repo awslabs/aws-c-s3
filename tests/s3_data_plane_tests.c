@@ -3,18 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/common/byte_buf.h>
-#include <aws/common/clock.h>
-#include <aws/common/common.h>
-#include <aws/http/request_response.h>
-#include <aws/io/stream.h>
-#include <aws/testing/aws_test_harness.h>
-
-#include <inttypes.h>
-
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include "s3_tester.h"
+#include <aws/common/byte_buf.h>
+#include <aws/common/clock.h>
+#include <aws/common/common.h>
+#include <aws/common/ref_count.h>
+#include <aws/http/request_response.h>
+#include <aws/io/stream.h>
+#include <aws/testing/aws_test_harness.h>
+#include <inttypes.h>
 
 static const struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 
@@ -62,8 +61,6 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
-
-    aws_s3_library_init(allocator);
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -115,8 +112,6 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     aws_s3_tester_clean_up(&tester);
 
-    aws_s3_library_clean_up();
-
     return 0;
 }
 
@@ -131,8 +126,6 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object2.txt");
-
-    aws_s3_library_init(allocator);
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, s_test_bucket_name, s_test_s3_region));
@@ -199,8 +192,6 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     }
 
     aws_s3_tester_clean_up(&tester);
-
-    aws_s3_library_clean_up();
 
     return 0;
 }
