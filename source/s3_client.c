@@ -27,7 +27,7 @@
 #include <inttypes.h>
 #include <math.h>
 
-static const int32_t s_s3_max_request_count_per_connection = 100;
+static const uint32_t s_s3_max_request_count_per_connection = 100;
 
 static const int32_t s_s3_vip_connection_timeout_seconds = 3; // TODO
 static const int32_t s_s3_vip_connection_port = 80;           // TODO
