@@ -438,7 +438,7 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
     }
 
     /* Allocate the actual in-flight request structure. */
-    struct aws_s3_request *request = aws_s3_request_new(meta_request, request_desc, message);
+    struct aws_s3_request *request = aws_s3_request_new(meta_request, message);
     aws_http_message_release(message);
 
     if (request == NULL) {
@@ -564,12 +564,11 @@ static int s_s3_auto_ranged_put_incoming_body(
     void *user_data) {
 
     AWS_PRECONDITION(stream);
+    (void)stream;
 
     struct aws_s3_send_request_work *work = user_data;
     AWS_PRECONDITION(work);
-
-    struct aws_s3_meta_request *meta_request = work->meta_request;
-    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(work->meta_request);
 
     struct aws_s3_request *request = work->request;
     AWS_PRECONDITION(request);
@@ -591,6 +590,7 @@ static int s_s3_auto_ranged_put_incoming_body(
 
 static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
     AWS_PRECONDITION(stream);
+    (void)stream;
 
     struct aws_s3_send_request_work *work = user_data;
     AWS_PRECONDITION(work);

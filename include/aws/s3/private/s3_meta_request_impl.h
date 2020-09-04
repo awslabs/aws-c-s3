@@ -218,10 +218,7 @@ struct aws_s3_request_desc *aws_s3_request_desc_new(
 void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc);
 
 /* Create a new s3 request structure with the given options. */
-struct aws_s3_request *aws_s3_request_new(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_desc *request_desc,
-    struct aws_http_message *message);
+struct aws_s3_request *aws_s3_request_new(struct aws_s3_meta_request *meta_request, struct aws_http_message *message);
 
 void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 

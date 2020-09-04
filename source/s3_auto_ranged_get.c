@@ -290,7 +290,7 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
         }
     }
 
-    struct aws_s3_request *request = aws_s3_request_new(meta_request, request_desc, message);
+    struct aws_s3_request *request = aws_s3_request_new(meta_request, message);
 
     if (request == NULL) {
         AWS_LOGF_ERROR(
@@ -407,6 +407,7 @@ static int s_s3_auto_ranged_get_incoming_body(
     void *user_data) {
 
     AWS_PRECONDITION(stream);
+    (void)stream;
 
     struct aws_s3_send_request_work *work = user_data;
     AWS_PRECONDITION(work);
@@ -444,6 +445,7 @@ static int s_s3_auto_ranged_get_incoming_body(
 
 static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
     AWS_PRECONDITION(stream);
+    (void)stream;
 
     struct aws_s3_send_request_work *work = user_data;
     AWS_PRECONDITION(work);
