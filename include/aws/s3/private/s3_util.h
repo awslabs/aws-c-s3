@@ -37,6 +37,7 @@ extern const struct aws_byte_cursor g_etag_header_name;
 
 typedef void(aws_s3_task_util_task_fn)(void **args);
 
+/* Wrapper for tasks that allocates a payload of task/arguments and handles clean up of that payload. */
 int aws_s3_task_util_new_task(
     struct aws_allocator *allocator,
     struct aws_event_loop *event_loop,

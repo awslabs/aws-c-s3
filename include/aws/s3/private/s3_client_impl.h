@@ -17,6 +17,7 @@
 struct aws_http_connection_manager;
 struct aws_htttp_connection;
 
+/* Pre-allocated buffer that is the size of a single part.*/
 struct aws_s3_part_buffer {
     struct aws_linked_list_node node;
 
@@ -29,11 +30,13 @@ struct aws_s3_part_buffer {
     struct aws_byte_buf buffer;
 };
 
+/* Pool of pre-allocated part buffers. */
 struct aws_s3_part_buffer_pool {
     int32_t num_allocated;
     struct aws_linked_list free_list;
 };
 
+/* Represents one VIP in S3, including a connection manager that points directly at that VIP. */
 struct aws_s3_vip {
     /* Address this VIP represents. */
     struct aws_string *host_address;
@@ -42,25 +45,33 @@ struct aws_s3_vip {
     struct aws_http_connection_manager *http_connection_manager;
 };
 
+/* Represents one connection on a particular VIP. */
 struct aws_s3_vip_connection {
     struct aws_linked_list_node node;
 
     /* Used to group this VIP connection with other VIP connections belonging to the same VIP. */
     void *vip_id;
 
+    /* Connection manager reference.  We store one on the VIP connection so that we don't have to worry about release
+     * order with the associated VIP. */
     struct aws_http_connection_manager *http_connection_manager;
+
+    /* The underlying, currently in-use HTTP connection. */
+    struct aws_http_connection *http_connection;
 
     /* Next meta request to be used.  We try to keep this up always pointing to the next meta request, even when
      * meta requests are removed/added, so that mutations of the meta request list do not cause any unintentional
      * favoring of certain files.  (Might be overkill.)*/
     size_t next_meta_request_index;
 
+    /* When true, the VIP connection should destroy itself as soon as possible. */
     uint32_t pending_destruction : 1;
 
+    /* Number of requests we have mde on this particular connection. Important for the request service limit. */
     uint32_t request_count;
 
-    struct aws_http_connection *http_connection;
-
+    /* This is transient task data, placed here just to prevent constant allocation, but not meant to be used outside of
+     * that task. */
     struct {
 
         struct aws_s3_client *client;
@@ -68,12 +79,15 @@ struct aws_s3_vip_connection {
     } transient_active_request_args;
 };
 
-/* Stores state for an instance of a high performance s3 client */
+/* Represents the state of the S3 client. */
 struct aws_s3_client {
     struct aws_allocator *allocator;
 
     struct aws_atomic_var ref_count;
 
+    /* Internal ref count prevents clean up from taking place, but not from being initiated.  IE: once the "normal" ref
+     * count hits zero, all resources are told to clean up.  Once those resources release their internal ref count, any
+     * remaining shutdown logic take place. */
     struct aws_atomic_var internal_ref_count;
 
     struct aws_client_bootstrap *client_bootstrap;
@@ -107,6 +121,7 @@ struct aws_s3_client {
     /* The calculated ideal number of VIP's based on throughput target and throughput per vip. */
     uint32_t ideal_vip_count;
 
+    /* Atomic used for switching host resolution on/off in a thread safe way. */
     struct aws_atomic_var resolving_hosts;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
@@ -128,6 +143,7 @@ struct aws_s3_client {
         /* Client list of on going meta requests. */
         struct aws_array_list meta_requests;
 
+        /* Our pool of parts to be used by file transfers as needed. */
         struct aws_s3_part_buffer_pool part_buffer_pool;
 
     } synced_data;
