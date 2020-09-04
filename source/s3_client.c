@@ -50,18 +50,21 @@ static void s_s3_client_unlock_synced_data(struct aws_s3_client *client);
 /* BEGIN Allocation/Destruction Functions */
 static void s_s3_client_release_task(void **args);
 
+/* Interfaces with "internal" reference count.  For more info, see the comments by the internal_ref_count variable in
+ * the header. */
 static void s_s3_client_internal_acquire(struct aws_s3_client *client);
 static void s_s3_client_internal_release(struct aws_s3_client *client);
 
 static void s_s3_client_vip_http_connection_manager_shutdown_callback(void *user_data);
 
+/* Initializes/cleans up a VIP structure.  Both assume the lock is already held.  */
 static int s_s3_client_vip_init_synced(
     struct aws_s3_client *client,
     struct aws_s3_vip *vip,
     struct aws_byte_cursor host_address);
-
 static void s_s3_client_vip_clean_up_synced(struct aws_s3_client *client, struct aws_s3_vip *vip);
 
+/* Allocates/Destroy a VIP Connection structure. */
 struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *client, struct aws_s3_vip *vip);
 int s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 /* END Allocation/Destruction Functions */
@@ -77,12 +80,16 @@ static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *cl
 /* END Part Buffer Pool Functions */
 
 /* BEGIN Meta Request Functions  */
+
+/* Asynchronously push a meta request into our list of processing. */
 static int s_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 static void s_s3_client_push_meta_request_task(void **args);
 
+/* Asynchronously removes a meta request from our list. */
 static int s_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 static void s_s3_client_remove_meta_request_task(void **args);
 
+/* Callback for when a meta request in our list has stopped sending requests. */
 static void s_s3_client_meta_request_stopped_callback(
     struct aws_s3_meta_request *meta_request,
     int error_code,
@@ -100,6 +107,9 @@ static void s_s3_client_remove_vip_task(void **args);
 /* END VIP Functions */
 
 /* BEGIN VIP Connection Functions */
+
+/* Schedule the process_meta_requests_loop_task for a given vip_connection.  Only done for idle connections or
+ * automatically at the end of processing for a meta request (so that processing of another one can start).  */
 static int s_s3_client_vip_connection_process_meta_requests(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
@@ -107,6 +117,7 @@ static int s_s3_client_vip_connection_process_meta_requests(
 
 static void s_s3_client_vip_connection_process_meta_requests_loop_task(void **args);
 
+/* Callback for when a single request (not an entire meta request) has finished on a VIP connection. */
 static void s_s3_client_vip_connection_request_finished(void *user_data);
 
 static void s_s3_vip_connection_request_signing_complete(
@@ -283,8 +294,6 @@ struct aws_s3_client *aws_s3_client_new(
 
 error_clean_up:
 
-    /* NOTE: it's important that no async operations have been started if we hit here, so that we can immediately
-     * clean up.  Otherwise, we might have to set shutdown_callback sooner and awkarddly rely on it. */
     if (client != NULL) {
         aws_s3_client_release(client);
         client = NULL;
@@ -323,8 +332,11 @@ static void s_s3_client_release_task(void **args) {
     AWS_PRECONDITION(client);
 
     s_s3_client_lock_synced_data(client);
+
+    /* Stop listening for new VIP addresses. */
     s_s3_client_stop_resolving_addresses(client);
 
+    /* Schedule removal of all existing VIP structures. */
     for (size_t vip_index = 0; vip_index < aws_array_list_length(&client->synced_data.vips); ++vip_index) {
         struct aws_s3_vip *vip = NULL;
         aws_array_list_get_at_ptr(&client->synced_data.vips, (void **)&vip, vip_index);
@@ -333,6 +345,7 @@ static void s_s3_client_release_task(void **args) {
 
     s_s3_client_unlock_synced_data(client);
 
+    /* Release the intial internal ref count that we have held since allocation. */
     s_s3_client_internal_release(client);
 }
 
@@ -356,6 +369,7 @@ static void s_s3_client_internal_release(struct aws_s3_client *client) {
         return;
     }
 
+    /* If we made it here, ref count and internal ref count are both 0, and we can de-allocate anything remaining. */
     if (client->credentials_provider != NULL) {
         aws_credentials_provider_release(client->credentials_provider);
         client->credentials_provider = NULL;
@@ -453,6 +467,7 @@ static int s_s3_client_vip_init_synced(
         goto error_clean_up;
     }
 
+    /* Acquire internal reference for the HTTP Connection Manager. */
     s_s3_client_internal_acquire(client);
 
     /* Setup all of our vip connections. */
@@ -550,6 +565,7 @@ static void s_s3_client_vip_clean_up_synced(struct aws_s3_client *client, struct
     }
 }
 
+/* Allocate a new VIP Connection structure for a given VIP. */
 struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *client, struct aws_s3_vip *vip) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip);
@@ -567,11 +583,13 @@ struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *cl
     vip_connection->http_connection_manager = vip->http_connection_manager;
     aws_http_connection_manager_acquire(vip->http_connection_manager);
 
+    /* Acquire internal reference for our VIP Connection structure. */
     s_s3_client_internal_acquire(client);
 
     return vip_connection;
 }
 
+/* Destroy a VIP Connection structure. */
 int s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
@@ -631,6 +649,7 @@ struct aws_s3_part_buffer *aws_s3_client_get_part_buffer(struct aws_s3_client *c
     struct aws_s3_part_buffer_pool *pool = &client->synced_data.part_buffer_pool;
     struct aws_linked_list *free_list = &pool->free_list;
 
+    /* Grab a part buffer from our free list if we have one. */
     if (!aws_linked_list_empty(free_list)) {
         struct aws_linked_list_node *part_buffer_node = aws_linked_list_pop_back(free_list);
         result = AWS_CONTAINER_OF(part_buffer_node, struct aws_s3_part_buffer, node);
@@ -650,7 +669,7 @@ struct aws_s3_part_buffer *aws_s3_client_get_part_buffer(struct aws_s3_client *c
 
         result->range_end = result->range_start + client->part_size - 1;
 
-        aws_byte_buf_reset(&result->buffer, true);
+        aws_byte_buf_reset(&result->buffer, false);
     }
 
     return result;
@@ -745,6 +764,7 @@ static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *cl
 /* END Part Buffer Pool Functions*/
 
 /*  BEGIN Meta Request Functions  */
+/* Public facing make-meta-request function. */
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
@@ -781,6 +801,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     struct aws_s3_meta_request *meta_request = NULL;
 
+    /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
         meta_request = aws_s3_meta_request_auto_ranged_get_new(client->allocator, &internal_options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
@@ -796,6 +817,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
 
+    /* Asynchronously push the new request into our list for processing. */
     if (s_s3_client_push_meta_request(client, meta_request)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not initate pushing of new meta request.", (void *)client);
         aws_s3_meta_request_release(meta_request);
@@ -814,8 +836,15 @@ static int s_s3_client_push_meta_request(struct aws_s3_client *client, struct aw
 
     AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Pushing meta request %p", (void *)client, (void *)meta_request);
 
-    return aws_s3_task_util_new_task(
-        client->allocator, client->event_loop, s_s3_client_push_meta_request_task, 0, 2, client, meta_request);
+    if (aws_s3_task_util_new_task(
+            client->allocator, client->event_loop, s_s3_client_push_meta_request_task, 0, 2, client, meta_request)) {
+        aws_s3_client_release(client);
+        aws_s3_meta_request_release(meta_request);
+
+        return AWS_OP_ERR;
+    }
+
+    return AWS_OP_SUCCESS;
 }
 
 static void s_s3_client_push_meta_request_task(void **args) {
@@ -841,6 +870,7 @@ static void s_s3_client_push_meta_request_task(void **args) {
         goto clean_up;
     }
 
+    /* Wake up any idle connections and tell them that there is work to do. */
     while (!aws_linked_list_empty(&client->synced_data.idle_vip_connections)) {
         struct aws_linked_list_node *vip_connection_node =
             aws_linked_list_pop_front(&client->synced_data.idle_vip_connections);
@@ -870,8 +900,15 @@ static int s_s3_client_remove_meta_request(struct aws_s3_client *client, struct 
     aws_s3_meta_request_acquire(meta_request);
     aws_s3_client_acquire(client);
 
-    return aws_s3_task_util_new_task(
-        client->allocator, client->event_loop, s_s3_client_remove_meta_request_task, 0, 2, client, meta_request);
+    if (aws_s3_task_util_new_task(
+            client->allocator, client->event_loop, s_s3_client_remove_meta_request_task, 0, 2, client, meta_request)) {
+        aws_s3_client_release(client);
+        aws_s3_meta_request_release(meta_request);
+
+        return AWS_OP_ERR;
+    }
+
+    return AWS_OP_SUCCESS;
 }
 
 static void s_s3_client_remove_meta_request_task(void **args) {
@@ -978,8 +1015,14 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, struct aws_byte_cur
 
     aws_s3_client_acquire(client);
 
-    return aws_s3_task_util_new_task(
-        client->allocator, client->event_loop, s_s3_client_add_vip_task, 0, 2, client, copied_host_address);
+    if (aws_s3_task_util_new_task(
+            client->allocator, client->event_loop, s_s3_client_add_vip_task, 0, 2, client, copied_host_address)) {
+
+        aws_s3_client_release(client);
+        return AWS_OP_ERR;
+    }
+
+    return AWS_OP_SUCCESS;
 }
 
 static void s_s3_client_add_vip_task(void **args) {
@@ -1014,6 +1057,7 @@ static void s_s3_client_add_vip_task(void **args) {
 
     s_s3_client_unlock_synced_data(client);
 
+    /* Acquire internal reference for our VIP. */
     s_s3_client_internal_acquire(client);
 
     s_s3_client_add_new_part_buffers_to_pool(client, client->num_connections_per_vip);
@@ -1059,8 +1103,16 @@ static int s_s3_client_remove_vip(struct aws_s3_client *client, struct aws_byte_
         return AWS_OP_ERR;
     }
 
-    return aws_s3_task_util_new_task(
-        client->allocator, client->event_loop, s_s3_client_remove_vip_task, 0, 2, client, copied_host_address);
+    if (aws_s3_task_util_new_task(
+            client->allocator, client->event_loop, s_s3_client_remove_vip_task, 0, 2, client, copied_host_address)) {
+
+        aws_string_destroy(copied_host_address);
+        copied_host_address = NULL;
+
+        return AWS_OP_ERR;
+    }
+
+    return AWS_OP_SUCCESS;
 }
 
 static void s_s3_client_remove_vip_task(void **args) {
@@ -1074,6 +1126,7 @@ static void s_s3_client_remove_vip_task(void **args) {
 
     s_s3_client_lock_synced_data(client);
 
+    /* See if we have a VIP with the given address. */
     size_t vip_index = s_s3_find_vip(&client->synced_data.vips, aws_byte_cursor_from_string(host_address));
 
     if (vip_index == (size_t)-1) {
@@ -1093,6 +1146,7 @@ static void s_s3_client_remove_vip_task(void **args) {
     aws_string_destroy(host_address);
     host_address = NULL;
 
+    /* Remove our VIP's internal reference. */
     s_s3_client_internal_release(client);
 }
 /* END VIP Functions */
@@ -1142,6 +1196,7 @@ static void s_s3_client_vip_connection_process_meta_requests_loop_task(void **ar
 
     size_t num_meta_requests = aws_array_list_length(&client->synced_data.meta_requests);
 
+    /* If we're pending destruction, go ahead and clean up. */
     if (vip_connection->pending_destruction) {
         aws_linked_list_remove(&vip_connection->node);
         s_s3_client_unlock_synced_data(client);
@@ -1149,7 +1204,7 @@ static void s_s3_client_vip_connection_process_meta_requests_loop_task(void **ar
         goto clean_up;
     }
 
-    /* If we don't have anything to do, go back to idle state. */
+    /* If we don't have anything to do, go back to idle. */
     if (num_meta_requests == 0) {
         vip_connection->next_meta_request_index = 0;
 
@@ -1186,7 +1241,8 @@ static void s_s3_client_vip_connection_process_meta_requests_loop_task(void **ar
 
         aws_s3_meta_request_send_next_request(meta_request, &options, &found_work);
 
-        /* If we successfully got one, then go ahead and calculate a new next_meta_request_index value. */
+        /* If we successfully got work for this connection, then go ahead and calculate a new next_meta_request_index
+         * value. */
         if (found_work) {
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,
@@ -1224,6 +1280,7 @@ clean_up:
     aws_s3_client_release(client);
 }
 
+/* Called by the meta request when it has finished using this VIP connection for a single request. */
 static void s_s3_client_vip_connection_request_finished(void *user_data) {
     struct aws_s3_vip_connection *vip_connection = user_data;
     AWS_PRECONDITION(vip_connection);
@@ -1245,8 +1302,7 @@ struct s3_client_siging_payload {
     void *user_data;
 };
 
-/* Start issuing the actual request It is the responsibility of the caller to not call this again until a clean-up
- * callback has been triggered. */
+/* Handles signing a message for the caller. */
 int aws_s3_client_sign_message(
     struct aws_s3_client *client,
     struct aws_http_message *message,
@@ -1347,6 +1403,7 @@ static void s_s3_vip_connection_request_signing_complete(
         }
     }
 
+    /* Pass back the signed message. */
     if (payload->callback != NULL) {
         payload->callback(error_code, payload->user_data);
     }
@@ -1372,6 +1429,7 @@ struct s3_client_get_http_connection_payload {
     void *user_data;
 };
 
+/* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
 int aws_s3_client_get_http_connection(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
@@ -1397,6 +1455,7 @@ int aws_s3_client_get_http_connection(
     struct aws_http_connection **http_connection = &vip_connection->http_connection;
     uint32_t *connection_request_count = &vip_connection->request_count;
 
+    /* If we have a cached connection, see if we still want to use it. */
     if (*http_connection != NULL) {
         /* If we're at the max request count, set us up to get a new connection.  Also close the original connection so
          * that the connection manager doesn't reuse it.*/
@@ -1405,8 +1464,8 @@ int aws_s3_client_get_http_connection(
         if (*connection_request_count == s_s3_max_request_count_per_connection) {
             aws_http_connection_close(*http_connection);
 
-            aws_http_connection_manager_release_connection(
-                vip_connection->http_connection_manager, *http_connection); /* TODO error */
+            /* TODO handle possible error here? */
+            aws_http_connection_manager_release_connection(vip_connection->http_connection_manager, *http_connection);
 
             *http_connection = NULL;
             *connection_request_count = 0;
@@ -1475,6 +1534,7 @@ static void s_s3_client_vip_connection_on_acquire_request_connection(
         vip_connection->request_count = 0;
     }
 
+    /* Notify the caller of their HTTP connection. */
     if (payload->callback != NULL) {
         payload->callback(*current_http_connection, AWS_ERROR_SUCCESS, payload->user_data);
     }

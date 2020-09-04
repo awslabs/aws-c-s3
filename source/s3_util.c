@@ -10,6 +10,7 @@ const struct aws_byte_cursor g_content_length_header_name_name =
 const struct aws_byte_cursor g_content_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Range");
 const struct aws_byte_cursor g_content_type_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type");
 const struct aws_byte_cursor g_content_length_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
+const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
 
 #include <aws/common/task_scheduler.h>
 #include <aws/io/event_loop.h>
@@ -20,7 +21,7 @@ struct aws_s3_task_util_payload {
 
     struct aws_allocator *allocator;
 
-    /* Function that will process the work. */
+    /* "Task" function that will be called. */
     aws_s3_task_util_task_fn *task_fn;
 
     /* The actual task itself. */
@@ -34,9 +35,9 @@ static struct aws_s3_task_util_payload *s_s3_task_util_payload_new(
 
 static void s_s3_task_util_payload_destroy(struct aws_s3_task_util_payload *payload);
 
+/* Underlying task function. */
 static void s_s3_task_util_process_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-/* Allocate a new task-util-work. */
 static struct aws_s3_task_util_payload *s_s3_task_util_payload_new(
     struct aws_allocator *allocator,
     aws_s3_task_util_task_fn task_fn,
@@ -140,7 +141,7 @@ static void s_s3_task_util_process_task(struct aws_task *task, void *arg, enum a
 
     void **payload_args = (void **)((uint8_t *)payload + sizeof(struct aws_s3_task_util_payload));
 
-    /* Call the user's passed in task function. */
+    /* Call the passed in task function. */
     payload->task_fn(payload_args);
 
 clean_up:

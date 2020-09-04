@@ -37,6 +37,8 @@ static int s_s3_message_util_add_content_range_header(
 
 static int s_s3_create_multipart_set_up_request_path(struct aws_allocator *allocator, struct aws_http_message *message);
 
+/* Create a new get object request from an existing get object request. Currently just adds an optional ranged header.
+ */
 struct aws_http_message *aws_s3_get_object_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
@@ -69,6 +71,8 @@ error_clean_up:
     return NULL;
 }
 
+/* Create a new put object request from an existing put object request.  Currently just optionall adds part information
+ * for a multipart upload. */
 struct aws_http_message *aws_s3_put_object_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
@@ -109,6 +113,7 @@ error_clean_up:
     return NULL;
 }
 
+/* Creates a create-multipart-upload request from a given put objet request. */
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
@@ -135,8 +140,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         goto error_clean_up;
     }
 
-    const struct aws_byte_cursor post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST"); /* TODO constant */
-    aws_http_message_set_request_method(message, post_method);
+    aws_http_message_set_request_method(message, g_post_method);
 
     aws_http_message_set_body_stream(message, NULL);
 
@@ -152,12 +156,112 @@ error_clean_up:
     return NULL;
 }
 
-int s_s3_create_multipart_set_up_request_path(struct aws_allocator *allocator, struct aws_http_message *message) {
+static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n");
+
+static const struct aws_byte_cursor s_complete_payload_entry =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
+                                          "        <ETag>%s</ETag>\n"
+                                          "        <PartNumber>%d</PartNumber>\n"
+                                          "    </Part>\n");
+
+static const struct aws_byte_cursor s_complete_payload_end =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</CompleteMultipartUpload>");
+
+/* Create a complete-multipart message, which includes an XML payload of all completed parts. */
+struct aws_http_message *aws_s3_complete_multipart_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_buf *buffer,
+    const struct aws_string *upload_id,
+    const struct aws_array_list *etags) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(base_message);
+    AWS_PRECONDITION(buffer);
+    AWS_PRECONDITION(upload_id);
+    AWS_PRECONDITION(etags);
+
+    struct aws_http_message *message = s_s3_message_util_copy_http_message(allocator, base_message);
+    struct aws_http_headers *headers = NULL;
+
+    if (message == NULL) {
+        goto error_clean_up;
+    }
+
+    if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, message)) {
+        goto error_clean_up;
+    }
+
+    aws_http_message_set_request_method(message, g_post_method);
+
+    headers = aws_http_message_get_headers(message);
+
+    if (headers == NULL) {
+        goto error_clean_up;
+    }
+
+    if (aws_http_headers_erase(headers, g_content_length_header_name_name)) {
+        goto error_clean_up;
+    }
+
+    if (aws_http_headers_erase(headers, g_content_type_header_name)) {
+        goto error_clean_up;
+    }
+
+    /* Create XML payload with all of the etags of finished parts */
+    {
+        if (aws_byte_buf_append_dynamic(buffer, &s_complete_payload_begin)) {
+            goto error_clean_up;
+        }
+
+        for (size_t etag_index = 0; etag_index < aws_array_list_length(etags); ++etag_index) {
+            struct aws_string *etag = NULL;
+
+            aws_array_list_get_at(etags, &etag, etag_index);
+
+            AWS_FATAL_ASSERT(etag != NULL);
+
+            /* TODO don't use a arbitrarily sized buffer without error checking. */
+            char entry_buffer[1024] = "";
+            sprintf(
+                entry_buffer, (const char *)s_complete_payload_entry.ptr, (const char *)etag->bytes, etag_index + 1);
+
+            struct aws_byte_cursor entry_cursor = aws_byte_cursor_from_array(entry_buffer, strlen(entry_buffer));
+
+            aws_byte_buf_append_dynamic(buffer, &entry_cursor);
+        }
+
+        if (aws_byte_buf_append_dynamic(buffer, &s_complete_payload_end)) {
+            goto error_clean_up;
+        }
+
+        struct aws_byte_cursor buf_cursor = aws_byte_cursor_from_buf(buffer);
+        AWS_LOGF_INFO(AWS_LS_S3_REQUEST, "%s", buf_cursor.ptr);
+
+        s_s3_message_util_assign_body(allocator, buffer, message);
+    }
+
+    return message;
+
+error_clean_up:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+/* Sets up the request path for a create-multipart upload request. */
+static int s_s3_create_multipart_set_up_request_path(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
 
-    const struct aws_byte_cursor request_path_suffix =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("?uploads"); /* TODO constant */
+    const struct aws_byte_cursor request_path_suffix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("?uploads");
 
     struct aws_byte_cursor request_path;
 
@@ -199,45 +303,22 @@ struct create_multipart_upload_xml_user_data {
     struct aws_string *upload_id;
 };
 
-static bool s_s3_create_multipart_upload_child_xml_node(
+static bool s_s3_create_multipart_upload_root_xml_node(
     struct aws_xml_parser *parser,
     struct aws_xml_node *node,
-    void *user_data) {
-
-    const struct aws_byte_cursor upload_id_tag_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
-
-    struct aws_byte_cursor node_name;
-
-    if (aws_xml_node_get_name(node, &node_name)) {
-        return false;
-    }
-
-    struct create_multipart_upload_xml_user_data *multipart_upload_xml_user_data = user_data;
-
-    if (aws_byte_cursor_eq(&node_name, &upload_id_tag_name)) {
-
-        struct aws_byte_cursor node_body;
-        aws_xml_node_as_body(parser, node, &node_body);
-
-        multipart_upload_xml_user_data->upload_id =
-            aws_string_new_from_cursor(multipart_upload_xml_user_data->allocator, &node_body);
-
-        return false;
-    }
-
-    return true;
-}
+    void *user_data);
 
 static bool s_s3_create_multipart_upload_root_xml_node(
     struct aws_xml_parser *parser,
     struct aws_xml_node *node,
-    void *user_data) {
+    void *user_data);
 
-    aws_xml_node_traverse(parser, node, s_s3_create_multipart_upload_child_xml_node, user_data);
+static bool s_s3_create_multipart_upload_child_xml_node(
+    struct aws_xml_parser *parser,
+    struct aws_xml_node *node,
+    void *user_data);
 
-    return false;
-}
-
+/* Parses the XML response of a create-multipart-upload to get the Upload Id */
 struct aws_string *aws_s3_create_multipart_upload_get_upload_id(
     struct aws_allocator *allocator,
     struct aws_byte_cursor *response_body) {
@@ -271,104 +352,46 @@ clean_up:
     return xml_user_data.upload_id;
 }
 
-static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-    "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n");
+static bool s_s3_create_multipart_upload_root_xml_node(
+    struct aws_xml_parser *parser,
+    struct aws_xml_node *node,
+    void *user_data) {
 
-static const struct aws_byte_cursor s_complete_payload_entry =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
-                                          "        <ETag>%s</ETag>\n"
-                                          "        <PartNumber>%d</PartNumber>\n"
-                                          "    </Part>\n");
+    aws_xml_node_traverse(parser, node, s_s3_create_multipart_upload_child_xml_node, user_data);
 
-static const struct aws_byte_cursor s_complete_payload_end =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</CompleteMultipartUpload>");
-
-struct aws_http_message *aws_s3_complete_multipart_message_new(
-    struct aws_allocator *allocator,
-    struct aws_http_message *base_message,
-    struct aws_byte_buf *buffer,
-    const struct aws_string *upload_id,
-    const struct aws_array_list *etags) {
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(base_message);
-    AWS_PRECONDITION(buffer);
-    AWS_PRECONDITION(upload_id);
-    AWS_PRECONDITION(etags);
-
-    struct aws_http_message *message = s_s3_message_util_copy_http_message(allocator, base_message);
-    struct aws_http_headers *headers = NULL;
-
-    if (message == NULL) {
-        goto error_clean_up;
-    }
-
-    if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, message)) {
-        goto error_clean_up;
-    }
-
-    const struct aws_byte_cursor post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
-
-    aws_http_message_set_request_method(message, post_method);
-
-    headers = aws_http_message_get_headers(message);
-
-    if (headers == NULL) {
-        goto error_clean_up;
-    }
-
-    if (aws_http_headers_erase(headers, g_content_length_header_name_name)) {
-        goto error_clean_up;
-    }
-
-    if (aws_http_headers_erase(headers, g_content_type_header_name)) {
-        goto error_clean_up;
-    }
-
-    /* Create XML payload with all of the etags of finished parts */
-    {
-        if (aws_byte_buf_append_dynamic(buffer, &s_complete_payload_begin)) {
-            goto error_clean_up;
-        }
-
-        for (size_t etag_index = 0; etag_index < aws_array_list_length(etags); ++etag_index) {
-            struct aws_string *etag = NULL;
-
-            aws_array_list_get_at(etags, &etag, etag_index);
-
-            AWS_FATAL_ASSERT(etag != NULL);
-
-            char entry_buffer[1024] = ""; /* TODO */
-            sprintf(
-                entry_buffer, (const char *)s_complete_payload_entry.ptr, (const char *)etag->bytes, etag_index + 1);
-
-            struct aws_byte_cursor entry_cursor = aws_byte_cursor_from_array(entry_buffer, strlen(entry_buffer));
-
-            aws_byte_buf_append_dynamic(buffer, &entry_cursor);
-        }
-
-        if (aws_byte_buf_append_dynamic(buffer, &s_complete_payload_end)) {
-            goto error_clean_up;
-        }
-
-        struct aws_byte_cursor buf_cursor = aws_byte_cursor_from_buf(buffer);
-        AWS_LOGF_INFO(AWS_LS_S3_REQUEST, "%s", buf_cursor.ptr);
-
-        s_s3_message_util_assign_body(allocator, buffer, message);
-    }
-
-    return message;
-
-error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
+    return false;
 }
 
+static bool s_s3_create_multipart_upload_child_xml_node(
+    struct aws_xml_parser *parser,
+    struct aws_xml_node *node,
+    void *user_data) {
+
+    const struct aws_byte_cursor upload_id_tag_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
+
+    struct aws_byte_cursor node_name;
+
+    if (aws_xml_node_get_name(node, &node_name)) {
+        return false;
+    }
+
+    struct create_multipart_upload_xml_user_data *multipart_upload_xml_user_data = user_data;
+
+    if (aws_byte_cursor_eq(&node_name, &upload_id_tag_name)) {
+
+        struct aws_byte_cursor node_body;
+        aws_xml_node_as_body(parser, node, &node_body);
+
+        multipart_upload_xml_user_data->upload_id =
+            aws_string_new_from_cursor(multipart_upload_xml_user_data->allocator, &node_body);
+
+        return false;
+    }
+
+    return true;
+}
+
+/* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
 static struct aws_input_stream *s_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
@@ -390,6 +413,7 @@ static struct aws_input_stream *s_s3_message_util_assign_body(
         goto error_clean_up;
     }
 
+    /* TODO don't use a arbitrarily sized buffer without error checking. */
     char content_length_buffer[64] = "";
     sprintf(content_length_buffer, "%" PRIu64, (uint64_t)part_buffer_byte_cursor.len);
     struct aws_byte_cursor content_length_cursor =
@@ -414,6 +438,7 @@ error_clean_up:
     return NULL;
 }
 
+/* Copy an existing HTTP message's headers and body. */
 static struct aws_http_message *s_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
@@ -473,6 +498,7 @@ error_clean_up:
     return NULL;
 }
 
+/* Add a content-range header.*/
 static int s_s3_message_util_add_content_range_header(
     uint64_t part_index,
     uint64_t part_size,
@@ -482,7 +508,8 @@ static int s_s3_message_util_add_content_range_header(
     uint64_t range_start = part_index * part_size;
     uint64_t range_end = range_start + part_size - 1;
 
-    char range_value_buffer[128] = ""; /* TODO */
+    /* TODO don't use a arbitrarily sized buffer without error checking. */
+    char range_value_buffer[128] = "";
     snprintf(range_value_buffer, sizeof(range_value_buffer), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end);
 
     struct aws_http_header range_header;
@@ -497,6 +524,8 @@ static int s_s3_message_util_add_content_range_header(
     return AWS_OP_SUCCESS;
 }
 
+/* Handle setting up the multipart request path for a message. */
+/* TODO Should be a more compact way of writing this. */
 static int s_s3_message_util_set_multipart_request_path(
     struct aws_allocator *allocator,
     const struct aws_string *upload_id,
@@ -532,6 +561,7 @@ static int s_s3_message_util_set_multipart_request_path(
             goto error_clean_up;
         }
 
+        /* TODO don't use a arbitrarily sized buffer without error checking. */
         char part_number_buffer[32] = "";
         sprintf(part_number_buffer, "%d", part_number);
         struct aws_byte_cursor part_number_cursor =

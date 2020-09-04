@@ -11,7 +11,7 @@ enum aws_s3_auto_ranged_get_state {
 };
 
 enum aws_s3_auto_ranged_get_request_type {
-    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_ENTIRE_OBJECT,
+    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST,
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART,
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART
 };
@@ -79,6 +79,7 @@ static void s_s3_auto_ranged_get_unlock_synced_data(struct aws_s3_auto_ranged_ge
     aws_mutex_unlock(&auto_ranged_get->base.synced_data.lock);
 }
 
+/* Allocate a new auto-ranged-get meta request. */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_internal_options *options) {
@@ -93,6 +94,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         return NULL;
     }
 
+    /* Try to initialize the base type. */
     if (aws_s3_meta_request_init_base(
             allocator, options, auto_ranged_get, &s_s3_auto_ranged_get_vtable, &auto_ranged_get->base)) {
 
@@ -121,6 +123,7 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
+/* Try to get the next request that should be processed. */
 static int s_s3_auto_ranged_get_next_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request_desc **out_request_desc) {
@@ -133,6 +136,7 @@ static int s_s3_auto_ranged_get_next_request(
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
 
     switch (auto_ranged_get->synced_data.state) {
+        /* This state means we haven't sent anything yet */
         case AWS_S3_AUTO_RANGED_GET_STATE_START: {
             struct aws_http_message *initial_message = meta_request->initial_request_message;
             AWS_FATAL_ASSERT(initial_message != NULL);
@@ -150,7 +154,7 @@ static int s_s3_auto_ranged_get_next_request(
              * this requires additional parsing of this header value, so for now, we just send the message. */
             if (!aws_http_headers_get(initial_message_headers, g_range_header_name, &range_header_value)) {
                 request_desc =
-                    aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_ENTIRE_OBJECT, 0);
+                    aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST, 0);
 
                 if (request_desc == NULL) {
                     s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
@@ -170,6 +174,8 @@ static int s_s3_auto_ranged_get_next_request(
                 }
 
                 auto_ranged_get->synced_data.next_part_number = 2;
+
+                /* Wait for the first part's headers so that we can discover the object's total size. */
                 auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_WAITING_FOR_FIRST_PART;
             }
 
@@ -180,6 +186,7 @@ static int s_s3_auto_ranged_get_next_request(
         }
         case AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS: {
 
+            /* Keep returning reutrning requests until we've returned up to the total amount of parts. */
             if (auto_ranged_get->synced_data.next_part_number <= auto_ranged_get->synced_data.total_num_parts) {
 
                 request_desc = aws_s3_request_desc_new(
@@ -222,6 +229,7 @@ error_clean_up:
     return AWS_OP_ERR;
 }
 
+/* Given a request description, spin up an in flight request. */
 struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
@@ -234,23 +242,20 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
     struct aws_s3_part_buffer *part_buffer = NULL;
 
     switch (request_desc->request_tag) {
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_ENTIRE_OBJECT: {
-            message =
-                aws_s3_get_object_message_new(meta_request->allocator, meta_request->initial_request_message, 0, 0);
+        /* If we're just using the original message, go ahead and send that messag now. */
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST: {
+            message = meta_request->initial_request_message;
 
-            if (message == NULL) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Could not create message for request with tag %d for auto-ranged-get meta request.",
-                    (void *)meta_request,
-                    request_desc->request_tag);
-                goto message_alloc_failed;
-            }
+            AWS_FATAL_ASSERT(message != NULL);
 
+            aws_http_message_acquire(message);
             break;
         }
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART:
+            /* Bleed-through is intentional */
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART: {
+
+            /* Generate a new ranged get request based on the original message. */
             message = aws_s3_get_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
@@ -266,6 +271,7 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
                 goto message_alloc_failed;
             }
 
+            /* Grab a part buffer that we can write the contents to and pass back to the user. */
             part_buffer = aws_s3_client_get_part_buffer(client, request_desc->part_number);
 
             if (part_buffer == NULL) {
@@ -417,13 +423,17 @@ static int s_s3_auto_ranged_get_incoming_body(
     struct aws_s3_part_buffer *part_buffer = request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
-    if (request_desc->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_ENTIRE_OBJECT) {
+    /* TODO If we we're using the original message, just pass back directly for now.  This should currently only be the
+     * case when the incoming request from the user is already ranged.  */
+    if (request_desc->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST) {
 
         if (meta_request->body_callback != NULL) {
             meta_request->body_callback(meta_request, data, 0, 0, meta_request->user_data);
         }
 
     } else {
+
+        /* Store the contents in our part buffer */
         if (aws_byte_buf_append(&part_buffer->buffer, data)) {
             return AWS_OP_ERR;
         }
@@ -447,10 +457,12 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
 
     if (error_code != AWS_ERROR_SUCCESS) {
 
+        /* If the error was service side, or we just ran out of part buffers, retry the request. */
         if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
             if (aws_s3_meta_request_queue_retry(meta_request, &work->request_desc)) {
                 aws_s3_meta_request_finish(meta_request, aws_last_error());
             }
+            /* Otherwise, finish the request with failure. */
         } else {
             aws_s3_meta_request_finish(meta_request, error_code);
         }
@@ -464,6 +476,7 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
     struct aws_s3_part_buffer *part_buffer = request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
+    /* Schedule the part buffer to be sent back to the user so that they can process it. */
     if (aws_s3_meta_request_write_part_buffer_to_caller(meta_request, part_buffer) == AWS_OP_SUCCESS) {
         request->part_buffer = NULL;
     }
@@ -478,6 +491,7 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
         auto_ranged_get->synced_data.num_parts_completed,
         auto_ranged_get->synced_data.total_num_parts);
 
+    /* If we have now grabbed all parts for this transfer, then we are done with this meta request. */
     bool finished = auto_ranged_get->synced_data.num_parts_completed == auto_ranged_get->synced_data.total_num_parts;
 
     s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);

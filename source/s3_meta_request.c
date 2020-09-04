@@ -82,12 +82,15 @@ int aws_s3_meta_request_init_base(
     meta_request->part_size = internal_options->client->part_size;
     meta_request->event_loop = internal_options->client->event_loop;
 
+    /* Keep a reference to the original message structure passed in. */
     meta_request->initial_request_message = options->message;
     aws_http_message_acquire(options->message);
 
     aws_linked_list_init(&meta_request->synced_data.retry_queue);
     aws_linked_list_init(&meta_request->synced_data.write_queue);
 
+    /* Store a copy of the original message's initial body stream in our synced data, so that concurrent requests can
+     * safely take turns reading from it when needed. */
     meta_request->synced_data.initial_body_stream = aws_http_message_get_body_stream(options->message);
 
     if (aws_mutex_init(&meta_request->synced_data.lock)) {
@@ -106,68 +109,6 @@ int aws_s3_meta_request_init_base(
     meta_request->internal_stopped_callback = internal_options->stopped_callback;
 
     return AWS_OP_SUCCESS;
-}
-
-struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_send_request_options *options,
-    struct aws_s3_request_desc *request_desc) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(options);
-    AWS_PRECONDITION(options->client);
-    AWS_PRECONDITION(options->vip_connection);
-    AWS_PRECONDITION(request_desc);
-
-    struct aws_s3_send_request_work *work =
-        aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_send_request_work));
-
-    if (work == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not allocate aws_s3_send_request_work structure",
-            (void *)meta_request);
-        return NULL;
-    }
-
-    work->client = options->client;
-    work->vip_connection = options->vip_connection;
-    aws_s3_client_acquire(work->client);
-
-    work->meta_request = meta_request;
-    s_s3_meta_request_acquire_work_ref(meta_request);
-    aws_s3_meta_request_acquire(meta_request);
-
-    work->request_desc = request_desc;
-    work->finished_callback = options->finished_callback;
-    work->user_data = options->user_data;
-
-    return work;
-}
-
-void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_request_work *work) {
-    AWS_PRECONDITION(work);
-    AWS_PRECONDITION(work->meta_request);
-    AWS_PRECONDITION(work->client);
-    AWS_PRECONDITION(work->vip_connection);
-    AWS_PRECONDITION(work->request);
-
-    struct aws_s3_meta_request *meta_request = work->meta_request;
-
-    aws_s3_client_release(work->client);
-    work->client = NULL;
-
-    aws_s3_request_destroy(work->meta_request, work->request);
-    work->request = NULL;
-
-    if (work->request_desc != NULL) {
-        aws_s3_request_desc_destroy(meta_request, work->request_desc);
-        work->request_desc = NULL;
-    }
-
-    aws_mem_release(meta_request->allocator, work);
-
-    s_s3_meta_request_release_work_ref(meta_request);
-    aws_s3_meta_request_release(meta_request);
 }
 
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request) {
@@ -242,6 +183,148 @@ static void s_s3_meta_request_release_work_ref(struct aws_s3_meta_request *meta_
     }
 }
 
+struct aws_s3_request_desc *aws_s3_request_desc_new(
+    struct aws_s3_meta_request *meta_request,
+    uint32_t request_tag,
+    uint32_t part_number) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_request_desc *desc = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request_desc));
+
+    if (desc == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not allocate aws_s3_request_desc.", (void *)meta_request);
+        return NULL;
+    }
+
+    desc->request_tag = request_tag;
+    desc->part_number = part_number;
+
+    return desc;
+}
+
+void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request_desc);
+
+    aws_mem_release(meta_request->allocator, request_desc);
+}
+
+struct aws_s3_request *aws_s3_request_new(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request_desc *request_desc,
+    struct aws_http_message *message) {
+
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->allocator);
+    AWS_PRECONDITION(request_desc);
+    AWS_PRECONDITION(message);
+
+    struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
+
+    if (request == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not allocate memory required for aws_s3_request.");
+        return NULL;
+    }
+
+    request->message = message;
+    aws_http_message_acquire(message);
+
+    return request;
+}
+
+void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->allocator);
+    AWS_PRECONDITION(meta_request->initial_request_message);
+    AWS_PRECONDITION(request);
+
+    if (request->message != NULL) {
+        struct aws_input_stream *input_stream = aws_http_message_get_body_stream(request->message);
+        struct aws_input_stream *initial_input_stream = NULL;
+
+        initial_input_stream = aws_http_message_get_body_stream(meta_request->initial_request_message);
+
+        if (input_stream != initial_input_stream) {
+            aws_input_stream_destroy(input_stream);
+            input_stream = NULL;
+            aws_http_message_set_body_stream(request->message, NULL);
+        }
+
+        aws_http_message_release(request->message);
+        request->message = NULL;
+    }
+
+    if (request->part_buffer != NULL) {
+        aws_s3_part_buffer_release(request->part_buffer);
+        request->part_buffer = NULL;
+    }
+
+    aws_mem_release(meta_request->allocator, request);
+    request = NULL;
+}
+
+struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_send_request_options *options,
+    struct aws_s3_request_desc *request_desc) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(options);
+    AWS_PRECONDITION(options->client);
+    AWS_PRECONDITION(options->vip_connection);
+    AWS_PRECONDITION(request_desc);
+
+    struct aws_s3_send_request_work *work =
+        aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_send_request_work));
+
+    if (work == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not allocate aws_s3_send_request_work structure",
+            (void *)meta_request);
+        return NULL;
+    }
+
+    work->client = options->client;
+    work->vip_connection = options->vip_connection;
+    aws_s3_client_acquire(work->client);
+
+    work->meta_request = meta_request;
+    s_s3_meta_request_acquire_work_ref(meta_request);
+    aws_s3_meta_request_acquire(meta_request);
+
+    work->request_desc = request_desc;
+    work->finished_callback = options->finished_callback;
+    work->user_data = options->user_data;
+
+    return work;
+}
+
+void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_request_work *work) {
+    AWS_PRECONDITION(work);
+    AWS_PRECONDITION(work->meta_request);
+    AWS_PRECONDITION(work->client);
+    AWS_PRECONDITION(work->vip_connection);
+    AWS_PRECONDITION(work->request);
+
+    struct aws_s3_meta_request *meta_request = work->meta_request;
+
+    aws_s3_client_release(work->client);
+    work->client = NULL;
+
+    aws_s3_request_destroy(work->meta_request, work->request);
+    work->request = NULL;
+
+    if (work->request_desc != NULL) {
+        aws_s3_request_desc_destroy(meta_request, work->request_desc);
+        work->request_desc = NULL;
+    }
+
+    aws_mem_release(meta_request->allocator, work);
+
+    s_s3_meta_request_release_work_ref(meta_request);
+    aws_s3_meta_request_release(meta_request);
+}
+
 int aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_send_request_options *options,
@@ -253,6 +336,7 @@ int aws_s3_meta_request_send_next_request(
 
     s_s3_meta_request_lock_synced_data(meta_request);
 
+    /* If the meta request has been flagged to stop, don't initiate any additional work. */
     if (meta_request->synced_data.stopped) {
         s_s3_meta_request_unlock_synced_data(meta_request);
 
@@ -263,6 +347,7 @@ int aws_s3_meta_request_send_next_request(
         return AWS_OP_SUCCESS;
     }
 
+    /* Try grabbing a request_desc from the retry queue. */
     if (!aws_linked_list_empty(&meta_request->synced_data.retry_queue)) {
         struct aws_linked_list_node *request_desc_node =
             aws_linked_list_pop_front(&meta_request->synced_data.retry_queue);
@@ -274,6 +359,8 @@ int aws_s3_meta_request_send_next_request(
 
     s_s3_meta_request_unlock_synced_data(meta_request);
 
+    /* If we didn't find something in the retry queue, call the derived request type, asking what the next request
+     * should be. */
     if (request_desc == NULL) {
         struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
         AWS_FATAL_ASSERT(vtable);
@@ -283,6 +370,9 @@ int aws_s3_meta_request_send_next_request(
         }
     }
 
+    /* If it returned NULL, return success.  This is valid in cases where the meta request is waiting on a particular
+     * request finishing before it can continue.  (ie: a create-multipart-upload, or an initial ranged get to discover
+     * file size, etc.) */
     if (request_desc == NULL) {
         if (out_found_work) {
             *out_found_work = false;
@@ -298,6 +388,7 @@ int aws_s3_meta_request_send_next_request(
         request_desc->request_tag,
         (void *)request_desc);
 
+    /* Allocate a work structure that we will keep alive for the duration of processing this request. */
     struct aws_s3_send_request_work *work =
         s_s3_meta_request_send_request_work_new(meta_request, options, request_desc);
 
@@ -305,6 +396,7 @@ int aws_s3_meta_request_send_next_request(
         goto error_finish;
     }
 
+    /* Kick off processing the actual work for this request. */
     s_s3_meta_request_process_work(work);
 
     if (out_found_work) {
@@ -330,6 +422,7 @@ static void s_s3_meta_request_process_work(struct aws_s3_send_request_work *work
     struct aws_s3_meta_request *meta_request = work->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    /* Spin up a task for creating the request from the request structure. */
     if (aws_s3_task_util_new_task(
             meta_request->allocator, meta_request->event_loop, s_s3_meta_request_create_request_task, 0, 1, work)) {
         AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not initiate create request task.", (void *)meta_request);
@@ -338,6 +431,7 @@ static void s_s3_meta_request_process_work(struct aws_s3_send_request_work *work
     }
 }
 
+/* Try to allocate the actual request structure and initiate signing. */
 static void s_s3_meta_request_create_request_task(void **args) {
     AWS_PRECONDITION(args);
 
@@ -357,8 +451,10 @@ static void s_s3_meta_request_create_request_task(void **args) {
     struct aws_s3_meta_request_vtable *vtable = work->meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
+    /* Ask the factory to create a new request based on the reqeust description. */
     work->request = vtable->request_factory(work->meta_request, work->client, work->request_desc);
 
+    /* Finish the work for this reqeust immediately if we couldn't allocate any work for it. */
     if (work->request == NULL) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -376,12 +472,14 @@ static void s_s3_meta_request_create_request_task(void **args) {
     AWS_LOGF_INFO(
         AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)work->meta_request, (void *)work->request);
 
+    /* Sign the newly created message. */
     if (aws_s3_client_sign_message(work->client, work->request->message, s_s3_meta_request_request_on_signed, work)) {
         s_s3_meta_request_send_request_work_finish(work, NULL, aws_last_error());
         return;
     }
 }
 
+/* Handle the signing result, getting an HTTP connection for the request if signing succeeded. */
 static void s_s3_meta_request_request_on_signed(int error_code, void *user_data) {
     AWS_PRECONDITION(user_data);
 
@@ -393,6 +491,7 @@ static void s_s3_meta_request_request_on_signed(int error_code, void *user_data)
     AWS_PRECONDITION(work->client);
     AWS_PRECONDITION(work->vip_connection);
 
+    /* If we couldn't sign, finish the request with an error. */
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -410,6 +509,7 @@ static void s_s3_meta_request_request_on_signed(int error_code, void *user_data)
         (void *)work->meta_request,
         (void *)work->request);
 
+    /* Get a connection for this request, finishing if we failed immediately trying to get the connection. */
     if (aws_s3_client_get_http_connection(
             work->client, work->vip_connection, s_s3_meta_request_send_http_request, work)) {
 
@@ -418,6 +518,7 @@ static void s_s3_meta_request_request_on_signed(int error_code, void *user_data)
     }
 }
 
+/* Set up a stream to actually process the request. */
 static void s_s3_meta_request_send_http_request(
     struct aws_http_connection *http_connection,
     int error_code,
@@ -478,6 +579,7 @@ static void s_s3_meta_request_send_http_request(
     }
 }
 
+/* Finish up the processing of the request work. */
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
     (void)stream;
 
@@ -510,6 +612,7 @@ static void s_s3_meta_request_send_request_work_finish(
 
     int response_status = 0;
 
+    /* If there isn't already an error code, look for other failures.*/
     if (error_code == AWS_ERROR_SUCCESS) {
         if (stream == NULL) {
             error_code = AWS_ERROR_UNKNOWN;
@@ -533,6 +636,7 @@ static void s_s3_meta_request_send_request_work_finish(
         }
     }
 
+    /* Call the derived type, having it handle what to do with the current failure or success. */
     vtable->stream_complete(stream, error_code, work);
 
     if (stream != NULL) {
@@ -540,13 +644,17 @@ static void s_s3_meta_request_send_request_work_finish(
         stream = NULL;
     }
 
+    /* Tell the caller that we finished processing this particular request. */
     if (work->finished_callback != NULL) {
         work->finished_callback(work->user_data);
     }
 
+    /* Release our work structure. */
     s_s3_meta_request_send_request_work_destroy(work);
 }
 
+/* Push a request description into the retry queue.  This assumes ownership of the request desc, and will NULL out the
+ * passed in pointer-to-pointer to help enforce this. */
 int aws_s3_meta_request_queue_retry(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request_desc **in_out_desc) {
@@ -563,6 +671,8 @@ int aws_s3_meta_request_queue_retry(
     return AWS_OP_SUCCESS;
 }
 
+/* Finish the overall meta request, initially just stopping any additional requests from being sent.  Once all in flight
+ * work has finished, finish callbacks will be called. */
 void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int error_code) {
     AWS_PRECONDITION(meta_request);
 
@@ -583,10 +693,7 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int er
 
     s_s3_meta_request_unlock_synced_data(meta_request);
 
-    if (already_stopped) {
-        AWS_LOGF_WARN(AWS_LS_S3_META_REQUEST, "id=%p Meta Request called finish more than once.", (void *)meta_request);
-        return;
-    } else {
+    if (!already_stopped) {
         aws_atomic_exchange_int(&meta_request->finished_error_code, error_code);
         s_s3_meta_request_release_work_ref(meta_request);
 
@@ -596,87 +703,9 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int er
     }
 }
 
-struct aws_s3_request_desc *aws_s3_request_desc_new(
-    struct aws_s3_meta_request *meta_request,
-    uint32_t request_tag,
-    uint32_t part_number) {
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_request_desc *desc = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request_desc));
-
-    if (desc == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not allocate aws_s3_request_desc.", (void *)meta_request);
-        return NULL;
-    }
-
-    desc->request_tag = request_tag;
-    desc->part_number = part_number;
-
-    return desc;
-}
-
-void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(request_desc);
-
-    aws_mem_release(meta_request->allocator, request_desc);
-}
-
-struct aws_s3_request *aws_s3_request_new(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_desc *request_desc,
-    struct aws_http_message *message) {
-
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->allocator);
-    AWS_PRECONDITION(request_desc);
-    AWS_PRECONDITION(message);
-
-    struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
-
-    if (request == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not allocate memory required for aws_s3_request.");
-        return NULL;
-    }
-
-    request->message = message;
-    aws_http_message_acquire(message);
-
-    return request;
-}
-
-void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->allocator);
-    AWS_PRECONDITION(meta_request->initial_request_message);
-    AWS_PRECONDITION(request);
-
-    if (request->message != NULL) {
-        struct aws_input_stream *input_stream = aws_http_message_get_body_stream(request->message);
-        struct aws_input_stream *initial_input_stream = NULL;
-
-        /* TODO if these are null, this likely indicates a severe error */
-        initial_input_stream = aws_http_message_get_body_stream(meta_request->initial_request_message);
-
-        if (input_stream != initial_input_stream) {
-            aws_input_stream_destroy(input_stream);
-            input_stream = NULL;
-            aws_http_message_set_body_stream(request->message, NULL);
-        }
-
-        aws_http_message_release(request->message);
-        request->message = NULL;
-    }
-
-    if (request->part_buffer != NULL) {
-        aws_s3_part_buffer_release(request->part_buffer);
-        request->part_buffer = NULL;
-    }
-
-    aws_mem_release(meta_request->allocator, request);
-    request = NULL;
-}
-
+/* Asynchronously queue a part to send back to the caller.  This for situations such as a parallel get, where we don't
+ * necessarily want the handling of that data (which may include file IO) to happen at the same time we're downloading
+ * it. */
 int aws_s3_meta_request_write_part_buffer_to_caller(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_part_buffer *part_buffer) {
@@ -712,8 +741,10 @@ static void s_s3_meta_request_queue_part_buffer_task(void **args) {
 
     s_s3_meta_request_lock_synced_data(meta_request);
 
+    /* Push the aprt buffer into the queue. */
     aws_linked_list_push_back(&meta_request->synced_data.write_queue, &part_buffer->node);
 
+    /* If we already have a task running, we can exit now. */
     if (meta_request->synced_data.processing_write_queue) {
         s_s3_meta_request_unlock_synced_data(meta_request);
         s_s3_meta_request_release_work_ref(meta_request);
@@ -723,17 +754,25 @@ static void s_s3_meta_request_queue_part_buffer_task(void **args) {
 
     s_s3_meta_request_unlock_synced_data(meta_request);
 
+    /* Acquire an additional reference for the task below. */
     aws_s3_meta_request_acquire(meta_request);
 
-    aws_s3_task_util_new_task(
-        meta_request->allocator,
-        meta_request->event_loop,
-        s_s3_meta_request_process_write_queue_task,
-        0,
-        2,
-        meta_request,
-        part_buffer);
+    if (aws_s3_task_util_new_task(
+            meta_request->allocator,
+            meta_request->event_loop,
+            s_s3_meta_request_process_write_queue_task,
+            0,
+            2,
+            meta_request,
+            part_buffer)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not initiate task for processing part buffer write queue",
+            (void *)meta_request);
+        aws_s3_meta_request_release(meta_request);
+    }
 
+    /* Release our original reference for this present task. */
     aws_s3_meta_request_release(meta_request);
 }
 
@@ -745,6 +784,7 @@ static void s_s3_meta_request_process_write_queue_task(void **args) {
 
     s_s3_meta_request_lock_synced_data(meta_request);
 
+    /* If we're out of work, clean up and exit. */
     if (aws_linked_list_empty(&meta_request->synced_data.write_queue)) {
 
         meta_request->synced_data.processing_write_queue = false;
@@ -765,6 +805,7 @@ static void s_s3_meta_request_process_write_queue_task(void **args) {
 
     s_s3_meta_request_unlock_synced_data(meta_request);
 
+    /* Send the data to the user through the body callback. */
     if (meta_request->body_callback != NULL) {
         struct aws_byte_cursor buf_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
 
@@ -772,14 +813,29 @@ static void s_s3_meta_request_process_write_queue_task(void **args) {
             meta_request, &buf_byte_cursor, part_buffer->range_start, part_buffer->range_end, meta_request->user_data);
     }
 
+    /* Release the part buffer back to the client. */
     aws_s3_part_buffer_release(part_buffer);
     part_buffer = NULL;
 
-    aws_s3_task_util_new_task(
-        meta_request->allocator,
-        meta_request->event_loop,
-        s_s3_meta_request_process_write_queue_task,
-        0,
-        1,
-        meta_request);
+    /* Queue up task to process the next buffer in the queue. */
+    if (aws_s3_task_util_new_task(
+            meta_request->allocator,
+            meta_request->event_loop,
+            s_s3_meta_request_process_write_queue_task,
+            0,
+            1,
+            meta_request)) {
+
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not initiate task for processing part buffer write queue",
+            (void *)meta_request);
+
+        s_s3_meta_request_lock_synced_data(meta_request);
+        meta_request->synced_data.processing_write_queue = false;
+        s_s3_meta_request_unlock_synced_data(meta_request);
+
+        s_s3_meta_request_release_work_ref(meta_request);
+        aws_s3_meta_request_release(meta_request);
+    }
 }

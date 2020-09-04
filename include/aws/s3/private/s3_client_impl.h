@@ -21,12 +21,15 @@ struct aws_htttp_connection;
 struct aws_s3_part_buffer {
     struct aws_linked_list_node node;
 
+    /* Reference to the owning client so that it can easily be released back. */
     struct aws_s3_client *client;
 
+    /* What part of the overall file transfer this part is currently designated to. */
     uint64_t range_start;
 
     uint64_t range_end;
 
+    /* Re-usable byte buffer. */
     struct aws_byte_buf buffer;
 };
 
@@ -70,8 +73,8 @@ struct aws_s3_vip_connection {
     /* Number of requests we have mde on this particular connection. Important for the request service limit. */
     uint32_t request_count;
 
-    /* This is transient task data, placed here just to prevent constant allocation, but not meant to be used outside of
-     * that task. */
+    /* This is transient used during the processing of meta requests, placed here just to prevent constant allocation,
+     * but not meant to be used outside of that flow. */
     struct {
 
         struct aws_s3_client *client;
@@ -85,9 +88,10 @@ struct aws_s3_client {
 
     struct aws_atomic_var ref_count;
 
-    /* Internal ref count prevents clean up from taking place, but not from being initiated.  IE: once the "normal" ref
-     * count hits zero, all resources are told to clean up.  Once those resources release their internal ref count, any
-     * remaining shutdown logic take place. */
+    /* Internal ref count is used for tracking the lifetime of resources owned by the client that have asynchronous
+     * clean up.  In those cases, we don't want to prevent clean up from being initiated (which is what would happen
+     * with a normal reference), but we do want to know when we can completely clean up (ie: regular ref count and
+     * internal ref count are both 0). */
     struct aws_atomic_var internal_ref_count;
 
     struct aws_client_bootstrap *client_bootstrap;
