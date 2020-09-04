@@ -234,7 +234,7 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     aws_mutex_clean_up(&tester->lock);
 
     aws_s3_library_clean_up();
-    
+
     aws_logger_set(NULL);
     aws_logger_clean_up(&tester->logger);
 
