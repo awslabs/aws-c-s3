@@ -1323,14 +1323,10 @@ int aws_s3_client_sign_message(
     payload->message = message;
     payload->callback = callback;
     payload->user_data = user_data;
-
-    int error_code = AWS_ERROR_SUCCESS;
-
     payload->signable = aws_signable_new_http_request(client->allocator, message);
 
     if (payload->signable == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not allocate signable for http request", (void *)client);
-        error_code = aws_last_error();
         goto error_clean_up;
     }
 
@@ -1358,7 +1354,6 @@ int aws_s3_client_sign_message(
             payload)) {
 
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not sign request", (void *)client);
-        error_code = aws_last_error();
         goto error_clean_up;
     }
 
