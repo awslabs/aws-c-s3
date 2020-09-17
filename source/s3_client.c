@@ -242,7 +242,7 @@ int s3_client_make_request(struct aws_s3_client *client, struct aws_s3_request *
     signing_config.region = aws_byte_cursor_from_array(client->region->bytes, client->region->len);
     signing_config.service = service_name;
     signing_config.date = now;
-    signing_config.signed_body_value = AWS_SBVT_UNSIGNED_PAYLOAD;
+    signing_config.signed_body_value = g_aws_signed_body_value_unsigned_payload;
     signing_config.signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
 
     if (aws_sign_request_aws(
