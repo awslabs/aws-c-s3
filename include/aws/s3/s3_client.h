@@ -35,7 +35,7 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 /* Options for a new client. */
 struct aws_s3_client_config {
 
-    /* Reggion that the S3 bucket lives in. */
+    /* Region that the S3 bucket lives in. */
     struct aws_byte_cursor region;
 
     /* Endpoint for the S3 bucket to use. */
@@ -50,14 +50,11 @@ struct aws_s3_client_config {
     /* Size of parts the files will be downloaded or uploaded in. */
     uint64_t part_size;
 
-    /* Amount of time a VIP address stays in the host resolver. */
-    size_t dns_host_address_ttl;
-
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
 
     /* Amount of throughput in Gbps to designate to each VIP. */
-    double throughput_per_vip;
+    double throughput_per_vip_gbps;
 
     /* The number of connections that each VIP will have. */
     uint32_t num_connections_per_vip;

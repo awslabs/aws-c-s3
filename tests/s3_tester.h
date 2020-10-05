@@ -23,7 +23,6 @@ struct aws_host_resolver;
 /* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
     struct aws_allocator *allocator;
-    struct aws_logger logger;
 
     struct aws_mutex lock;
     struct aws_condition_variable signal;
@@ -67,6 +66,6 @@ void aws_s3_tester_bind_client_shutdown(struct aws_s3_tester *tester, struct aws
  * finish shutting down before releasing any resources. */
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
-struct aws_string *aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size);
+void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf* out_buf);
 
 #endif /* AWS_S3_TESTER_H */

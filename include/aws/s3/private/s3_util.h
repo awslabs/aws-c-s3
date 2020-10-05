@@ -10,12 +10,7 @@
 
 #include <aws/common/byte_buf.h>
 
-#if defined(DEBUG_BUILD)
-#    define ASSERT_SYNCED_DATA_LOCK_HELD(object)                                                                       \
-        AWS_FATAL_ASSERT(aws_mutex_try_lock(&(object)->synced_data.lock) == AWS_OP_ERR);
-#else
-#    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
-#endif
+#define ASSERT_SYNCED_DATA_LOCK_HELD(object) AWS_ASSERT(aws_mutex_try_lock(&(object)->synced_data.lock) == AWS_OP_ERR)
 
 struct aws_allocator;
 struct aws_http_stream;
@@ -38,7 +33,8 @@ extern const struct aws_byte_cursor g_post_method;
 
 typedef void(aws_s3_task_util_task_fn)(void **args);
 
-/* Wrapper for tasks that allocates a payload of task/arguments and handles clean up of that payload. */
+/* Wrapper for tasks that allocates a payload of task/arguments and handles clean up of that payload.  Assumes that all
+ * variadic arguments are pointers. */
 int aws_s3_task_util_new_task(
     struct aws_allocator *allocator,
     struct aws_event_loop *event_loop,

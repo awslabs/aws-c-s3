@@ -18,13 +18,14 @@ struct aws_s3_client;
 struct aws_s3_meta_request;
 struct aws_s3_request_options;
 
-typedef void(
-    aws_s3_meta_request_stopped_callback_fn)(struct aws_s3_meta_request *meta_request, int error_code, void *user_data);
+typedef void(aws_s3_meta_request_work_available_fn)(struct aws_s3_meta_request *meta_request, void *user_data);
 
 typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
 
+enum aws_s3_meta_request_state { AWS_S3_META_REQUEST_STATE_ACTIVE, AWS_S3_META_REQUEST_STATE_FINISHED };
+
 /* Represents a "description" of a request, ie, enough information to create an actual message.  This is meant to be
- * queuable for retries. */
+ * queueable for retries. */
 struct aws_s3_request_desc {
 
     /* Linked list node used for queuing. */
@@ -36,7 +37,7 @@ struct aws_s3_request_desc {
     /* Tag that defines what the built request will actually consist of.  Request tags are different per meta request
      * type, and do not necessarily map 1:1 with actual S3 API requests.  For example, they can be more contextual, like
      * "first part" instead of just "part".) */
-    uint32_t request_tag;
+    int request_tag;
 };
 
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
@@ -50,9 +51,8 @@ struct aws_s3_request {
 };
 
 /* Meta requests control the flow (when signing, sending, etc. takes place) of their underlying requests.  This options
- * structure is used to configur that flow when triggering it. */
+ * structure is used to configure that flow when triggering it. */
 struct aws_s3_send_request_options {
-    struct aws_s3_client *client;
     struct aws_s3_vip_connection *vip_connection;
     aws_s3_request_finished_callback_fn *finished_callback;
     void *user_data;
@@ -61,7 +61,6 @@ struct aws_s3_send_request_options {
 /* Represents the state for the sending of a single request.  This data is passed through the chain of function calls
  * that prepare/send a request. Visible in the header file for usage by derived meta requests types. */
 struct aws_s3_send_request_work {
-    struct aws_s3_client *client;
     struct aws_s3_vip_connection *vip_connection;
     struct aws_s3_meta_request *meta_request;
     struct aws_s3_request_desc *request_desc;
@@ -75,25 +74,26 @@ struct aws_s3_send_request_work {
  * specified options. */
 struct aws_s3_meta_request_internal_options {
     const struct aws_s3_meta_request_options *options;
+
     void *user_data;
 
     struct aws_s3_client *client;
 
-    /* Callback for when the meta request has stopped and will not send additional requests, but may have still have
-     * work in flight.*/
-    aws_s3_meta_request_stopped_callback_fn *stopped_callback;
+    /* Callback for when the meta request has more work to do.  */
+    aws_s3_meta_request_work_available_fn *work_available_callback;
 
     /* Callback for when the meta request has finished, and has no more work in flight. */
     aws_s3_meta_request_finish_fn *finish_callback;
 };
 
 struct aws_s3_meta_request_vtable {
+    bool (*has_work)(const struct aws_s3_meta_request *meta_request);
 
     /* Pass back a request description of the next request that should be created.  If no work is available, this should
      * pass back a NULL pointer. */
     int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc **request_desc);
 
-    /* Given a reqeust description, create a new in-flight request. */
+    /* Given a request description, create a new in-flight request. */
     struct aws_s3_request *(*request_factory)(
         struct aws_s3_meta_request *meta_request,
         struct aws_s3_client *client,
@@ -114,7 +114,7 @@ struct aws_s3_meta_request_vtable {
  */
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
-    struct aws_atomic_var ref_count;
+    struct aws_ref_count ref_count;
     void *impl;
     struct aws_s3_meta_request_vtable *vtable;
 
@@ -122,7 +122,7 @@ struct aws_s3_meta_request {
     struct aws_http_message *initial_request_message;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
-    uint64_t part_size;
+    const uint64_t part_size;
 
     /* Event loop used for scheduling.  Passed down by the creating client. */
     struct aws_event_loop *event_loop;
@@ -135,32 +135,28 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 
-    /* Internal user data and callbacks so that the owning client can generically listen for finish without working
+    /* Internal user data and callbacks so that the owning client can generically listen for without working
      * around the customer specified callbacks. */
     void *internal_user_data;
+    aws_s3_meta_request_work_available_fn *internal_work_available_callback;
     aws_s3_meta_request_finish_fn *internal_finish_callback;
-    aws_s3_meta_request_stopped_callback_fn *internal_stopped_callback;
 
-    /* Work reference ount.  This does not keep the meta request alive, but does delay the finish callback from taking
-     * place. Like a normal reference count, this should be incremented from a place that already owns a work ref count.
+    /* Internal reference count.  This does not keep the meta request alive, but does delay the finish callback from
+     * taking place. Like a normal reference count, this should be incremented from a place that already owns an
+     * internal ref count.
      */
-    struct aws_atomic_var work_ref_count;
+    struct aws_ref_count internal_ref_count;
 
-    /* Error code that we finished the request with. */
-    struct aws_atomic_var finished_error_code;
+    struct {
 
-    /* Thread-safe flag for us to know if we have issued the finish callback already or not. */
-    struct aws_atomic_var issued_finish_callback;
+        struct aws_linked_list_node node;
+
+    } client_data;
 
     struct {
         struct aws_mutex lock;
 
-        /* True when the request is stopped, ie, isn't sending any more requests.  Other work at this point can still be
-         * in flight via the work_ref_count, but no additional work should be started. */
-        uint32_t stopped : 1;
-
-        /* True if we're processing our "write" queue via tasks.  This is for passing buffers back to the customer. */
-        uint32_t processing_write_queue : 1;
+        enum aws_s3_meta_request_state state;
 
         /* Queue of aws_s3_request_desc structures that will be retried. */
         struct aws_linked_list retry_queue;
@@ -169,19 +165,16 @@ struct aws_s3_meta_request {
          * their own specific position (which should be in close proximity of one another). */
         struct aws_input_stream *initial_body_stream;
 
-        /* Queue of part buffers that we are sending back to the client. */
-        /* TODO "write" queue probably isn't the best name. */
-        struct aws_linked_list write_queue;
-
     } synced_data;
 };
 
+bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request);
+
 /* Tells the meta request to start sending another request, if there is one currently to send.  This is used the client.
  */
-int aws_s3_meta_request_send_next_request(
+void aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_send_request_options *options,
-    bool *out_found_work);
+    const struct aws_s3_send_request_options *options);
 
 /* BEGIN - Meant only for use by derived types. */
 
@@ -193,16 +186,20 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_meta_request_vtable *vtable,
     struct aws_s3_meta_request *base_type);
 
+typedef void(aws_write_part_buffer_callback_fn)(void *user_data);
+
 /* Pass back this part buffer to the customer specified callback.  This assumes ownership of the part buffer passed in.
  */
 int aws_s3_meta_request_write_part_buffer_to_caller(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_part_buffer *part_buffer);
+    struct aws_s3_part_buffer **part_buffer,
+    aws_write_part_buffer_callback_fn callback,
+    void *user_data);
 
-/* Allocate a new reqeust description with the given options. */
+/* Allocate a new request description with the given options. */
 struct aws_s3_request_desc *aws_s3_request_desc_new(
     struct aws_s3_meta_request *meta_request,
-    uint32_t tag,
+    int request_tag,
     uint32_t part_number);
 
 void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc);
@@ -218,6 +215,8 @@ int aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, st
 
 /* Tells the meta request to stop, with an error code for indicating failure when necessary. */
 void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int error_code);
+
+void aws_s3_meta_request_notify_work_available(struct aws_s3_meta_request *meta_request);
 
 /* END - Meant only for use by derived types.  */
 
