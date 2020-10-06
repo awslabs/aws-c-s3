@@ -137,7 +137,7 @@ void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_si
 
         struct aws_byte_cursor from_byte_cursor = {.len = string_copy_size, .ptr = test_string.ptr};
 
-        aws_byte_buf_append(out_buf, from_byte_cursor);
+        aws_byte_buf_append(out_buf, &from_byte_cursor);
     }
 }
 

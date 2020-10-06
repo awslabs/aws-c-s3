@@ -7,7 +7,8 @@
 enum aws_s3_auto_ranged_get_state {
     AWS_S3_AUTO_RANGED_GET_STATE_START,
     AWS_S3_AUTO_RANGED_GET_STATE_WAITING_FOR_FIRST_PART,
-    AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS
+    AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS,
+    AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS_MADE
 };
 
 enum aws_s3_auto_ranged_get_request_type {
@@ -147,32 +148,6 @@ static bool s_s3_auto_ranged_get_has_work(const struct aws_s3_meta_request *meta
     return has_work;
 }
 
-static void s_s3_auto_ranged_get_set_state(
-    struct aws_s3_auto_ranged_get *auto_ranged_get,
-    enum aws_s3_auto_ranged_get_state state) {
-
-    bool had_work = false;
-    bool has_work = false;
-
-    s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
-
-    if (state == auto_ranged_get->synced_data.state) {
-        s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
-        return;
-    }
-    had_work = s_s3_auto_ranged_state_has_work(auto_ranged_get->synced_data.state);
-
-    auto_ranged_get->synced_data.state = state;
-    
-    has_work = s_s3_auto_ranged_state_has_work(state);
-
-    s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
-
-    if(has_work && !had_work) {
-        aws_s3_meta_request_notify_work_available(&auto_ranged_get->base);
-    }
-}
-
 /* Try to get the next request that should be processed. */
 static int s_s3_auto_ranged_get_next_request(
     struct aws_s3_meta_request *meta_request,
@@ -250,10 +225,17 @@ static int s_s3_auto_ranged_get_next_request(
                 }
 
                 ++auto_ranged_get->synced_data.next_part_number;
+
+                if (auto_ranged_get->synced_data.next_part_number > auto_ranged_get->synced_data.total_num_parts) {
+                    auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS_MADE;
+                }
             }
 
             break;
         }
+        case AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS_MADE: {
+
+        } break;
         default:
             AWS_FATAL_ASSERT(false);
             break;
@@ -446,6 +428,8 @@ static int s_s3_auto_ranged_get_incoming_headers(
         auto_ranged_get->synced_data.total_num_parts = num_parts;
 
         s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
+
+        aws_s3_meta_request_notify_work_available(&auto_ranged_get->base);
     }
 
     return AWS_OP_SUCCESS;
@@ -494,7 +478,6 @@ static int s_s3_auto_ranged_get_incoming_body(
 }
 
 static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
-    AWS_PRECONDITION(stream);
     (void)stream;
 
     struct aws_s3_send_request_work *work = user_data;
@@ -525,13 +508,13 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
     struct aws_s3_request *request = work->request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_part_buffer *part_buffer = request->part_buffer;
-    AWS_PRECONDITION(part_buffer);
+    AWS_PRECONDITION(request->part_buffer);
 
     aws_s3_meta_request_internal_acquire(meta_request);
 
     /* Schedule the part buffer to be sent back to the user so that they can process it. */
-    if (aws_s3_meta_request_write_part_buffer_to_caller(meta_request, &part_buffer, s_s3_auto_ranged_get_write_part_buffer_callback, auto_ranged_get)) {
+    if (aws_s3_meta_request_write_part_buffer_to_caller(
+            meta_request, &request->part_buffer, s_s3_auto_ranged_get_write_part_buffer_callback, auto_ranged_get)) {
 
         aws_s3_meta_request_finish(meta_request, aws_last_error());
 
@@ -540,6 +523,11 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
 }
 
 static void s_s3_auto_ranged_get_write_part_buffer_callback(void *user_data) {
+
+    struct aws_s3_auto_ranged_get *auto_ranged_get = user_data;
+    AWS_PRECONDITION(auto_ranged_get);
+
+    struct aws_s3_meta_request *meta_request = &auto_ranged_get->base;
 
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
     ++auto_ranged_get->synced_data.num_parts_completed;
@@ -560,5 +548,5 @@ static void s_s3_auto_ranged_get_write_part_buffer_callback(void *user_data) {
         aws_s3_meta_request_finish(meta_request, AWS_ERROR_SUCCESS);
     }
 
-    aws_s3_meta_request_internal_release(&auto_ranged_get->base);
+    aws_s3_meta_request_internal_release(meta_request);
 }
