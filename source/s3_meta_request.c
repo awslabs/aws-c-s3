@@ -308,15 +308,20 @@ void aws_s3_meta_request_notify_work_available(struct aws_s3_meta_request *meta_
 }
 
 bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request) {
-    bool has_work = false;
+    AWS_PRECONDITION(meta_request);
 
     s_s3_meta_request_lock_synced_data((struct aws_s3_meta_request *)meta_request);
-    has_work = aws_linked_list_empty(&meta_request->synced_data.retry_queue);
-    s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
+    if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
+        s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
+        return false;
+    }
 
-    if (has_work) {
+    if (!aws_linked_list_empty(&meta_request->synced_data.retry_queue)) {
+        s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
         return true;
     }
+
+    s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
 
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_FATAL_ASSERT(vtable);
@@ -710,7 +715,7 @@ int aws_s3_meta_request_write_part_buffer_to_caller(
             0,
             4,
             meta_request,
-            part_buffer,
+            *part_buffer,
             callback,
             user_data)) {
 
