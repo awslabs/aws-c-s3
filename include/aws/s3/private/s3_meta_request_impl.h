@@ -218,6 +218,10 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int er
 
 void aws_s3_meta_request_notify_work_available(struct aws_s3_meta_request *meta_request);
 
+void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
+
+void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request);
+
 /* END - Meant only for use by derived types.  */
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */

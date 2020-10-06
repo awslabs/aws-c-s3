@@ -17,9 +17,6 @@ static void s_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *met
 static void s_s3_meta_request_start_destroy(void *user_data);
 static void s_s3_meta_request_finish_destroy(void *user_data);
 
-static void s_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
-static void s_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request);
-
 static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request, enum aws_s3_meta_request_state state);
 
 static void s_s3_meta_request_process_write_queue_task(void **args);
@@ -135,7 +132,7 @@ static void s_s3_meta_request_start_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
 
-    s_s3_meta_request_internal_release(meta_request);
+    aws_s3_meta_request_internal_release(meta_request);
 }
 
 static void s_s3_meta_request_finish_destroy(void *user_data) {
@@ -160,13 +157,13 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     }
 }
 
-static void s_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request) {
+void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_ref_count_acquire(&meta_request->internal_ref_count);
 }
 
-static void s_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request) {
+void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_ref_count_release(&meta_request->internal_ref_count);
@@ -271,7 +268,7 @@ static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
     work->vip_connection = options->vip_connection;
 
     work->meta_request = meta_request;
-    s_s3_meta_request_internal_acquire(meta_request);
+    aws_s3_meta_request_internal_acquire(meta_request);
     aws_s3_meta_request_acquire(meta_request);
 
     work->request_desc = request_desc;
@@ -298,7 +295,7 @@ static void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_reque
 
     aws_mem_release(meta_request->allocator, work);
 
-    s_s3_meta_request_internal_release(meta_request);
+    aws_s3_meta_request_internal_release(meta_request);
     aws_s3_meta_request_release(meta_request);
 }
 
@@ -704,7 +701,7 @@ int aws_s3_meta_request_write_part_buffer_to_caller(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(part_buffer && *part_buffer);
 
-    s_s3_meta_request_internal_acquire(meta_request);
+    aws_s3_meta_request_internal_acquire(meta_request);
 
     if (aws_s3_task_util_new_task(
             meta_request->allocator,
@@ -722,7 +719,7 @@ int aws_s3_meta_request_write_part_buffer_to_caller(
             "id=%p Could not initiate task for processing part buffer write queue",
             (void *)meta_request);
 
-        s_s3_meta_request_internal_release(meta_request);
+        aws_s3_meta_request_internal_release(meta_request);
         return AWS_OP_ERR;
     }
 
@@ -755,5 +752,5 @@ static void s_s3_meta_request_process_write_queue_task(void **args) {
         callback(callback_user_data);
     }
 
-    s_s3_meta_request_internal_release(meta_request);
+    aws_s3_meta_request_internal_release(meta_request);
 }
