@@ -55,7 +55,7 @@ static void s_s3_client_internal_release(struct aws_s3_client *client);
 static void s_s3_client_vip_http_connection_manager_shutdown_callback(void *user_data);
 
 /* Initializes/cleans up a VIP structure.  Both assume the lock is already held.  */
-static struct aws_s3_vip *s_s3_client_vip_new(struct aws_s3_client *client, struct aws_byte_cursor host_address);
+static struct aws_s3_vip *s_s3_client_vip_new(struct aws_s3_client *client, const struct aws_byte_cursor *host_address);
 static void s_s3_client_vip_destroy(struct aws_s3_vip *vip);
 static void s_s3_client_vip_finish_destroy(void *user_data);
 
@@ -65,12 +65,14 @@ int s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_
 /* END Allocation/Destruction Functions */
 
 /* BEGIN Utility Functions */
-static struct aws_s3_vip *s_s3_find_vip(const struct aws_linked_list *vip_list, struct aws_byte_cursor host_address);
+static struct aws_s3_vip *s_s3_find_vip(
+    const struct aws_linked_list *vip_list,
+    const struct aws_byte_cursor *host_address);
 /* END Utility Functions*/
 
 /* BEGIN Part Buffer Pool Functions */
 static void s_s3_part_buffer_pool_init(struct aws_s3_part_buffer_pool *pool);
-static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client *client, size_t num_buffers);
+static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client *client, const size_t num_buffers);
 static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *client);
 /* END Part Buffer Pool Functions */
 
@@ -95,9 +97,7 @@ static void s_s3_client_meta_request_finished_callback(
 /* BEGIN VIP Functions */
 static void s_s3_client_resolved_address_callback(struct aws_host_address *host_address, void *user_data);
 
-static int s_s3_client_add_vip(struct aws_s3_client *client, struct aws_byte_cursor host_address);
-
-void s_s3_client_remove_vip(struct aws_s3_client *client, struct aws_byte_cursor host_address);
+static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_byte_cursor *host_address);
 /* END VIP Functions */
 
 /* BEGIN VIP Connection Functions */
@@ -396,7 +396,9 @@ static void s_s3_client_vip_http_connection_manager_shutdown_callback(void *user
 }
 
 /* Initialize a new VIP structure for the client to use, given an address. Assumes lock is held. */
-static struct aws_s3_vip *s_s3_client_vip_new(struct aws_s3_client *client, struct aws_byte_cursor host_address) {
+static struct aws_s3_vip *s_s3_client_vip_new(
+    struct aws_s3_client *client,
+    const struct aws_byte_cursor *host_address) {
     AWS_PRECONDITION(client);
 
     struct aws_s3_vip *vip = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_vip));
@@ -411,7 +413,7 @@ static struct aws_s3_vip *s_s3_client_vip_new(struct aws_s3_client *client, stru
     s_s3_client_internal_acquire(client);
 
     /* Copy over the host address. */
-    vip->host_address = aws_string_new_from_array(client->allocator, host_address.ptr, host_address.len);
+    vip->host_address = aws_string_new_from_array(client->allocator, host_address->ptr, host_address->len);
 
     if (vip->host_address == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_VIP, "id=%p: Could not allocate aws_s3_vip host address string.", (void *)vip);
@@ -599,7 +601,9 @@ int s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_
 /* END Allocation/Destruction Functions */
 
 /* BEGIN Utility Functions */
-static struct aws_s3_vip *s_s3_find_vip(const struct aws_linked_list *vip_list, struct aws_byte_cursor host_address) {
+static struct aws_s3_vip *s_s3_find_vip(
+    const struct aws_linked_list *vip_list,
+    const struct aws_byte_cursor *host_address) {
     AWS_PRECONDITION(vip_list);
 
     if (aws_linked_list_empty(vip_list)) {
@@ -613,7 +617,7 @@ static struct aws_s3_vip *s_s3_find_vip(const struct aws_linked_list *vip_list, 
 
         struct aws_byte_cursor vip_host_address = aws_byte_cursor_from_string(vip->host_address);
 
-        if (aws_byte_cursor_eq(&host_address, &vip_host_address)) {
+        if (aws_byte_cursor_eq(host_address, &vip_host_address)) {
             return vip;
         }
 
@@ -686,7 +690,7 @@ static void s_s3_part_buffer_pool_init(struct aws_s3_part_buffer_pool *pool) {
     aws_linked_list_init(&pool->free_list);
 }
 
-static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client *client, size_t num_buffers) {
+static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client *client, const size_t num_buffers) {
     AWS_PRECONDITION(client);
 
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
@@ -860,8 +864,10 @@ static void s_s3_client_resolved_address_callback(struct aws_host_address *host_
 
     struct aws_s3_client *client = user_data;
 
+    struct aws_byte_cursor host_address_byte_cursor = aws_byte_cursor_from_string(host_address->address);
+
     /* Issue an async action to create a VIP from the resolved address. */
-    if (s_s3_client_add_vip(client, aws_byte_cursor_from_string(host_address->address))) {
+    if (s_s3_client_add_vip(client, &host_address_byte_cursor)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p: Could not initate adding VIP with address %s to client.",
@@ -870,14 +876,14 @@ static void s_s3_client_resolved_address_callback(struct aws_host_address *host_
     }
 }
 
-static int s_s3_client_add_vip(struct aws_s3_client *client, struct aws_byte_cursor host_address) {
+static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_byte_cursor *host_address) {
     AWS_PRECONDITION(client);
 
     AWS_LOGF_INFO(
         AWS_LS_S3_CLIENT,
         "id=%p Initiating creation of VIP with address '%s'",
         (void *)client,
-        (const char *)host_address.ptr);
+        (const char *)host_address->ptr);
 
     struct aws_s3_vip *vip = NULL;
 
@@ -927,31 +933,6 @@ error_clean_up:
     }
 
     return AWS_OP_ERR;
-}
-
-void s_s3_client_remove_vip(struct aws_s3_client *client, struct aws_byte_cursor host_address) {
-    AWS_PRECONDITION(client);
-
-    AWS_LOGF_INFO(
-        AWS_LS_S3_CLIENT,
-        "id=%p Initiating removal of VIP with address '%s'",
-        (void *)client,
-        (const char *)host_address.ptr);
-
-    s_s3_client_lock_synced_data(client);
-
-    struct aws_s3_vip *vip = s_s3_find_vip(&client->synced_data.vips, host_address);
-
-    if (vip == NULL) {
-        s_s3_client_unlock_synced_data(client);
-        return;
-    }
-
-    aws_linked_list_remove(&vip->node);
-
-    s_s3_client_unlock_synced_data(client);
-
-    s_s3_client_vip_destroy(vip);
 }
 /* END VIP Functions */
 
