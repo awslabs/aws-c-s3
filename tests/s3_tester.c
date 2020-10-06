@@ -233,7 +233,7 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     aws_global_thread_creator_shutdown_wait_for(10);
 }
 
-void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf* out_buf) {
+void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf) {
     struct aws_byte_cursor test_string = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("This is an S3 test.");
 
     aws_byte_buf_init(out_buf, allocator, buffer_size);
@@ -246,10 +246,7 @@ void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_si
             string_copy_size = buffer_size_remaining;
         }
 
-        struct aws_byte_cursor from_byte_cursor = { 
-            .len = string_copy_size,
-            .ptr = test_string.ptr
-        };
+        struct aws_byte_cursor from_byte_cursor = {.len = string_copy_size, .ptr = test_string.ptr};
 
         aws_byte_buf_append(out_buf, from_byte_cursor);
     }
