@@ -31,16 +31,4 @@ extern const struct aws_byte_cursor g_content_length_header_name;
 extern const struct aws_byte_cursor g_etag_header_name;
 extern const struct aws_byte_cursor g_post_method;
 
-typedef void(aws_s3_task_util_task_fn)(void **args);
-
-/* Wrapper for tasks that allocates a payload of task/arguments and handles clean up of that payload.  Assumes that all
- * variadic arguments are pointers. */
-int aws_s3_task_util_new_task(
-    struct aws_allocator *allocator,
-    struct aws_event_loop *event_loop,
-    aws_s3_task_util_task_fn *task_fn,
-    uint64_t delay_ns,
-    uint32_t num_args,
-    ...);
-
 #endif /* AWS_S3_UTIL_H */

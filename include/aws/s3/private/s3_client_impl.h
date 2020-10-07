@@ -6,38 +6,17 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_part_buffer.h"
 #include "aws/s3/s3_client.h"
 
-#include <aws/common/array_list.h>
 #include <aws/common/atomics.h>
 #include <aws/common/byte_buf.h>
+#include <aws/common/linked_list.h>
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
 
 struct aws_http_connection_manager;
-
-/* Pre-allocated buffer that is the size of a single part.*/
-struct aws_s3_part_buffer {
-    struct aws_linked_list_node node;
-
-    /* Reference to the owning client so that it can easily be released back. */
-    struct aws_s3_client *client;
-
-    /* What part of the overall file transfer this part is currently designated to. */
-    uint64_t range_start;
-
-    uint64_t range_end;
-
-    /* Re-usable byte buffer. */
-    struct aws_byte_buf buffer;
-};
-
-/* Pool of pre-allocated part buffers. */
-struct aws_s3_part_buffer_pool {
-    size_t num_allocated;
-    struct aws_linked_list free_list;
-};
 
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
 struct aws_s3_vip {
@@ -73,7 +52,11 @@ struct aws_s3_vip_connection {
     /* Number of requests we have made on this particular connection. Important for the request service limit. */
     uint32_t request_count;
 
+    /* Current meta request being processed by this VIP connection. */
     struct aws_s3_meta_request *meta_request;
+
+    /* Task for processing meta requests on this VIP connection. */
+    struct aws_task process_meta_requests_task;
 };
 
 /* Represents the state of the S3 client. */

@@ -9,9 +9,11 @@
 #include <aws/common/atomics.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/mutex.h>
+#include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
 #include <aws/http/request_response.h>
 
+#include "aws/s3/private/s3_part_buffer.h"
 #include "aws/s3/s3_client.h"
 
 struct aws_s3_client;
@@ -186,14 +188,12 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_meta_request_vtable *vtable,
     struct aws_s3_meta_request *base_type);
 
-typedef void(aws_write_part_buffer_callback_fn)(void *user_data);
-
 /* Pass back this part buffer to the customer specified callback.  This assumes ownership of the part buffer passed in.
  */
 int aws_s3_meta_request_write_part_buffer_to_caller(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_part_buffer **part_buffer,
-    aws_write_part_buffer_callback_fn callback,
+    aws_write_part_buffer_callback_fn *callback,
     void *user_data);
 
 /* Allocate a new request description with the given options. */

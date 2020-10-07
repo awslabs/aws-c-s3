@@ -19,7 +19,10 @@ static void s_s3_meta_request_finish_destroy(void *user_data);
 
 static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request, enum aws_s3_meta_request_state state);
 
-static void s_s3_meta_request_process_write_queue_task(void **args);
+static void s_s3_meta_request_process_write_queue_task(
+    struct aws_task *task,
+    void *arg,
+    enum aws_task_status task_status);
 
 static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
     struct aws_s3_meta_request *meta_request,
@@ -417,8 +420,7 @@ call_finished_callback:
 static int s_s3_meta_request_process_work(struct aws_s3_send_request_work *work) {
     AWS_PRECONDITION(work);
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
-    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(work->meta_request);
     AWS_PRECONDITION(work->request_desc);
 
     AWS_LOGF_TRACE(
@@ -700,46 +702,50 @@ static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request,
  * downloading it. */
 int aws_s3_meta_request_write_part_buffer_to_caller(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_part_buffer **part_buffer,
+    struct aws_s3_part_buffer **in_out_part_buffer,
     aws_write_part_buffer_callback_fn *callback,
     void *user_data) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(part_buffer && *part_buffer);
+    AWS_PRECONDITION(in_out_part_buffer && *in_out_part_buffer);
+
+    struct aws_s3_part_buffer *part_buffer = *in_out_part_buffer;
 
     aws_s3_meta_request_internal_acquire(meta_request);
+    part_buffer->write_part_buffer_data.meta_request = meta_request;
+    part_buffer->write_part_buffer_data.write_part_buffer_callback = callback;
+    part_buffer->write_part_buffer_data.user_data = user_data;
 
-    if (aws_s3_task_util_new_task(
-            meta_request->allocator,
-            meta_request->event_loop,
-            s_s3_meta_request_process_write_queue_task,
-            0,
-            4,
-            meta_request,
-            *part_buffer,
-            callback,
-            user_data)) {
+    aws_task_init(
+        &part_buffer->write_part_buffer_data.task,
+        s_s3_meta_request_process_write_queue_task,
+        part_buffer,
+        "s3_write_part_buffer_to_caller");
 
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not initiate task for processing part buffer write queue",
-            (void *)meta_request);
+    aws_event_loop_schedule_task_now(meta_request->event_loop, &part_buffer->write_part_buffer_data.task);
 
-        aws_s3_meta_request_internal_release(meta_request);
-        return AWS_OP_ERR;
-    }
-
-    *part_buffer = NULL;
+    *in_out_part_buffer = NULL;
 
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_meta_request_process_write_queue_task(void **args) {
-    AWS_PRECONDITION(args);
+static void s_s3_meta_request_process_write_queue_task(
+    struct aws_task *task,
+    void *arg,
+    enum aws_task_status task_status) {
 
-    struct aws_s3_meta_request *meta_request = args[0];
-    struct aws_s3_part_buffer *part_buffer = args[1];
-    aws_write_part_buffer_callback_fn *callback = (aws_write_part_buffer_callback_fn *)args[2];
-    void *callback_user_data = args[3];
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+
+    (void)task;
+    (void)task_status;
+
+    struct aws_s3_part_buffer *part_buffer = arg;
+    AWS_PRECONDITION(part_buffer);
+
+    struct aws_s3_meta_request *meta_request = part_buffer->write_part_buffer_data.meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    aws_write_part_buffer_callback_fn *callback = part_buffer->write_part_buffer_data.write_part_buffer_callback;
+    void *callback_user_data = part_buffer->write_part_buffer_data.user_data;
 
     /* Send the data to the user through the body callback. */
     if (meta_request->body_callback != NULL) {
@@ -749,6 +755,11 @@ static void s_s3_meta_request_process_write_queue_task(void **args) {
             meta_request, &buf_byte_cursor, part_buffer->range_start, part_buffer->range_end, meta_request->user_data);
     }
 
+    part_buffer->write_part_buffer_data.meta_request = NULL;
+    part_buffer->write_part_buffer_data.write_part_buffer_callback = NULL;
+    part_buffer->write_part_buffer_data.user_data = NULL;
+    aws_s3_meta_request_internal_release(meta_request);
+
     /* Release the part buffer back to the client. */
     aws_s3_part_buffer_release(part_buffer);
     part_buffer = NULL;
@@ -756,6 +767,4 @@ static void s_s3_meta_request_process_write_queue_task(void **args) {
     if (callback != NULL) {
         callback(callback_user_data);
     }
-
-    aws_s3_meta_request_internal_release(meta_request);
 }
