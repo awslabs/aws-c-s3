@@ -71,13 +71,14 @@ int aws_s3_meta_request_init_base(
     AWS_PRECONDITION(internal_options->client);
     AWS_PRECONDITION(meta_request);
 
+    AWS_ZERO_STRUCT(*meta_request);
     meta_request->impl = impl;
     meta_request->vtable = vtable;
 
-    AWS_PRECONDITION(vtable->next_request);
-    AWS_PRECONDITION(vtable->request_factory);
-    AWS_PRECONDITION(vtable->stream_complete);
-    AWS_PRECONDITION(vtable->destroy);
+    AWS_ASSERT(vtable->next_request);
+    AWS_ASSERT(vtable->request_factory);
+    AWS_ASSERT(vtable->stream_complete);
+    AWS_ASSERT(vtable->destroy);
 
     const struct aws_s3_meta_request_options *options = internal_options->options;
     AWS_PRECONDITION(options->message);
@@ -126,7 +127,9 @@ void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request) {
 }
 
 void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
+    if (meta_request == NULL) {
+        return;
+    }
 
     aws_ref_count_release(&meta_request->ref_count);
 }
@@ -180,11 +183,6 @@ struct aws_s3_request_desc *aws_s3_request_desc_new(
 
     struct aws_s3_request_desc *desc = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request_desc));
 
-    if (desc == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not allocate aws_s3_request_desc.", (void *)meta_request);
-        return NULL;
-    }
-
     desc->request_tag = request_tag;
     desc->part_number = part_number;
 
@@ -205,11 +203,6 @@ struct aws_s3_request *aws_s3_request_new(struct aws_s3_meta_request *meta_reque
     AWS_PRECONDITION(message);
 
     struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
-
-    if (request == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not allocate memory required for aws_s3_request.");
-        return NULL;
-    }
 
     request->message = message;
     aws_http_message_acquire(message);
@@ -239,13 +232,8 @@ void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws
         request->message = NULL;
     }
 
-    if (request->part_buffer != NULL) {
-        aws_s3_part_buffer_release(request->part_buffer);
-        request->part_buffer = NULL;
-    }
-
+    aws_s3_part_buffer_release(request->part_buffer);
     aws_mem_release(meta_request->allocator, request);
-    request = NULL;
 }
 
 static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
@@ -259,14 +247,6 @@ static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
 
     struct aws_s3_send_request_work *work =
         aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_send_request_work));
-
-    if (work == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not allocate aws_s3_send_request_work structure",
-            (void *)meta_request);
-        return NULL;
-    }
 
     work->vip_connection = options->vip_connection;
 
@@ -282,7 +262,11 @@ static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
 }
 
 static void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_request_work *work) {
-    AWS_PRECONDITION(work);
+
+    if(work == NULL) {
+        return;
+    }
+
     AWS_PRECONDITION(work->meta_request);
     AWS_PRECONDITION(work->vip_connection);
 
@@ -291,10 +275,8 @@ static void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_reque
     aws_s3_request_destroy(work->meta_request, work->request);
     work->request = NULL;
 
-    if (work->request_desc != NULL) {
-        aws_s3_request_desc_destroy(meta_request, work->request_desc);
-        work->request_desc = NULL;
-    }
+    aws_s3_request_desc_destroy(meta_request, work->request_desc);
+    work->request_desc = NULL;
 
     aws_mem_release(meta_request->allocator, work);
 
@@ -639,7 +621,6 @@ static void s_s3_meta_request_send_request_work_finish(
 
     /* Release our work structure. */
     s_s3_meta_request_send_request_work_destroy(work);
-    work = NULL;
 }
 
 /* Push a request description into the retry queue.  This assumes ownership of the request desc, and will NULL out the
@@ -762,7 +743,6 @@ static void s_s3_meta_request_process_write_queue_task(
 
     /* Release the part buffer back to the client. */
     aws_s3_part_buffer_release(part_buffer);
-    part_buffer = NULL;
 
     if (callback != NULL) {
         callback(callback_user_data);

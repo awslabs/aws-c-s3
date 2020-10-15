@@ -111,7 +111,7 @@ struct aws_s3_client {
 
         uint32_t vip_count;
 
-        /* Array list of active VIP's. */
+        /* Linked list of active VIP's. */
         struct aws_linked_list vips;
 
         /* List of all idle VIP Connections for each VIP. */

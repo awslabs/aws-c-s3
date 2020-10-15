@@ -50,16 +50,8 @@ int aws_s3_tester_init(
     /* Make a copy of the bucket name string. */
     tester->bucket_name = aws_string_new_from_array(allocator, bucket_name.ptr, bucket_name.len);
 
-    if (tester->bucket_name == NULL) {
-        goto bucket_name_failed;
-    }
-
     /* Make a copy of the region string. */
     tester->region = aws_string_new_from_array(allocator, region.ptr, region.len);
-
-    if (tester->region == NULL) {
-        goto region_name_failed;
-    }
 
     /* Compute an S3 endpoint given a bucket name and region. */
     {
@@ -69,10 +61,6 @@ int aws_s3_tester_init(
             (tester->bucket_name->len) + endpoint_url_part0.len + (tester->region->len) + endpoint_url_part1.len + 1;
         char *endpoint_buffer = aws_mem_acquire(allocator, endpoint_buffer_len);
 
-        if (endpoint_buffer == NULL) {
-            return AWS_OP_ERR;
-        }
-
         endpoint_buffer[0] = '\0';
 
         strncat(endpoint_buffer, aws_string_c_str(tester->bucket_name), tester->bucket_name->len);
@@ -81,10 +69,6 @@ int aws_s3_tester_init(
         strncat(endpoint_buffer, (const char *)endpoint_url_part1.ptr, endpoint_url_part1.len);
 
         tester->endpoint = aws_string_new_from_c_str(allocator, endpoint_buffer);
-
-        if (tester->endpoint == NULL) {
-            goto endpoint_setup_failed;
-        }
 
         aws_mem_release(allocator, endpoint_buffer);
     }
@@ -105,10 +89,6 @@ int aws_s3_tester_init(
         bootstrap_options.user_data = tester;
 
         tester->client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
-
-        if (tester->client_bootstrap == NULL) {
-            goto client_bootstrap_alloc_failed;
-        }
     }
 
     /* Setup the credentials provider */
@@ -117,45 +97,9 @@ int aws_s3_tester_init(
         AWS_ZERO_STRUCT(credentials_config);
         credentials_config.bootstrap = tester->client_bootstrap;
         tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
-
-        if (tester->credentials_provider == NULL) {
-            goto credentials_provider_alloc_failed;
-        }
     }
 
     return AWS_OP_SUCCESS;
-
-credentials_provider_alloc_failed:
-
-    if (tester->client_bootstrap != NULL) {
-        aws_client_bootstrap_release(tester->client_bootstrap);
-        tester->client_bootstrap = NULL;
-    }
-
-client_bootstrap_alloc_failed:
-
-    if (tester->endpoint != NULL) {
-        aws_string_destroy(tester->endpoint);
-        tester->endpoint = NULL;
-    }
-
-endpoint_setup_failed:
-
-    if (tester->region != NULL) {
-        aws_string_destroy(tester->region);
-        tester->region = NULL;
-    }
-
-region_name_failed:
-
-    if (tester->bucket_name != NULL) {
-        aws_string_destroy(tester->bucket_name);
-        tester->bucket_name = NULL;
-    }
-
-bucket_name_failed:
-
-    aws_condition_variable_clean_up(&tester->signal);
 
 condition_variable_failed:
 
@@ -185,45 +129,29 @@ void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, int error_code)
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
-    if (tester->bound_to_client_shutdown) {
-        s_s3_tester_wait_for_clean_up_signal(tester);
-        tester->bound_to_client_shutdown = false;
-    }
+    s_s3_tester_wait_for_clean_up_signal(tester);
+    tester->bound_to_client_shutdown = false;
 
-    if (tester->client_bootstrap != NULL) {
-        aws_client_bootstrap_release(tester->client_bootstrap);
-        tester->client_bootstrap = NULL;
-    }
+    aws_client_bootstrap_release(tester->client_bootstrap);
+    tester->client_bootstrap = NULL;
 
-    if (tester->credentials_provider != NULL) {
-        aws_credentials_provider_release(tester->credentials_provider);
-        tester->credentials_provider = NULL;
-    }
+    aws_credentials_provider_release(tester->credentials_provider);
+    tester->credentials_provider = NULL;
 
-    if (tester->region != NULL) {
-        aws_string_destroy(tester->region);
-        tester->region = NULL;
-    }
+    aws_string_destroy(tester->region);
+    tester->region = NULL;
 
-    if (tester->bucket_name != NULL) {
-        aws_string_destroy(tester->bucket_name);
-        tester->bucket_name = NULL;
-    }
+    aws_string_destroy(tester->bucket_name);
+    tester->bucket_name = NULL;
 
-    if (tester->endpoint != NULL) {
-        aws_string_destroy(tester->endpoint);
-        tester->endpoint = NULL;
-    }
+    aws_string_destroy(tester->endpoint);
+    tester->endpoint = NULL;
 
-    if (tester->host_resolver != NULL) {
-        aws_host_resolver_release(tester->host_resolver);
-        tester->host_resolver = NULL;
-    }
+    aws_host_resolver_release(tester->host_resolver);
+    tester->host_resolver = NULL;
 
-    if (tester->el_group != NULL) {
-        aws_event_loop_group_release(tester->el_group);
-        tester->el_group = NULL;
-    }
+    aws_event_loop_group_release(tester->el_group);
+    tester->el_group = NULL;
 
     aws_condition_variable_clean_up(&tester->signal);
     aws_mutex_clean_up(&tester->lock);

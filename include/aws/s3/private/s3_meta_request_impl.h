@@ -116,7 +116,15 @@ struct aws_s3_meta_request_vtable {
  */
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
+    
     struct aws_ref_count ref_count;
+
+    /* Internal reference count.  This does not keep the meta request alive, but does delay the finish callback from
+     * taking place. Like a normal reference count, this should be incremented from a place that already owns an
+     * internal ref count.
+     */
+    struct aws_ref_count internal_ref_count;
+
     void *impl;
     struct aws_s3_meta_request_vtable *vtable;
 
@@ -142,12 +150,6 @@ struct aws_s3_meta_request {
     void *internal_user_data;
     aws_s3_meta_request_work_available_fn *internal_work_available_callback;
     aws_s3_meta_request_finish_fn *internal_finish_callback;
-
-    /* Internal reference count.  This does not keep the meta request alive, but does delay the finish callback from
-     * taking place. Like a normal reference count, this should be incremented from a place that already owns an
-     * internal ref count.
-     */
-    struct aws_ref_count internal_ref_count;
 
     struct {
 

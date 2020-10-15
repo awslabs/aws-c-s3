@@ -38,12 +38,9 @@ static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
 
-/* BEGIN Locking Functions */
 static void s_s3_client_lock_synced_data(struct aws_s3_client *client);
 static void s_s3_client_unlock_synced_data(struct aws_s3_client *client);
-/* END Locking Functions */
 
-/* BEGIN Allocation/Destruction Functions */
 static void s_s3_client_start_destroy(void *user_data);
 static void s_s3_client_finish_destroy(void *user_data);
 
@@ -61,22 +58,15 @@ static void s_s3_client_vip_finish_destroy(void *user_data);
 
 /* Allocates/Destroy a VIP Connection structure. */
 struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *client, struct aws_s3_vip *vip);
-int s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
-/* END Allocation/Destruction Functions */
+void s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
-/* BEGIN Utility Functions */
 static struct aws_s3_vip *s_s3_find_vip(
     const struct aws_linked_list *vip_list,
     const struct aws_byte_cursor *host_address);
-/* END Utility Functions*/
 
-/* BEGIN Part Buffer Pool Functions */
 static void s_s3_part_buffer_pool_init(struct aws_s3_part_buffer_pool *pool);
 static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client *client, const size_t num_buffers);
 static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *client);
-/* END Part Buffer Pool Functions */
-
-/* BEGIN Meta Request Functions  */
 
 /* Push a meta request into our list of processing. */
 static void s_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
@@ -92,15 +82,11 @@ static void s_s3_client_meta_request_finished_callback(
     struct aws_s3_meta_request *meta_request,
     int error_code,
     void *user_data);
-/* END Meta Request Functions */
 
-/* BEGIN VIP Functions */
 static void s_s3_client_resolved_address_callback(struct aws_host_address *host_address, void *user_data);
 
 static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_byte_cursor *host_address);
-/* END VIP Functions */
 
-/* BEGIN VIP Connection Functions */
 static void s_s3_client_wake_up_idle_vip_connections(struct aws_s3_client *client);
 
 /* Schedule the process_meta_requests_loop_task for a given vip_connection.  Only done for idle connections or
@@ -130,14 +116,10 @@ static void s_s3_client_vip_connection_on_acquire_request_connection(
     struct aws_http_connection *http_connection,
     int error_code,
     void *user_data);
-/* END VIP Connection Functions*/
 
-/* BEGIN TEMP Host Resolver Functions */
 static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client);
 static void s_s3_client_stop_resolving_addresses(struct aws_s3_client *client);
-/* END TEMP Host Resolver Functions */
 
-/* BEGIN Locking Functions */
 static void s_s3_client_lock_synced_data(struct aws_s3_client *client) {
     aws_mutex_lock(&client->synced_data.lock);
 }
@@ -145,9 +127,7 @@ static void s_s3_client_lock_synced_data(struct aws_s3_client *client) {
 static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
     aws_mutex_unlock(&client->synced_data.lock);
 }
-/* END Locking Functions */
 
-/* BEGIN Allocation/Destruction Functions */
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
@@ -171,26 +151,23 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
-    if (client_config->throughput_target_gbps < 0.0) {
+    if (client_config->throughput_target_gbps <= 0.0) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT, "Cannot create client from client_config; throughput_target_gbps cannot be negative.");
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; throughput_target_gbps cannot less than or equal to 0.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
 
-    if (client_config->throughput_per_vip_gbps < 0.0) {
+    if (client_config->throughput_per_vip_gbps <= 0.0) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT, "Cannot create client from client_config; throughput_per_vip_gbps cannot be negative.");
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; throughput_per_vip_gbps cannot less than or equal to 0.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
 
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
-
-    if (client == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Could not allocate aws_s3_client");
-        return NULL;
-    }
 
     client->allocator = allocator;
 
@@ -211,18 +188,8 @@ struct aws_s3_client *aws_s3_client_new(
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
-    if (client->region == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not allocate aws_s3_client region string", (void *)client);
-        goto error_clean_up;
-    }
-
     /* Make a copy of the endpoint string. */
     client->endpoint = aws_string_new_from_array(allocator, client_config->endpoint.ptr, client_config->endpoint.len);
-
-    if (client->endpoint == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not allocate aws_s3_client endpoint string", (void *)client);
-        goto error_clean_up;
-    }
 
     if (client_config->part_size != 0) {
         *((uint64_t *)&client->part_size) = client_config->part_size;
@@ -276,10 +243,7 @@ struct aws_s3_client *aws_s3_client_new(
 
 error_clean_up:
 
-    if (client != NULL) {
-        aws_s3_client_release(client);
-        client = NULL;
-    }
+    aws_s3_client_release(client);
 
     return NULL;
 }
@@ -291,7 +255,9 @@ void aws_s3_client_acquire(struct aws_s3_client *client) {
 }
 
 void aws_s3_client_release(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
+    if (client == NULL) {
+        return;
+    }
 
     aws_ref_count_release(&client->ref_count);
 }
@@ -345,25 +311,17 @@ static void s_s3_client_finish_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    if (client->client_bootstrap != NULL) {
-        aws_client_bootstrap_release(client->client_bootstrap);
-        client->client_bootstrap = NULL;
-    }
+    aws_client_bootstrap_release(client->client_bootstrap);
+    client->client_bootstrap = NULL;
 
-    if (client->credentials_provider != NULL) {
-        aws_credentials_provider_release(client->credentials_provider);
-        client->credentials_provider = NULL;
-    }
+    aws_credentials_provider_release(client->credentials_provider);
+    client->credentials_provider = NULL;
 
-    if (client->region != NULL) {
-        aws_string_destroy(client->region);
-        client->region = NULL;
-    }
+    aws_string_destroy(client->region);
+    client->region = NULL;
 
-    if (client->endpoint != NULL) {
-        aws_string_destroy(client->endpoint);
-        client->endpoint = NULL;
-    }
+    aws_string_destroy(client->endpoint);
+    client->endpoint = NULL;
 
     aws_mutex_clean_up(&client->synced_data.lock);
 
@@ -406,10 +364,6 @@ static struct aws_s3_vip *s_s3_client_vip_new(
 
     struct aws_s3_vip *vip = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_vip));
 
-    if (vip == NULL) {
-        goto error_clean_up;
-    }
-
     aws_ref_count_init(&vip->internal_ref_count, vip, s_s3_client_vip_finish_destroy);
 
     vip->owning_client = client;
@@ -417,11 +371,6 @@ static struct aws_s3_vip *s_s3_client_vip_new(
 
     /* Copy over the host address. */
     vip->host_address = aws_string_new_from_array(client->allocator, host_address->ptr, host_address->len);
-
-    if (vip->host_address == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_VIP, "id=%p: Could not allocate aws_s3_vip host address string.", (void *)vip);
-        goto error_clean_up;
-    }
 
     /* Try to set up an HTTP connection manager. */
     struct aws_socket_options socket_options;
@@ -552,11 +501,6 @@ struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *cl
     struct aws_s3_vip_connection *vip_connection =
         aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_vip_connection));
 
-    if (vip_connection == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_VIP_CONNECTION, "Could not allocate new aws_s3_vip_connection.");
-        return NULL;
-    }
-
     vip_connection->owning_vip = vip;
     aws_ref_count_acquire(&vip->internal_ref_count);
 
@@ -569,9 +513,11 @@ struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *cl
 }
 
 /* Destroy a VIP Connection structure. */
-int s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(vip_connection);
+void s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+
+    if (client == NULL || vip_connection == NULL) {
+        return;
+    }
 
     struct aws_s3_vip *owning_vip = vip_connection->owning_vip;
 
@@ -589,21 +535,14 @@ int s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_
     owning_vip = NULL;
     vip_connection->owning_vip = NULL;
 
-    if (vip_connection->meta_request != NULL) {
-        aws_s3_meta_request_release(vip_connection->meta_request);
-        vip_connection->meta_request = NULL;
-    }
+    aws_s3_meta_request_release(vip_connection->meta_request);
+    vip_connection->meta_request = NULL;
 
     aws_mem_release(client->allocator, vip_connection);
 
     s_s3_client_internal_release(client);
-
-    return AWS_OP_SUCCESS;
 }
 
-/* END Allocation/Destruction Functions */
-
-/* BEGIN Utility Functions */
 static struct aws_s3_vip *s_s3_find_vip(
     const struct aws_linked_list *vip_list,
     const struct aws_byte_cursor *host_address) {
@@ -629,9 +568,7 @@ static struct aws_s3_vip *s_s3_find_vip(
 
     return NULL;
 }
-/* END Utility Functions*/
 
-/* BEGIN Part Buffer Pool Functions */
 struct aws_s3_part_buffer *aws_s3_client_get_part_buffer(struct aws_s3_client *client, uint32_t part_number) {
     AWS_PRECONDITION(client);
 
@@ -669,7 +606,10 @@ struct aws_s3_part_buffer *aws_s3_client_get_part_buffer(struct aws_s3_client *c
 }
 
 void aws_s3_part_buffer_release(struct aws_s3_part_buffer *part_buffer) {
-    AWS_PRECONDITION(part_buffer);
+    if (part_buffer == NULL) {
+        return;
+    }
+
     AWS_PRECONDITION(part_buffer->client);
 
     struct aws_s3_client *client = part_buffer->client;
@@ -704,11 +644,6 @@ static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client
     for (size_t buffer_index = 0; buffer_index < num_buffers; ++buffer_index) {
         struct aws_s3_part_buffer *part_buffer =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_part_buffer));
-
-        if (part_buffer == NULL) {
-            AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not allocate additional part buffer", (void *)client);
-            return;
-        }
 
         aws_byte_buf_init(&part_buffer->buffer, client->allocator, client->part_size);
 
@@ -746,9 +681,7 @@ static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *cl
             num_leaked);
     }
 }
-/* END Part Buffer Pool Functions*/
 
-/*  BEGIN Meta Request Functions  */
 /* Public facing make-meta-request function. */
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
@@ -857,9 +790,7 @@ static void s_s3_client_meta_request_work_available_callback(
 
     s_s3_client_wake_up_idle_vip_connections(client);
 }
-/* END Meta Request Functions */
 
-/* BEGIN VIP Functions */
 /* Callback for address being resolved by the host resolver. */
 static void s_s3_client_resolved_address_callback(struct aws_host_address *host_address, void *user_data) {
     AWS_PRECONDITION(host_address);
@@ -937,9 +868,7 @@ error_clean_up:
 
     return AWS_OP_ERR;
 }
-/* END VIP Functions */
 
-/* BEGIN VIP Connection Functions */
 static void s_s3_client_wake_up_idle_vip_connections(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
@@ -1024,11 +953,9 @@ static void s_s3_client_vip_connection_process_meta_requests_loop_task(
     if (owning_vip->synced_data.pending_destruction) {
         s_s3_client_unlock_synced_data(client);
 
-        if (prev_meta_request != NULL) {
-            aws_s3_meta_request_release(prev_meta_request);
-            prev_meta_request = NULL;
-            vip_connection->meta_request = NULL;
-        }
+        aws_s3_meta_request_release(prev_meta_request);
+        prev_meta_request = NULL;
+        vip_connection->meta_request = NULL;
 
         s_s3_vip_connection_destroy(client, vip_connection);
         s_s3_client_internal_release(client);
@@ -1168,10 +1095,6 @@ int aws_s3_client_sign_message(
     struct s3_client_siging_payload *payload =
         aws_mem_acquire(client->allocator, sizeof(struct s3_client_siging_payload));
 
-    if (payload == NULL) {
-        return AWS_OP_ERR;
-    }
-
     payload->client = client;
     aws_s3_client_acquire(client);
     payload->message = message;
@@ -1215,15 +1138,8 @@ int aws_s3_client_sign_message(
 
 error_clean_up:
 
-    if (payload != NULL) {
-        if (payload->client != NULL) {
-            aws_s3_client_release(payload->client);
-            payload->client = NULL;
-        }
-
-        aws_mem_release(client->allocator, payload);
-        payload = NULL;
-    }
+    aws_s3_client_release(payload->client);
+    aws_mem_release(client->allocator, payload);
 
     return AWS_OP_ERR;
 }
@@ -1257,18 +1173,12 @@ static void s_s3_vip_connection_request_signing_complete(
         payload->callback(error_code, payload->user_data);
     }
 
-    if (payload->signable != NULL) {
-        aws_signable_destroy(payload->signable);
-        payload->signable = NULL;
-    }
+    aws_signable_destroy(payload->signable);
+    payload->signable = NULL;
 
-    if (payload->client != NULL) {
-        aws_s3_client_release(payload->client);
-        payload->client = NULL;
-    }
-
+    aws_s3_client_release(payload->client);
+    payload->client = NULL;
     aws_mem_release(client->allocator, payload);
-    payload = NULL;
 }
 
 struct s3_client_get_http_connection_payload {
@@ -1290,10 +1200,6 @@ int aws_s3_client_get_http_connection(
 
     struct s3_client_get_http_connection_payload *payload =
         aws_mem_acquire(client->allocator, sizeof(struct s3_client_get_http_connection_payload));
-
-    if (payload == NULL) {
-        return AWS_OP_ERR;
-    }
 
     payload->client = client;
     aws_s3_client_acquire(client);
@@ -1392,15 +1298,10 @@ static void s_s3_client_vip_connection_on_acquire_request_connection(
 
 clean_up:
 
-    if (payload->client != NULL) {
-        aws_s3_client_release(payload->client);
-        payload->client = NULL;
-    }
-
+    aws_s3_client_release(payload->client);
     aws_mem_release(client->allocator, payload);
     payload = NULL;
 }
-/* END VIP Connection Functions */
 
 /* BEGIN TEMP Host Resolver Functions */
 /* These are temporary hacks; the following section is a temporary hack for listening to host resolution events that
