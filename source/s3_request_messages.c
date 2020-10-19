@@ -128,7 +128,8 @@ static int s_s3_message_util_add_content_range_header(
     uint64_t range_start = part_index * part_size;
     uint64_t range_end = range_start + part_size - 1;
 
-    /* TODO don't use a arbitrarily sized buffer without error checking. */
+    /* TODO this is more than enough space, but maybe there's a better way to do this?
+     * ((2^64)-1 = 20 characters;  2*20 + length-of("bytes=-") < 128) */
     char range_value_buffer[128] = "";
     snprintf(range_value_buffer, sizeof(range_value_buffer), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end);
 
