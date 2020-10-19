@@ -160,14 +160,18 @@ static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
     "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n");
 
-static const struct aws_byte_cursor s_complete_payload_entry =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
-                                          "        <ETag>%s</ETag>\n"
-                                          "        <PartNumber>%d</PartNumber>\n"
-                                          "    </Part>\n");
-
 static const struct aws_byte_cursor s_complete_payload_end =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</CompleteMultipartUpload>");
+
+static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
+                                                                                                  "        <ETag>");
+
+static const struct aws_byte_cursor s_part_section_string_1 =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag>\n"
+                                          "         <PartNumber>");
+
+static const struct aws_byte_cursor s_part_section_string_2 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n"
+                                                                                                  "    </Part>\n");
 
 /* Create a complete-multipart message, which includes an XML payload of all completed parts. */
 struct aws_http_message *aws_s3_complete_multipart_message_new(
@@ -222,14 +226,21 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
             AWS_FATAL_ASSERT(etag != NULL);
 
-            /* TODO don't use a arbitrarily sized buffer without error checking. */
-            char entry_buffer[1024] = "";
-            sprintf(
-                entry_buffer, (const char *)s_complete_payload_entry.ptr, (const char *)etag->bytes, etag_index + 1);
+            aws_byte_buf_append_dynamic(buffer, &s_part_section_string_0);
 
-            struct aws_byte_cursor entry_cursor = aws_byte_cursor_from_array(entry_buffer, strlen(entry_buffer));
+            struct aws_byte_cursor etag_byte_cursor = aws_byte_cursor_from_string(etag);
+            aws_byte_buf_append_dynamic(buffer, &etag_byte_cursor);
 
-            aws_byte_buf_append_dynamic(buffer, &entry_cursor);
+            aws_byte_buf_append_dynamic(buffer, &s_part_section_string_1);
+
+            char part_number_buffer[32] = "";
+            int part_number = (int)(etag_index + 1);
+            int part_number_num_char = snprintf(part_number_buffer, sizeof(part_number_buffer), "%d", part_number);
+            struct aws_byte_cursor part_number_byte_cursor = aws_byte_cursor_from_array(part_number_buffer, part_number_num_char);
+
+            aws_byte_buf_append_dynamic(buffer, &part_number_byte_cursor);
+
+            aws_byte_buf_append_dynamic(buffer, &s_part_section_string_2);
         }
 
         if (aws_byte_buf_append_dynamic(buffer, &s_complete_payload_end)) {
@@ -410,9 +421,8 @@ static struct aws_input_stream *s_s3_message_util_assign_body(
         goto error_clean_up;
     }
 
-    /* TODO don't use a arbitrarily sized buffer without error checking. */
     char content_length_buffer[64] = "";
-    sprintf(content_length_buffer, "%" PRIu64, (uint64_t)part_buffer_byte_cursor.len);
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)part_buffer_byte_cursor.len);
     struct aws_byte_cursor content_length_cursor =
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
 
@@ -556,9 +566,8 @@ static int s_s3_message_util_set_multipart_request_path(
             goto error_clean_up;
         }
 
-        /* TODO don't use a arbitrarily sized buffer without error checking. */
         char part_number_buffer[32] = "";
-        sprintf(part_number_buffer, "%d", part_number);
+        snprintf(part_number_buffer, sizeof(part_number_buffer), "%d", part_number);
         struct aws_byte_cursor part_number_cursor =
             aws_byte_cursor_from_array(part_number_buffer, strlen(part_number_buffer));
 
