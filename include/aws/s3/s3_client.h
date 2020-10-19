@@ -56,7 +56,7 @@ struct aws_s3_client_config {
     struct aws_tls_connection_options *tls_connection_options;
 
     /* Timeout value, in milliseconds, used for each connection. */
-    uint64_t connection_timeout_ms;
+    uint32_t connection_timeout_ms;
 
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;

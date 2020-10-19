@@ -30,12 +30,12 @@
 
 static const uint32_t s_s3_max_request_count_per_connection = 100;
 
-static const uint32_t s_http_port = 80;
-static const uint32_t s_https_port = 443;
+static const uint16_t s_http_port = 80;
+static const uint16_t s_https_port = 443;
 
 static const uint64_t s_default_part_size = 20 * 1024 * 1024;
 static const size_t s_default_dns_host_address_ttl = 2 * 60;
-static const uint64_t s_default_connection_timeout_ms = 3000;
+static const uint32_t s_default_connection_timeout_ms = 3000;
 static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
@@ -199,9 +199,9 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     if (client_config->connection_timeout_ms != 0) {
-        *((uint64_t *)&client->connection_timeout_ms) = client_config->connection_timeout_ms;
+        *((uint32_t *)&client->connection_timeout_ms) = client_config->connection_timeout_ms;
     } else {
-        *((uint64_t *)&client->connection_timeout_ms) = s_default_connection_timeout_ms;
+        *((uint32_t *)&client->connection_timeout_ms) = s_default_connection_timeout_ms;
     }
 
     if (client_config->tls_connection_options != NULL) {
@@ -670,7 +670,7 @@ static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *cl
     struct aws_s3_part_buffer_pool *pool = &client->synced_data.part_buffer_pool;
     struct aws_linked_list *free_list = &pool->free_list;
 
-    int32_t num_popped = 0;
+    size_t num_popped = 0;
 
     while (!aws_linked_list_empty(free_list)) {
         struct aws_linked_list_node *part_buffer_node = aws_linked_list_pop_back(free_list);
@@ -681,15 +681,7 @@ static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *cl
         ++num_popped;
     }
 
-    uint32_t num_leaked = pool->num_allocated - num_popped;
-
-    if (num_leaked > 0) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "id=%p Not all part buffers were returned to free list: %d leaked.",
-            (void *)client,
-            num_leaked);
-    }
+    AWS_ASSERT(pool->num_allocated == num_popped);
 }
 
 /* Public facing make-meta-request function. */
