@@ -199,9 +199,9 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     if (client_config->connection_timeout_ms != 0) {
-        *((uint64_t *)&client_config->connection_timeout_ms) = client_config->connection_timeout_ms;
+        *((uint64_t *)&client->connection_timeout_ms) = client_config->connection_timeout_ms;
     } else {
-        *((uint64_t *)&client_config->connection_timeout_ms) = s_default_connection_timeout_ms;
+        *((uint64_t *)&client->connection_timeout_ms) = s_default_connection_timeout_ms;
     }
 
     if (client_config->tls_connection_options != NULL) {
@@ -889,12 +889,6 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
     for (size_t conn_index = 0; conn_index < client->num_connections_per_vip; ++conn_index) {
         struct aws_s3_vip_connection *vip_connection = aws_s3_vip_connection_new(client, vip);
 
-        if (vip_connection == NULL) {
-            AWS_LOGF_ERROR(AWS_LS_S3_VIP, "id=%p: Could not allocate aws_s3_vip_connection.", (void *)vip);
-
-            goto error_clean_up;
-        }
-
         aws_linked_list_push_back(&client->synced_data.idle_vip_connections, &vip_connection->node);
     }
 
@@ -906,10 +900,7 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
 
 error_clean_up:
 
-    if (vip != NULL) {
-        s_s3_client_vip_destroy(vip);
-        vip = NULL;
-    }
+    s_s3_client_vip_destroy(vip);
 
     return AWS_OP_ERR;
 }
