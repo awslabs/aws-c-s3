@@ -61,7 +61,6 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
         .client_bootstrap = tester.client_bootstrap,
         .credentials_provider = tester.credentials_provider,
         .region = s_test_s3_region,
-        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len),
         .part_size = 64 * 1024};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
@@ -78,6 +77,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     options.message = message;
     options.user_data = &tester;
     options.body_callback = s_test_s3_get_object_body_callback;
+    options.bucket_name = s_test_bucket_name;
     options.finish_callback = s_test_s3_get_object_finish;
 
     /* Trigger accelerating of our Get Object request. */

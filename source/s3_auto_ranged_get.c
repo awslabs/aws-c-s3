@@ -95,11 +95,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_s3_auto_ranged_get *auto_ranged_get =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_get));
 
-    if (auto_ranged_get == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not allocate Auto-Ranged-Get Meta Request.");
-        return NULL;
-    }
-
     /* Try to initialize the base type. */
     if (aws_s3_meta_request_init_base(
             allocator, options, auto_ranged_get, &s_s3_auto_ranged_get_vtable, &auto_ranged_get->base)) {
@@ -169,8 +164,7 @@ static int s_s3_auto_ranged_get_next_request(
             struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(initial_message);
 
             if (initial_message_headers == NULL) {
-                s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
-                goto error_clean_up;
+                goto error_clean_up_unlock;
             }
 
             struct aws_byte_cursor range_header_value;
@@ -181,22 +175,12 @@ static int s_s3_auto_ranged_get_next_request(
                 request_desc =
                     aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST, 0);
 
-                if (request_desc == NULL) {
-                    s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
-                    goto error_clean_up;
-                }
-
                 auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS;
 
             } else {
                 /* We initially queue just one ranged get that is the size of a single part.  The headers from this
                  * first get will tell us the size of the object, and we can spin up additional gets if necessary. */
                 request_desc = aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART, 1);
-
-                if (request_desc == NULL) {
-                    s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
-                    goto error_clean_up;
-                }
 
                 auto_ranged_get->synced_data.next_part_number = 2;
 
@@ -218,11 +202,6 @@ static int s_s3_auto_ranged_get_next_request(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                     auto_ranged_get->synced_data.next_part_number);
-
-                if (request_desc == NULL) {
-                    s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
-                    goto error_clean_up;
-                }
 
                 ++auto_ranged_get->synced_data.next_part_number;
 
@@ -256,7 +235,9 @@ static int s_s3_auto_ranged_get_next_request(
 
     return AWS_OP_SUCCESS;
 
-error_clean_up:
+error_clean_up_unlock:
+
+    s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
 
     return AWS_OP_ERR;
 }
@@ -324,15 +305,6 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
 
     struct aws_s3_request *request = aws_s3_request_new(meta_request, message);
 
-    if (request == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not not allocate request with tag %d for Auto-Ranged-Get Meta Request.",
-            (void *)meta_request,
-            request_desc->request_tag);
-        goto request_alloc_failed;
-    }
-
     request->part_buffer = part_buffer;
     aws_http_message_release(message);
 
@@ -344,13 +316,6 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
         request_desc->part_number);
 
     return request;
-
-request_alloc_failed:
-
-    if (part_buffer != NULL) {
-        aws_s3_part_buffer_release(part_buffer);
-        part_buffer = NULL;
-    }
 
 part_buffer_get_failed:
 
