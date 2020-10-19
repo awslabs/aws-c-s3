@@ -12,12 +12,17 @@ struct aws_allocator;
 
 struct aws_http_stream;
 struct aws_http_message;
+struct aws_tls_connection_options;
 
 struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
 
-enum aws_s3_meta_request_type { AWS_S3_META_REQUEST_TYPE_GET_OBJECT, AWS_S3_META_REQUEST_TYPE_PUT_OBJECT };
+enum aws_s3_meta_request_type {
+    AWS_S3_META_REQUEST_TYPE_ANY,
+    AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+    AWS_S3_META_REQUEST_TYPE_PUT_OBJECT
+};
 
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     struct aws_s3_meta_request *meta_request,
@@ -38,9 +43,6 @@ struct aws_s3_client_config {
     /* Region that the S3 bucket lives in. */
     struct aws_byte_cursor region;
 
-    /* Endpoint for the S3 bucket to use. */
-    struct aws_byte_cursor endpoint;
-
     /* Client bootstrap used for common staples such as event loop group, host resolver, etc.. s*/
     struct aws_client_bootstrap *client_bootstrap;
 
@@ -49,6 +51,12 @@ struct aws_s3_client_config {
 
     /* Size of parts the files will be downloaded or uploaded in. */
     uint64_t part_size;
+
+    /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
+    struct aws_tls_connection_options *tls_connection_options;
+
+    /* Timeout value, in milliseconds, used for each connection. */
+    uint64_t connection_timeout_ms;
 
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
@@ -72,6 +80,9 @@ struct aws_s3_meta_request_options {
 
     /* Initial HTTP message that defines what operation we are doing. */
     struct aws_http_message *message;
+
+    /* Bucket that this request refers to. */
+    struct aws_byte_cursor bucket_name;
 
     /* User data for all callbacks. */
     void *user_data;

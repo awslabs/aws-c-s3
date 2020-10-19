@@ -263,7 +263,7 @@ static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
 
 static void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_request_work *work) {
 
-    if(work == NULL) {
+    if (work == NULL) {
         return;
     }
 

@@ -23,17 +23,19 @@
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
 #include <aws/io/socket.h>
+#include <aws/io/tls_channel_handler.h>
 
 #include <inttypes.h>
 #include <math.h>
 
 static const uint32_t s_s3_max_request_count_per_connection = 100;
 
-static const int32_t s_s3_vip_connection_timeout_seconds = 3; // TODO
-static const uint32_t s_s3_vip_connection_port = 80;          // TODO
+static const uint32_t s_http_port = 80;
+static const uint32_t s_https_port = 443;
 
 static const uint64_t s_default_part_size = 20 * 1024 * 1024;
 static const size_t s_default_dns_host_address_ttl = 2 * 60;
+static const uint64_t s_default_connection_timeout_ms = 3000;
 static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
@@ -188,13 +190,24 @@ struct aws_s3_client *aws_s3_client_new(
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
-    /* Make a copy of the endpoint string. */
-    client->endpoint = aws_string_new_from_array(allocator, client_config->endpoint.ptr, client_config->endpoint.len);
-
     if (client_config->part_size != 0) {
         *((uint64_t *)&client->part_size) = client_config->part_size;
     } else {
         *((uint64_t *)&client->part_size) = s_default_part_size;
+    }
+
+    if (client_config->connection_timeout_ms != 0) {
+        *((uint64_t *)&client_config->connection_timeout_ms) = client_config->connection_timeout_ms;
+    } else {
+        *((uint64_t *)&client_config->connection_timeout_ms) = s_default_connection_timeout_ms;
+    }
+
+    if (client_config->tls_connection_options != NULL) {
+
+        client->tls_connection_options =
+            aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+
+        aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
     }
 
     if (client_config->throughput_target_gbps != 0.0) {
@@ -235,17 +248,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->shutdown_callback = client_config->shutdown_callback;
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
 
-    if (s_s3_client_start_resolving_addresses(client)) {
-        goto error_clean_up;
-    }
-
     return client;
-
-error_clean_up:
-
-    aws_s3_client_release(client);
-
-    return NULL;
 }
 
 void aws_s3_client_acquire(struct aws_s3_client *client) {
@@ -323,6 +326,12 @@ static void s_s3_client_finish_destroy(void *user_data) {
     aws_string_destroy(client->endpoint);
     client->endpoint = NULL;
 
+    if (client->tls_connection_options) {
+        aws_tls_connection_options_clean_up(client->tls_connection_options);
+        aws_mem_release(client->allocator, client->tls_connection_options);
+        client->tls_connection_options = NULL;
+    }
+
     aws_mutex_clean_up(&client->synced_data.lock);
 
     /* Remove all active meta requests. */
@@ -377,21 +386,25 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     AWS_ZERO_STRUCT(socket_options);
     socket_options.type = AWS_SOCKET_STREAM;
     socket_options.domain = AWS_SOCKET_IPV4;
-    socket_options.connect_timeout_ms = (uint32_t)aws_timestamp_convert(
-        s_s3_vip_connection_timeout_seconds, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_MILLIS, NULL);
+    socket_options.connect_timeout_ms = client->connection_timeout_ms;
 
     struct aws_http_connection_manager_options manager_options;
     AWS_ZERO_STRUCT(manager_options);
     manager_options.bootstrap = client->client_bootstrap;
     manager_options.initial_window_size = SIZE_MAX;
     manager_options.socket_options = &socket_options;
-    manager_options.tls_connection_options = NULL;
     manager_options.proxy_options = NULL;
     manager_options.host = aws_byte_cursor_from_string(vip->host_address);
-    manager_options.port = s_s3_vip_connection_port;
     manager_options.max_connections = client->num_connections_per_vip * 2;
     manager_options.shutdown_complete_callback = s_s3_client_vip_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
+    manager_options.tls_connection_options = client->tls_connection_options;
+
+    if (manager_options.tls_connection_options != NULL) {
+        manager_options.port = s_https_port;
+    } else {
+        manager_options.port = s_http_port;
+    }
 
     vip->http_connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
 
@@ -475,19 +488,14 @@ static void s_s3_client_vip_finish_destroy(void *user_data) {
     AWS_PRECONDITION(vip);
 
     /* Release the VIP's reference to it's connection manager. */
-    if (vip->http_connection_manager != NULL) {
-        aws_http_connection_manager_release(vip->http_connection_manager);
-        vip->http_connection_manager = NULL;
-    }
+    aws_http_connection_manager_release(vip->http_connection_manager);
+    vip->http_connection_manager = NULL;
 
     /* Clean up the address string. */
-    if (vip->host_address != NULL) {
-        aws_string_destroy(vip->host_address);
-        vip->host_address = NULL;
-    }
+    aws_string_destroy(vip->host_address);
+    vip->host_address = NULL;
 
     struct aws_s3_client *client = vip->owning_client;
-
     aws_mem_release(client->allocator, vip);
 
     s_s3_client_internal_release(client);
@@ -692,7 +700,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
 
-    if (options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT && options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+    if (options->type != AWS_S3_META_REQUEST_TYPE_ANY && options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
+        options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request; invalid meta request type specified.",
@@ -708,6 +717,33 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             (void *)client);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
+    }
+
+    /* TODO This is temporary until we add multiple bucket support. */
+    if (client->endpoint == NULL) {
+
+        struct aws_byte_cursor endpoint_url_part0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".s3.");
+        struct aws_byte_cursor endpoint_url_part1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".amazonaws.com");
+        size_t endpoint_buffer_len =
+            (options->bucket_name.len) + endpoint_url_part0.len + (client->region->len) + endpoint_url_part1.len + 1;
+        char *endpoint_buffer = aws_mem_acquire(client->allocator, endpoint_buffer_len);
+
+        endpoint_buffer[0] = '\0';
+
+        strncat(endpoint_buffer, (const char *)options->bucket_name.ptr, options->bucket_name.len);
+        strncat(endpoint_buffer, (const char *)endpoint_url_part0.ptr, endpoint_url_part0.len);
+        strncat(endpoint_buffer, aws_string_c_str(client->region), client->region->len);
+        strncat(endpoint_buffer, (const char *)endpoint_url_part1.ptr, endpoint_url_part1.len);
+
+        client->endpoint = aws_string_new_from_c_str(client->allocator, endpoint_buffer);
+
+        aws_mem_release(client->allocator, endpoint_buffer);
+
+        if (s_s3_client_start_resolving_addresses(client)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT, "id=%p: Could not start resolving endpoint for meta request.", (void *)client);
+            return NULL;
+        }
     }
 
     struct aws_s3_meta_request_internal_options internal_options;
@@ -741,7 +777,7 @@ static void s_s3_client_push_meta_request(struct aws_s3_client *client, struct a
 
     s_s3_client_lock_synced_data(client);
 
-    /* Grab a new reference for the meta reqeust for its place in the list. */
+    /* Grab a new reference for the meta request for its place in the list. */
     aws_s3_meta_request_acquire(meta_request);
 
     /* Add our new meta request to our request list */
@@ -928,8 +964,6 @@ static void s_s3_client_vip_connection_process_meta_requests_loop_task(
     void *arg,
     enum aws_task_status task_status) {
 
-    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
-
     (void)task;
     (void)task_status;
 
@@ -951,16 +985,15 @@ static void s_s3_client_vip_connection_process_meta_requests_loop_task(
 
     /* If we're pending destruction, go ahead and clean up. */
     if (owning_vip->synced_data.pending_destruction) {
-        s_s3_client_unlock_synced_data(client);
-
-        aws_s3_meta_request_release(prev_meta_request);
-        prev_meta_request = NULL;
-        vip_connection->meta_request = NULL;
-
-        s_s3_vip_connection_destroy(client, vip_connection);
-        s_s3_client_internal_release(client);
-        return;
+        goto clean_up_vip_connection;
     }
+
+    /* If this task is getting cancelled, make this connection idle. */
+    if (task_status == AWS_TASK_STATUS_CANCELED) {
+        goto make_vip_connection_idle;
+    }
+
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
     struct aws_s3_meta_request *next_meta_request = NULL;
 
@@ -1024,39 +1057,56 @@ static void s_s3_client_vip_connection_process_meta_requests_loop_task(
 
     /* If we have been unable to find a meta request that has work, then put the vip connection into the idle list. */
     if (next_meta_request == NULL) {
+        goto make_vip_connection_idle;
+    }
 
-        /* Reset the current meta request variable on the VIP connection. We'll release the held reference once outside
-         * of the mutex. */
-        vip_connection->meta_request = NULL;
+    aws_s3_meta_request_acquire(next_meta_request);
+    s_s3_client_unlock_synced_data(client);
 
-        aws_linked_list_push_back(&client->synced_data.idle_vip_connections, &vip_connection->node);
-        s_s3_client_unlock_synced_data(client);
+    if (prev_meta_request != NULL) {
+        aws_s3_meta_request_release(prev_meta_request);
+        prev_meta_request = NULL;
+    }
 
-        /* Get rid of internal reference for processing meta requests on this VIP connection. */
-        s_s3_client_internal_release(client);
+    vip_connection->meta_request = next_meta_request;
 
-        /* Clean up the previous meta request reference outside of the mutex. */
-        if (prev_meta_request != NULL) {
-            aws_s3_meta_request_release(prev_meta_request);
-            prev_meta_request = NULL;
-        }
-    } else {
-        /* Else, if we found a meta request, then we can go ahead and process it. */
-        aws_s3_meta_request_acquire(next_meta_request);
-        s_s3_client_unlock_synced_data(client);
+    struct aws_s3_send_request_options options = {.vip_connection = vip_connection,
+                                                  .finished_callback = s_s3_client_vip_connection_request_finished,
+                                                  .user_data = vip_connection};
 
-        if (prev_meta_request != NULL) {
-            aws_s3_meta_request_release(prev_meta_request);
-            prev_meta_request = NULL;
-        }
+    aws_s3_meta_request_send_next_request(next_meta_request, &options);
 
-        vip_connection->meta_request = next_meta_request;
+    return;
 
-        struct aws_s3_send_request_options options = {.vip_connection = vip_connection,
-                                                      .finished_callback = s_s3_client_vip_connection_request_finished,
-                                                      .user_data = vip_connection};
+clean_up_vip_connection:
 
-        aws_s3_meta_request_send_next_request(next_meta_request, &options);
+    s_s3_client_unlock_synced_data(client);
+
+    aws_s3_meta_request_release(prev_meta_request);
+    prev_meta_request = NULL;
+    vip_connection->meta_request = NULL;
+
+    s_s3_vip_connection_destroy(client, vip_connection);
+    s_s3_client_internal_release(client);
+
+    return;
+
+make_vip_connection_idle:
+
+    /* Reset the current meta request variable on the VIP connection. We'll release the held reference once outside
+     * of the mutex. */
+    vip_connection->meta_request = NULL;
+
+    aws_linked_list_push_back(&client->synced_data.idle_vip_connections, &vip_connection->node);
+    s_s3_client_unlock_synced_data(client);
+
+    /* Get rid of internal reference for processing meta requests on this VIP connection. */
+    s_s3_client_internal_release(client);
+
+    /* Clean up the previous meta request reference outside of the mutex. */
+    if (prev_meta_request != NULL) {
+        aws_s3_meta_request_release(prev_meta_request);
+        prev_meta_request = NULL;
     }
 }
 
