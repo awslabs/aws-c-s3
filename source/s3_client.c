@@ -870,8 +870,7 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
 
     /* If we didn't find a match in the table, we have a VIP to add! */
     if (s_s3_find_vip(&client->synced_data.vips, host_address) != NULL) {
-        s_s3_client_unlock_synced_data(client);
-        goto error_clean_up;
+        goto error_clean_up_unlock;
     }
 
     /* Allocate the new VIP. */
@@ -898,6 +897,10 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
 
     return AWS_OP_SUCCESS;
 
+error_clean_up_unlock:
+
+    s_s3_client_unlock_synced_data(client);
+
 error_clean_up:
 
     s_s3_client_vip_destroy(vip);
@@ -917,6 +920,8 @@ static void s_s3_client_wake_up_idle_vip_connections(struct aws_s3_client *clien
     s_s3_client_unlock_synced_data(client);
 
     /* Wake up any idle connections and tell them that there is work to do. */
+    /* TODO Optimization: have a separate linked list of meta requests that have work, so that we don't have to wake up
+     * N connections that possibly need to look through M meta requests, which is O(MN).*/
     while (!aws_linked_list_empty(&local_list)) {
         struct aws_linked_list_node *vip_connection_node = aws_linked_list_pop_front(&local_list);
 

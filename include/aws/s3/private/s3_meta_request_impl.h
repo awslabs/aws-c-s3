@@ -116,7 +116,7 @@ struct aws_s3_meta_request_vtable {
  */
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
-    
+
     struct aws_ref_count ref_count;
 
     /* Internal reference count.  This does not keep the meta request alive, but does delay the finish callback from

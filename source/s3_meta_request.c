@@ -297,13 +297,11 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
 
     s_s3_meta_request_lock_synced_data((struct aws_s3_meta_request *)meta_request);
     if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
-        s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
-        return false;
+        goto state_finished_so_no_work;
     }
 
     if (!aws_linked_list_empty(&meta_request->synced_data.retry_queue)) {
-        s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
-        return true;
+        goto retry_queue_has_work;
     }
 
     s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
@@ -312,6 +310,14 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
     AWS_FATAL_ASSERT(vtable);
 
     return vtable->has_work(meta_request);
+
+state_finished_so_no_work:
+    s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
+    return false;
+
+retry_queue_has_work:
+    s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
+    return true;
 }
 
 void aws_s3_meta_request_send_next_request(
@@ -326,9 +332,7 @@ void aws_s3_meta_request_send_next_request(
 
     /* If the meta request has been finished, don't initiate any additional work. */
     if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
-        s_s3_meta_request_unlock_synced_data(meta_request);
-
-        goto call_finished_callback;
+        goto meta_request_already_finished;
     }
 
     /* Try grabbing a request_desc from the retry queue. */
@@ -393,6 +397,16 @@ error_finish:
     aws_s3_meta_request_finish(meta_request, aws_last_error());
 
 call_finished_callback:
+
+    if (options->finished_callback != NULL) {
+        options->finished_callback(options->user_data);
+    }
+
+    return;
+
+meta_request_already_finished:
+
+    s_s3_meta_request_unlock_synced_data(meta_request);
 
     if (options->finished_callback != NULL) {
         options->finished_callback(options->user_data);
@@ -671,11 +685,16 @@ static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request,
     s_s3_meta_request_lock_synced_data(meta_request);
 
     if (meta_request->synced_data.state == state) {
-        s_s3_meta_request_unlock_synced_data(meta_request);
-        return AWS_OP_ERR;
+        goto error_state_already_set;
     }
 
+    s_s3_meta_request_unlock_synced_data(meta_request);
+
     return AWS_OP_SUCCESS;
+
+error_state_already_set:
+    s_s3_meta_request_unlock_synced_data(meta_request);
+    return AWS_OP_ERR;
 }
 
 /* Asynchronously queue a part to send back to the caller.  This is for situations such as a parallel get, where we
@@ -714,8 +733,6 @@ static void s_s3_meta_request_process_write_queue_task(
     void *arg,
     enum aws_task_status task_status) {
 
-    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
-
     (void)task;
     (void)task_status;
 
@@ -728,6 +745,12 @@ static void s_s3_meta_request_process_write_queue_task(
     aws_write_part_buffer_callback_fn *callback = part_buffer->write_part_buffer_data.write_part_buffer_callback;
     void *callback_user_data = part_buffer->write_part_buffer_data.user_data;
 
+    if (task_status == AWS_TASK_STATUS_CANCELED) {
+        goto clean_up;
+    }
+
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+
     /* Send the data to the user through the body callback. */
     if (meta_request->body_callback != NULL) {
         struct aws_byte_cursor buf_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
@@ -736,6 +759,8 @@ static void s_s3_meta_request_process_write_queue_task(
             meta_request, &buf_byte_cursor, part_buffer->range_start, part_buffer->range_end, meta_request->user_data);
     }
 
+clean_up:
+
     part_buffer->write_part_buffer_data.meta_request = NULL;
     part_buffer->write_part_buffer_data.write_part_buffer_callback = NULL;
     part_buffer->write_part_buffer_data.user_data = NULL;
@@ -743,8 +768,9 @@ static void s_s3_meta_request_process_write_queue_task(
 
     /* Release the part buffer back to the client. */
     aws_s3_part_buffer_release(part_buffer);
+    part_buffer = NULL;
 
-    if (callback != NULL) {
+    if (task_status == AWS_TASK_STATUS_RUN_READY && callback != NULL) {
         callback(callback_user_data);
     }
 }

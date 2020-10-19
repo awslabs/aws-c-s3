@@ -88,7 +88,7 @@ struct aws_s3_client {
     const uint64_t part_size;
 
     /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
-    struct aws_tls_connection_options* tls_connection_options;
+    struct aws_tls_connection_options *tls_connection_options;
 
     /* Timeout value, in milliseconds, used for each connection. */
     const uint64_t connection_timeout_ms;
