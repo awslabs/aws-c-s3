@@ -22,9 +22,7 @@ static bool s_s3_tester_has_received_finish_callback(void *user_data);
 
 static bool s_s3_tester_has_clean_up_finished(void *user_data);
 
-int aws_s3_tester_init(
-    struct aws_allocator *allocator,
-    struct aws_s3_tester *tester) {
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -44,9 +42,6 @@ int aws_s3_tester_init(
     if (aws_condition_variable_init(&tester->signal)) {
         goto condition_variable_failed;
     }
-
-    /* Make a copy of the region string. */
-    tester->region = aws_string_new_from_array(allocator, region.ptr, region.len);
 
     /* Setup an event loop group and host resolver. */
     tester->el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
