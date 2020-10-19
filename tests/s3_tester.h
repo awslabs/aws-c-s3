@@ -32,9 +32,7 @@ struct aws_s3_tester {
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
 
-    struct aws_string *bucket_name;
     struct aws_string *region;
-    struct aws_string *endpoint;
 
     int finish_error_code;
 

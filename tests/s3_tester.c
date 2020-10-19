@@ -47,31 +47,8 @@ int aws_s3_tester_init(
         goto condition_variable_failed;
     }
 
-    /* Make a copy of the bucket name string. */
-    tester->bucket_name = aws_string_new_from_array(allocator, bucket_name.ptr, bucket_name.len);
-
     /* Make a copy of the region string. */
     tester->region = aws_string_new_from_array(allocator, region.ptr, region.len);
-
-    /* Compute an S3 endpoint given a bucket name and region. */
-    {
-        struct aws_byte_cursor endpoint_url_part0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".s3.");
-        struct aws_byte_cursor endpoint_url_part1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".amazonaws.com");
-        size_t endpoint_buffer_len =
-            (tester->bucket_name->len) + endpoint_url_part0.len + (tester->region->len) + endpoint_url_part1.len + 1;
-        char *endpoint_buffer = aws_mem_acquire(allocator, endpoint_buffer_len);
-
-        endpoint_buffer[0] = '\0';
-
-        strncat(endpoint_buffer, aws_string_c_str(tester->bucket_name), tester->bucket_name->len);
-        strncat(endpoint_buffer, (const char *)endpoint_url_part0.ptr, endpoint_url_part0.len);
-        strncat(endpoint_buffer, aws_string_c_str(tester->region), tester->region->len);
-        strncat(endpoint_buffer, (const char *)endpoint_url_part1.ptr, endpoint_url_part1.len);
-
-        tester->endpoint = aws_string_new_from_c_str(allocator, endpoint_buffer);
-
-        aws_mem_release(allocator, endpoint_buffer);
-    }
 
     /* Setup an event loop group and host resolver. */
     tester->el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
@@ -140,12 +117,6 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
 
     aws_string_destroy(tester->region);
     tester->region = NULL;
-
-    aws_string_destroy(tester->bucket_name);
-    tester->bucket_name = NULL;
-
-    aws_string_destroy(tester->endpoint);
-    tester->endpoint = NULL;
 
     aws_host_resolver_release(tester->host_resolver);
     tester->host_resolver = NULL;
