@@ -22,7 +22,33 @@ static bool s_s3_tester_has_received_finish_callback(void *user_data);
 
 static bool s_s3_tester_has_clean_up_finished(void *user_data);
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
+struct aws_string *aws_s3_tester_build_endpoint_string(
+    struct aws_allocator *allocator,
+    const struct aws_byte_cursor *bucket_name,
+    const struct aws_byte_cursor *region) {
+
+    struct aws_byte_cursor endpoint_url_part0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".s3.");
+    struct aws_byte_cursor endpoint_url_part1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".amazonaws.com");
+    size_t endpoint_buffer_len = bucket_name->len + endpoint_url_part0.len + region->len + endpoint_url_part1.len + 1;
+    char *endpoint_buffer = aws_mem_acquire(allocator, endpoint_buffer_len);
+
+    endpoint_buffer[0] = '\0';
+
+    strncat(endpoint_buffer, (const char *)bucket_name->ptr, bucket_name->len);
+    strncat(endpoint_buffer, (const char *)endpoint_url_part0.ptr, endpoint_url_part0.len);
+    strncat(endpoint_buffer, (const char *)region->ptr, region->len);
+    strncat(endpoint_buffer, (const char *)endpoint_url_part1.ptr, endpoint_url_part1.len);
+
+    struct aws_string *endpoint_string = aws_string_new_from_c_str(allocator, endpoint_buffer);
+
+    aws_mem_release(allocator, endpoint_buffer);
+
+    return endpoint_string;
+}
+
+int aws_s3_tester_init(
+    struct aws_allocator *allocator,
+    struct aws_s3_tester *tester) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);

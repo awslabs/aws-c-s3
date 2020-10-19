@@ -57,19 +57,20 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, s_test_bucket_name, s_test_s3_region));
 
-    struct aws_s3_client_config client_config = {
-        .client_bootstrap = tester.client_bootstrap,
-        .credentials_provider = tester.credentials_provider,
-        .region = s_test_s3_region,
-        .part_size = 64 * 1024};
+    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
+                                                 .credentials_provider = tester.credentials_provider,
+                                                 .region = s_test_s3_region,
+                                                 .part_size = 64 * 1024};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
+    struct aws_string *host_name = aws_s3_tester_build_endpoint_string(allocator, &s_test_bucket_name, &s_test_s3_region);
+
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        s_make_get_object_request(allocator, aws_byte_cursor_from_string(tester.endpoint), test_object_path);
+        s_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -77,7 +78,6 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     options.message = message;
     options.user_data = &tester;
     options.body_callback = s_test_s3_get_object_body_callback;
-    options.bucket_name = s_test_bucket_name;
     options.finish_callback = s_test_s3_get_object_finish;
 
     /* Trigger accelerating of our Get Object request. */
@@ -91,15 +91,14 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     aws_s3_meta_request_release(meta_request);
 
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
+    aws_http_message_release(message);
+    message = NULL;
 
-    if (client != NULL) {
-        aws_s3_client_release(client);
-        client = NULL;
-    }
+    aws_string_destroy(host_name);
+    host_name = NULL;
+
+    aws_s3_client_release(client);
+    client = NULL;
 
     aws_s3_tester_clean_up(&tester);
 

@@ -60,4 +60,9 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf);
 
+struct aws_string *aws_s3_tester_build_endpoint_string(
+    struct aws_allocator *allocator,
+    const struct aws_byte_cursor *bucket_name,
+    const struct aws_byte_cursor *region);
+
 #endif /* AWS_S3_TESTER_H */
