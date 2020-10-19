@@ -338,7 +338,6 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
             struct aws_input_stream *initial_body_stream = meta_request->synced_data.initial_body_stream;
 
             if (initial_body_stream == NULL) {
-                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not find initial body stream to use for request with tag %d for auto-ranged-put "
@@ -353,7 +352,6 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
 
             /* Seek to our part of the original input stream. */
             if (aws_input_stream_seek(initial_body_stream, range_start, AWS_SSB_BEGIN)) {
-                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not seek initial body stream for request with tag %d for auto-ranged-put meta "
@@ -365,7 +363,6 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
 
             /* Copy it into our part buffer. */
             if (aws_input_stream_read(initial_body_stream, &part_buffer->buffer)) {
-                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not read from initial body stream for request with tag %d for auto-ranged-put "
@@ -478,6 +475,9 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
     return request;
 
 message_create_failed:
+    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+    return NULL;
 
 part_buffer_get_failed:
 
