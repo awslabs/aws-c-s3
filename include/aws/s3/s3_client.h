@@ -81,9 +81,6 @@ struct aws_s3_meta_request_options {
     /* Initial HTTP message that defines what operation we are doing. */
     struct aws_http_message *message;
 
-    /* Bucket that this request refers to. */
-    struct aws_byte_cursor bucket_name;
-
     /* User data for all callbacks. */
     void *user_data;
 

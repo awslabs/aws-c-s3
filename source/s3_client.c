@@ -721,25 +721,32 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
+    struct aws_http_headers *message_headers = aws_http_message_get_headers(options->message);
+
+    if (message_headers == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; message provided in options does not contain headers.",
+            (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    struct aws_byte_cursor host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
+    struct aws_byte_cursor host_header_value;
+
+    if (aws_http_headers_get(message_headers, host_header_name, &host_header_value)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
+            (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     /* TODO This is temporary until we add multiple bucket support. */
     if (client->endpoint == NULL) {
-
-        struct aws_byte_cursor endpoint_url_part0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".s3.");
-        struct aws_byte_cursor endpoint_url_part1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".amazonaws.com");
-        size_t endpoint_buffer_len =
-            (options->bucket_name.len) + endpoint_url_part0.len + (client->region->len) + endpoint_url_part1.len + 1;
-        char *endpoint_buffer = aws_mem_acquire(client->allocator, endpoint_buffer_len);
-
-        endpoint_buffer[0] = '\0';
-
-        strncat(endpoint_buffer, (const char *)options->bucket_name.ptr, options->bucket_name.len);
-        strncat(endpoint_buffer, (const char *)endpoint_url_part0.ptr, endpoint_url_part0.len);
-        strncat(endpoint_buffer, aws_string_c_str(client->region), client->region->len);
-        strncat(endpoint_buffer, (const char *)endpoint_url_part1.ptr, endpoint_url_part1.len);
-
-        client->endpoint = aws_string_new_from_c_str(client->allocator, endpoint_buffer);
-
-        aws_mem_release(client->allocator, endpoint_buffer);
+        client->endpoint = aws_string_new_from_array(client->allocator, host_header_value.ptr, host_header_value.len);
 
         if (s_s3_client_start_resolving_addresses(client)) {
             AWS_LOGF_ERROR(
