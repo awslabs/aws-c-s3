@@ -95,14 +95,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_s3_auto_ranged_get *auto_ranged_get =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_get));
 
-<<<<<<< HEAD
-=======
-    if (auto_ranged_get == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not allocate Auto-Ranged-Get Meta Request.");
-        return NULL;
-    }
-
->>>>>>> Auto-range-get support
     /* Try to initialize the base type. */
     if (aws_s3_meta_request_init_base(
             allocator, options, auto_ranged_get, &s_s3_auto_ranged_get_vtable, &auto_ranged_get->base)) {

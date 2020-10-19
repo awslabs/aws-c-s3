@@ -45,6 +45,9 @@ static void s_s3_auto_ranged_put_unlock_synced_data(struct aws_s3_auto_ranged_pu
 
 static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request *meta_request);
 
+static bool s_s3_auto_ranged_put_state_has_work(enum aws_s3_auto_ranged_put_state state);
+static bool s_s3_auto_ranged_put_has_work(const struct aws_s3_meta_request *meta_request);
+
 static int s_s3_auto_ranged_put_next_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request_desc **out_request_desc);
@@ -69,6 +72,7 @@ static int s_s3_auto_ranged_put_incoming_body(
 static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
+    .has_work = s_s3_auto_ranged_put_has_work,
     .next_request = s_s3_auto_ranged_put_next_request,
     .request_factory = s_s3_auto_ranged_put_request_factory,
     .incoming_headers = s_s3_auto_ranged_put_incoming_headers,
@@ -145,6 +149,25 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     aws_array_list_clean_up(&auto_ranged_put->synced_data.etag_list);
 
     aws_mem_release(meta_request->allocator, auto_ranged_put);
+}
+
+static bool s_s3_auto_ranged_put_state_has_work(enum aws_s3_auto_ranged_put_state state) {
+    return state == AWS_S3_AUTO_RANGED_PUT_STATE_START || state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
+}
+
+static bool s_s3_auto_ranged_put_has_work(const struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->impl);
+
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    bool has_work = false;
+
+    s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+    has_work = s_s3_auto_ranged_put_state_has_work(auto_ranged_put->synced_data.state);
+    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+    return has_work;
 }
 
 static int s_s3_auto_ranged_put_next_request(
@@ -650,6 +673,9 @@ static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream,
         auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
 
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+        /* Create Multipart Upload finished successfully, so now we should have parts to send. */
+        aws_s3_meta_request_notify_work_available(&auto_ranged_put->base);
 
     } else if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 

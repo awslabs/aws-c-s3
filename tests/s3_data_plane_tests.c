@@ -75,7 +75,8 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    struct aws_string *host_name = aws_s3_tester_build_endpoint_string(allocator, &s_test_bucket_name, &s_test_s3_region);
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &s_test_bucket_name, &s_test_s3_region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
@@ -127,30 +128,29 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object2.txt");
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, s_test_bucket_name, s_test_s3_region));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config = {
-        .client_bootstrap = tester.client_bootstrap,
-        .credentials_provider = tester.credentials_provider,
-        .region = s_test_s3_region,
-        .endpoint = aws_byte_cursor_from_array(tester.endpoint->bytes, tester.endpoint->len),
-        .part_size = 5 * 1024 * 1024};
+    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
+                                                 .credentials_provider = tester.credentials_provider,
+                                                 .region = s_test_s3_region,
+                                                 .part_size = 5 * 1024 * 1024};
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    struct aws_string *test_body = aws_s3_create_test_buffer(allocator, 10 * 1024 * 1024);
-    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_string(test_body);
+    struct aws_byte_buf test_buffer;
+    aws_s3_create_test_buffer(allocator, 10 * 1024 * 1024, &test_buffer);
+
+    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
     struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &s_test_bucket_name, &s_test_s3_region);
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *message = s_make_put_object_request(
-        allocator,
-        aws_byte_cursor_from_string(tester.endpoint),
-        test_object_path,
-        s_test_body_content_type,
-        input_stream);
+        allocator, aws_byte_cursor_from_string(host_name), test_object_path, s_test_body_content_type, input_stream);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -170,25 +170,19 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     aws_s3_meta_request_release(meta_request);
 
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
+    aws_http_message_release(message);
+    message = NULL;
 
-    if (client != NULL) {
-        aws_s3_client_release(client);
-        client = NULL;
-    }
+    aws_string_destroy(host_name);
+    host_name = NULL;
 
-    if (input_stream != NULL) {
-        aws_input_stream_destroy(input_stream);
-        input_stream = NULL;
-    }
+    aws_s3_client_release(client);
+    client = NULL;
 
-    if (test_body != NULL) {
-        aws_string_destroy(test_body);
-        test_body = NULL;
-    }
+    aws_input_stream_destroy(input_stream);
+    input_stream = NULL;
+
+    aws_byte_buf_clean_up(&test_buffer);
 
     aws_s3_tester_clean_up(&tester);
 
