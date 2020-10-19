@@ -153,7 +153,8 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
-    if (client_config->throughput_target_gbps <= 0.0) {
+    /* Cannot be less than zero.  If zero, use default. */
+    if (client_config->throughput_target_gbps < 0.0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; throughput_target_gbps cannot less than or equal to 0.");
@@ -161,7 +162,8 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
-    if (client_config->throughput_per_vip_gbps <= 0.0) {
+    /* Cannot be less than zero.  If zero, use default. */
+    if (client_config->throughput_per_vip_gbps < 0.0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; throughput_per_vip_gbps cannot less than or equal to 0.");
