@@ -24,9 +24,7 @@ static bool s_s3_tester_has_clean_up_finished(void *user_data);
 
 int aws_s3_tester_init(
     struct aws_allocator *allocator,
-    struct aws_s3_tester *tester,
-    const struct aws_byte_cursor bucket_name,
-    const struct aws_byte_cursor region) {
+    struct aws_s3_tester *tester) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -114,9 +112,6 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
 
     aws_credentials_provider_release(tester->credentials_provider);
     tester->credentials_provider = NULL;
-
-    aws_string_destroy(tester->region);
-    tester->region = NULL;
 
     aws_host_resolver_release(tester->host_resolver);
     tester->host_resolver = NULL;

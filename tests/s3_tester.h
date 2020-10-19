@@ -32,8 +32,6 @@ struct aws_s3_tester {
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
 
-    struct aws_string *region;
-
     int finish_error_code;
 
     bool received_finish_callback;
@@ -43,11 +41,7 @@ struct aws_s3_tester {
 
 struct aws_s3_client_config;
 
-int aws_s3_tester_init(
-    struct aws_allocator *allocator,
-    struct aws_s3_tester *tester,
-    const struct aws_byte_cursor region,
-    const struct aws_byte_cursor bucket_name);
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
 
 /* Wait for aws_s3_tester_notify_finished to be called */
 void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester);
