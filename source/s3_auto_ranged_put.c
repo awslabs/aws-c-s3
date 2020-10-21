@@ -611,9 +611,7 @@ static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream,
 
         /* Retry if the error was service side or we just ran out of parts.  Otherwise, fail the meta request. */
         if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
-            if (aws_s3_meta_request_queue_retry(meta_request, &work->request_desc)) {
-                aws_s3_meta_request_finish(meta_request, aws_last_error());
-            }
+            aws_s3_meta_request_queue_retry(meta_request, &work->request_desc);
         } else {
             aws_s3_meta_request_finish(meta_request, error_code);
         }
@@ -657,7 +655,7 @@ static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream,
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         /* Create Multipart Upload finished successfully, so now we should have parts to send. */
-        aws_s3_meta_request_notify_work_available(&auto_ranged_put->base);
+        aws_s3_client_schedule_meta_request_work(meta_request->client, &auto_ranged_put->base);
 
     } else if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 
@@ -681,7 +679,7 @@ static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream,
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         if (notify_work_available) {
-            aws_s3_meta_request_notify_work_available(&auto_ranged_put->base);
+            aws_s3_client_schedule_meta_request_work(meta_request->client, &auto_ranged_put->base);
         }
 
     } else if (
