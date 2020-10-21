@@ -33,16 +33,12 @@ struct aws_s3_vip {
     /* Connection manager shared by all VIP connections. */
     struct aws_http_connection_manager *http_connection_manager;
 
-    struct {
-        /* When true, the VIP connection should destroy itself as soon as possible. */
-        uint32_t pending_destruction : 1;
-    } synced_data;
+	/* List of vip connections for this particular VIP. */
+    struct aws_linked_list vip_connections;
 };
 
 /* Represents one connection on a particular VIP. */
 struct aws_s3_vip_connection {
-    struct aws_linked_list_node node;
-
     /* The VIP that this connection belongs to. */
     struct aws_s3_vip *owning_vip;
 
@@ -52,11 +48,25 @@ struct aws_s3_vip_connection {
     /* Number of requests we have made on this particular connection. Important for the request service limit. */
     uint32_t request_count;
 
-    /* Current meta request being processed by this VIP connection. */
-    struct aws_s3_meta_request *meta_request;
+    struct {
+		
+		/* Linked list node for the owning vip's linked list. */
+        struct aws_linked_list_node vip_node;
 
-    /* Task for processing meta requests on this VIP connection. */
-    struct aws_task process_meta_requests_task;
+    } synced_data;
+
+    struct {
+
+		/* Linked list node for a linked list of referencing VIP connections in the below meta request. */
+        struct aws_linked_list_node meta_request_reference_node;
+
+		/* Actively processing meta request. */
+        struct aws_s3_meta_request *meta_request;
+		
+		/* Once this connection is idle (ie: meta_request is NULL), this connection will clean up. */
+        bool pending_destruction;
+
+    } threaded_data;
 };
 
 /* Represents the state of the S3 client. */
@@ -120,16 +130,33 @@ struct aws_s3_client {
         /* Linked list of active VIP's. */
         struct aws_linked_list vips;
 
-        /* List of all idle VIP Connections for each VIP. */
+        /* Our pool of parts to be used by file transfers as needed. */
+        struct aws_s3_part_buffer_pool part_buffer_pool;
+
+		/* VIP Connections that need added or updatd in the work event loop. */
+        struct aws_linked_list pending_vip_connection_updates;
+		
+		/* VIP Connections that need removed in the work event loop. */
+        struct aws_linked_list pending_vip_connection_removals;
+		
+		/* Meta requests that need added in the work event loop. */
+        struct aws_linked_list pending_meta_requests;
+
+		/* Task for processing the above work. */
+        struct aws_task process_work_task;
+		
+		/* Whether or not work processing is currently scheduled. */
+        bool process_work_task_scheduled;
+
+    } synced_data;
+
+    struct {
+        /* List of all VIP Connections for each VIP. */
         struct aws_linked_list idle_vip_connections;
 
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
-
-        /* Our pool of parts to be used by file transfers as needed. */
-        struct aws_s3_part_buffer_pool part_buffer_pool;
-
-    } synced_data;
+    } threaded_data;
 };
 
 typedef void(aws_s3_client_get_http_connection_callback)(
@@ -138,6 +165,8 @@ typedef void(aws_s3_client_get_http_connection_callback)(
     void *user_data);
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
+
+void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
 int aws_s3_client_sign_message(
     struct aws_s3_client *client,

@@ -77,15 +77,7 @@ struct aws_s3_send_request_work {
 struct aws_s3_meta_request_internal_options {
     const struct aws_s3_meta_request_options *options;
 
-    void *user_data;
-
     struct aws_s3_client *client;
-
-    /* Callback for when the meta request has more work to do.  */
-    aws_s3_meta_request_work_available_fn *work_available_callback;
-
-    /* Callback for when the meta request has finished, and has no more work in flight. */
-    aws_s3_meta_request_finish_fn *finish_callback;
 };
 
 struct aws_s3_meta_request_vtable {
@@ -128,6 +120,10 @@ struct aws_s3_meta_request {
     void *impl;
     struct aws_s3_meta_request_vtable *vtable;
 
+    /* Client that created this meta request which also processes this request.  After the meta request is finished,
+     * this reference is removed. */
+    struct aws_s3_client *client;
+
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
 
@@ -145,17 +141,18 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 
-    /* Internal user data and callbacks so that the owning client can generically listen for without working
-     * around the customer specified callbacks. */
-    void *internal_user_data;
-    aws_s3_meta_request_work_available_fn *internal_work_available_callback;
-    aws_s3_meta_request_finish_fn *internal_finish_callback;
-
     struct {
 
+		/* Linked list node for the meta requests linked list in the client. */
         struct aws_linked_list_node node;
+        
+		/* List of VIP connections currently processing this meta request. */
+        struct aws_linked_list referenced_vip_connections;
 
-    } client_data;
+		/* True when this meta request has already been added to the client. */
+        bool added_to_client;
+
+    } threaded_data;
 
     struct {
         struct aws_mutex lock;
@@ -213,12 +210,12 @@ void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws
 
 /* Push a request description into the retry queue.  This assumes ownership of the request desc, and will NULL out the
  * passed in pointer-to-pointer to help enforce this. */
-int aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc **in_out_desc);
+void aws_s3_meta_request_queue_retry(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request_desc **in_out_desc);
 
 /* Tells the meta request to stop, with an error code for indicating failure when necessary. */
 void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int error_code);
-
-void aws_s3_meta_request_notify_work_available(struct aws_s3_meta_request *meta_request);
 
 void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
 

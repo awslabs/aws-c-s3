@@ -40,6 +40,16 @@ static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
 
+enum aws_s3_client_work_flags {
+    AWS_S3_CLIENT_WORK_FLAGS_POOL = 0x01,
+};
+
+struct aws_s3_client_work {
+    struct aws_linked_list_node node;
+    void *user_data;
+    uint32_t flags;
+};
+
 static void s_s3_client_lock_synced_data(struct aws_s3_client *client);
 static void s_s3_client_unlock_synced_data(struct aws_s3_client *client);
 
@@ -62,6 +72,39 @@ static void s_s3_client_vip_finish_destroy(void *user_data);
 struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *client, struct aws_s3_vip *vip);
 void s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
+static struct aws_s3_client_work *s_s3_client_work_new(struct aws_s3_client *client, void *user_data, uint32_t flags) {
+
+    struct aws_s3_client_work *work = NULL;
+
+    if ((flags & AWS_S3_CLIENT_WORK_FLAGS_POOL) != 0) {
+        // TODO    work = aws_memory_pool_acquire(client->work_memory_pool);
+    } else {
+        work = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_client_work));
+    }
+
+    work->user_data = user_data;
+    work->flags = flags;
+
+    return work;
+}
+
+static void s_s3_client_work_destroy(struct aws_s3_client *client, struct aws_s3_client_work *work) {
+    if ((work->flags & AWS_S3_CLIENT_WORK_FLAGS_POOL) != 0) {
+        // TODO    aws_memory_pool_release(client->work_memory_pool);
+    } else {
+        aws_mem_release(client->allocator, work);
+    }
+}
+
+static void s_s3_client_work_destroy_list(struct aws_s3_client *client, struct aws_linked_list *work_list) {
+    while (!aws_linked_list_empty(work_list)) {
+        struct aws_linked_list_node *work_node = aws_linked_list_pop_back(work_list);
+        struct aws_s3_client_work *work = AWS_CONTAINER_OF(work_node, struct aws_s3_client_work, node);
+
+        s_s3_client_work_destroy(client, work);
+    }
+}
+
 static struct aws_s3_vip *s_s3_find_vip(
     const struct aws_linked_list *vip_list,
     const struct aws_byte_cursor *host_address);
@@ -70,41 +113,13 @@ static void s_s3_part_buffer_pool_init(struct aws_s3_part_buffer_pool *pool);
 static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client *client, const size_t num_buffers);
 static void s_s3_client_destroy_part_buffer_pool_synced(struct aws_s3_client *client);
 
-/* Push a meta request into our list of processing. */
-static void s_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
-/* Remove a meta request from our list. */
-static void s_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
-/* Callback for when a meta request in our list has new work available. */
-static void s_s3_client_meta_request_work_available_callback(struct aws_s3_meta_request *meta_request, void *user_data);
-
-/* Callback for when a meta request in our list completely done.  */
-static void s_s3_client_meta_request_finished_callback(
-    struct aws_s3_meta_request *meta_request,
-    int error_code,
-    void *user_data);
-
 static void s_s3_client_resolved_address_callback(struct aws_host_address *host_address, void *user_data);
 
 static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_byte_cursor *host_address);
 
-static void s_s3_client_wake_up_idle_vip_connections(struct aws_s3_client *client);
+static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
 
-/* Schedule the process_meta_requests_loop_task for a given vip_connection.  Only done for idle connections or
- * automatically at the end of processing for a meta request (so that processing of another one can start).  */
-static int s_s3_client_vip_connection_process_meta_requests(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
-
-static int s_s3_client_vip_connection_process_meta_requests_continue(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
-
-static void s_s3_client_vip_connection_process_meta_requests_loop_task(
-    struct aws_task *task,
-    void *arg,
-    enum aws_task_status task_status);
+static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
 /* Callback for when a single request (not an entire meta request) has finished on a VIP connection. */
 static void s_s3_client_vip_connection_request_finished(void *user_data);
@@ -183,6 +198,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->client_bootstrap = client_config->client_bootstrap;
     aws_client_bootstrap_acquire(client_config->client_bootstrap);
 
+    aws_event_loop_group_acquire(client_config->client_bootstrap->event_loop_group);
     client->event_loop = aws_event_loop_group_get_next_loop(client_config->client_bootstrap->event_loop_group);
 
     /* Store credentials provider and grab a reference. */
@@ -241,8 +257,12 @@ struct aws_s3_client *aws_s3_client_new(
     aws_mutex_init(&client->synced_data.lock);
 
     aws_linked_list_init(&client->synced_data.vips);
-    aws_linked_list_init(&client->synced_data.idle_vip_connections);
-    aws_linked_list_init(&client->synced_data.meta_requests);
+    aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
+    aws_linked_list_init(&client->synced_data.pending_vip_connection_removals);
+    aws_linked_list_init(&client->synced_data.pending_meta_requests);
+
+    aws_linked_list_init(&client->threaded_data.idle_vip_connections);
+    aws_linked_list_init(&client->threaded_data.meta_requests);
 
     s_s3_part_buffer_pool_init(&client->synced_data.part_buffer_pool);
 
@@ -316,9 +336,6 @@ static void s_s3_client_finish_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    aws_client_bootstrap_release(client->client_bootstrap);
-    client->client_bootstrap = NULL;
-
     aws_credentials_provider_release(client->credentials_provider);
     client->credentials_provider = NULL;
 
@@ -336,16 +353,19 @@ static void s_s3_client_finish_destroy(void *user_data) {
 
     aws_mutex_clean_up(&client->synced_data.lock);
 
-    /* Remove all active meta requests. */
-    while (!aws_linked_list_empty(&client->synced_data.meta_requests)) {
-        struct aws_linked_list_node *meta_request_node = aws_linked_list_pop_back(&client->synced_data.meta_requests);
-        struct aws_s3_meta_request *meta_request =
-            AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_data.node);
+    AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_vip_connection_updates));
+    AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_vip_connection_removals));
+    AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_requests));
 
-        aws_s3_meta_request_release(meta_request);
-    }
+    AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.idle_vip_connections));
+    AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));
 
     s_s3_client_destroy_part_buffer_pool_synced(client);
+
+    aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
+
+    aws_client_bootstrap_release(client->client_bootstrap);
+    client->client_bootstrap = NULL;
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
@@ -415,6 +435,8 @@ static struct aws_s3_vip *s_s3_client_vip_new(
         goto error_clean_up;
     }
 
+    aws_linked_list_init(&vip->vip_connections);
+
     /* Acquire internal reference for the HTTP Connection Manager. */
     s_s3_client_internal_acquire(client);
 
@@ -435,51 +457,22 @@ static void s_s3_client_vip_destroy(struct aws_s3_vip *vip) {
     AWS_PRECONDITION(vip);
 
     struct aws_s3_client *client = vip->owning_client;
-
-    struct aws_linked_list destroy_list;
-    aws_linked_list_init(&destroy_list);
-
     s_s3_client_lock_synced_data(client);
 
-    vip->synced_data.pending_destruction = true;
-
-    /* Grab all idle vip connections for this vip so that we can immediately clean them up. */
-    if (!aws_linked_list_empty(&client->synced_data.idle_vip_connections)) {
-        struct aws_linked_list_node *current_node = aws_linked_list_begin(&client->synced_data.idle_vip_connections);
-
-        while (current_node != aws_linked_list_end(&client->synced_data.idle_vip_connections)) {
-            struct aws_s3_vip_connection *vip_connection =
-                AWS_CONTAINER_OF(current_node, struct aws_s3_vip_connection, node);
-
-            struct aws_linked_list_node *next_node = aws_linked_list_next(current_node);
-
-            if (vip_connection->owning_vip == vip) {
-                AWS_LOGF_DEBUG(
-                    AWS_LS_S3_CLIENT,
-                    "id=%p VIP Connection %p is idle, immediately destroying it for vip %p",
-                    (void *)client,
-                    (void *)vip_connection,
-                    (void *)vip);
-
-                aws_linked_list_remove(current_node);
-
-                aws_linked_list_push_back(&destroy_list, current_node);
-            }
-
-            current_node = next_node;
-        }
-    }
-
-    s_s3_client_unlock_synced_data(client);
-
-    while (!aws_linked_list_empty(&destroy_list)) {
-        struct aws_linked_list_node *current_node = aws_linked_list_pop_back(&destroy_list);
+    while (!aws_linked_list_empty(&vip->vip_connections)) {
+        struct aws_linked_list_node *vip_connection_node = aws_linked_list_pop_back(&vip->vip_connections);
 
         struct aws_s3_vip_connection *vip_connection =
-            AWS_CONTAINER_OF(current_node, struct aws_s3_vip_connection, node);
+            AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, synced_data.vip_node);
 
-        s_s3_vip_connection_destroy(client, vip_connection);
+        struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection, 0);
+
+        aws_linked_list_push_back(&client->synced_data.pending_vip_connection_removals, &work->node);
     }
+
+    s_s3_client_schedule_process_work_task_synced(client);
+
+    s_s3_client_unlock_synced_data(client);
 
     aws_ref_count_release(&vip->internal_ref_count);
     vip = NULL;
@@ -545,8 +538,8 @@ void s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip
     owning_vip = NULL;
     vip_connection->owning_vip = NULL;
 
-    aws_s3_meta_request_release(vip_connection->meta_request);
-    vip_connection->meta_request = NULL;
+    aws_s3_meta_request_release(vip_connection->threaded_data.meta_request);
+    vip_connection->threaded_data.meta_request = NULL;
 
     aws_mem_release(client->allocator, vip_connection);
 
@@ -747,13 +740,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
     }
 
+    /* TODO just pass in client? */
     struct aws_s3_meta_request_internal_options internal_options;
     AWS_ZERO_STRUCT(internal_options);
     internal_options.options = options;
     internal_options.client = client;
-    internal_options.user_data = client;
-    internal_options.work_available_callback = s_s3_client_meta_request_work_available_callback;
-    internal_options.finish_callback = s_s3_client_meta_request_finished_callback;
 
     struct aws_s3_meta_request *meta_request = NULL;
 
@@ -764,68 +755,27 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
+    aws_s3_client_schedule_meta_request_work(meta_request->client, meta_request);
+
     AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
 
-    s_s3_client_push_meta_request(client, meta_request);
     return meta_request;
 }
 
-static void s_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
+void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(meta_request);
 
-    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Pushing meta request %p", (void *)client, (void *)meta_request);
-
     s_s3_client_lock_synced_data(client);
 
-    /* Grab a new reference for the meta request for its place in the list. */
     aws_s3_meta_request_acquire(meta_request);
 
-    /* Add our new meta request to our request list */
-    aws_linked_list_push_back(&client->synced_data.meta_requests, &meta_request->client_data.node);
+    struct aws_s3_client_work *work = s_s3_client_work_new(client, meta_request, 0);
+    aws_linked_list_push_back(&client->synced_data.pending_meta_requests, &work->node);
+
+    s_s3_client_schedule_process_work_task_synced(client);
 
     s_s3_client_unlock_synced_data(client);
-
-    s_s3_client_wake_up_idle_vip_connections(client);
-}
-
-static void s_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(meta_request);
-
-    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Removing meta request %p", (void *)client, (void *)meta_request);
-
-    s_s3_client_lock_synced_data(client);
-    aws_linked_list_remove(&meta_request->client_data.node);
-    s_s3_client_unlock_synced_data(client);
-
-    aws_s3_meta_request_release(meta_request);
-}
-
-/* Callback for when the meta request is finished. */
-static void s_s3_client_meta_request_finished_callback(
-    struct aws_s3_meta_request *meta_request,
-    int error_code,
-    void *user_data) {
-    (void)error_code;
-
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(user_data);
-
-    struct aws_s3_client *client = user_data;
-    s_s3_client_remove_meta_request(client, meta_request);
-}
-
-static void s_s3_client_meta_request_work_available_callback(
-    struct aws_s3_meta_request *meta_request,
-    void *user_data) {
-    struct aws_s3_client *client = user_data;
-
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(meta_request);
-    (void)meta_request;
-
-    s_s3_client_wake_up_idle_vip_connections(client);
 }
 
 /* Callback for address being resolved by the host resolver. */
@@ -862,14 +812,14 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
 
     /* If we didn't find a match in the table, we have a VIP to add! */
     if (s_s3_find_vip(&client->synced_data.vips, host_address) != NULL) {
-        goto error_clean_up_unlock;
+        goto unlock;
     }
 
     /* Allocate the new VIP. */
     vip = s_s3_client_vip_new(client, host_address);
 
     if (vip == NULL) {
-        goto error_clean_up;
+        goto unlock;
     }
 
     aws_linked_list_push_back(&client->synced_data.vips, &vip->node);
@@ -880,231 +830,249 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
     for (size_t conn_index = 0; conn_index < client->num_connections_per_vip; ++conn_index) {
         struct aws_s3_vip_connection *vip_connection = aws_s3_vip_connection_new(client, vip);
 
-        aws_linked_list_push_back(&client->synced_data.idle_vip_connections, &vip_connection->node);
+        aws_linked_list_push_back(&vip->vip_connections, &vip_connection->synced_data.vip_node);
+
+        struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection, 0);
+
+        aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &work->node);
     }
+
+    s_s3_client_schedule_process_work_task_synced(client);
+
+unlock:
 
     s_s3_client_unlock_synced_data(client);
 
-    s_s3_client_wake_up_idle_vip_connections(client);
+    if (vip == NULL) {
+        return AWS_OP_ERR;
+    }
 
     return AWS_OP_SUCCESS;
-
-error_clean_up_unlock:
-
-    s_s3_client_unlock_synced_data(client);
-
-error_clean_up:
-
-    s_s3_client_vip_destroy(vip);
-
-    return AWS_OP_ERR;
 }
 
-static void s_s3_client_wake_up_idle_vip_connections(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
+static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
-    struct aws_linked_list local_list;
-
-    aws_linked_list_init(&local_list);
-
-    s_s3_client_lock_synced_data(client);
-    aws_linked_list_swap_contents(&client->synced_data.idle_vip_connections, &local_list);
-    s_s3_client_unlock_synced_data(client);
-
-    /* Wake up any idle connections and tell them that there is work to do. */
-    /* TODO Optimization: have a separate linked list of meta requests that have work, so that we don't have to wake up
-     * N connections that possibly need to look through M meta requests, which is O(MN).*/
-    while (!aws_linked_list_empty(&local_list)) {
-        struct aws_linked_list_node *vip_connection_node = aws_linked_list_pop_front(&local_list);
-
-        struct aws_s3_vip_connection *vip_connection =
-            AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, node);
-
-        s_s3_client_vip_connection_process_meta_requests(client, vip_connection);
+    if (client->synced_data.process_work_task_scheduled) {
+        return;
     }
-}
-
-/* Start processing meta requests on the specified VIP connection. Acquired a new internal reference to the client to
- * keep the client from cleaning up until the processing has been terminated. */
-static int s_s3_client_vip_connection_process_meta_requests(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
 
     s_s3_client_internal_acquire(client);
 
-    return s_s3_client_vip_connection_process_meta_requests_continue(client, vip_connection);
-}
-
-/* Continue processing meta requests for the specific VIP connection. Does not acquire a new internal reference to the
- * client--only meant to be called to continue processing meta requests after it has finished processing a previous meta
- * request. */
-static int s_s3_client_vip_connection_process_meta_requests_continue(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(vip_connection);
-
     aws_task_init(
-        &vip_connection->process_meta_requests_task,
-        s_s3_client_vip_connection_process_meta_requests_loop_task,
-        vip_connection,
-        "s3_client_vip_connection_process_meta_requests_loop_task");
+        &client->synced_data.process_work_task, s_s3_client_process_work_task, client, "s3_client_process_work_task");
 
-    aws_event_loop_schedule_task_now(client->event_loop, &vip_connection->process_meta_requests_task);
+    aws_event_loop_schedule_task_now(client->event_loop, &client->synced_data.process_work_task);
 
-    return AWS_OP_SUCCESS;
+    client->synced_data.process_work_task_scheduled = true;
 }
 
 /* Task function for trying to find a request that can be processed. */
-static void s_s3_client_vip_connection_process_meta_requests_loop_task(
-    struct aws_task *task,
-    void *arg,
-    enum aws_task_status task_status) {
-
+static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    AWS_PRECONDITION(task);
     (void)task;
-    (void)task_status;
 
-    struct aws_s3_vip_connection *vip_connection = arg;
-    AWS_PRECONDITION(vip_connection);
-
-    struct aws_s3_vip *vip = vip_connection->owning_vip;
-    AWS_PRECONDITION(vip);
-
-    struct aws_s3_client *client = vip->owning_client;
+    struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);
 
-    struct aws_s3_meta_request *prev_meta_request = vip_connection->meta_request;
+    /* Client keeps a reference to the event loop group; a 'canceled' status should not be happen.*/
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+
+    struct aws_linked_list vip_connections_updates;
+    struct aws_linked_list vip_connections_removals;
+    struct aws_linked_list meta_requests_adds;
+    struct aws_linked_list work_destroy_list;
+
+    aws_linked_list_init(&vip_connections_updates);
+    aws_linked_list_init(&vip_connections_removals);
+    aws_linked_list_init(&meta_requests_adds);
+    aws_linked_list_init(&work_destroy_list);
 
     s_s3_client_lock_synced_data(client);
 
-    struct aws_s3_vip *owning_vip = vip_connection->owning_vip;
-    AWS_PRECONDITION(owning_vip);
+    /* Once we exit this mutex, someone can reschedule this task. */
+    client->synced_data.process_work_task_scheduled = false;
 
-    /* If we're pending destruction, go ahead and clean up. */
-    if (owning_vip->synced_data.pending_destruction) {
-        goto clean_up_vip_connection;
+    aws_linked_list_swap_contents(&vip_connections_updates, &client->synced_data.pending_vip_connection_updates);
+    aws_linked_list_swap_contents(&vip_connections_removals, &client->synced_data.pending_vip_connection_removals);
+    aws_linked_list_swap_contents(&meta_requests_adds, &client->synced_data.pending_meta_requests);
+
+    s_s3_client_unlock_synced_data(client);
+
+    /*******************/
+    /* Step 1: Process VIP connection removals, flagging each VIP connection for destruction */
+    /*******************/
+    while (!aws_linked_list_empty(&vip_connections_removals)) {
+        struct aws_linked_list_node *work_node = aws_linked_list_pop_back(&vip_connections_removals);
+        struct aws_s3_client_work *work = AWS_CONTAINER_OF(work_node, struct aws_s3_client_work, node);
+        struct aws_s3_vip_connection *vip_connection = work->user_data;
+
+        /* We can't necessarily clean up a VIP connection immediately--it may still be in the middle of processing a
+         * request. Instead, we flag it for pending destruction, and the next time it becomes idle, it will be
+         * destroyed. */
+        vip_connection->threaded_data.pending_destruction = true;
+
+        aws_linked_list_push_back(&work_destroy_list, &work->node);
     }
 
-    /* If this task is getting cancelled, make this connection idle. */
-    if (task_status == AWS_TASK_STATUS_CANCELED) {
-        goto make_vip_connection_idle;
-    }
+    /*******************/
+    /* Step 2: Process meta request adds. */
+    /*******************/
+    while (!aws_linked_list_empty(&meta_requests_adds)) {
+        struct aws_linked_list_node *work_node = aws_linked_list_pop_back(&meta_requests_adds);
+        struct aws_s3_client_work *work = AWS_CONTAINER_OF(work_node, struct aws_s3_client_work, node);
+        struct aws_s3_meta_request *meta_request = work->user_data;
 
-    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
-
-    struct aws_s3_meta_request *next_meta_request = NULL;
-
-    const struct aws_linked_list_node *meta_request_node_search_start =
-        aws_linked_list_begin(&client->synced_data.meta_requests);
-
-    const struct aws_linked_list_node *meta_request_node_search_end =
-        aws_linked_list_end(&client->synced_data.meta_requests);
-
-    /* If we have an existing meta request, see if there is a request next in the list that can be used. */
-    if (prev_meta_request != NULL && aws_linked_list_node_next_is_valid(&prev_meta_request->client_data.node) &&
-        aws_linked_list_next(&prev_meta_request->client_data.node) !=
-            aws_linked_list_end(&client->synced_data.meta_requests)) {
-
-        struct aws_linked_list_node *next_meta_request_node =
-            aws_linked_list_next(&prev_meta_request->client_data.node);
-
-        next_meta_request = AWS_CONTAINER_OF(next_meta_request_node, struct aws_s3_meta_request, client_data.node);
-        AWS_FATAL_ASSERT(next_meta_request);
-
-        /* If the next meta request in the list doesn't have work available, then we set up to search the list starting
-         * from its next-node, terminating at its own node. */
-        if (!aws_s3_meta_request_has_work(next_meta_request)) {
-            meta_request_node_search_start = aws_linked_list_next(&next_meta_request->client_data.node);
-
-            if (meta_request_node_search_start == aws_linked_list_end(&client->synced_data.meta_requests)) {
-                meta_request_node_search_start = aws_linked_list_begin(&client->synced_data.meta_requests);
-            }
-
-            meta_request_node_search_end = &next_meta_request->client_data.node;
-            next_meta_request = NULL;
+        /* If this is already scheduled, go ahead and clean it up. */
+        if (meta_request->threaded_data.added_to_client) {
+            aws_s3_meta_request_release(meta_request);
+        } else {
+            /* Push it to our list.  We don't call aws_s3_meta_request_acquire here since we still have the reference
+             * for when the meta request was added to the work list. */
+            aws_linked_list_push_back(&client->threaded_data.meta_requests, &meta_request->threaded_data.node);
+            meta_request->threaded_data.added_to_client = true;
         }
+
+        aws_linked_list_push_back(&work_destroy_list, &work->node);
     }
 
-    /* If we don't have a next meta request that has work yet, then we search through the list. */
-    if (next_meta_request == NULL) {
-        const struct aws_linked_list_node *meta_request_node_actual_end =
-            aws_linked_list_end(&client->synced_data.meta_requests);
+    /*******************/
+    /* Step 3: Check all of the incoming VIP connections for meta requests.  If they already have a meta request, that
+     * means they just finished a request, so we check for remaining work.  If there isn't any remaining work, then we
+     * remove that meta request from our list. */
+    /*******************/
+    for (struct aws_linked_list_node *work_node = aws_linked_list_begin(&vip_connections_updates);
+         work_node != aws_linked_list_end(&vip_connections_updates);
+         work_node = aws_linked_list_next(work_node)) {
+        struct aws_s3_client_work *work = AWS_CONTAINER_OF(work_node, struct aws_s3_client_work, node);
+        struct aws_s3_vip_connection *vip_connection = work->user_data;
 
-        const struct aws_linked_list_node *meta_request_node = meta_request_node_search_start;
+        struct aws_s3_meta_request *meta_request = vip_connection->threaded_data.meta_request;
 
-        while (meta_request_node != meta_request_node_search_end) {
-            struct aws_s3_meta_request *current_meta_request =
-                AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_data.node);
+        /* If this VIP connection has a meta request that no longer has work, we can remove that meta request.*/
+        if (meta_request == NULL || aws_s3_meta_request_has_work(meta_request)) {
+            continue;
+        }
 
-            if (aws_s3_meta_request_has_work(current_meta_request)) {
-                next_meta_request = current_meta_request;
-                break;
-            }
+        /* Try to find the meta request before the current meta request. */
+        struct aws_s3_meta_request *prev_meta_request = NULL;
 
-            meta_request_node = aws_linked_list_next(meta_request_node);
+        if (&meta_request->threaded_data.node != aws_linked_list_begin(&client->threaded_data.meta_requests)) {
+            struct aws_linked_list_node *prev_node = aws_linked_list_prev(&meta_request->threaded_data.node);
+            prev_meta_request = AWS_CONTAINER_OF(prev_node, struct aws_s3_meta_request, threaded_data.node);
+        }
 
-            /* If we hit the end of the list, but our search end is not at the end of the list, wrap around to the
-             * beginning. */
-            if (meta_request_node == meta_request_node_actual_end &&
-                meta_request_node_search_end != meta_request_node_actual_end) {
-                meta_request_node = aws_linked_list_begin(&client->synced_data.meta_requests);
+        /* Go through all of the VIP connections that this meta request is referenced by, and switch their meta
+         * request to the meta request before it.  This is so that the processing ordering of meta requests will still
+         * be maintained in the next step when we actually go to the next request in the list. */
+        while (!aws_linked_list_empty(&meta_request->threaded_data.referenced_vip_connections)) {
+            struct aws_linked_list_node *ref_vip_connection_node =
+                aws_linked_list_pop_back(&meta_request->threaded_data.referenced_vip_connections);
+
+            struct aws_s3_vip_connection *ref_vip_connection = AWS_CONTAINER_OF(
+                ref_vip_connection_node, struct aws_s3_vip_connection, threaded_data.meta_request_reference_node);
+
+            /* All VIP connections in this referenced list should be referencing this meta request. */
+            AWS_ASSERT(ref_vip_connection->threaded_data.meta_request == meta_request);
+
+            /* Clear out the reference to this meta request */
+            aws_s3_meta_request_release(meta_request);
+
+            ref_vip_connection->threaded_data.meta_request = prev_meta_request;
+
+            /* If we just pointed our VIP connection to a new meta request, then acquire a reference and add the VIP
+             * connection to the reference list. */
+            if (prev_meta_request != NULL) {
+                aws_s3_meta_request_acquire(prev_meta_request);
+                aws_linked_list_push_back(
+                    &prev_meta_request->threaded_data.referenced_vip_connections,
+                    &ref_vip_connection->threaded_data.meta_request_reference_node);
             }
         }
+
+        /* Remove the meta request from our list. */
+        aws_s3_meta_request_release(meta_request);
+        aws_linked_list_remove(&meta_request->threaded_data.node);
+        meta_request->threaded_data.added_to_client = false;
     }
 
-    /* If we have been unable to find a meta request that has work, then put the vip connection into the idle list. */
-    if (next_meta_request == NULL) {
-        goto make_vip_connection_idle;
+    /*******************/
+    /* Step 4: Move all idle connections into our local update list.  If it turns out we can't find work for them,
+     * they'll arrive back in the idle vip connections list by the end of the next loop. */
+    /*******************/
+    aws_linked_list_move_all_back(&vip_connections_updates, &client->threaded_data.idle_vip_connections);
+
+    /*******************/
+    /* Step 5: Go through all VIP connections that could take new work, both incoming and what we know is already idle,
+     * and try to assign a meta request to each. */
+    /*******************/
+    while (!aws_linked_list_empty(&vip_connections_updates)) {
+        struct aws_linked_list_node *work_node = aws_linked_list_pop_back(&vip_connections_updates);
+        struct aws_s3_client_work *work = AWS_CONTAINER_OF(work_node, struct aws_s3_client_work, node);
+        struct aws_s3_vip_connection *vip_connection = work->user_data;
+
+        /* If this VIP connection is pending destruction, go ahead and clean it up now. */
+        if (vip_connection->threaded_data.pending_destruction) {
+            s_s3_vip_connection_destroy(client, vip_connection);
+            aws_linked_list_push_back(&work_destroy_list, &work->node);
+            continue;
+        }
+
+        struct aws_linked_list_node *next_meta_request_node = NULL;
+
+        /* If this VIP connection has a meta request, clear it out, and try to grab the next one in the list. */
+        if (vip_connection->threaded_data.meta_request != NULL) {
+            next_meta_request_node =
+                aws_linked_list_next(&vip_connection->threaded_data.meta_request->threaded_data.node);
+
+            aws_linked_list_remove(&vip_connection->threaded_data.meta_request_reference_node);
+            aws_s3_meta_request_release(vip_connection->threaded_data.meta_request);
+            vip_connection->threaded_data.meta_request = NULL;
+        }
+
+        bool has_next_meta_request_node =
+            next_meta_request_node != NULL &&
+            next_meta_request_node != aws_linked_list_end(&client->threaded_data.meta_requests);
+
+        /* If we don't have a next-meta-request node (either we didn't have a meta request, or it's next-node didn't get
+         * us anything), and we do have something in our meta request list, then start at the beginning of the list.*/
+        if (!has_next_meta_request_node && !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+            next_meta_request_node = aws_linked_list_begin(&client->threaded_data.meta_requests);
+        }
+
+        /* If we still don't have a meta request node, there's nothing for this vip connectiont o do. */
+        if (next_meta_request_node == NULL) {
+            AWS_ASSERT(vip_connection->threaded_data.meta_request == NULL);
+            aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &work->node);
+            continue;
+        }
+
+        struct aws_s3_meta_request *next_meta_request =
+            AWS_CONTAINER_OF(next_meta_request_node, struct aws_s3_meta_request, threaded_data.node);
+
+        /* Acquire a new reference to this meta request for our VIP connection. */
+        aws_s3_meta_request_acquire(next_meta_request);
+        vip_connection->threaded_data.meta_request = next_meta_request;
+
+        aws_linked_list_push_back(
+            &next_meta_request->threaded_data.referenced_vip_connections,
+            &vip_connection->threaded_data.meta_request_reference_node);
+
+        /* Acquire an internal reference to be released by s_s3_client_vip_connection_request_finished. */
+        s_s3_client_internal_acquire(client);
+
+        struct aws_s3_send_request_options options = {.vip_connection = vip_connection,
+                                                      .finished_callback = s_s3_client_vip_connection_request_finished,
+                                                      .user_data = vip_connection};
+
+        aws_s3_meta_request_send_next_request(vip_connection->threaded_data.meta_request, &options);
+
+        aws_linked_list_push_back(&work_destroy_list, &work->node);
     }
 
-    aws_s3_meta_request_acquire(next_meta_request);
-    s_s3_client_unlock_synced_data(client);
+    s_s3_client_work_destroy_list(client, &work_destroy_list);
 
-    if (prev_meta_request != NULL) {
-        aws_s3_meta_request_release(prev_meta_request);
-        prev_meta_request = NULL;
-    }
-
-    vip_connection->meta_request = next_meta_request;
-
-    struct aws_s3_send_request_options options = {.vip_connection = vip_connection,
-                                                  .finished_callback = s_s3_client_vip_connection_request_finished,
-                                                  .user_data = vip_connection};
-
-    aws_s3_meta_request_send_next_request(next_meta_request, &options);
-
-    return;
-
-clean_up_vip_connection:
-
-    s_s3_client_unlock_synced_data(client);
-
-    aws_s3_meta_request_release(prev_meta_request);
-    prev_meta_request = NULL;
-    vip_connection->meta_request = NULL;
-
-    s_s3_vip_connection_destroy(client, vip_connection);
     s_s3_client_internal_release(client);
-
-    return;
-
-make_vip_connection_idle:
-
-    /* Reset the current meta request variable on the VIP connection. We'll release the held reference once outside
-     * of the mutex. */
-    vip_connection->meta_request = NULL;
-
-    aws_linked_list_push_back(&client->synced_data.idle_vip_connections, &vip_connection->node);
-    s_s3_client_unlock_synced_data(client);
-
-    /* Get rid of internal reference for processing meta requests on this VIP connection. */
-    s_s3_client_internal_release(client);
-
-    /* Clean up the previous meta request reference outside of the mutex. */
-    if (prev_meta_request != NULL) {
-        aws_s3_meta_request_release(prev_meta_request);
-        prev_meta_request = NULL;
-    }
 }
 
 /* Called by the meta request when it has finished using this VIP connection for a single request. */
@@ -1118,7 +1086,15 @@ static void s_s3_client_vip_connection_request_finished(void *user_data) {
     struct aws_s3_client *client = vip->owning_client;
     AWS_PRECONDITION(client);
 
-    s_s3_client_vip_connection_process_meta_requests_continue(client, vip_connection);
+    s_s3_client_lock_synced_data(client);
+
+    struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection, 0);
+    aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &work->node);
+    s_s3_client_schedule_process_work_task_synced(client);
+
+    s_s3_client_unlock_synced_data(client);
+
+    s_s3_client_internal_release(client);
 }
 
 struct s3_client_siging_payload {
