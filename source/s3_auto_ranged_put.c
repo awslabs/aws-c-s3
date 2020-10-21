@@ -332,6 +332,9 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
         }
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
+
+            bool error_occurred = false;
+
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
 
             uint64_t range_start = (request_desc->part_number - 1) * meta_request->part_size;
@@ -344,7 +347,8 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
                     "meta request.",
                     (void *)meta_request,
                     request_desc->request_tag);
-                goto message_create_failed;
+                error_occurred = true;
+                goto unlock;
             }
 
             struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
@@ -358,7 +362,8 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
                     "request.",
                     (void *)meta_request,
                     request_desc->request_tag);
-                goto message_create_failed;
+                error_occurred = true;
+                goto unlock;
             }
 
             /* Copy it into our part buffer. */
@@ -370,10 +375,16 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
                     "request.",
                     (void *)meta_request,
                     request_desc->request_tag);
-                goto message_create_failed;
+                error_occurred = true;
+                goto unlock;
             }
 
+unlock:
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+            if(error_occurred) {
+                goto message_create_failed;
+            }
 
             /* Create a new put-object message to upload a part. */
             message = aws_s3_put_object_message_new(
@@ -475,7 +486,6 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
     return request;
 
 message_create_failed:
-    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
     return NULL;
 
