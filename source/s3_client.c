@@ -745,6 +745,9 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
         /* TODO */
         AWS_FATAL_ASSERT(false);
+    } else if (options->type == AWS_S3_META_REQUEST_TYPE_ANY) {
+        /* TODO */
+        AWS_FATAL_ASSERT(false);
     } else {
         AWS_FATAL_ASSERT(false);
     }

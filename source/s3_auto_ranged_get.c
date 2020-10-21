@@ -394,7 +394,7 @@ static int s_s3_auto_ranged_get_incoming_headers(
 
         s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
 
-        aws_s3_meta_request_notify_work_available(&auto_ranged_get->base);
+        aws_s3_client_schedule_meta_request_work(meta_request->client, &auto_ranged_get->base);
     }
 
     return AWS_OP_SUCCESS;
@@ -459,10 +459,8 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
 
         /* If the error was service side, or we just ran out of part buffers, retry the request. */
         if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
-            if (aws_s3_meta_request_queue_retry(meta_request, &work->request_desc)) {
-                aws_s3_meta_request_finish(meta_request, aws_last_error());
-            }
-            /* Otherwise, finish the request with failure. */
+            aws_s3_meta_request_queue_retry(meta_request, &work->request_desc);
+        /* Otherwise, finish the request with failure. */
         } else {
             aws_s3_meta_request_finish(meta_request, error_code);
         }
