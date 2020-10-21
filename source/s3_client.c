@@ -40,14 +40,9 @@ static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
 
-enum aws_s3_client_work_flags {
-    AWS_S3_CLIENT_WORK_FLAGS_POOL = 0x01,
-};
-
 struct aws_s3_client_work {
     struct aws_linked_list_node node;
     void *user_data;
-    uint32_t flags;
 };
 
 static void s_s3_client_lock_synced_data(struct aws_s3_client *client);
@@ -72,28 +67,24 @@ static void s_s3_client_vip_finish_destroy(void *user_data);
 struct aws_s3_vip_connection *aws_s3_vip_connection_new(struct aws_s3_client *client, struct aws_s3_vip *vip);
 void s_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
-static struct aws_s3_client_work *s_s3_client_work_new(struct aws_s3_client *client, void *user_data, uint32_t flags) {
+/* TODO add option to grab work memory from a pool */
+static struct aws_s3_client_work *s_s3_client_work_new(struct aws_s3_client *client, void *user_data) {
+    AWS_PRECONDITION(client);
 
-    struct aws_s3_client_work *work = NULL;
-
-    if ((flags & AWS_S3_CLIENT_WORK_FLAGS_POOL) != 0) {
-        // TODO    work = aws_memory_pool_acquire(client->work_memory_pool);
-    } else {
-        work = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_client_work));
-    }
-
+    struct aws_s3_client_work *work = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_client_work));
     work->user_data = user_data;
-    work->flags = flags;
 
     return work;
 }
 
 static void s_s3_client_work_destroy(struct aws_s3_client *client, struct aws_s3_client_work *work) {
-    if ((work->flags & AWS_S3_CLIENT_WORK_FLAGS_POOL) != 0) {
-        // TODO    aws_memory_pool_release(client->work_memory_pool);
-    } else {
-        aws_mem_release(client->allocator, work);
+    AWS_PRECONDITION(client);
+
+    if (work == NULL) {
+        return;
     }
+
+    aws_mem_release(client->allocator, work);
 }
 
 static void s_s3_client_work_destroy_list(struct aws_s3_client *client, struct aws_linked_list *work_list) {
@@ -465,7 +456,7 @@ static void s_s3_client_vip_destroy(struct aws_s3_vip *vip) {
         struct aws_s3_vip_connection *vip_connection =
             AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, synced_data.vip_node);
 
-        struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection, 0);
+        struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection);
 
         aws_linked_list_push_back(&client->synced_data.pending_vip_connection_removals, &work->node);
     }
@@ -770,7 +761,7 @@ void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, stru
 
     aws_s3_meta_request_acquire(meta_request);
 
-    struct aws_s3_client_work *work = s_s3_client_work_new(client, meta_request, 0);
+    struct aws_s3_client_work *work = s_s3_client_work_new(client, meta_request);
     aws_linked_list_push_back(&client->synced_data.pending_meta_requests, &work->node);
 
     s_s3_client_schedule_process_work_task_synced(client);
@@ -832,7 +823,7 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
 
         aws_linked_list_push_back(&vip->vip_connections, &vip_connection->synced_data.vip_node);
 
-        struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection, 0);
+        struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection);
 
         aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &work->node);
     }
@@ -1088,7 +1079,7 @@ static void s_s3_client_vip_connection_request_finished(void *user_data) {
 
     s_s3_client_lock_synced_data(client);
 
-    struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection, 0);
+    struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection);
     aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &work->node);
     s_s3_client_schedule_process_work_task_synced(client);
 
