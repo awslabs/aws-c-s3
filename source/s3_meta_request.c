@@ -215,7 +215,7 @@ void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws
     AWS_PRECONDITION(meta_request->allocator);
     AWS_PRECONDITION(meta_request->initial_request_message);
 
-    if(request == NULL) {
+    if (request == NULL) {
         return;
     }
 
@@ -293,7 +293,7 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
     bool has_result = false;
     bool result = false;
 
-    s_s3_meta_request_lock_synced_data((struct aws_s3_meta_request*)meta_request);
+    s_s3_meta_request_lock_synced_data((struct aws_s3_meta_request *)meta_request);
 
     if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
         has_result = true;
@@ -303,9 +303,9 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
         result = true;
     }
 
-    s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request*)meta_request);
-    
-    if(has_result) {
+    s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
+
+    if (has_result) {
         return result;
     }
 
@@ -651,7 +651,7 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int er
         return;
     }
 
-    if(meta_request->client != NULL) {
+    if (meta_request->client != NULL) {
         aws_s3_client_release(meta_request->client);
         meta_request->client = NULL;
     }

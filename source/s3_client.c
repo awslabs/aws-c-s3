@@ -862,6 +862,7 @@ static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *
 static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     AWS_PRECONDITION(task);
     (void)task;
+    (void)task_status;
 
     struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);

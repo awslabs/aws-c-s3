@@ -143,13 +143,13 @@ struct aws_s3_meta_request {
 
     struct {
 
-		/* Linked list node for the meta requests linked list in the client. */
+        /* Linked list node for the meta requests linked list in the client. */
         struct aws_linked_list_node node;
-        
-		/* List of VIP connections currently processing this meta request. */
+
+        /* List of VIP connections currently processing this meta request. */
         struct aws_linked_list referenced_vip_connections;
 
-		/* True when this meta request has already been added to the client. */
+        /* True when this meta request has already been added to the client. */
         bool added_to_client;
 
     } threaded_data;

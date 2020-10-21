@@ -33,7 +33,7 @@ struct aws_s3_vip {
     /* Connection manager shared by all VIP connections. */
     struct aws_http_connection_manager *http_connection_manager;
 
-	/* List of vip connections for this particular VIP. */
+    /* List of vip connections for this particular VIP. */
     struct aws_linked_list vip_connections;
 };
 
@@ -49,21 +49,21 @@ struct aws_s3_vip_connection {
     uint32_t request_count;
 
     struct {
-		
-		/* Linked list node for the owning vip's linked list. */
+
+        /* Linked list node for the owning vip's linked list. */
         struct aws_linked_list_node vip_node;
 
     } synced_data;
 
     struct {
 
-		/* Linked list node for a linked list of referencing VIP connections in the below meta request. */
+        /* Linked list node for a linked list of referencing VIP connections in the below meta request. */
         struct aws_linked_list_node meta_request_reference_node;
 
-		/* Actively processing meta request. */
+        /* Actively processing meta request. */
         struct aws_s3_meta_request *meta_request;
-		
-		/* Once this connection is idle (ie: meta_request is NULL), this connection will clean up. */
+
+        /* Once this connection is idle (ie: meta_request is NULL), this connection will clean up. */
         bool pending_destruction;
 
     } threaded_data;
@@ -133,19 +133,19 @@ struct aws_s3_client {
         /* Our pool of parts to be used by file transfers as needed. */
         struct aws_s3_part_buffer_pool part_buffer_pool;
 
-		/* VIP Connections that need added or updatd in the work event loop. */
+        /* VIP Connections that need added or updatd in the work event loop. */
         struct aws_linked_list pending_vip_connection_updates;
-		
-		/* VIP Connections that need removed in the work event loop. */
+
+        /* VIP Connections that need removed in the work event loop. */
         struct aws_linked_list pending_vip_connection_removals;
-		
-		/* Meta requests that need added in the work event loop. */
+
+        /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_requests;
 
-		/* Task for processing the above work. */
+        /* Task for processing the above work. */
         struct aws_task process_work_task;
-		
-		/* Whether or not work processing is currently scheduled. */
+
+        /* Whether or not work processing is currently scheduled. */
         bool process_work_task_scheduled;
 
     } synced_data;
