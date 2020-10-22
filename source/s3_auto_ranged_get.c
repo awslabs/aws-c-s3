@@ -288,7 +288,7 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
             part_buffer = aws_s3_client_get_part_buffer(client, request_desc->part_number);
 
             if (part_buffer == NULL) {
-                AWS_LOGF_WARN(
+                AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not get part buffer for request with tag %d for auto-ranged-get meta request.",
                     (void *)meta_request,
@@ -458,9 +458,10 @@ static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream,
     if (error_code != AWS_ERROR_SUCCESS) {
 
         /* If the error was service side, or we just ran out of part buffers, retry the request. */
+        /* TODO try to guarantee part buffers ara available earlier. */
         if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
             aws_s3_meta_request_queue_retry(meta_request, &work->request_desc);
-        /* Otherwise, finish the request with failure. */
+            /* Otherwise, finish the request with failure. */
         } else {
             aws_s3_meta_request_finish(meta_request, error_code);
         }
