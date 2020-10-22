@@ -177,12 +177,12 @@ static const struct aws_byte_cursor s_part_section_string_2 = AWS_BYTE_CUR_INIT_
 struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    struct aws_byte_buf *buffer,
+    struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *etags) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
-    AWS_PRECONDITION(buffer);
+    AWS_PRECONDITION(body_buffer);
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
 
@@ -215,7 +215,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     /* Create XML payload with all of the etags of finished parts */
     {
-        if (aws_byte_buf_append(buffer, &s_complete_payload_begin)) {
+        if (aws_byte_buf_append(body_buffer, &s_complete_payload_begin)) {
             goto error_clean_up;
         }
 
@@ -226,17 +226,17 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
             AWS_FATAL_ASSERT(etag != NULL);
 
-            if (aws_byte_buf_append(buffer, &s_part_section_string_0)) {
+            if (aws_byte_buf_append(body_buffer, &s_part_section_string_0)) {
                 goto error_clean_up;
             }
 
             struct aws_byte_cursor etag_byte_cursor = aws_byte_cursor_from_string(etag);
 
-            if (aws_byte_buf_append(buffer, &etag_byte_cursor)) {
+            if (aws_byte_buf_append(body_buffer, &etag_byte_cursor)) {
                 goto error_clean_up;
             }
 
-            if (aws_byte_buf_append(buffer, &s_part_section_string_1)) {
+            if (aws_byte_buf_append(body_buffer, &s_part_section_string_1)) {
                 goto error_clean_up;
             }
 
@@ -246,20 +246,20 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             struct aws_byte_cursor part_number_byte_cursor =
                 aws_byte_cursor_from_array(part_number_buffer, part_number_num_char);
 
-            if (aws_byte_buf_append(buffer, &part_number_byte_cursor)) {
+            if (aws_byte_buf_append(body_buffer, &part_number_byte_cursor)) {
                 goto error_clean_up;
             }
 
-            if (aws_byte_buf_append(buffer, &s_part_section_string_2)) {
+            if (aws_byte_buf_append(body_buffer, &s_part_section_string_2)) {
                 goto error_clean_up;
             }
         }
 
-        if (aws_byte_buf_append(buffer, &s_complete_payload_end)) {
+        if (aws_byte_buf_append(body_buffer, &s_complete_payload_end)) {
             goto error_clean_up;
         }
 
-        s_s3_message_util_assign_body(allocator, buffer, message);
+        s_s3_message_util_assign_body(allocator, body_buffer, message);
     }
 
     return message;
