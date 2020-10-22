@@ -216,7 +216,8 @@ static int s_s3_auto_ranged_put_next_request(
                 goto unlock;
             }
 
-            auto_ranged_put->synced_data.total_num_parts = request_body_length / meta_request->part_size;
+            /* TODO add additional error checking for this going out of bounds. */
+            auto_ranged_put->synced_data.total_num_parts = (uint32_t)(request_body_length / meta_request->part_size);
 
             if (request_body_length % meta_request->part_size) {
                 ++auto_ranged_put->synced_data.total_num_parts;

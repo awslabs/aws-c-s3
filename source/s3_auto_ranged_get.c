@@ -4,6 +4,11 @@
 #include "aws/s3/private/s3_util.h"
 #include <inttypes.h>
 
+#ifdef _MSC_VER
+/* sscanf warning (not currently scanning for strings) */
+#    pragma warning(disable : 4996)
+#endif
+
 enum aws_s3_auto_ranged_get_state {
     AWS_S3_AUTO_RANGED_GET_STATE_START,
     AWS_S3_AUTO_RANGED_GET_STATE_WAITING_FOR_FIRST_PART,
@@ -195,7 +200,7 @@ static int s_s3_auto_ranged_get_next_request(
         }
         case AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS: {
 
-            /* Keep returning reutrning requests until we've returned up to the total amount of parts. */
+            /* Keep returning returning requests until we've returned up to the total amount of parts. */
             if (auto_ranged_get->synced_data.next_part_number <= auto_ranged_get->synced_data.total_num_parts) {
 
                 request_desc = aws_s3_request_desc_new(
@@ -383,7 +388,8 @@ static int s_s3_auto_ranged_get_incoming_headers(
 
         s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
 
-        size_t num_parts = total_object_size / meta_request->part_size;
+        /* TODO add additional error checking for this value going out of bounds. */
+        uint32_t num_parts = (uint32_t)(total_object_size / meta_request->part_size);
 
         if (total_object_size % meta_request->part_size) {
             ++num_parts;
