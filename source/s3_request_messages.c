@@ -103,9 +103,6 @@ static struct aws_http_message *s_s3_message_util_copy_http_message(
         }
     }
 
-    struct aws_input_stream *body_stream = aws_http_message_get_body_stream(base_message);
-    aws_http_message_set_body_stream(message, body_stream);
-
     return message;
 
 error_clean_up:
