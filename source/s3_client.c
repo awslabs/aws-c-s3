@@ -798,6 +798,7 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
         (const char *)host_address->ptr);
 
     struct aws_s3_vip *vip = NULL;
+    int result = AWS_OP_SUCCESS;
 
     s_s3_client_lock_synced_data(client);
 
@@ -810,6 +811,7 @@ static int s_s3_client_add_vip(struct aws_s3_client *client, const struct aws_by
     vip = s_s3_client_vip_new(client, host_address);
 
     if (vip == NULL) {
+        result = AWS_OP_ERR;
         goto unlock;
     }
 
@@ -834,11 +836,7 @@ unlock:
 
     s_s3_client_unlock_synced_data(client);
 
-    if (vip == NULL) {
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
+    return result;
 }
 
 static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client) {

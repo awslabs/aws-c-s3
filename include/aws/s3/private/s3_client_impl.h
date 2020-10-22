@@ -55,6 +55,7 @@ struct aws_s3_vip_connection {
 
     } synced_data;
 
+    /* threaded_data members accessible only from the event loop thread. */
     struct {
 
         /* Linked list node for a linked list of referencing VIP connections in the below meta request. */
