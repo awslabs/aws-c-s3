@@ -224,6 +224,7 @@ static int s_s3_auto_ranged_put_next_request(
 
             /* TODO add better support for this. */
             AWS_ASSERT(auto_ranged_put->synced_data.total_num_parts < g_max_num_upload_parts);
+            (void)g_max_num_upload_parts;
 
             /* If we're less than a part size, don't bother with a multipart upload. */
             if (request_body_length <= (int64_t)meta_request->part_size) {
