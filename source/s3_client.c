@@ -739,7 +739,17 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     struct aws_s3_meta_request *meta_request = NULL;
 
-    /* TODO branch on meta-request type */
+    /* Call the appropriate meta-request new function. */
+    if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        meta_request = aws_s3_meta_request_auto_ranged_get_new(client->allocator, &internal_options);
+    } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+        meta_request = aws_s3_meta_request_auto_ranged_put_new(client->allocator, &internal_options);
+    } else if (options->type == AWS_S3_META_REQUEST_TYPE_ANY) {
+        /* TODO */
+        AWS_FATAL_ASSERT(false);
+    } else {
+        AWS_FATAL_ASSERT(false);
+    }
 
     if (meta_request == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not create new meta request.", (void *)client);

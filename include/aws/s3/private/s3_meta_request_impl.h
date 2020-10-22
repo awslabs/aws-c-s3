@@ -171,6 +171,16 @@ struct aws_s3_meta_request {
 
 bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request);
 
+/* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */
+struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
+    struct aws_allocator *allocator,
+    const struct aws_s3_meta_request_internal_options *options);
+
+/* Creates a new auto-ranged put meta request.  This will do a multipart upload in parallel when appropriate. */
+struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
+    struct aws_allocator *allocator,
+    const struct aws_s3_meta_request_internal_options *options);
+
 /* Tells the meta request to start sending another request, if there is one currently to send.  This is used the client.
  */
 void aws_s3_meta_request_send_next_request(

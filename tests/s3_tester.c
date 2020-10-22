@@ -22,6 +22,29 @@ static bool s_s3_tester_has_received_finish_callback(void *user_data);
 
 static bool s_s3_tester_has_clean_up_finished(void *user_data);
 
+struct aws_string *aws_s3_tester_build_endpoint_string(
+    struct aws_allocator *allocator,
+    const struct aws_byte_cursor *bucket_name,
+    const struct aws_byte_cursor *region) {
+
+    struct aws_byte_cursor endpoint_url_part0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".s3.");
+    struct aws_byte_cursor endpoint_url_part1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(".amazonaws.com");
+
+    struct aws_byte_buf endpoint_buffer;
+    aws_byte_buf_init(&endpoint_buffer, allocator, 128);
+
+    aws_byte_buf_append_dynamic(&endpoint_buffer, bucket_name);
+    aws_byte_buf_append_dynamic(&endpoint_buffer, &endpoint_url_part0);
+    aws_byte_buf_append_dynamic(&endpoint_buffer, region);
+    aws_byte_buf_append_dynamic(&endpoint_buffer, &endpoint_url_part1);
+
+    struct aws_string *endpoint_string = aws_string_new_from_buf(allocator, &endpoint_buffer);
+
+    aws_byte_buf_clean_up(&endpoint_buffer);
+
+    return endpoint_string;
+}
+
 int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
 
     AWS_PRECONDITION(allocator);
@@ -137,7 +160,7 @@ void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_si
 
         struct aws_byte_cursor from_byte_cursor = {.len = string_copy_size, .ptr = test_string.ptr};
 
-        aws_byte_buf_append(out_buf, from_byte_cursor);
+        aws_byte_buf_append(out_buf, &from_byte_cursor);
     }
 }
 
