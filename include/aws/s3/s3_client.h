@@ -19,7 +19,7 @@ struct aws_s3_request;
 struct aws_s3_meta_request;
 
 enum aws_s3_meta_request_type {
-    AWS_S3_META_REQUEST_TYPE_ANY,
+    AWS_S3_META_REQUEST_TYPE_DEFAULT,
     AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT
 };

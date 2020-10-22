@@ -678,7 +678,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
 
-    if (options->type != AWS_S3_META_REQUEST_TYPE_ANY && options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
+    if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT && options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
         options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
@@ -744,7 +744,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         meta_request = aws_s3_meta_request_auto_ranged_get_new(client->allocator, &internal_options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
         meta_request = aws_s3_meta_request_auto_ranged_put_new(client->allocator, &internal_options);
-    } else if (options->type == AWS_S3_META_REQUEST_TYPE_ANY) {
+    } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         /* TODO */
         AWS_FATAL_ASSERT(false);
     } else {
