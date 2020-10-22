@@ -164,14 +164,14 @@ static const struct aws_byte_cursor s_complete_payload_end =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</CompleteMultipartUpload>");
 
 static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
-                                                                                                  "        <ETag>");
+                                                                                                    "        <ETag>");
 
 static const struct aws_byte_cursor s_part_section_string_1 =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag>\n"
                                           "         <PartNumber>");
 
 static const struct aws_byte_cursor s_part_section_string_2 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n"
-                                                                                                  "    </Part>\n");
+                                                                                                    "    </Part>\n");
 
 /* Create a complete-multipart message, which includes an XML payload of all completed parts. */
 struct aws_http_message *aws_s3_complete_multipart_message_new(
@@ -215,7 +215,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     /* Create XML payload with all of the etags of finished parts */
     {
-        if (aws_byte_buf_append_dynamic(buffer, &s_complete_payload_begin)) {
+        if (aws_byte_buf_append(buffer, &s_complete_payload_begin)) {
             goto error_clean_up;
         }
 
@@ -226,24 +226,36 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
             AWS_FATAL_ASSERT(etag != NULL);
 
-            aws_byte_buf_append_dynamic(buffer, &s_part_section_string_0);
+            if (aws_byte_buf_append(buffer, &s_part_section_string_0)) {
+                goto error_clean_up;
+            }
 
             struct aws_byte_cursor etag_byte_cursor = aws_byte_cursor_from_string(etag);
-            aws_byte_buf_append_dynamic(buffer, &etag_byte_cursor);
 
-            aws_byte_buf_append_dynamic(buffer, &s_part_section_string_1);
+            if (aws_byte_buf_append(buffer, &etag_byte_cursor)) {
+                goto error_clean_up;
+            }
+
+            if (aws_byte_buf_append(buffer, &s_part_section_string_1)) {
+                goto error_clean_up;
+            }
 
             char part_number_buffer[32] = "";
             int part_number = (int)(etag_index + 1);
             int part_number_num_char = snprintf(part_number_buffer, sizeof(part_number_buffer), "%d", part_number);
-            struct aws_byte_cursor part_number_byte_cursor = aws_byte_cursor_from_array(part_number_buffer, part_number_num_char);
+            struct aws_byte_cursor part_number_byte_cursor =
+                aws_byte_cursor_from_array(part_number_buffer, part_number_num_char);
 
-            aws_byte_buf_append_dynamic(buffer, &part_number_byte_cursor);
+            if (aws_byte_buf_append(buffer, &part_number_byte_cursor)) {
+                goto error_clean_up;
+            }
 
-            aws_byte_buf_append_dynamic(buffer, &s_part_section_string_2);
+            if (aws_byte_buf_append(buffer, &s_part_section_string_2)) {
+                goto error_clean_up;
+            }
         }
 
-        if (aws_byte_buf_append_dynamic(buffer, &s_complete_payload_end)) {
+        if (aws_byte_buf_append(buffer, &s_complete_payload_end)) {
             goto error_clean_up;
         }
 
@@ -253,6 +265,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     return message;
 
 error_clean_up:
+
+    AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Could not create complete multipart message");
 
     if (message != NULL) {
         aws_http_message_release(message);
