@@ -19,7 +19,7 @@ static const struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT
 
 static const struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
 static const struct aws_byte_cursor s_test_bucket_name =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket");
 
 AWS_TEST_CASE(test_s3_client_create_destroy, s_test_s3_client_create_destroy)
 static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void *ctx) {
@@ -86,7 +86,7 @@ AWS_TEST_CASE(test_s3_get_object, s_test_s3_get_object)
 static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -148,7 +148,7 @@ AWS_TEST_CASE(test_s3_get_object_multiple, s_test_s3_get_object_multiple)
 static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 
     struct aws_s3_meta_request *meta_requests[] = {NULL, NULL, NULL, NULL};
     size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
@@ -226,7 +226,7 @@ AWS_TEST_CASE(test_s3_put_object, s_test_s3_put_object)
 static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object2.txt");
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/put_object_test_10MB.txt");
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, 1));
