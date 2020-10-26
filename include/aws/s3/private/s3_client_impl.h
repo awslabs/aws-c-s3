@@ -91,9 +91,6 @@ struct aws_s3_client {
     /* Region of the S3 bucket. */
     struct aws_string *region;
 
-    /* Endpoint to use for the bucket. */
-    struct aws_string *endpoint;
-
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
     const uint64_t part_size;
@@ -116,15 +113,15 @@ struct aws_s3_client {
     /* The calculated ideal number of VIP's based on throughput target and throughput per vip. */
     const uint32_t ideal_vip_count;
 
-    /* Atomic used for switching host resolution on/off in a thread safe way. */
-    struct aws_atomic_var resolving_hosts;
-
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
     struct {
         struct aws_mutex lock;
+
+        /* Endpoint to use for the bucket. */
+        struct aws_string *endpoint;
 
         uint32_t vip_count;
 
@@ -146,8 +143,14 @@ struct aws_s3_client {
         /* Task for processing the above work. */
         struct aws_task process_work_task;
 
+        /* Host listener to get new IP addresses. */
+        struct aws_host_listener *host_listener;
+
         /* Whether or not work processing is currently scheduled. */
         bool process_work_task_scheduled;
+
+        /* Whether or not the client has started cleaning up all of its resources */
+        bool cleaning_up;
 
     } synced_data;
 

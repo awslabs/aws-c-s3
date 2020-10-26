@@ -23,25 +23,29 @@ struct aws_host_resolver;
 /* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
     struct aws_allocator *allocator;
-
-    struct aws_mutex lock;
-    struct aws_condition_variable signal;
-
     struct aws_event_loop_group *el_group;
     struct aws_host_resolver *host_resolver;
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
 
-    int finish_error_code;
-
-    bool received_finish_callback;
+    struct aws_condition_variable signal;
+    size_t desired_finish_count;
     bool bound_to_client_shutdown;
-    bool clean_up_flag;
+
+    struct {
+        struct aws_mutex lock;
+
+        size_t finish_count;
+        int finish_error_code;
+
+        bool received_finish_callback;
+        bool clean_up_flag;
+    } synced_data;
 };
 
 struct aws_s3_client_config;
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, size_t desired_finish_count);
 
 /* Wait for aws_s3_tester_notify_finished to be called */
 void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester);
@@ -59,6 +63,10 @@ void aws_s3_tester_bind_client_shutdown(struct aws_s3_tester *tester, struct aws
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf);
+
+void aws_s3_tester_lock_synced_data(struct aws_s3_tester *tester);
+
+void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester);
 
 struct aws_string *aws_s3_tester_build_endpoint_string(
     struct aws_allocator *allocator,

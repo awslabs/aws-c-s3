@@ -21,6 +21,32 @@ static const struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_ST
 static const struct aws_byte_cursor s_test_bucket_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-rc");
 
+AWS_TEST_CASE(test_s3_client_create_destroy, s_test_s3_client_create_destroy)
+static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, 0));
+
+    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
+                                                 .credentials_provider = tester.credentials_provider,
+                                                 .region = s_test_s3_region};
+
+    aws_s3_tester_bind_client_shutdown(&tester, &client_config);
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 static struct aws_http_message *s_make_get_object_request(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host,
@@ -64,7 +90,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, 1));
 
     struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
                                                  .credentials_provider = tester.credentials_provider,
@@ -97,9 +123,84 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_finish(&tester);
-    ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
+
+    aws_s3_tester_lock_synced_data(&tester);
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    aws_s3_tester_unlock_synced_data(&tester);
 
     aws_s3_meta_request_release(meta_request);
+
+    aws_http_message_release(message);
+    message = NULL;
+
+    aws_string_destroy(host_name);
+    host_name = NULL;
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_get_object_multiple, s_test_s3_get_object_multiple)
+static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object.txt");
+
+    struct aws_s3_meta_request *meta_requests[] = {NULL, NULL, NULL, NULL};
+    size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, num_meta_requests));
+
+    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
+                                                 .credentials_provider = tester.credentials_provider,
+                                                 .region = s_test_s3_region,
+                                                 .part_size = 64 * 1024};
+
+    aws_s3_tester_bind_client_shutdown(&tester, &client_config);
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &s_test_bucket_name, &s_test_s3_region);
+
+    /* Put together a simple S3 Get Object request. */
+    struct aws_http_message *message =
+        s_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        struct aws_s3_meta_request_options options;
+        AWS_ZERO_STRUCT(options);
+        options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+        options.message = message;
+        options.user_data = &tester;
+        options.body_callback = s_test_s3_get_object_body_callback;
+        options.finish_callback = s_test_s3_get_object_finish;
+
+        /* Trigger accelerating of our Get Object request. */
+        struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+
+        ASSERT_TRUE(meta_request != NULL);
+
+        meta_requests[i] = meta_request;
+    }
+
+    /* Wait for the request to finish. */
+    aws_s3_tester_wait_for_finish(&tester);
+
+    aws_s3_tester_lock_synced_data(&tester);
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        aws_s3_meta_request_release(meta_requests[i]);
+        meta_requests[i] = NULL;
+    }
 
     aws_http_message_release(message);
     message = NULL;
@@ -128,7 +229,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/test_object2.txt");
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, 1));
 
     struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
                                                  .credentials_provider = tester.credentials_provider,
@@ -166,7 +267,10 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_finish(&tester);
-    ASSERT_TRUE(tester.finish_error_code == AWS_ERROR_SUCCESS);
+
+    aws_s3_tester_lock_synced_data(&tester);
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    aws_s3_tester_unlock_synced_data(&tester);
 
     aws_s3_meta_request_release(meta_request);
 

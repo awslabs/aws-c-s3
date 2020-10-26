@@ -45,7 +45,7 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     return endpoint_string;
 }
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, size_t desired_finish_count) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -58,7 +58,7 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 
     aws_s3_library_init(allocator);
 
-    if (aws_mutex_init(&tester->lock)) {
+    if (aws_mutex_init(&tester->synced_data.lock)) {
         return AWS_OP_ERR;
     }
 
@@ -72,6 +72,8 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 
     tester->host_resolver = aws_host_resolver_new_default(allocator, 10, tester->el_group, NULL);
     ASSERT_TRUE(tester->host_resolver != NULL);
+
+    tester->desired_finish_count = desired_finish_count;
 
     /* Setup the client boot strap. */
     {
@@ -96,27 +98,41 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 
 condition_variable_failed:
 
-    aws_mutex_clean_up(&tester->lock);
+    aws_mutex_clean_up(&tester->synced_data.lock);
 
     return AWS_OP_ERR;
 }
 
 void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
-    aws_mutex_lock(&tester->lock);
-    aws_condition_variable_wait_pred(&tester->signal, &tester->lock, s_s3_tester_has_received_finish_callback, tester);
-    aws_mutex_unlock(&tester->lock);
+
+    aws_s3_tester_lock_synced_data(tester);
+    aws_condition_variable_wait_pred(
+        &tester->signal, &tester->synced_data.lock, s_s3_tester_has_received_finish_callback, tester);
+    aws_s3_tester_unlock_synced_data(tester);
 }
 
 void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, int error_code) {
     AWS_PRECONDITION(tester);
 
-    aws_mutex_lock(&tester->lock);
-    tester->received_finish_callback = true;
-    tester->finish_error_code = error_code;
-    aws_mutex_unlock(&tester->lock);
+    bool notify = false;
 
-    aws_condition_variable_notify_one(&tester->signal);
+    aws_s3_tester_lock_synced_data(tester);
+    ++tester->synced_data.finish_count;
+
+    if (tester->desired_finish_count == 0 || tester->synced_data.finish_count == tester->desired_finish_count ||
+        error_code != AWS_ERROR_SUCCESS) {
+        tester->synced_data.received_finish_callback = true;
+        tester->synced_data.finish_error_code = error_code;
+
+        notify = true;
+    }
+
+    aws_s3_tester_unlock_synced_data(tester);
+
+    if (notify) {
+        aws_condition_variable_notify_one(&tester->signal);
+    }
 }
 
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
@@ -138,14 +154,28 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     tester->el_group = NULL;
 
     aws_condition_variable_clean_up(&tester->signal);
-    aws_mutex_clean_up(&tester->lock);
+    aws_mutex_clean_up(&tester->synced_data.lock);
 
     aws_s3_library_clean_up();
 
     aws_global_thread_creator_shutdown_wait_for(10);
 }
 
+void aws_s3_tester_lock_synced_data(struct aws_s3_tester *tester) {
+    AWS_PRECONDITION(tester);
+    aws_mutex_lock(&tester->synced_data.lock);
+}
+
+void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
+    AWS_PRECONDITION(tester);
+
+    aws_mutex_unlock(&tester->synced_data.lock);
+}
+
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(out_buf);
+
     struct aws_byte_cursor test_string = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("This is an S3 test.");
 
     aws_byte_buf_init(out_buf, allocator, buffer_size);
@@ -180,9 +210,9 @@ static void s_tester_notify_clean_up_signal(void *user_data) {
 
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
 
-    aws_mutex_lock(&tester->lock);
-    tester->clean_up_flag = true;
-    aws_mutex_unlock(&tester->lock);
+    aws_s3_tester_lock_synced_data(tester);
+    tester->synced_data.clean_up_flag = true;
+    aws_s3_tester_unlock_synced_data(tester);
 
     aws_condition_variable_notify_one(&tester->signal);
 }
@@ -190,23 +220,26 @@ static void s_tester_notify_clean_up_signal(void *user_data) {
 static bool s_s3_tester_has_received_finish_callback(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
-    return tester->received_finish_callback;
+
+    return tester->synced_data.received_finish_callback;
 }
 
 static bool s_s3_tester_has_clean_up_finished(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
-    return tester->clean_up_flag;
+
+    return tester->synced_data.clean_up_flag;
 }
 
 static void s_s3_tester_wait_for_clean_up_signal(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
-    aws_mutex_lock(&tester->lock);
-    aws_condition_variable_wait_pred(&tester->signal, &tester->lock, s_s3_tester_has_clean_up_finished, tester);
+    aws_s3_tester_lock_synced_data(tester);
+    aws_condition_variable_wait_pred(
+        &tester->signal, &tester->synced_data.lock, s_s3_tester_has_clean_up_finished, tester);
 
     /* Reset the clean up flag for any additional clean up steps */
-    tester->clean_up_flag = false;
+    tester->synced_data.clean_up_flag = false;
 
-    aws_mutex_unlock(&tester->lock);
+    aws_s3_tester_unlock_synced_data(tester);
 }
