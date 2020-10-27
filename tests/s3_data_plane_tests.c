@@ -182,11 +182,9 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
         options.finish_callback = s_test_s3_get_object_finish;
 
         /* Trigger accelerating of our Get Object request. */
-        struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+        meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
 
-        ASSERT_TRUE(meta_request != NULL);
-
-        meta_requests[i] = meta_request;
+        ASSERT_TRUE(meta_requests[i] != NULL);
     }
 
     /* Wait for the request to finish. */
