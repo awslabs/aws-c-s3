@@ -193,7 +193,7 @@ struct aws_s3_request_desc *aws_s3_request_desc_new(
 void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc) {
     AWS_PRECONDITION(meta_request);
 
-    if(request_desc == NULL) {
+    if (request_desc == NULL) {
         return;
     }
 
