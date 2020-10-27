@@ -391,6 +391,7 @@ unlock:
         work = NULL;
 
         if (error == AWS_ERROR_S3_NO_PART_BUFFER) {
+            aws_s3_meta_request_queue_retry(meta_request, &request_desc);
             goto call_finished_callback;
         } else {
             goto error_finish;
