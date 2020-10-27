@@ -356,7 +356,7 @@ static struct aws_http_message *s_make_put_object_request(
     struct aws_http_header content_type_header = {.name = g_content_type_header_name, .value = content_type};
 
     char content_length_buffer[64] = "";
-    sprintf(content_length_buffer, "%" PRId64 "", body_stream_length);
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRId64 "", body_stream_length);
 
     struct aws_http_header content_length_header = {.name = g_content_length_header_name,
                                                     .value = aws_byte_cursor_from_c_str(content_length_buffer)};
