@@ -385,9 +385,16 @@ unlock:
 
     /* Kick off processing the actual work for this request. */
     if (s_s3_meta_request_process_work(work)) {
+        int error = aws_last_error();
+
         s_s3_meta_request_send_request_work_destroy(work);
         work = NULL;
-        goto error_finish;
+
+        if (error == AWS_ERROR_S3_NO_PART_BUFFER) {
+            goto call_finished_callback;
+        } else {
+            goto error_finish;
+        }
     }
 
     return;

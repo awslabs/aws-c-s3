@@ -1049,7 +1049,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
             next_meta_request_node = aws_linked_list_begin(&client->threaded_data.meta_requests);
         }
 
-        /* If we still don't have a meta request node, there's nothing for this vip connectiont o do. */
+        /* If we still don't have a meta request node, there's nothing for this VIP connection to do. */
         if (next_meta_request_node == NULL) {
             AWS_ASSERT(vip_connection->threaded_data.meta_request == NULL);
             aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &work->node);
