@@ -5,7 +5,7 @@ set -ex
 if [ ! -x /home/ec2-user/install/bin/aws-crt-cpp-canary ]; then
     cd /tmp
     yum update -y
-    yum install -y cmake3 git gcc
+    yum install -y cmake3 git gcc7 gcc7-c++
     git clone https://github.com/awslabs/aws-crt-cpp.git
     cd aws-crt-cpp
     git checkout s3_canary_vertical
