@@ -1,8 +1,15 @@
-# Welcome to your CDK TypeScript project!
+# S3 Benchmark CDK kit
 
-This is a blank project for TypeScript development with CDK.
+This will deploy an EC2 instance with the S3Canary on it, and will dump a run to CloudWatch
+when the instance boots.
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+## Parameters:
+ * -c Uploads=N Where N is >= 0. 0 disables upload benchmark
+ * -c Downloads=N Where N is >= 0. 0 disables download benchmark
+      Should be about 1.6x your expected instance bandwidth
+ * -c InstanceType=I Where I is a valid ec2 instance type. Deployment will fail if CFN
+      can't work out the instance type
+
 
 ## Useful commands
 

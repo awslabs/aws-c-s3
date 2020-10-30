@@ -17,23 +17,23 @@ export class BenchmarksStack extends cdk.Stack {
 
     super(scope, id, props);
 
-    const instanceType = this.node.tryGetContext('InstanceType');
-    const downloads = this.node.tryGetContext('Downloads')
-    const uploads = this.node.tryGetContext('Uploads')
+    const instanceType = this.node.tryGetContext('InstanceType') as string;
+    const downloads = this.node.tryGetContext('Downloads') as number
+    const uploads = this.node.tryGetContext('Uploads') as number
 
     const s3BucketName = "aws-crt-canary-bucket" + (this.region != 'us-west-2') ? '-' + this.region : '';
 
     // Write out canary config
     var canary_config = {
       "ToolName": "S3Canary",
-      "InstanceType": instanceType.valueAsString,
+      "InstanceType": instanceType,
       "Region": this.region,
       "BucketName": s3BucketName,
       "DownloadObjectName": "crt-canary-obj-single-part-9223372036854775807",
-      "NumUpTransfers": uploads.valueAsNumber,
-      "NumUpConcurrentTransfers": uploads.valueAsNumber,
-      "NumDownTransfers": downloads.valueAsNumber,
-      "NumDownConcurrentTransfers": downloads.valueAsNumber,
+      "NumUpTransfers": uploads,
+      "NumUpConcurrentTransfers": uploads,
+      "NumDownTransfers": downloads,
+      "NumDownConcurrentTransfers": downloads,
       "FileNameSuffixOffset": 0,
       "MetricsPublishingEnabled": true,
       "MeasureSinglePartTransfer": true
