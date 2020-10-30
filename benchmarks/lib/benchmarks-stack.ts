@@ -17,23 +17,9 @@ export class BenchmarksStack extends cdk.Stack {
 
     super(scope, id, props);
 
-    const instanceType = new cdk.CfnParameter(this, 'InstanceType', {
-      type: "String",
-      description: "EC2 Instance Type to test",
-      default: 'c5n.18xlarge'
-    });
-
-    const downloads = new cdk.CfnParameter(this, 'Downloads', {
-      type: "Number",
-      description: "1.6 x N Gbps expected bandwidth",
-      default: '160'
-    });
-
-    const uploads = new cdk.CfnParameter(this, 'Uploads', {
-      type: "Number",
-      description: "Number of uploads to do, 0 disables",
-      default: 0
-    });
+    const instanceType = this.node.tryGetContext('InstanceType');
+    const downloads = this.node.tryGetContext('Downloads')
+    const uploads = this.node.tryGetContext('Uploads')
 
     const s3BucketName = "aws-crt-canary-bucket" + (this.region != 'us-west-2') ? '-' + this.region : '';
 
@@ -45,7 +31,7 @@ export class BenchmarksStack extends cdk.Stack {
       "BucketName": s3BucketName,
       "DownloadObjectName": "crt-canary-obj-single-part-9223372036854775807",
       "NumUpTransfers": uploads.valueAsNumber,
-      "MumUpConcurrentTransfers": uploads.valueAsNumber,
+      "NumUpConcurrentTransfers": uploads.valueAsNumber,
       "NumDownTransfers": downloads.valueAsNumber,
       "NumDownConcurrentTransfers": downloads.valueAsNumber,
       "FileNameSuffixOffset": 0,

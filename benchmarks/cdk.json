@@ -3,7 +3,10 @@
   "context": {
     "@aws-cdk/core:enableStackNameDuplicates": "true",
     "aws-cdk:enableDiffNoFail": "true",
-    "@aws-cdk/core:stackRelativeExports": "true"
+    "@aws-cdk/core:stackRelativeExports": "true",
+    "InstanceType": "c5n.18xlarge",
+    "Uploads": 0,
+    "Downloads": 160
   },
   "requireApproval": "never"
 }
