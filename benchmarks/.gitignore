@@ -9,3 +9,6 @@ cdk.out
 
 # Parcel default cache directory
 .parcel-cache
+
+cdk.context.json
+lib/canary.json
