@@ -6,9 +6,6 @@ import * as iam from '@aws-cdk/aws-iam';
 import * as path from 'path';
 import * as fs from 'fs';
 
-
-
-
 export class BenchmarksStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     props = props ? props : {
@@ -56,7 +53,7 @@ export class BenchmarksStack extends cdk.Stack {
       "MeasureSinglePartTransfer": true
     }
 
-    fs.writeFileSync(path.join(__dirname, 'canary.json'), canary_config);
+    fs.writeFileSync(path.join(__dirname, 'canary.json'), JSON.stringify(canary_config));
 
     // Make canary script and config available as assets
     const canary_json = new assets.Asset(this, 'canary.json', {

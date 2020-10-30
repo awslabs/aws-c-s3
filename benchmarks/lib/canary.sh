@@ -5,7 +5,7 @@ set -ex
 if [ ! -x /home/ec2-user/install/bin/aws-crt-cpp-canary ]; then
     cd /tmp
     yum update -y
-    yum install -y cmake3 git gcc7 gcc7-c++
+    yum install -y cmake3 git gcc72 gcc72-c++
     git clone https://github.com/awslabs/aws-crt-cpp.git
     cd aws-crt-cpp
     git checkout s3_canary_vertical
@@ -20,7 +20,7 @@ if [ ! -x /home/ec2-user/install/bin/aws-crt-cpp-canary ]; then
     mkdir -p /tmp/aws-crt-cpp/build
     cd /tmp/aws-crt-cpp/build
     cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_DEPS=true -DCMAKE_INSTALL_PREFIX=/home/ec2-user/install -DCMAKE_PREFIX_PATH=/home/ec2-user/install
-    cmake3 --build --target install
+    cmake3 --build . --target install -- -j
 fi
 
 
