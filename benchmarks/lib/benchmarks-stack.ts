@@ -2,6 +2,7 @@ import * as cdk from '@aws-cdk/core';
 import * as s3 from '@aws-cdk/aws-s3';
 import * as ec2 from '@aws-cdk/aws-ec2';
 import * as assets from '@aws-cdk/aws-s3-assets';
+import * as iam from '@aws-cdk/aws-iam';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -10,6 +11,13 @@ import * as fs from 'fs';
 
 export class BenchmarksStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
+    props = props ? props : {
+      env: {
+        account: '123124136734',
+        region: 'us-east-1'
+      }
+    }
+
     super(scope, id, props);
 
     const instanceType = new cdk.CfnParameter(this, 'InstanceType', {
@@ -30,7 +38,7 @@ export class BenchmarksStack extends cdk.Stack {
       default: 0
     });
 
-    const s3BucketName = "aws-crt-canary-bucket" + (this.region != 'us-east-1') ? '-' + this.region : '';
+    const s3BucketName = "aws-crt-canary-bucket" + (this.region != 'us-west-2') ? '-' + this.region : '';
 
     // Write out canary config
     var canary_config = {
@@ -77,13 +85,25 @@ export class BenchmarksStack extends cdk.Stack {
       arguments: canary_json_path
     });
 
-    const ec2instance = new ec2.Instance(this, 'BenchmarkClientInstance', {
+    const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
+      vpcId: 'vpc-d96a98a3'
+    });
+    const security_group = new ec2.SecurityGroup(this, 'SecurityGroup', {
+      vpc: vpc,
+    });
+    security_group.addIngressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(22),
+      'SSH'
+    );
+    const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient', {
       instanceType: new ec2.InstanceType('c5n.18xlarge'),
-      vpc: ec2.Vpc.fromLookup(this, 'VPC', {
-        vpcId: 'vpc-d96a98a3'
-      }),
+      vpc: vpc,
       machineImage: ec2.MachineImage.latestAmazonLinux(),
-      userData: instanceUserData
+      userData: instanceUserData,
+      role: iam.Role.fromRoleArn(this, 'S3CanaryInstanceRole', 'arn:aws:iam::123124136734:role/S3CanaryEC2Role'),
+      keyName: 'aws-common-runtime-keys',
+      securityGroup: security_group
     });
 
   }
