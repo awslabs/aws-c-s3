@@ -21,7 +21,7 @@ export class BenchmarksStack extends cdk.Stack {
     const downloads = this.node.tryGetContext('Downloads') as number
     const uploads = this.node.tryGetContext('Uploads') as number
 
-    const s3BucketName = "aws-crt-canary-bucket" + (this.region != 'us-west-2') ? '-' + this.region : '';
+    const s3BucketName = "aws-crt-canary-bucket" + ((this.region != 'us-west-2') ? '-' + this.region : '');
 
     // Write out canary config
     var canary_config = {
