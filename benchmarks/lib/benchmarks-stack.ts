@@ -80,7 +80,7 @@ export class BenchmarksStack extends cdk.Stack {
       'SSH'
     );
     const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient', {
-      instanceType: new ec2.InstanceType('c5n.18xlarge'),
+      instanceType: new ec2.InstanceType(instanceType),
       vpc: vpc,
       machineImage: ec2.MachineImage.latestAmazonLinux(),
       userData: instanceUserData,
