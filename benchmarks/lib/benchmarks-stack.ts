@@ -8,12 +8,12 @@ import * as fs from 'fs';
 
 export class BenchmarksStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
-    props = props ? props : {
-      env: {
-        account: '123124136734',
-        region: 'us-east-1'
-      }
-    }
+    // props = props ? props : {
+    //   env: {
+    //     account: 'XXXXXXXXXXX',
+    //     region: 'us-east-1'
+    //   }
+    // }
 
     super(scope, id, props);
 
