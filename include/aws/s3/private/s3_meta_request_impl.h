@@ -144,6 +144,7 @@ struct aws_s3_meta_request {
     struct {
 
         /* Linked list node for the meta requests linked list in the client. */
+        /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
         struct aws_linked_list_node node;
 
         /* List of VIP connections currently processing this meta request. */
