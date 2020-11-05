@@ -28,9 +28,11 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, 0));
 
-    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
-                                                 .credentials_provider = tester.credentials_provider,
-                                                 .region = s_test_s3_region};
+    struct aws_s3_client_config client_config = {
+        .client_bootstrap = tester.client_bootstrap,
+        .credentials_provider = tester.credentials_provider,
+        .region = s_test_s3_region,
+    };
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
@@ -91,10 +93,12 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, 1));
 
-    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
-                                                 .credentials_provider = tester.credentials_provider,
-                                                 .region = s_test_s3_region,
-                                                 .part_size = 64 * 1024};
+    struct aws_s3_client_config client_config = {
+        .client_bootstrap = tester.client_bootstrap,
+        .credentials_provider = tester.credentials_provider,
+        .region = s_test_s3_region,
+        .part_size = 64 * 1024,
+    };
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
@@ -156,10 +160,12 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, num_meta_requests));
 
-    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
-                                                 .credentials_provider = tester.credentials_provider,
-                                                 .region = s_test_s3_region,
-                                                 .part_size = 64 * 1024};
+    struct aws_s3_client_config client_config = {
+        .client_bootstrap = tester.client_bootstrap,
+        .credentials_provider = tester.credentials_provider,
+        .region = s_test_s3_region,
+        .part_size = 64 * 1024,
+    };
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
@@ -228,10 +234,12 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, 1));
 
-    struct aws_s3_client_config client_config = {.client_bootstrap = tester.client_bootstrap,
-                                                 .credentials_provider = tester.credentials_provider,
-                                                 .region = s_test_s3_region,
-                                                 .part_size = 5 * 1024 * 1024};
+    struct aws_s3_client_config client_config = {
+        .client_bootstrap = tester.client_bootstrap,
+        .credentials_provider = tester.credentials_provider,
+        .region = s_test_s3_region,
+        .part_size = 5 * 1024 * 1024,
+    };
 
     aws_s3_tester_bind_client_shutdown(&tester, &client_config);
 
