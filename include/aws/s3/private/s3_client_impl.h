@@ -51,6 +51,7 @@ struct aws_s3_vip_connection {
     struct {
 
         /* Linked list node for the owning vip's linked list. */
+        /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
         struct aws_linked_list_node vip_node;
 
     } synced_data;
@@ -59,6 +60,7 @@ struct aws_s3_vip_connection {
     struct {
 
         /* Linked list node for a linked list of referencing VIP connections in the below meta request. */
+        /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
         struct aws_linked_list_node meta_request_reference_node;
 
         /* Actively processing meta request. */

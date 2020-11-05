@@ -455,7 +455,7 @@ static void s_s3_client_vip_destroy(struct aws_s3_vip *vip) {
         struct aws_linked_list_node *vip_connection_node = aws_linked_list_pop_back(&vip->vip_connections);
 
         struct aws_s3_vip_connection *vip_connection =
-            AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, synced_data.vip_node);
+            AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, synced_data);
 
         struct aws_s3_client_work *work = s_s3_client_work_new(client, vip_connection);
 
@@ -968,7 +968,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
         if (&meta_request->threaded_data.node != aws_linked_list_begin(&client->threaded_data.meta_requests)) {
             struct aws_linked_list_node *prev_node = aws_linked_list_prev(&meta_request->threaded_data.node);
-            prev_meta_request = AWS_CONTAINER_OF(prev_node, struct aws_s3_meta_request, threaded_data.node);
+            prev_meta_request = AWS_CONTAINER_OF(prev_node, struct aws_s3_meta_request, threaded_data);
         }
 
         /* Go through all of the VIP connections that this meta request is referenced by, and switch their meta
@@ -978,8 +978,8 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
             struct aws_linked_list_node *ref_vip_connection_node =
                 aws_linked_list_pop_back(&meta_request->threaded_data.referenced_vip_connections);
 
-            struct aws_s3_vip_connection *ref_vip_connection = AWS_CONTAINER_OF(
-                ref_vip_connection_node, struct aws_s3_vip_connection, threaded_data.meta_request_reference_node);
+            struct aws_s3_vip_connection *ref_vip_connection =
+                AWS_CONTAINER_OF(ref_vip_connection_node, struct aws_s3_vip_connection, threaded_data);
 
             /* All VIP connections in this referenced list should be referencing this meta request. */
             AWS_ASSERT(ref_vip_connection->threaded_data.meta_request == meta_request);
@@ -1057,7 +1057,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
         }
 
         struct aws_s3_meta_request *next_meta_request =
-            AWS_CONTAINER_OF(next_meta_request_node, struct aws_s3_meta_request, threaded_data.node);
+            AWS_CONTAINER_OF(next_meta_request_node, struct aws_s3_meta_request, threaded_data);
 
         /* Acquire a new reference to this meta request for our VIP connection. */
         aws_s3_meta_request_acquire(next_meta_request);
