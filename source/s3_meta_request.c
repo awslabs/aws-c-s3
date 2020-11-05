@@ -192,7 +192,10 @@ struct aws_s3_request_desc *aws_s3_request_desc_new(
 
 void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(request_desc);
+
+    if (request_desc == NULL) {
+        return;
+    }
 
     aws_mem_release(meta_request->allocator, request_desc);
 }
@@ -271,7 +274,6 @@ static void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_reque
     }
 
     AWS_PRECONDITION(work->meta_request);
-    AWS_PRECONDITION(work->vip_connection);
 
     struct aws_s3_meta_request *meta_request = work->meta_request;
 
@@ -322,6 +324,7 @@ void aws_s3_meta_request_send_next_request(
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_request_desc *request_desc = NULL;
+    struct aws_s3_send_request_work *work = NULL;
     bool meta_request_already_finished = false;
 
     s_s3_meta_request_lock_synced_data(meta_request);
@@ -375,8 +378,7 @@ unlock:
         (void *)request_desc);
 
     /* Allocate a work structure that we will keep alive for the duration of processing this request. */
-    struct aws_s3_send_request_work *work =
-        s_s3_meta_request_send_request_work_new(meta_request, options, request_desc);
+    work = s_s3_meta_request_send_request_work_new(meta_request, options, request_desc);
 
     if (work == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not allocate work for meta request.", (void *)meta_request);
@@ -385,9 +387,20 @@ unlock:
 
     /* Kick off processing the actual work for this request. */
     if (s_s3_meta_request_process_work(work)) {
-        s_s3_meta_request_send_request_work_destroy(work);
-        work = NULL;
-        goto error_finish;
+        int error = aws_last_error();
+
+        if (error == AWS_ERROR_S3_NO_PART_BUFFER) {
+            AWS_LOGF_INFO(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Pushing request into retry queue due to lack of part buffer availability.",
+                (void *)meta_request);
+
+            aws_s3_meta_request_queue_retry(meta_request, &work->request_desc);
+
+            goto call_finished_callback;
+        } else {
+            goto error_finish;
+        }
     }
 
     return;
@@ -397,6 +410,9 @@ error_finish:
     aws_s3_meta_request_finish(meta_request, aws_last_error());
 
 call_finished_callback:
+
+    s_s3_meta_request_send_request_work_destroy(work);
+    work = NULL;
 
     if (options->finished_callback != NULL) {
         options->finished_callback(options->user_data);
