@@ -778,7 +778,7 @@ static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request,
  * downloading it. */
 void aws_s3_meta_request_write_body_to_caller(
     struct aws_s3_request *request,
-    aws_s3_meta_request_write_body_callback_fn *callback) {
+    aws_s3_meta_request_write_body_finished_callback_fn *callback) {
     AWS_PRECONDITION(request && request->part_buffer);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -787,15 +787,17 @@ void aws_s3_meta_request_write_body_to_caller(
     aws_s3_meta_request_internal_acquire(meta_request);
 
     aws_s3_request_acquire(request);
-    request->write_body_callback = callback;
+
+    AWS_ASSERT(request->write_body_data.finished_callback == NULL);
+    request->write_body_data.finished_callback = callback;
 
     aws_task_init(
-        &request->write_body_task,
+        &request->write_body_data.task,
         s_s3_meta_request_process_write_body_task,
         request,
         "s3_meta_request_process_write_body_task");
 
-    aws_event_loop_schedule_task_now(meta_request->event_loop, &request->write_body_task);
+    aws_event_loop_schedule_task_now(meta_request->event_loop, &request->write_body_data.task);
 }
 
 static void s_s3_meta_request_process_write_body_task(
@@ -815,7 +817,8 @@ static void s_s3_meta_request_process_write_body_task(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    aws_s3_meta_request_write_body_callback_fn *callback = request->write_body_callback;
+    aws_s3_meta_request_write_body_finished_callback_fn *callback = request->write_body_data.finished_callback;
+    request->write_body_data.finished_callback = NULL;
 
     if (task_status == AWS_TASK_STATUS_CANCELED) {
         goto clean_up;

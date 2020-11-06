@@ -17,6 +17,7 @@
 #include "aws/s3/s3_client.h"
 
 struct aws_s3_client;
+struct aws_s3_vip_connection;
 struct aws_s3_meta_request;
 struct aws_s3_request;
 struct aws_s3_request_options;
@@ -24,7 +25,7 @@ struct aws_http_headers;
 
 typedef void(aws_s3_meta_request_work_available_fn)(struct aws_s3_meta_request *meta_request, void *user_data);
 
-typedef void(aws_s3_meta_request_write_body_callback_fn)(
+typedef void(aws_s3_meta_request_write_body_finished_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
@@ -63,12 +64,14 @@ struct aws_s3_request {
     /* Optional part buffer to be used with this request. */
     struct aws_s3_part_buffer *part_buffer;
 
-    /* TODO put these in a struct? */
-    /* Callback used for aws_s3_meta_request_write_body_to_caller. */
-    aws_s3_meta_request_write_body_callback_fn *write_body_callback;
+    /* Data intended to be only be used by aws_s3_meta_request_write_body_to_caller functionality. */
+    struct {
+        /* Callback used for aws_s3_meta_request_write_body_to_caller. */
+        aws_s3_meta_request_write_body_finished_callback_fn *finished_callback;
 
-    /* Task used for aws_s3_meta_request_write_body_to_caller. */
-    struct aws_task write_body_task;
+        /* Task used for aws_s3_meta_request_write_body_to_caller. */
+        struct aws_task task;
+    } write_body_data;
 };
 
 /* Additional options that can be used internally (ie: by the client) without having to interfere with any user
@@ -218,7 +221,7 @@ int aws_s3_meta_request_init_base(
 /* Pass back the part buffer of the request as a response body to the user */
 void aws_s3_meta_request_write_body_to_caller(
     struct aws_s3_request *request,
-    aws_s3_meta_request_write_body_callback_fn *callback);
+    aws_s3_meta_request_write_body_finished_callback_fn *callback);
 
 /* Allocate a new request description with the given options. */
 struct aws_s3_request_desc *aws_s3_request_desc_new(
