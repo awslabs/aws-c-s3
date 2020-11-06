@@ -14,7 +14,7 @@
 #include <aws/http/request_response.h>
 
 #include "aws/s3/private/s3_part_buffer.h"
-#include "aws/s3/s3_client.h"
+#include "aws/s3/s3_client_impl.h"
 
 struct aws_s3_client;
 struct aws_s3_vip_connection;
