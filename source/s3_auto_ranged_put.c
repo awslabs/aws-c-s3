@@ -65,14 +65,17 @@ static int s_s3_auto_ranged_put_incoming_headers(
     enum aws_http_header_block header_block,
     const struct aws_http_header *headers,
     size_t headers_count,
-    void *user_data);
+    struct aws_s3_vip_connection *vip_connection);
 
 static int s_s3_auto_ranged_put_incoming_body(
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *data,
-    void *user_data);
+    struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
+static void s_s3_auto_ranged_put_stream_complete(
+    struct aws_http_stream *stream,
+    int error_code,
+    struct aws_s3_vip_connection *vip_connection);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .has_work = s_s3_auto_ranged_put_has_work,
@@ -511,24 +514,23 @@ static int s_s3_auto_ranged_put_incoming_headers(
     enum aws_http_header_block header_block,
     const struct aws_http_header *headers,
     size_t headers_count,
-    void *user_data) {
+    struct aws_s3_vip_connection *vip_connection) {
 
     (void)stream;
     (void)header_block;
 
     AWS_PRECONDITION(stream);
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work);
+    AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_request_desc *request_desc = work->request_desc;
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
     AWS_PRECONDITION(request_desc);
 
     if (request_desc->request_tag != AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
         return AWS_OP_SUCCESS;
     }
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
@@ -537,7 +539,7 @@ static int s_s3_auto_ranged_put_incoming_headers(
     struct aws_allocator *allocator = meta_request->allocator;
     AWS_PRECONDITION(allocator);
 
-    size_t part_number = work->request_desc->part_number;
+    size_t part_number = request_desc->part_number;
     AWS_FATAL_ASSERT(part_number > 0);
     size_t part_index = part_number - 1;
 
@@ -590,22 +592,20 @@ static int s_s3_auto_ranged_put_incoming_headers(
 static int s_s3_auto_ranged_put_incoming_body(
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *data,
-    void *user_data) {
+    struct aws_s3_vip_connection *vip_connection) {
 
     AWS_PRECONDITION(stream);
     (void)stream;
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work);
-    AWS_PRECONDITION(work->meta_request);
+    AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_request *request = work->request;
+    struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_request_desc *request_desc = work->request_desc;
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
     AWS_PRECONDITION(request_desc);
 
-    struct aws_s3_part_buffer *part_buffer = request->part_buffer;
+    struct aws_s3_part_buffer *part_buffer = vip_connection->work_data.request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
     if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
@@ -617,38 +617,44 @@ static int s_s3_auto_ranged_put_incoming_body(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_auto_ranged_put_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
+static void s_s3_auto_ranged_put_stream_complete(
+    struct aws_http_stream *stream,
+    int error_code,
+    struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(stream);
     (void)stream;
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work);
-    AWS_PRECONDITION(work->request_desc);
+    AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
+    AWS_PRECONDITION(request_desc);
+
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     AWS_PRECONDITION(auto_ranged_put);
 
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    AWS_PRECONDITION(auto_ranged_get);
+
     if (error_code != AWS_ERROR_SUCCESS) {
 
-        /* Retry if the error was service side or we just ran out of parts.  Otherwise, fail the meta request. */
+        /* If the error was service side, or we just ran out of part buffers, retry the request. */
         /* TODO try to guarantee part buffers ara available earlier. */
         if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
-            aws_s3_meta_request_queue_retry(meta_request, &work->request_desc);
+            aws_s3_meta_request_queue_retry(meta_request, request_desc);
+            vip_connection->work_data.request_desc = NULL;
         } else {
+            /* Otherwise, finish the request with failure. */
             aws_s3_meta_request_finish(meta_request, error_code);
         }
 
         return;
     }
-
-    struct aws_s3_request *request = work->request;
-    AWS_PRECONDITION(request);
-
-    struct aws_s3_request_desc *request_desc = work->request_desc;
-    AWS_PRECONDITION(request_desc);
 
     struct aws_s3_part_buffer *part_buffer = request->part_buffer;
     AWS_PRECONDITION(part_buffer);
