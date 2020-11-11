@@ -126,6 +126,7 @@ int aws_s3_meta_request_init_base(
     meta_request->client = internal_options->client;
 
     meta_request->user_data = options->user_data;
+    meta_request->headers_callback = options->headers_callback;
     meta_request->body_callback = options->body_callback;
     meta_request->finish_callback = options->finish_callback;
     meta_request->shutdown_callback = options->shutdown_callback;
@@ -191,13 +192,15 @@ void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_reque
 struct aws_s3_request_desc *aws_s3_request_desc_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
-    uint32_t part_number) {
+    uint32_t part_number,
+    uint32_t flags) {
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_request_desc *desc = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request_desc));
 
     desc->request_tag = request_tag;
     desc->part_number = part_number;
+    desc->record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
 
     return desc;
 }
@@ -271,6 +274,8 @@ void s_s3_request_destroy(void *user_data) {
         request->message = NULL;
     }
 
+    aws_http_headers_release(request->response_headers);
+    aws_byte_buf_clean_up(&request->response_body_error);
     aws_s3_part_buffer_release(request->part_buffer);
     aws_mem_release(meta_request->allocator, request);
     aws_s3_meta_request_release(meta_request);
@@ -459,7 +464,7 @@ unlock:
 
 error_finish:
 
-    aws_s3_meta_request_finish(meta_request, aws_last_error());
+    aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error());
 
 call_finished_callback:
 
@@ -584,7 +589,46 @@ static int s_s3_meta_request_incoming_headers(
     struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
 
-    if (meta_request->vtable->incoming_headers) {
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
+    AWS_PRECONDITION(request_desc);
+
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Incoming headers for request %p. VIP connection: %p.",
+        (void *)meta_request,
+        (void *)request,
+        (void *)vip_connection);
+
+    if (aws_http_stream_get_incoming_response_status(stream, &request->response_status)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not get incoming response status for request %p (request desc: %p)",
+            (void *)meta_request,
+            (void *)request,
+            (void *)request_desc);
+    }
+
+    bool successful_response = request->response_status == AWS_S3_RESPONSE_STATUS_SUCCESS ||
+                               request->response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS;
+
+    /* Only record headers if an error has taken place, or if the reqest_desc has asked for them. */
+    bool should_record_headers = !successful_response || request_desc->record_response_headers;
+
+    if (should_record_headers) {
+        for (size_t i = 0; i < headers_count; ++i) {
+            const struct aws_byte_cursor *name = &headers[i].name;
+            const struct aws_byte_cursor *value = &headers[i].value;
+
+            aws_http_headers_add(request->response_headers, *name, *value);
+        }
+    }
+
+    /* Failed requests are handled inside of the meta request base type, so only pass through to virtual function on
+     * success. */
+    if (successful_response && meta_request->vtable->incoming_headers) {
         return meta_request->vtable->incoming_headers(stream, header_block, headers, headers_count, vip_connection);
     }
 
@@ -602,8 +646,31 @@ static int s_s3_meta_request_headers_block_done(
     struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request && meta_request->vtable);
 
-    if (meta_request->vtable->incoming_headers_block_done) {
-        return meta_request->vtable->incoming_headers_block_done(stream, header_block, vip_connection);
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request && request->part_buffer);
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Header block done for request %p. Response status: %d. VIP connection: %p.",
+        (void *)meta_request,
+        (void *)request,
+        request->response_status,
+        (void *)vip_connection);
+
+    bool successful_response = request->response_status == AWS_S3_RESPONSE_STATUS_SUCCESS ||
+                               request->response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS;
+
+    /* Failed requests are handled inside of the meta request base type, so only pass through to virtual function on
+     * success. */
+    if (successful_response) {
+        if (meta_request->vtable->incoming_headers_block_done) {
+            return meta_request->vtable->incoming_headers_block_done(stream, header_block, vip_connection);
+        }
+    } else {
+        const size_t one_kb = 1 * 1024 * 1024;
+
+        /* We may have an error body coming soon, so allocate a buffer for that error. */
+        aws_byte_buf_init(&request->response_body_error, meta_request->allocator, one_kb);
     }
 
     return AWS_OP_SUCCESS;
@@ -620,8 +687,35 @@ static int s_s3_meta_request_incoming_body(
     struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request && meta_request->vtable);
 
-    if (meta_request->vtable->incoming_body) {
-        return meta_request->vtable->incoming_body(stream, data, vip_connection);
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request && request->part_buffer);
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Incoming body for request %p. Response status: %d. Data Size: %" PRIu64 ". VIP connection: %p.",
+        (void *)meta_request,
+        (void *)request,
+        request->response_status,
+        (uint64_t)data->len,
+        (void *)vip_connection);
+
+    bool successful_response = request->response_status == AWS_S3_RESPONSE_STATUS_SUCCESS ||
+                               request->response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS;
+
+    /* Failed requests are handled inside of the meta request base type, so only pass through to virtual function on
+     * success. */
+    if (successful_response) {
+
+        if (meta_request->vtable->incoming_body) {
+            return meta_request->vtable->incoming_body(stream, data, vip_connection);
+        }
+
+    } else {
+
+        /* Append the error to the response_body_error buffer, allowing the buffer to grow if necessary. */
+        if (aws_byte_buf_append_dynamic(&request->response_body_error, data)) {
+            return AWS_OP_ERR;
+        }
     }
 
     return AWS_OP_SUCCESS;
@@ -636,11 +730,28 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
     s_s3_meta_request_send_request_finish(vip_connection, stream, error_code);
 }
 
+static int s_s3_meta_request_error_code_from_response_status(int response_status) {
+    int error_code = AWS_ERROR_UNKNOWN;
+
+    if (response_status == AWS_S3_RESPONSE_STATUS_SUCCESS || response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS) {
+        error_code = AWS_ERROR_SUCCESS;
+    } else if (response_status == AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR) {
+        error_code = AWS_ERROR_S3_INTERNAL_ERROR;
+    } else {
+        error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
+    }
+
+    return error_code;
+}
+
 static void s_s3_meta_request_send_request_finish(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code) {
     AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
@@ -651,43 +762,44 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
     AWS_PRECONDITION(request_desc);
 
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p: Sending of request desc %p finished with error code %d",
-        (void *)meta_request,
-        (void *)request_desc,
-        error_code);
+    int response_status = request->response_status;
 
-    int response_status = 0;
-
-    /* If there isn't already an error code, look for other failures.*/
     if (error_code == AWS_ERROR_SUCCESS) {
-        if (stream == NULL) {
-            error_code = AWS_ERROR_UNKNOWN;
+        error_code = s_s3_meta_request_error_code_from_response_status(response_status);
+
+        if (error_code != AWS_ERROR_SUCCESS) {
             aws_raise_error(error_code);
-        } else if (aws_http_stream_get_incoming_response_status(stream, &response_status)) {
-            error_code = aws_last_error();
-        } else if (
-            response_status == AWS_S3_RESPONSE_STATUS_SUCCESS ||
-            response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS) {
-            error_code = AWS_ERROR_SUCCESS;
-        } else if (response_status == AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR) {
-            error_code = AWS_ERROR_S3_INTERNAL_ERROR;
-        } else {
-            error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Meta request received response status %d for request with tag %d",
-                (void *)meta_request,
-                response_status,
-                request_desc->request_tag);
         }
     }
 
-    if (vtable->stream_complete) {
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Request %p finished with error code %d and response status %d",
+        (void *)meta_request,
+        (void *)request,
+        error_code,
+        response_status);
 
-        /* Call the derived type, having it handle what to do with the current failure or success. */
-        vtable->stream_complete(stream, error_code, vip_connection);
+    if (error_code == AWS_ERROR_SUCCESS) {
+        if (vtable->stream_complete) {
+            /* Call the derived type, having it handle what to do with the current success. */
+            vtable->stream_complete(stream, vip_connection);
+        }
+    } else {
+        /* If the error was service side, or we just ran out of part buffers, retry the request. */
+        /* TODO try to guarantee part buffers ara available earlier. */
+        if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
+            aws_s3_meta_request_queue_retry(meta_request, request_desc);
+            vip_connection->work_data.request_desc = NULL;
+        } else {
+            AWS_PRECONDITION(request->part_buffer);
+
+            if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
+                aws_s3_meta_request_finish(meta_request, request, request->response_status, error_code);
+            } else {
+                aws_s3_meta_request_finish(meta_request, NULL, 0, error_code);
+            }
+        }
     }
 
     if (stream != NULL) {
@@ -719,17 +831,22 @@ void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, s
 }
 
 /* Flag the meta request as finished, immediately triggering any on-finished callbacks. */
-void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int error_code) {
+void aws_s3_meta_request_finish(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *failed_request,
+    int response_status,
+    int error_code) {
     AWS_PRECONDITION(meta_request);
 
     if (s_s3_meta_request_set_state(meta_request, AWS_S3_META_REQUEST_STATE_FINISHED)) {
         return;
     }
 
-    if (meta_request->client != NULL) {
-        aws_s3_client_release(meta_request->client);
-        meta_request->client = NULL;
-    }
+    /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
+    AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
+
+    aws_s3_client_release(meta_request->client);
+    meta_request->client = NULL;
 
     AWS_LOGF_INFO(
         AWS_LS_S3_META_REQUEST,
@@ -739,7 +856,20 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int er
         aws_error_str(error_code));
 
     if (meta_request->finish_callback != NULL) {
-        meta_request->finish_callback(meta_request, error_code, meta_request->user_data);
+
+        struct aws_s3_meta_request_result meta_request_result = {
+            .error_response_headers = NULL,
+            .error_response_body = NULL,
+            .error_code = error_code,
+            .response_status = response_status,
+        };
+
+        if (failed_request != NULL) {
+            meta_request_result.error_response_headers = failed_request->response_headers;
+            meta_request_result.error_response_body = &failed_request->response_body_error;
+        }
+
+        meta_request->finish_callback(meta_request, &meta_request_result, meta_request->user_data);
     }
 }
 

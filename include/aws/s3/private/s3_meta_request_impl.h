@@ -31,6 +31,8 @@ typedef void(aws_s3_meta_request_write_body_finished_callback_fn)(
 
 enum aws_s3_meta_request_state { AWS_S3_META_REQUEST_STATE_ACTIVE, AWS_S3_META_REQUEST_STATE_FINISHED };
 
+enum aws_s3_request_desc_flags { AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001 };
+
 /* Represents a "description" of a request, ie, enough information to create an actual message.  This is meant to be
  * queueable for retries. */
 struct aws_s3_request_desc {
@@ -45,6 +47,9 @@ struct aws_s3_request_desc {
      * type, and do not necessarily map 1:1 with actual S3 API requests.  For example, they can be more contextual, like
      * "first part" instead of just "part".) */
     int request_tag;
+
+    /* When true, response headers from the request will be stored in the request's response_headers variable. */
+    uint32_t record_response_headers : 1;
 };
 
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
@@ -58,8 +63,18 @@ struct aws_s3_request {
     /* The HTTP message to send for this request. */
     struct aws_http_message *message;
 
+    /* Recorded response headers for the request. Set only when the request_desc has record_response_headers set to
+     * true. */
+    struct aws_http_headers *response_headers;
+
     /* Optional part buffer to be used with this request. */
     struct aws_s3_part_buffer *part_buffer;
+
+    /* If the request receives an error, this byte buffer will be allocated and will hold the body of that error.*/
+    struct aws_byte_buf response_body_error;
+
+    /* Returned response status of this request. */
+    int response_status;
 
     /* Data intended to be only be used by aws_s3_meta_request_write_body_to_caller functionality. */
     struct {
@@ -110,8 +125,7 @@ struct aws_s3_meta_request_vtable {
         const struct aws_byte_cursor *data,
         struct aws_s3_vip_connection *vip_connection);
 
-    void (
-        *stream_complete)(struct aws_http_stream *stream, int error_code, struct aws_s3_vip_connection *vip_connection);
+    void (*stream_complete)(struct aws_http_stream *stream, struct aws_s3_vip_connection *vip_connection);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
@@ -151,6 +165,7 @@ struct aws_s3_meta_request {
     void *user_data;
 
     /* Customer specified callbacks. */
+    aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
@@ -224,7 +239,8 @@ void aws_s3_meta_request_write_body_to_caller(
 struct aws_s3_request_desc *aws_s3_request_desc_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
-    uint32_t part_number);
+    uint32_t part_number,
+    uint32_t flags);
 
 void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc);
 
@@ -239,7 +255,11 @@ void aws_s3_request_release(struct aws_s3_request *request);
 void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *desc);
 
 /* Tells the meta request to stop, with an error code for indicating failure when necessary. */
-void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int error_code);
+void aws_s3_meta_request_finish(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *failed_request,
+    int response_status,
+    int error_code);
 
 void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
 

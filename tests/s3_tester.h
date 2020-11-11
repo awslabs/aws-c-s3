@@ -29,12 +29,11 @@ struct aws_s3_tester {
     struct aws_credentials_provider *credentials_provider;
 
     struct aws_condition_variable signal;
-    size_t desired_finish_count;
-    bool bound_to_client_shutdown;
 
     struct {
         struct aws_mutex lock;
 
+        size_t desired_finish_count;
         size_t finish_count;
         int finish_error_code;
 
@@ -43,20 +42,40 @@ struct aws_s3_tester {
     } synced_data;
 };
 
+struct aws_s3_tester_meta_request {
+    struct aws_s3_tester *tester;
+
+    struct aws_http_headers *error_response_headers;
+    struct aws_byte_buf error_response_body;
+
+    int headers_response_status;
+    struct aws_http_headers *response_headers;
+    uint64_t received_body_size;
+    int finished_response_status;
+    int finished_error_code;
+};
+
 struct aws_s3_client_config;
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, size_t desired_finish_count);
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
+
+/* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
+ * client to clean up. */
+int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client_config *config);
+
+int aws_s3_tester_bind_meta_request(
+    struct aws_s3_tester *tester,
+    struct aws_s3_meta_request_options *options,
+    struct aws_s3_tester_meta_request *test_meta_request);
+
+void aws_s3_tester_meta_request_clean_up(struct aws_s3_tester_meta_request *test_meta_request);
 
 /* Wait for aws_s3_tester_notify_finished to be called */
 void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester);
 
 /* Notify the tester that an operation has finished and that anyway waiting with aws_s3_tester_wait_for_finish can
  * continue */
-void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, int error_code);
-
-/* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
- * client to clean up. */
-void aws_s3_tester_bind_client_shutdown(struct aws_s3_tester *tester, struct aws_s3_client_config *config);
+void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, const struct aws_s3_meta_request_result *result);
 
 /* Handle cleaning up the tester.  If aws_s3_tester_bind_client_shutdown was used, then it will wait for the client to
  * finish shutting down before releasing any resources. */

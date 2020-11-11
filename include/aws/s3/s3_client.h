@@ -12,11 +12,13 @@ struct aws_allocator;
 
 struct aws_http_stream;
 struct aws_http_message;
+struct aws_http_headers;
 struct aws_tls_connection_options;
 
 struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
+struct aws_s3_meta_request_result;
 
 enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_DEFAULT,
@@ -24,14 +26,23 @@ enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT
 };
 
-typedef int(aws_s3_meta_request_receive_body_callback_fn)(
+typedef void(aws_s3_meta_request_headers_callback_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_http_headers *headers,
+    int response_status,
+    void *user_data);
+
+typedef void(aws_s3_meta_request_receive_body_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     uint64_t range_end,
     void *user_data);
 
-typedef void(aws_s3_meta_request_finish_fn)(struct aws_s3_meta_request *meta_request, int error_code, void *user_data);
+typedef void(aws_s3_meta_request_finish_fn)(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data);
 
 typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
@@ -84,6 +95,9 @@ struct aws_s3_meta_request_options {
     /* User data for all callbacks. */
     void *user_data;
 
+    /* Callback for receiving incoming headers. */
+    aws_s3_meta_request_headers_callback_fn *headers_callback;
+
     /* Callback for incoming body data. */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
 
@@ -92,6 +106,31 @@ struct aws_s3_meta_request_options {
 
     /* Callback for when the meta request has completely cleaned up. */
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
+};
+
+/* Final result details of a meta request.
+ *
+ * If error_code is AWS_ERROR_SUCCESS, then response_status will match the response_status passed earlier by the header
+ * callback and error_response_headers and error_response_body will be NULL.
+ *
+ * If error_code is equal to AWS_ERROR_S3_INVALID_RESPONSE_STATUS, then error_response_headers, error_response_body, and
+ * response_status will be populated by the failed request.
+ *
+ * For all other error codes, response_status will be 0, and the error_response variables will be NULL.
+ */
+struct aws_s3_meta_request_result {
+
+    /* HTTP Headers for the failed request that triggered finish of the meta request.  NULL if no request failed. */
+    struct aws_http_headers *error_response_headers;
+
+    /* Response body for the failed request that triggered finishing of the meta request.  NUll if no request failed.*/
+    struct aws_byte_buf *error_response_body;
+
+    /* Response status of the failed request or of the entire meta request. */
+    int response_status;
+
+    /* Final error code of the meta request. */
+    int error_code;
 };
 
 AWS_EXTERN_C_BEGIN

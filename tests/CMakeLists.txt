@@ -9,8 +9,9 @@ file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 add_test_case(test_s3_client_create_destroy)
 add_test_case(test_s3_get_object)
 add_test_case(test_s3_get_object_multiple)
-add_test_case(test_s3_get_object)
 add_test_case(test_s3_put_object)
+add_test_case(test_s3_error_response)
+
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
