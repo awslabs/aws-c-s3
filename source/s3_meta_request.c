@@ -580,6 +580,20 @@ static void s_s3_meta_request_send_http_request(
     }
 }
 
+static int s_s3_meta_request_error_code_from_response_status(int response_status) {
+    int error_code = AWS_ERROR_UNKNOWN;
+
+    if (response_status == AWS_S3_RESPONSE_STATUS_SUCCESS || response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS) {
+        error_code = AWS_ERROR_SUCCESS;
+    } else if (response_status == AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR) {
+        error_code = AWS_ERROR_S3_INTERNAL_ERROR;
+    } else {
+        error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
+    }
+
+    return error_code;
+}
+
 static int s_s3_meta_request_incoming_headers(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
@@ -619,8 +633,8 @@ static int s_s3_meta_request_incoming_headers(
             (void *)request_desc);
     }
 
-    bool successful_response = request->response_status == AWS_S3_RESPONSE_STATUS_SUCCESS ||
-                               request->response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS;
+    bool successful_response =
+        s_s3_meta_request_error_code_from_response_status(request->response_status) == AWS_ERROR_SUCCESS;
 
     /* Only record headers if an error has taken place, or if the reqest_desc has asked for them. */
     bool should_record_headers = !successful_response || request_desc->record_response_headers;
@@ -665,8 +679,8 @@ static int s_s3_meta_request_headers_block_done(
         request->response_status,
         (void *)vip_connection);
 
-    bool successful_response = request->response_status == AWS_S3_RESPONSE_STATUS_SUCCESS ||
-                               request->response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS;
+    bool successful_response =
+        s_s3_meta_request_error_code_from_response_status(request->response_status) == AWS_ERROR_SUCCESS;
 
     /* Failed requests are handled inside of the meta request base type, so only pass through to virtual function on
      * success. */
@@ -707,8 +721,8 @@ static int s_s3_meta_request_incoming_body(
         (uint64_t)data->len,
         (void *)vip_connection);
 
-    bool successful_response = request->response_status == AWS_S3_RESPONSE_STATUS_SUCCESS ||
-                               request->response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS;
+    bool successful_response =
+        s_s3_meta_request_error_code_from_response_status(request->response_status) == AWS_ERROR_SUCCESS;
 
     /* Failed requests are handled inside of the meta request base type, so only pass through to virtual function on
      * success. */
@@ -736,20 +750,6 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
     AWS_PRECONDITION(vip_connection);
 
     s_s3_meta_request_send_request_finish(vip_connection, stream, error_code);
-}
-
-static int s_s3_meta_request_error_code_from_response_status(int response_status) {
-    int error_code = AWS_ERROR_UNKNOWN;
-
-    if (response_status == AWS_S3_RESPONSE_STATUS_SUCCESS || response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS) {
-        error_code = AWS_ERROR_SUCCESS;
-    } else if (response_status == AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR) {
-        error_code = AWS_ERROR_S3_INTERNAL_ERROR;
-    } else {
-        error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
-    }
-
-    return error_code;
 }
 
 static void s_s3_meta_request_send_request_finish(
