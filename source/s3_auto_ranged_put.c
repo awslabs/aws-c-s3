@@ -599,9 +599,6 @@ static int s_s3_auto_ranged_put_incoming_body(
 
     AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_request *request = vip_connection->work_data.request;
-    AWS_PRECONDITION(request);
-
     struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
     AWS_PRECONDITION(request_desc);
 
@@ -637,9 +634,6 @@ static void s_s3_auto_ranged_put_stream_complete(
 
     struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
-
-    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
-    AWS_PRECONDITION(auto_ranged_get);
 
     if (error_code != AWS_ERROR_SUCCESS) {
 
