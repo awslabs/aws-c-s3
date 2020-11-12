@@ -584,9 +584,6 @@ static int s_s3_meta_request_incoming_headers(
     struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_request *request = vip_connection->work_data.request;
-    AWS_PRECONDITION(request);
-
     if (meta_request->vtable->incoming_headers) {
         return meta_request->vtable->incoming_headers(stream, header_block, headers, headers_count, vip_connection);
     }
