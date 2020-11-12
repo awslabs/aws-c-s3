@@ -227,8 +227,6 @@ struct aws_s3_request *aws_s3_request_new(struct aws_s3_meta_request *meta_reque
     request->message = message;
     aws_http_message_acquire(message);
 
-    request->response_headers = aws_http_headers_new(meta_request->allocator);
-
     return request;
 }
 
@@ -273,7 +271,6 @@ void s_s3_request_destroy(void *user_data) {
         request->message = NULL;
     }
 
-    aws_http_headers_release(request->response_headers);
     aws_s3_part_buffer_release(request->part_buffer);
     aws_mem_release(meta_request->allocator, request);
     aws_s3_meta_request_release(meta_request);

@@ -58,9 +58,6 @@ struct aws_s3_request {
     /* The HTTP message to send for this request. */
     struct aws_http_message *message;
 
-    /* Recorded response headers for the request. */
-    struct aws_http_headers *response_headers;
-
     /* Optional part buffer to be used with this request. */
     struct aws_s3_part_buffer *part_buffer;
 
