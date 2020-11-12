@@ -57,16 +57,21 @@ static int s_s3_auto_ranged_get_incoming_headers(
     enum aws_http_header_block header_block,
     const struct aws_http_header *headers,
     size_t headers_count,
-    void *user_data);
+    struct aws_s3_vip_connection *vip_connection);
 
 static int s_s3_auto_ranged_get_incoming_body(
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *data,
-    void *user_data);
+    struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
+static void s_s3_auto_ranged_get_stream_complete(
+    struct aws_http_stream *stream,
+    int error_code,
+    struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_auto_ranged_get_write_part_buffer_callback(void *user_data);
+static void s_s3_auto_ranged_get_write_body_callback(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .has_work = s_s3_auto_ranged_get_has_work,
@@ -333,28 +338,28 @@ message_alloc_failed:
 
     return NULL;
 }
+
 static int s_s3_auto_ranged_get_incoming_headers(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
     const struct aws_http_header *headers,
     size_t headers_count,
-    void *user_data) {
+    struct aws_s3_vip_connection *vip_connection) {
 
     AWS_PRECONDITION(stream);
-    AWS_PRECONDITION(user_data);
+    AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work->request_desc);
-
-    if (work->request_desc->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART) {
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
+    AWS_PRECONDITION(request_desc);
+    if (request_desc->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART) {
         return AWS_OP_SUCCESS;
     }
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
-    AWS_PRECONDITION(meta_request);
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    AWS_ASSERT(meta_request);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
-    AWS_PRECONDITION(auto_ranged_get);
+    AWS_ASSERT(auto_ranged_get);
 
     (void)stream;
     (void)header_block;
@@ -409,24 +414,18 @@ static int s_s3_auto_ranged_get_incoming_headers(
 static int s_s3_auto_ranged_get_incoming_body(
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *data,
-    void *user_data) {
-
-    AWS_PRECONDITION(stream);
+    struct aws_s3_vip_connection *vip_connection) {
     (void)stream;
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work);
+    AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_request *request = work->request;
-    AWS_PRECONDITION(request);
-
-    struct aws_s3_request_desc *request_desc = work->request_desc;
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
     AWS_PRECONDITION(request_desc);
 
-    struct aws_s3_part_buffer *part_buffer = request->part_buffer;
+    struct aws_s3_part_buffer *part_buffer = vip_connection->work_data.request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
     /* TODO If we we're using the original message, just pass back directly for now.  This should currently only be the
@@ -448,56 +447,55 @@ static int s_s3_auto_ranged_get_incoming_body(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_auto_ranged_get_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
+static void s_s3_auto_ranged_get_stream_complete(
+    struct aws_http_stream *stream,
+    int error_code,
+    struct aws_s3_vip_connection *vip_connection) {
     (void)stream;
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work);
-    AWS_PRECONDITION(work->request_desc);
+    AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
+    AWS_PRECONDITION(request_desc);
+
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
-    AWS_PRECONDITION(auto_ranged_get);
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
 
     if (error_code != AWS_ERROR_SUCCESS) {
 
         /* If the error was service side, or we just ran out of part buffers, retry the request. */
         /* TODO try to guarantee part buffers ara available earlier. */
         if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
-            aws_s3_meta_request_queue_retry(meta_request, &work->request_desc);
-            /* Otherwise, finish the request with failure. */
+            aws_s3_meta_request_queue_retry(meta_request, request_desc);
+            vip_connection->work_data.request_desc = NULL;
         } else {
+            /* Otherwise, finish the request with failure. */
             aws_s3_meta_request_finish(meta_request, error_code);
         }
 
         return;
     }
 
-    struct aws_s3_request *request = work->request;
-    AWS_PRECONDITION(request);
-
     AWS_PRECONDITION(request->part_buffer);
 
     aws_s3_meta_request_internal_acquire(meta_request);
 
     /* Schedule the part buffer to be sent back to the user so that they can process it. */
-    if (aws_s3_meta_request_write_part_buffer_to_caller(
-            meta_request, &request->part_buffer, s_s3_auto_ranged_get_write_part_buffer_callback, auto_ranged_get)) {
-
-        aws_s3_meta_request_finish(meta_request, aws_last_error());
-
-        aws_s3_meta_request_internal_release(meta_request);
-    }
+    aws_s3_meta_request_write_body_to_caller(request, s_s3_auto_ranged_get_write_body_callback);
 }
 
-static void s_s3_auto_ranged_get_write_part_buffer_callback(void *user_data) {
+static void s_s3_auto_ranged_get_write_body_callback(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->impl);
 
-    struct aws_s3_auto_ranged_get *auto_ranged_get = user_data;
-    AWS_PRECONDITION(auto_ranged_get);
+    (void)request;
 
-    struct aws_s3_meta_request *meta_request = &auto_ranged_get->base;
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
 
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
     ++auto_ranged_get->synced_data.num_parts_completed;

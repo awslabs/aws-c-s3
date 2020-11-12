@@ -13,16 +13,21 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/request_response.h>
 
+#include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_part_buffer.h"
-#include "aws/s3/s3_client.h"
 
 struct aws_s3_client;
+struct aws_s3_vip_connection;
 struct aws_s3_meta_request;
+struct aws_s3_request;
 struct aws_s3_request_options;
+struct aws_http_headers;
 
 typedef void(aws_s3_meta_request_work_available_fn)(struct aws_s3_meta_request *meta_request, void *user_data);
 
-typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
+typedef void(aws_s3_meta_request_write_body_finished_callback_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request);
 
 enum aws_s3_meta_request_state { AWS_S3_META_REQUEST_STATE_ACTIVE, AWS_S3_META_REQUEST_STATE_FINISHED };
 
@@ -45,31 +50,25 @@ struct aws_s3_request_desc {
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
 struct aws_s3_request {
 
+    struct aws_ref_count ref_count;
+
+    /* Owning meta request. */
+    struct aws_s3_meta_request *meta_request;
+
     /* The HTTP message to send for this request. */
     struct aws_http_message *message;
 
     /* Optional part buffer to be used with this request. */
     struct aws_s3_part_buffer *part_buffer;
-};
 
-/* Meta requests control the flow (when signing, sending, etc. takes place) of their underlying requests.  This options
- * structure is used to configure that flow when triggering it. */
-struct aws_s3_send_request_options {
-    struct aws_s3_vip_connection *vip_connection;
-    aws_s3_request_finished_callback_fn *finished_callback;
-    void *user_data;
-};
+    /* Data intended to be only be used by aws_s3_meta_request_write_body_to_caller functionality. */
+    struct {
+        /* Callback used for aws_s3_meta_request_write_body_to_caller. */
+        aws_s3_meta_request_write_body_finished_callback_fn *finished_callback;
 
-/* Represents the state for the sending of a single request.  This data is passed through the chain of function calls
- * that prepare/send a request. Visible in the header file for usage by derived meta requests types. */
-struct aws_s3_send_request_work {
-    struct aws_s3_vip_connection *vip_connection;
-    struct aws_s3_meta_request *meta_request;
-    struct aws_s3_request_desc *request_desc;
-    struct aws_s3_request *request;
-
-    aws_s3_request_finished_callback_fn *finished_callback;
-    void *user_data;
+        /* Task used for aws_s3_meta_request_write_body_to_caller. */
+        struct aws_task task;
+    } write_body_data;
 };
 
 /* Additional options that can be used internally (ie: by the client) without having to interfere with any user
@@ -94,10 +93,25 @@ struct aws_s3_meta_request_vtable {
         struct aws_s3_request_desc *request_desc);
 
     /* Callbacks for all HTTP messages being processed by this meta request. */
-    aws_http_on_incoming_headers_fn *incoming_headers;
-    aws_http_on_incoming_header_block_done_fn *incoming_headers_block_done;
-    aws_http_on_incoming_body_fn *incoming_body;
-    aws_http_on_stream_complete_fn *stream_complete;
+    int (*incoming_headers)(
+        struct aws_http_stream *stream,
+        enum aws_http_header_block header_block,
+        const struct aws_http_header *headers,
+        size_t headers_count,
+        struct aws_s3_vip_connection *vip_connection);
+
+    int (*incoming_headers_block_done)(
+        struct aws_http_stream *stream,
+        enum aws_http_header_block header_block,
+        struct aws_s3_vip_connection *vip_connection);
+
+    int (*incoming_body)(
+        struct aws_http_stream *stream,
+        const struct aws_byte_cursor *data,
+        struct aws_s3_vip_connection *vip_connection);
+
+    void (
+        *stream_complete)(struct aws_http_stream *stream, int error_code, struct aws_s3_vip_connection *vip_connection);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
@@ -182,11 +196,14 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_internal_options *options);
 
-/* Tells the meta request to start sending another request, if there is one currently to send.  This is used the client.
+/* Tells the meta request to start sending another request, if there is one currently to send.  This is used by the
+ * client.
  */
 void aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_send_request_options *options);
+    struct aws_s3_vip_connection *vip_connection,
+    aws_s3_request_finished_callback_fn *finished_callback,
+    void *user_data);
 
 /* BEGIN - Meant only for use by derived types. */
 
@@ -198,13 +215,10 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_meta_request_vtable *vtable,
     struct aws_s3_meta_request *base_type);
 
-/* Pass back this part buffer to the customer specified callback.  This assumes ownership of the part buffer passed in.
- */
-int aws_s3_meta_request_write_part_buffer_to_caller(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_part_buffer **part_buffer,
-    aws_write_part_buffer_callback_fn *callback,
-    void *user_data);
+/* Pass back the part buffer of the request as a response body to the user */
+void aws_s3_meta_request_write_body_to_caller(
+    struct aws_s3_request *request,
+    aws_s3_meta_request_write_body_finished_callback_fn *callback);
 
 /* Allocate a new request description with the given options. */
 struct aws_s3_request_desc *aws_s3_request_desc_new(
@@ -217,13 +231,12 @@ void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struc
 /* Create a new s3 request structure with the given options. */
 struct aws_s3_request *aws_s3_request_new(struct aws_s3_meta_request *meta_request, struct aws_http_message *message);
 
-void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+void aws_s3_request_acquire(struct aws_s3_request *request);
 
-/* Push a request description into the retry queue.  This assumes ownership of the request desc, and will NULL out the
- * passed in pointer-to-pointer to help enforce this. */
-void aws_s3_meta_request_queue_retry(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_desc **in_out_desc);
+void aws_s3_request_release(struct aws_s3_request *request);
+
+/* Push a request description into the retry queue.  This assumes ownership of the request desc, */
+void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *desc);
 
 /* Tells the meta request to stop, with an error code for indicating failure when necessary. */
 void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request, int error_code);

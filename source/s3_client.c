@@ -1070,11 +1070,11 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
         /* Acquire an internal reference to be released by s_s3_client_vip_connection_request_finished. */
         s_s3_client_internal_acquire(client);
 
-        struct aws_s3_send_request_options options = {.vip_connection = vip_connection,
-                                                      .finished_callback = s_s3_client_vip_connection_request_finished,
-                                                      .user_data = vip_connection};
-
-        aws_s3_meta_request_send_next_request(vip_connection->threaded_data.meta_request, &options);
+        aws_s3_meta_request_send_next_request(
+            vip_connection->threaded_data.meta_request,
+            vip_connection,
+            s_s3_client_vip_connection_request_finished,
+            vip_connection);
 
         aws_linked_list_push_back(&work_destroy_list, &work->node);
     }

@@ -11,6 +11,8 @@
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
+static void s_s3_request_destroy(void *user_data);
+
 static void s_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
 static void s_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request);
 
@@ -19,29 +21,39 @@ static void s_s3_meta_request_finish_destroy(void *user_data);
 
 static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request, enum aws_s3_meta_request_state state);
 
-static void s_s3_meta_request_process_write_queue_task(
+static void s_s3_meta_request_process_write_body_task(
     struct aws_task *task,
     void *arg,
     enum aws_task_status task_status);
 
-static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_send_request_options *options,
-    struct aws_s3_request_desc *request_desc);
-
-static void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_request_work *work);
-
-static int s_s3_meta_request_process_work(struct aws_s3_send_request_work *work);
-
 static void s_s3_meta_request_request_on_signed(int error_code, void *user_data);
+
 static void s_s3_meta_request_send_http_request(
     struct aws_http_connection *http_connection,
     int error_code,
     void *user_data);
 
+static int s_s3_meta_request_headers_block_done(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    void *user_data);
+
+static int s_s3_meta_request_incoming_body(
+    struct aws_http_stream *stream,
+    const struct aws_byte_cursor *data,
+    void *user_data);
+
+static int s_s3_meta_request_incoming_headers(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    const struct aws_http_header *headers,
+    size_t headers_count,
+    void *user_data);
+
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
-static void s_s3_meta_request_send_request_work_finish(
-    struct aws_s3_send_request_work *work,
+
+static void s_s3_meta_request_send_request_finish(
+    struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code);
 
@@ -207,20 +219,41 @@ struct aws_s3_request *aws_s3_request_new(struct aws_s3_meta_request *meta_reque
 
     struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
 
+    aws_ref_count_init(&request->ref_count, request, (aws_simple_completion_callback *)s_s3_request_destroy);
+
+    request->meta_request = meta_request;
+    aws_s3_meta_request_acquire(meta_request);
+
     request->message = message;
     aws_http_message_acquire(message);
 
     return request;
 }
 
-void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->allocator);
-    AWS_PRECONDITION(meta_request->initial_request_message);
+void aws_s3_request_acquire(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+
+    aws_ref_count_acquire(&request->ref_count);
+}
+
+void aws_s3_request_release(struct aws_s3_request *request) {
+    if (request == NULL) {
+        return;
+    }
+
+    aws_ref_count_release(&request->ref_count);
+}
+
+void s_s3_request_destroy(void *user_data) {
+    struct aws_s3_request *request = user_data;
 
     if (request == NULL) {
         return;
     }
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->initial_request_message);
 
     if (request->message != NULL) {
         struct aws_input_stream *input_stream = aws_http_message_get_body_stream(request->message);
@@ -240,53 +273,50 @@ void aws_s3_request_destroy(struct aws_s3_meta_request *meta_request, struct aws
 
     aws_s3_part_buffer_release(request->part_buffer);
     aws_mem_release(meta_request->allocator, request);
+    aws_s3_meta_request_release(meta_request);
 }
 
-static struct aws_s3_send_request_work *s_s3_meta_request_send_request_work_new(
+static void s_s3_meta_request_setup_work_data(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_send_request_options *options,
-    struct aws_s3_request_desc *request_desc) {
+    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_request_desc *request_desc,
+    struct aws_s3_request *request,
+    aws_s3_request_finished_callback_fn *finished_callback,
+    void *user_data) {
+
+    AWS_PRECONDITION(vip_connection);
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(options);
-    AWS_PRECONDITION(options->vip_connection);
     AWS_PRECONDITION(request_desc);
+    AWS_PRECONDITION(request);
 
-    struct aws_s3_send_request_work *work =
-        aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_send_request_work));
-
-    work->vip_connection = options->vip_connection;
-
-    work->meta_request = meta_request;
-    aws_s3_meta_request_internal_acquire(meta_request);
+    vip_connection->work_data.meta_request = meta_request;
     aws_s3_meta_request_acquire(meta_request);
 
-    work->request_desc = request_desc;
-    work->finished_callback = options->finished_callback;
-    work->user_data = options->user_data;
+    vip_connection->work_data.request = request;
+    aws_s3_request_acquire(request);
 
-    return work;
+    vip_connection->work_data.request_desc = request_desc;
+    vip_connection->work_data.finished_callback = finished_callback;
+    vip_connection->work_data.user_data = user_data;
 }
 
-static void s_s3_meta_request_send_request_work_destroy(struct aws_s3_send_request_work *work) {
+static void s_s3_meta_request_clean_up_work_data(struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(vip_connection);
 
-    if (work == NULL) {
-        return;
+    aws_s3_request_release(vip_connection->work_data.request);
+    vip_connection->work_data.request = NULL;
+
+    if (vip_connection->work_data.request_desc != NULL) {
+        AWS_ASSERT(vip_connection->work_data.meta_request);
+        aws_s3_request_desc_destroy(vip_connection->work_data.meta_request, vip_connection->work_data.request_desc);
+        vip_connection->work_data.request_desc = NULL;
     }
 
-    AWS_PRECONDITION(work->meta_request);
+    aws_s3_meta_request_release(vip_connection->work_data.meta_request);
+    vip_connection->work_data.meta_request = NULL;
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
-
-    aws_s3_request_destroy(work->meta_request, work->request);
-    work->request = NULL;
-
-    aws_s3_request_desc_destroy(meta_request, work->request_desc);
-    work->request_desc = NULL;
-
-    aws_mem_release(meta_request->allocator, work);
-
-    aws_s3_meta_request_internal_release(meta_request);
-    aws_s3_meta_request_release(meta_request);
+    vip_connection->work_data.finished_callback = NULL;
+    vip_connection->work_data.user_data = NULL;
 }
 
 bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request) {
@@ -319,12 +349,18 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
 
 void aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_send_request_options *options) {
+    struct aws_s3_vip_connection *vip_connection,
+    aws_s3_request_finished_callback_fn *finished_callback,
+    void *user_data) {
 
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    AWS_FATAL_ASSERT(vtable);
 
     struct aws_s3_request_desc *request_desc = NULL;
-    struct aws_s3_send_request_work *work = NULL;
+    struct aws_s3_request *request = NULL;
     bool meta_request_already_finished = false;
 
     s_s3_meta_request_lock_synced_data(meta_request);
@@ -355,9 +391,6 @@ unlock:
     /* If we didn't find something in the retry queue, call the derived request type, asking what the next request
      * should be. */
     if (request_desc == NULL) {
-        struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
-        AWS_FATAL_ASSERT(vtable);
-
         if (vtable->next_request(meta_request, &request_desc)) {
             goto error_finish;
         }
@@ -370,23 +403,21 @@ unlock:
         goto call_finished_callback;
     }
 
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Initiating send for request with request tag %d, request desc %p",
-        (void *)meta_request,
-        request_desc->request_tag,
-        (void *)request_desc);
+    struct aws_s3_vip *vip = vip_connection->owning_vip;
+    struct aws_s3_client *client = vip->owning_client;
 
-    /* Allocate a work structure that we will keep alive for the duration of processing this request. */
-    work = s_s3_meta_request_send_request_work_new(meta_request, options, request_desc);
+    /* Ask the factory to create a new request based on the request description. */
+    request = vtable->request_factory(meta_request, client, request_desc);
 
-    if (work == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not allocate work for meta request.", (void *)meta_request);
-        goto error_finish;
-    }
+    /* Finish the work for this request immediately if we couldn't create a request for it. */
+    if (request == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not create request with tag %d, request desc %p",
+            (void *)meta_request,
+            request_desc->request_tag,
+            (void *)request_desc);
 
-    /* Kick off processing the actual work for this request. */
-    if (s_s3_meta_request_process_work(work)) {
         int error = aws_last_error();
 
         if (error == AWS_ERROR_S3_NO_PART_BUFFER) {
@@ -395,12 +426,33 @@ unlock:
                 "id=%p Pushing request into retry queue due to lack of part buffer availability.",
                 (void *)meta_request);
 
-            aws_s3_meta_request_queue_retry(meta_request, &work->request_desc);
+            aws_s3_meta_request_queue_retry(meta_request, request_desc);
+            request_desc = NULL;
 
             goto call_finished_callback;
         } else {
             goto error_finish;
         }
+    }
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Initiating work for request with request tag %d, request desc %p",
+        (void *)meta_request,
+        request_desc->request_tag,
+        (void *)request_desc);
+
+    s_s3_meta_request_setup_work_data(
+        meta_request, vip_connection, request_desc, request, finished_callback, user_data);
+
+    /* Release initial reference of request to give complete ownership to the work_data. */
+    aws_s3_request_release(vip_connection->work_data.request);
+
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)meta_request, (void *)request);
+
+    /* Sign the newly created message. */
+    if (aws_s3_client_sign_message(client, request->message, s_s3_meta_request_request_on_signed, vip_connection)) {
+        goto error_finish;
     }
 
     return;
@@ -411,99 +463,48 @@ error_finish:
 
 call_finished_callback:
 
-    s_s3_meta_request_send_request_work_destroy(work);
-    work = NULL;
+    s_s3_meta_request_clean_up_work_data(vip_connection);
 
-    if (options->finished_callback != NULL) {
-        options->finished_callback(options->user_data);
+    if (finished_callback != NULL) {
+        finished_callback(user_data);
     }
-}
-
-static int s_s3_meta_request_process_work(struct aws_s3_send_request_work *work) {
-    AWS_PRECONDITION(work);
-
-    AWS_PRECONDITION(work->meta_request);
-    AWS_PRECONDITION(work->request_desc);
-
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Creating request with tag %d, request desc %p",
-        (void *)work->meta_request,
-        work->request_desc->request_tag,
-        (void *)work->request_desc);
-
-    struct aws_s3_meta_request_vtable *vtable = work->meta_request->vtable;
-    AWS_PRECONDITION(vtable);
-
-    struct aws_s3_vip_connection *vip_connection = work->vip_connection;
-    struct aws_s3_vip *vip = vip_connection->owning_vip;
-    struct aws_s3_client *client = vip->owning_client;
-
-    /* Ask the factory to create a new request based on the request description. */
-    work->request = vtable->request_factory(work->meta_request, client, work->request_desc);
-
-    /* Finish the work for this request immediately if we couldn't allocate any work for it. */
-    if (work->request == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not create request with tag %d, request desc %p",
-            (void *)work->meta_request,
-            work->request_desc->request_tag,
-            (void *)work->request_desc);
-
-        return AWS_OP_ERR;
-    }
-
-    AWS_FATAL_ASSERT(work->request->message != NULL);
-
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)work->meta_request, (void *)work->request);
-
-    /* Sign the newly created message. */
-    if (aws_s3_client_sign_message(client, work->request->message, s_s3_meta_request_request_on_signed, work)) {
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
 }
 
 /* Handle the signing result, getting an HTTP connection for the request if signing succeeded. */
 static void s_s3_meta_request_request_on_signed(int error_code, void *user_data) {
-    AWS_PRECONDITION(user_data);
 
-    struct aws_s3_send_request_work *work = user_data;
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
 
-    AWS_PRECONDITION(work);
-    AWS_PRECONDITION(work->meta_request);
-    AWS_PRECONDITION(work->request);
-    AWS_PRECONDITION(work->vip_connection);
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_vip *vip = vip_connection->owning_vip;
+    AWS_PRECONDITION(vip);
+
+    struct aws_s3_client *client = vip->owning_client;
+    AWS_PRECONDITION(client);
 
     /* If we couldn't sign, finish the request with an error. */
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Unable to sign request %p",
-            (void *)work->meta_request,
-            (void *)work->request);
+            AWS_LS_S3_META_REQUEST, "id=%p Unable to sign request %p", (void *)meta_request, (void *)request);
 
-        s_s3_meta_request_send_request_work_finish(work, NULL, error_code);
+        s_s3_meta_request_send_request_finish(vip_connection, NULL, error_code);
         return;
     }
 
     AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Getting HTTP connection for request %p",
-        (void *)work->meta_request,
-        (void *)work->request);
-
-    struct aws_s3_vip_connection *vip_connection = work->vip_connection;
-    struct aws_s3_vip *vip = vip_connection->owning_vip;
-    struct aws_s3_client *client = vip->owning_client;
+        AWS_LS_S3_META_REQUEST, "id=%p Getting HTTP connection for request %p", (void *)meta_request, (void *)request);
 
     /* Get a connection for this request, finishing if we failed immediately trying to get the connection. */
-    if (aws_s3_client_get_http_connection(client, work->vip_connection, s_s3_meta_request_send_http_request, work)) {
+    if (aws_s3_client_get_http_connection(
+            client, vip_connection, s_s3_meta_request_send_http_request, vip_connection)) {
 
-        s_s3_meta_request_send_request_work_finish(work, NULL, aws_last_error());
+        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
         return;
     }
 }
@@ -514,90 +515,147 @@ static void s_s3_meta_request_send_http_request(
     int error_code,
     void *user_data) {
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work);
-    AWS_PRECONDITION(work->meta_request);
-    AWS_PRECONDITION(work->request);
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    AWS_FATAL_ASSERT(vtable);
+
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request && request->message);
 
     if (error_code != AWS_ERROR_SUCCESS) {
-        s_s3_meta_request_send_request_work_finish(work, NULL, error_code);
+        s_s3_meta_request_send_request_finish(vip_connection, NULL, error_code);
         return;
     }
-
-    struct aws_s3_meta_request_vtable *vtable = work->meta_request->vtable;
-    AWS_FATAL_ASSERT(vtable);
 
     /* Now that we have a signed request and a connection, go ahead and issue the request. */
     struct aws_http_make_request_options options;
     AWS_ZERO_STRUCT(options);
     options.self_size = sizeof(struct aws_http_make_request_options);
-    options.request = work->request->message;
-    options.user_data = work;
-    options.on_response_headers = vtable->incoming_headers;
-    options.on_response_header_block_done = vtable->incoming_headers_block_done;
-    options.on_response_body = vtable->incoming_body;
+    options.request = request->message;
+    options.user_data = vip_connection;
+    options.on_response_headers = s_s3_meta_request_incoming_headers;
+    options.on_response_header_block_done = s_s3_meta_request_headers_block_done;
+    options.on_response_body = s_s3_meta_request_incoming_body;
     options.on_complete = s_s3_meta_request_stream_complete;
 
     struct aws_http_stream *stream = aws_http_connection_make_request(http_connection, &options);
 
     if (stream == NULL) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Could not make HTTP request %p",
-            (void *)work->meta_request,
-            (void *)work->request);
+            AWS_LS_S3_META_REQUEST, "id=%p: Could not make HTTP request %p", (void *)meta_request, (void *)request);
 
-        s_s3_meta_request_send_request_work_finish(work, NULL, aws_last_error());
+        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
         return;
     }
 
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)work->meta_request, (void *)work->request);
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
 
     if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
         aws_http_stream_release(stream);
         stream = NULL;
 
         AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Could not activate HTTP stream %p",
-            (void *)work->meta_request,
-            (void *)work->request);
+            AWS_LS_S3_META_REQUEST, "id=%p: Could not activate HTTP stream %p", (void *)meta_request, (void *)request);
 
-        s_s3_meta_request_send_request_work_finish(work, NULL, aws_last_error());
+        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
         return;
     }
 }
 
-/* Finish up the processing of the request work. */
-static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
-    (void)stream;
+static int s_s3_meta_request_incoming_headers(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    const struct aws_http_header *headers,
+    size_t headers_count,
+    void *user_data) {
 
-    struct aws_s3_send_request_work *work = user_data;
-    AWS_PRECONDITION(work);
+    (void)header_block;
 
-    s_s3_meta_request_send_request_work_finish(work, stream, error_code);
+    AWS_PRECONDITION(stream);
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    if (meta_request->vtable->incoming_headers) {
+        return meta_request->vtable->incoming_headers(stream, header_block, headers, headers_count, vip_connection);
+    }
+
+    return AWS_OP_SUCCESS;
 }
 
-static void s_s3_meta_request_send_request_work_finish(
-    struct aws_s3_send_request_work *work,
+static int s_s3_meta_request_headers_block_done(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    void *user_data) {
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    AWS_PRECONDITION(meta_request && meta_request->vtable);
+
+    if (meta_request->vtable->incoming_headers_block_done) {
+        return meta_request->vtable->incoming_headers_block_done(stream, header_block, vip_connection);
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
+static int s_s3_meta_request_incoming_body(
+    struct aws_http_stream *stream,
+    const struct aws_byte_cursor *data,
+    void *user_data) {
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    AWS_PRECONDITION(meta_request && meta_request->vtable);
+
+    if (meta_request->vtable->incoming_body) {
+        return meta_request->vtable->incoming_body(stream, data, vip_connection);
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Finish up the processing of the request work. */
+static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    s_s3_meta_request_send_request_finish(vip_connection, stream, error_code);
+}
+
+static void s_s3_meta_request_send_request_finish(
+    struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code) {
-    AWS_PRECONDITION(work);
-    AWS_PRECONDITION(work->meta_request);
-    AWS_PRECONDITION(work->request_desc);
+    AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_meta_request *meta_request = work->meta_request;
+    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    AWS_PRECONDITION(meta_request);
 
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
-    AWS_PRECONDITION(vtable->stream_complete);
+
+    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
+    AWS_PRECONDITION(request_desc);
 
     AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Sending of request desc %p finished with error code %d",
-        (void *)work->meta_request,
-        (void *)work->request_desc,
+        (void *)meta_request,
+        (void *)request_desc,
         error_code);
 
     int response_status = 0;
@@ -620,41 +678,42 @@ static void s_s3_meta_request_send_request_work_finish(
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p Meta request received response status %d for request with tag %d",
-                (void *)work->meta_request,
+                (void *)meta_request,
                 response_status,
-                work->request_desc->request_tag);
+                request_desc->request_tag);
         }
     }
 
-    /* Call the derived type, having it handle what to do with the current failure or success. */
-    vtable->stream_complete(stream, error_code, work);
+    if (vtable->stream_complete) {
+
+        /* Call the derived type, having it handle what to do with the current failure or success. */
+        vtable->stream_complete(stream, error_code, vip_connection);
+    }
 
     if (stream != NULL) {
         aws_http_stream_release(stream);
         stream = NULL;
     }
 
-    /* Tell the caller that we finished processing this particular request. */
-    if (work->finished_callback != NULL) {
-        work->finished_callback(work->user_data);
-    }
+    aws_s3_request_finished_callback_fn *finished_callback = vip_connection->work_data.finished_callback;
 
     /* Release our work structure. */
-    s_s3_meta_request_send_request_work_destroy(work);
+    s_s3_meta_request_clean_up_work_data(vip_connection);
+
+    /* Tell the caller that we finished processing this particular request. */
+    if (finished_callback != NULL) {
+        finished_callback(vip_connection);
+    }
 }
 
-/* Push a request description into the retry queue.  This assumes ownership of the request desc, and will NULL out the
- * passed in pointer-to-pointer to help enforce this. */
-void aws_s3_meta_request_queue_retry(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_desc **in_out_desc) {
+/* Push a request description into the retry queue.  This assumes ownership of the request desc. */
+void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *desc) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(in_out_desc && *in_out_desc);
+    AWS_PRECONDITION(desc);
 
     s_s3_meta_request_lock_synced_data(meta_request);
 
-    aws_linked_list_push_back(&meta_request->synced_data.retry_queue, &(*in_out_desc)->node);
-    *in_out_desc = NULL;
+    aws_linked_list_push_back(&meta_request->synced_data.retry_queue, &desc->node);
 
     s_s3_meta_request_unlock_synced_data(meta_request);
 }
@@ -705,35 +764,31 @@ static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request,
 /* Asynchronously queue a part to send back to the caller.  This is for situations such as a parallel get, where we
  * don't necessarily want the handling of that data (which may include file IO) to happen at the same time we're
  * downloading it. */
-int aws_s3_meta_request_write_part_buffer_to_caller(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_part_buffer **in_out_part_buffer,
-    aws_write_part_buffer_callback_fn *callback,
-    void *user_data) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(in_out_part_buffer && *in_out_part_buffer);
+void aws_s3_meta_request_write_body_to_caller(
+    struct aws_s3_request *request,
+    aws_s3_meta_request_write_body_finished_callback_fn *callback) {
+    AWS_PRECONDITION(request && request->part_buffer);
 
-    struct aws_s3_part_buffer *part_buffer = *in_out_part_buffer;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
 
     aws_s3_meta_request_internal_acquire(meta_request);
-    part_buffer->write_part_buffer_data.meta_request = meta_request;
-    part_buffer->write_part_buffer_data.write_part_buffer_callback = callback;
-    part_buffer->write_part_buffer_data.user_data = user_data;
+
+    aws_s3_request_acquire(request);
+
+    AWS_ASSERT(request->write_body_data.finished_callback == NULL);
+    request->write_body_data.finished_callback = callback;
 
     aws_task_init(
-        &part_buffer->write_part_buffer_data.task,
-        s_s3_meta_request_process_write_queue_task,
-        part_buffer,
-        "s3_write_part_buffer_to_caller");
+        &request->write_body_data.task,
+        s_s3_meta_request_process_write_body_task,
+        request,
+        "s3_meta_request_process_write_body_task");
 
-    aws_event_loop_schedule_task_now(meta_request->event_loop, &part_buffer->write_part_buffer_data.task);
-
-    *in_out_part_buffer = NULL;
-
-    return AWS_OP_SUCCESS;
+    aws_event_loop_schedule_task_now(meta_request->event_loop, &request->write_body_data.task);
 }
 
-static void s_s3_meta_request_process_write_queue_task(
+static void s_s3_meta_request_process_write_body_task(
     struct aws_task *task,
     void *arg,
     enum aws_task_status task_status) {
@@ -741,14 +796,17 @@ static void s_s3_meta_request_process_write_queue_task(
     (void)task;
     (void)task_status;
 
-    struct aws_s3_part_buffer *part_buffer = arg;
+    struct aws_s3_request *request = arg;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_part_buffer *part_buffer = request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
-    struct aws_s3_meta_request *meta_request = part_buffer->write_part_buffer_data.meta_request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    aws_write_part_buffer_callback_fn *callback = part_buffer->write_part_buffer_data.write_part_buffer_callback;
-    void *callback_user_data = part_buffer->write_part_buffer_data.user_data;
+    aws_s3_meta_request_write_body_finished_callback_fn *callback = request->write_body_data.finished_callback;
+    request->write_body_data.finished_callback = NULL;
 
     if (task_status == AWS_TASK_STATUS_CANCELED) {
         goto clean_up;
@@ -766,16 +824,10 @@ static void s_s3_meta_request_process_write_queue_task(
 
 clean_up:
 
-    part_buffer->write_part_buffer_data.meta_request = NULL;
-    part_buffer->write_part_buffer_data.write_part_buffer_callback = NULL;
-    part_buffer->write_part_buffer_data.user_data = NULL;
-    aws_s3_meta_request_internal_release(meta_request);
-
-    /* Release the part buffer back to the client. */
-    aws_s3_part_buffer_release(part_buffer);
-    part_buffer = NULL;
-
     if (task_status == AWS_TASK_STATUS_RUN_READY && callback != NULL) {
-        callback(callback_user_data);
+        callback(meta_request, request);
     }
+
+    aws_s3_request_release(request);
+    aws_s3_meta_request_internal_release(meta_request);
 }
