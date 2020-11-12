@@ -408,9 +408,7 @@ static int s_s3_auto_ranged_get_header_block_done(
         return AWS_OP_ERR;
     }
 
-    s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
-
-    /* TODO add additional error checking for this value going out of bounds. */
+    /* TODO add additional error checking for this value going out above service-side part limits. */
     uint32_t num_parts = (uint32_t)(total_object_size / meta_request->part_size);
 
     if (total_object_size % meta_request->part_size) {
@@ -426,9 +424,9 @@ static int s_s3_auto_ranged_get_header_block_done(
         num_parts,
         meta_request->part_size);
 
+    s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
     auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS;
     auto_ranged_get->synced_data.total_num_parts = num_parts;
-
     s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
 
     if (meta_request->headers_callback != NULL) {
