@@ -18,7 +18,6 @@ enum aws_s3_auto_ranged_get_state {
 };
 
 enum aws_s3_auto_ranged_get_request_type {
-    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST,
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART,
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART
 };
@@ -98,7 +97,20 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_internal_options *options) {
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(options);
+    AWS_PRECONDITION(options && options->options && options->options->message);
+
+    struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->options->message);
+
+    /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
+     * this requires some additional logic.  For now just return NULL. */
+    if (initial_message_headers && aws_http_headers_has(initial_message_headers, g_range_header_name)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create Meta Request with message %p. Ranged requests not currently supported.",
+            (void *)options->options->message);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
 
     struct aws_s3_auto_ranged_get *auto_ranged_get =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_get));
@@ -166,39 +178,19 @@ static int s_s3_auto_ranged_get_next_request(
     switch (auto_ranged_get->synced_data.state) {
         /* This state means we haven't sent anything yet */
         case AWS_S3_AUTO_RANGED_GET_STATE_START: {
-            struct aws_http_message *initial_message = meta_request->initial_request_message;
-            AWS_FATAL_ASSERT(initial_message != NULL);
 
-            struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(initial_message);
+            /* We initially queue just one ranged get that is the size of a single part.  The headers from this
+             * first get will tell us the size of the object, and we can spin up additional gets if necessary. */
+            request_desc = aws_s3_request_desc_new(
+                meta_request,
+                AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART,
+                1,
+                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
-            if (initial_message_headers == NULL) {
-                goto error_clean_up_unlock;
-            }
+            auto_ranged_get->synced_data.next_part_number = 2;
 
-            struct aws_byte_cursor range_header_value;
-
-            /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
-             * this requires additional parsing of this header value, so for now, we just send the message. */
-            if (!aws_http_headers_get(initial_message_headers, g_range_header_name, &range_header_value)) {
-                request_desc =
-                    aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST, 0, 0);
-
-                auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS;
-
-            } else {
-                /* We initially queue just one ranged get that is the size of a single part.  The headers from this
-                 * first get will tell us the size of the object, and we can spin up additional gets if necessary. */
-                request_desc = aws_s3_request_desc_new(
-                    meta_request,
-                    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART,
-                    1,
-                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-
-                auto_ranged_get->synced_data.next_part_number = 2;
-
-                /* Wait for the first part's headers so that we can discover the object's total size. */
-                auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_WAITING_FOR_FIRST_PART;
-            }
+            /* Wait for the first part's headers so that we can discover the object's total size. */
+            auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_WAITING_FOR_FIRST_PART;
 
             break;
         }
@@ -247,12 +239,6 @@ static int s_s3_auto_ranged_get_next_request(
     *out_request_desc = request_desc;
 
     return AWS_OP_SUCCESS;
-
-error_clean_up_unlock:
-
-    s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
-
-    return AWS_OP_ERR;
 }
 
 /* Given a request description, spin up an in flight request. */
@@ -268,15 +254,6 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
     struct aws_s3_part_buffer *part_buffer = NULL;
 
     switch (request_desc->request_tag) {
-        /* If we're just using the original message, go ahead and send that messag now. */
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST: {
-            message = meta_request->initial_request_message;
-
-            AWS_FATAL_ASSERT(message != NULL);
-
-            aws_http_message_acquire(message);
-            break;
-        }
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART:
             /* Bleed-through is intentional */
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART: {
@@ -432,12 +409,6 @@ static int s_s3_auto_ranged_get_header_block_done(
     if (meta_request->headers_callback != NULL) {
         struct aws_http_headers *response_headers = aws_http_headers_new(meta_request->allocator);
 
-        int response_status = request->response_status;
-
-        if (response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS) {
-            response_status = AWS_S3_RESPONSE_STATUS_SUCCESS;
-        }
-
         copy_http_headers(request->response_headers, response_headers);
 
         aws_http_headers_erase(response_headers, g_accept_ranges_header_name);
@@ -448,7 +419,8 @@ static int s_s3_auto_ranged_get_header_block_done(
         aws_http_headers_set(
             response_headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
 
-        meta_request->headers_callback(meta_request, response_headers, response_status, meta_request->user_data);
+        meta_request->headers_callback(
+            meta_request, response_headers, AWS_S3_RESPONSE_STATUS_SUCCESS, meta_request->user_data);
 
         aws_http_headers_release(response_headers);
     }
@@ -465,30 +437,14 @@ static int s_s3_auto_ranged_get_incoming_body(
     (void)stream;
 
     AWS_PRECONDITION(vip_connection);
-
-    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
-    AWS_PRECONDITION(request_desc);
+    AWS_PRECONDITION(vip_connection->work_data.request);
 
     struct aws_s3_part_buffer *part_buffer = vip_connection->work_data.request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
-    /* TODO If we we're using the original message, just pass back directly for now.  This should currently only be the
-     * case when the incoming request from the user is already ranged.  */
-    if (request_desc->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_REQUEST) {
-
-        if (meta_request->body_callback != NULL) {
-            meta_request->body_callback(meta_request, data, 0, 0, meta_request->user_data);
-        }
-
-    } else {
-
-        /* Store the contents in our part buffer */
-        if (aws_byte_buf_append(&part_buffer->buffer, data)) {
-            return AWS_OP_ERR;
-        }
+    /* Store the contents in our part buffer */
+    if (aws_byte_buf_append(&part_buffer->buffer, data)) {
+        return AWS_OP_ERR;
     }
 
     return AWS_OP_SUCCESS;
