@@ -11,6 +11,7 @@
 #include <aws/common/byte_buf.h>
 
 #define ASSERT_SYNCED_DATA_LOCK_HELD(object) AWS_ASSERT(aws_mutex_try_lock(&(object)->synced_data.lock) == AWS_OP_ERR)
+#define KB_TO_BYTES(kb) ((kb)*1024)
 
 struct aws_allocator;
 struct aws_http_stream;

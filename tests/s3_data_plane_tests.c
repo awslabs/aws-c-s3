@@ -15,11 +15,6 @@
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
-#ifdef _MSC_VER
-/* sscanf warning (not currently scanning for strings) */
-#    pragma warning(disable : 4996)
-#endif
-
 static const struct aws_byte_cursor s_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 
 static const struct aws_byte_cursor s_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
@@ -473,6 +468,7 @@ error_clean_up_message:
 
 static int s_validate_successful_get_entire_object(struct aws_s3_tester_meta_request *tester_meta_request) {
     AWS_PRECONDITION(tester_meta_request);
+    AWS_PRECONDITION(tester_meta_request->tester);
 
     ASSERT_TRUE(tester_meta_request->finished_response_status == 200);
     ASSERT_TRUE(tester_meta_request->finished_response_status == tester_meta_request->headers_response_status);
@@ -486,18 +482,26 @@ static int s_validate_successful_get_entire_object(struct aws_s3_tester_meta_req
     ASSERT_FALSE(
         aws_http_headers_has(tester_meta_request->response_headers, aws_byte_cursor_from_c_str("Content-Range")));
 
+    struct aws_s3_tester *tester = tester_meta_request->tester;
+
     struct aws_byte_cursor content_length_cursor;
     AWS_ZERO_STRUCT(content_length_cursor);
     ASSERT_SUCCESS(aws_http_headers_get(
         tester_meta_request->response_headers, aws_byte_cursor_from_c_str("Content-Length"), &content_length_cursor));
 
-    uint64_t content_length = 0;
-    sscanf((const char *)content_length_cursor.ptr, "%" PRIu64, &content_length);
+    struct aws_string *content_length_str = aws_string_new_from_cursor(tester->allocator, &content_length_cursor);
+
+    char *content_length_str_end = NULL;
+    uint64_t content_length = strtoull((const char *)content_length_str->bytes, &content_length_str_end, 10);
+
+    aws_string_destroy(content_length_str);
+
     AWS_LOGF_TRACE(
         AWS_LS_S3_GENERAL,
         "Content length in header is %" PRIu64 " and received body size is %" PRIu64,
         content_length,
         tester_meta_request->received_body_size);
+
     ASSERT_TRUE(content_length == tester_meta_request->received_body_size);
 
     return AWS_OP_SUCCESS;

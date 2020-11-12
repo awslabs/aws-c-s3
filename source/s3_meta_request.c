@@ -11,6 +11,8 @@
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
+static const uint64_t s_response_body_error_buf_size = KB_TO_BYTES(1);
+
 static void s_s3_request_destroy(void *user_data);
 
 static void s_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
@@ -689,10 +691,8 @@ static int s_s3_meta_request_headers_block_done(
             return meta_request->vtable->incoming_headers_block_done(stream, header_block, vip_connection);
         }
     } else {
-        const size_t one_kb = 1 * 1024 * 1024;
-
         /* We may have an error body coming soon, so allocate a buffer for that error. */
-        aws_byte_buf_init(&request->response_body_error, meta_request->allocator, one_kb);
+        aws_byte_buf_init(&request->response_body_error, meta_request->allocator, s_response_body_error_buf_size);
     }
 
     return AWS_OP_SUCCESS;
