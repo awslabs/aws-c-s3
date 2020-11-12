@@ -215,9 +215,13 @@ void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struc
     aws_mem_release(meta_request->allocator, request_desc);
 }
 
-struct aws_s3_request *aws_s3_request_new(struct aws_s3_meta_request *meta_request, struct aws_http_message *message) {
+struct aws_s3_request *aws_s3_request_new(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request_desc *request_desc,
+    struct aws_http_message *message) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->allocator);
+    AWS_PRECONDITION(request_desc);
     AWS_PRECONDITION(message);
 
     struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
@@ -229,6 +233,10 @@ struct aws_s3_request *aws_s3_request_new(struct aws_s3_meta_request *meta_reque
 
     request->message = message;
     aws_http_message_acquire(message);
+
+    if (request_desc->record_response_headers) {
+        request->response_headers = aws_http_headers_new(meta_request->allocator);
+    }
 
     return request;
 }

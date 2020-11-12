@@ -316,7 +316,7 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
         }
     }
 
-    struct aws_s3_request *request = aws_s3_request_new(meta_request, message);
+    struct aws_s3_request *request = aws_s3_request_new(meta_request, request_desc, message);
 
     request->part_buffer = part_buffer;
     aws_http_message_release(message);

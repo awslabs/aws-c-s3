@@ -474,7 +474,7 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
     }
 
     /* Allocate the actual in-flight request structure. */
-    struct aws_s3_request *request = aws_s3_request_new(meta_request, message);
+    struct aws_s3_request *request = aws_s3_request_new(meta_request, request_desc, message);
     aws_http_message_release(message);
 
     if (request == NULL) {
