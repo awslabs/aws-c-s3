@@ -695,13 +695,15 @@ static void s_s3_meta_request_send_request_finish(
         stream = NULL;
     }
 
-    /* Tell the caller that we finished processing this particular request. */
-    if (vip_connection->work_data.finished_callback != NULL) {
-        vip_connection->work_data.finished_callback(vip_connection);
-    }
+    aws_s3_request_finished_callback_fn *finished_callback = vip_connection->work_data.finished_callback;
 
     /* Release our work structure. */
     s_s3_meta_request_clean_up_work_data(vip_connection);
+
+    /* Tell the caller that we finished processing this particular request. */
+    if (finished_callback != NULL) {
+        finished_callback(vip_connection);
+    }
 }
 
 /* Push a request description into the retry queue.  This assumes ownership of the request desc. */
