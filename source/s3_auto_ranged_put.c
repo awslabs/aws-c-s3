@@ -23,6 +23,14 @@ enum aws_s3_auto_ranged_put_request_tag {
     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD
 };
 
+static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
+
+static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+};
+
 struct aws_s3_auto_ranged_put {
     struct aws_s3_meta_request base;
 
@@ -36,6 +44,7 @@ struct aws_s3_auto_ranged_put {
         uint64_t total_object_size;
 
         struct aws_string *upload_id;
+        struct aws_http_headers *needed_response_headers;
 
     } synced_data;
 };
@@ -60,11 +69,9 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
     struct aws_s3_client *client,
     struct aws_s3_request_desc *request_desc);
 
-static int s_s3_auto_ranged_put_incoming_headers(
+static int s_s3_auto_ranged_put_header_block_done(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
-    const struct aws_http_header *headers,
-    size_t headers_count,
     struct aws_s3_vip_connection *vip_connection);
 
 static int s_s3_auto_ranged_put_incoming_body(
@@ -74,15 +81,14 @@ static int s_s3_auto_ranged_put_incoming_body(
 
 static void s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
-    int error_code,
     struct aws_s3_vip_connection *vip_connection);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .has_work = s_s3_auto_ranged_put_has_work,
     .next_request = s_s3_auto_ranged_put_next_request,
     .request_factory = s_s3_auto_ranged_put_request_factory,
-    .incoming_headers = s_s3_auto_ranged_put_incoming_headers,
-    .incoming_headers_block_done = NULL,
+    .incoming_headers = NULL,
+    .incoming_headers_block_done = s_s3_auto_ranged_put_header_block_done,
     .incoming_body = s_s3_auto_ranged_put_incoming_body,
     .stream_complete = s_s3_auto_ranged_put_stream_complete,
     .destroy = s_s3_meta_request_auto_ranged_put_destroy};
@@ -149,24 +155,19 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    if (auto_ranged_put->synced_data.upload_id != NULL) {
-        aws_string_destroy(auto_ranged_put->synced_data.upload_id);
-        auto_ranged_put->synced_data.upload_id = NULL;
-    }
+    aws_string_destroy(auto_ranged_put->synced_data.upload_id);
+    auto_ranged_put->synced_data.upload_id = NULL;
 
     for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
          ++etag_index) {
         struct aws_string *etag = NULL;
 
         aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
-
-        if (etag != NULL) {
-            aws_string_destroy(etag);
-            etag = NULL;
-        }
+        aws_string_destroy(etag);
     }
 
     aws_array_list_clean_up(&auto_ranged_put->synced_data.etag_list);
+    aws_http_headers_release(auto_ranged_put->synced_data.needed_response_headers);
 
     aws_mem_release(meta_request->allocator, auto_ranged_put);
 }
@@ -233,7 +234,7 @@ static int s_s3_auto_ranged_put_next_request(
             /* If we're less than a part size, don't bother with a multipart upload. */
             if (request_body_length <= (int64_t)meta_request->part_size) {
                 request_desc =
-                    aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT, 0);
+                    aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT, 0, 0);
 
                 /* Wait for this request to be processed before quitting. */
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST;
@@ -241,7 +242,10 @@ static int s_s3_auto_ranged_put_next_request(
 
                 /* Setup for a create-multipart upload */
                 request_desc = aws_s3_request_desc_new(
-                    meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD, 0);
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
+                    0,
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
                 /* We'll need to wait for the initial create to get back so that we can get the upload-id. */
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE;
@@ -261,7 +265,8 @@ static int s_s3_auto_ranged_put_next_request(
                 request_desc = aws_s3_request_desc_new(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
-                    auto_ranged_put->synced_data.next_part_number);
+                    auto_ranged_put->synced_data.next_part_number,
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
                 ++auto_ranged_put->synced_data.next_part_number;
             } else {
@@ -275,8 +280,11 @@ static int s_s3_auto_ranged_put_next_request(
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE: {
             /* If all parts have been completed, set up to send a complete-multipart-upload request. */
-            request_desc =
-                aws_s3_request_desc_new(meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD, 0);
+            request_desc = aws_s3_request_desc_new(
+                meta_request,
+                AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
+                0,
+                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE;
             break;
@@ -466,7 +474,7 @@ static struct aws_s3_request *s_s3_auto_ranged_put_request_factory(
     }
 
     /* Allocate the actual in-flight request structure. */
-    struct aws_s3_request *request = aws_s3_request_new(meta_request, message);
+    struct aws_s3_request *request = aws_s3_request_new(meta_request, request_desc, message);
     aws_http_message_release(message);
 
     if (request == NULL) {
@@ -509,11 +517,9 @@ part_buffer_get_failed:
     return NULL;
 }
 
-static int s_s3_auto_ranged_put_incoming_headers(
+static int s_s3_auto_ranged_put_header_block_done(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
-    const struct aws_http_header *headers,
-    size_t headers_count,
     struct aws_s3_vip_connection *vip_connection) {
 
     (void)stream;
@@ -526,9 +532,8 @@ static int s_s3_auto_ranged_put_incoming_headers(
     struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
     AWS_PRECONDITION(request_desc);
 
-    if (request_desc->request_tag != AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
-        return AWS_OP_SUCCESS;
-    }
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request && request->part_buffer);
 
     struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
     AWS_PRECONDITION(meta_request);
@@ -539,33 +544,65 @@ static int s_s3_auto_ranged_put_incoming_headers(
     struct aws_allocator *allocator = meta_request->allocator;
     AWS_PRECONDITION(allocator);
 
-    size_t part_number = request_desc->part_number;
-    AWS_FATAL_ASSERT(part_number > 0);
-    size_t part_index = part_number - 1;
+    if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
+        AWS_ASSERT(request->response_headers);
 
-    int result = AWS_OP_SUCCESS;
+        struct aws_http_headers *needed_response_headers = aws_http_headers_new(allocator);
+        const size_t copy_header_count =
+            sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
 
-    /* Find the ETag header if it exists and cache it. */
-    for (size_t i = 0; i < headers_count; ++i) {
-        const struct aws_byte_cursor *name = &headers[i].name;
-        const struct aws_byte_cursor *value = &headers[i].value;
+        /* Copy any headers now that we'll need for the final, transformed headers later. */
+        for (size_t header_index = 0; header_index < copy_header_count; ++header_index) {
+            const struct aws_byte_cursor *header_name = &s_create_multipart_upload_copy_headers[header_index];
+            struct aws_byte_cursor header_value;
+            AWS_ZERO_STRUCT(header_value);
 
-        if (!aws_http_header_name_eq(*name, g_etag_header_name)) {
-            continue;
+            if (!aws_http_headers_get(request->response_headers, *header_name, &header_value)) {
+                aws_http_headers_set(needed_response_headers, *header_name, header_value);
+            }
         }
 
-        struct aws_byte_cursor value_within_quotes = *value;
+        /* Copy those headers into our needed_response_headers. */
+        s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+        aws_http_headers_release(auto_ranged_put->synced_data.needed_response_headers);
+        auto_ranged_put->synced_data.needed_response_headers = needed_response_headers;
+        s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+        return AWS_OP_SUCCESS;
+
+    } else if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+
+        size_t part_number = request_desc->part_number;
+        AWS_FATAL_ASSERT(part_number > 0);
+        size_t part_index = part_number - 1;
+
+        int result = AWS_OP_SUCCESS;
+
+        /* Find the ETag header if it exists and cache it. */
+        struct aws_byte_cursor etag_within_quotes;
+
+        AWS_ASSERT(request->response_headers);
+
+        if (aws_http_headers_get(request->response_headers, g_etag_header_name, &etag_within_quotes)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Could not find ETag header for request %p",
+                (void *)meta_request,
+                (void *)request);
+            aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
+            return AWS_OP_ERR;
+        }
 
         /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up later, so just
          * get rid of the quotes now. */
-        if (value_within_quotes.len >= 2 && value_within_quotes.ptr[0] == '"' &&
-            value_within_quotes.ptr[value_within_quotes.len - 1] == '"') {
+        if (etag_within_quotes.len >= 2 && etag_within_quotes.ptr[0] == '"' &&
+            etag_within_quotes.ptr[etag_within_quotes.len - 1] == '"') {
 
-            aws_byte_cursor_advance(&value_within_quotes, 1);
-            --value_within_quotes.len;
+            aws_byte_cursor_advance(&etag_within_quotes, 1);
+            --etag_within_quotes.len;
         }
 
-        struct aws_string *etag = aws_string_new_from_cursor(allocator, &value_within_quotes);
+        struct aws_string *etag = aws_string_new_from_cursor(allocator, &etag_within_quotes);
         struct aws_string *null_etag = NULL;
 
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
@@ -583,10 +620,13 @@ static int s_s3_auto_ranged_put_incoming_headers(
     unlock:
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
-        break;
+        return result;
+    } else if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
+        aws_byte_buf_reset(&request->part_buffer->buffer, false);
+        return AWS_OP_SUCCESS;
     }
 
-    return result;
+    return AWS_OP_SUCCESS;
 }
 
 static int s_s3_auto_ranged_put_incoming_body(
@@ -605,7 +645,8 @@ static int s_s3_auto_ranged_put_incoming_body(
     struct aws_s3_part_buffer *part_buffer = vip_connection->work_data.request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
-    if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
+    if (request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD ||
+        request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
         if (aws_byte_buf_append(&part_buffer->buffer, data)) {
             return AWS_OP_ERR;
         }
@@ -616,7 +657,6 @@ static int s_s3_auto_ranged_put_incoming_body(
 
 static void s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
-    int error_code,
     struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(stream);
     (void)stream;
@@ -635,21 +675,6 @@ static void s_s3_auto_ranged_put_stream_complete(
     struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
 
-    if (error_code != AWS_ERROR_SUCCESS) {
-
-        /* If the error was service side, or we just ran out of part buffers, retry the request. */
-        /* TODO try to guarantee part buffers ara available earlier. */
-        if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
-            aws_s3_meta_request_queue_retry(meta_request, request_desc);
-            vip_connection->work_data.request_desc = NULL;
-        } else {
-            /* Otherwise, finish the request with failure. */
-            aws_s3_meta_request_finish(meta_request, error_code);
-        }
-
-        return;
-    }
-
     struct aws_s3_part_buffer *part_buffer = request->part_buffer;
     AWS_PRECONDITION(part_buffer);
 
@@ -659,7 +684,7 @@ static void s_s3_auto_ranged_put_stream_complete(
 
         /* Find the upload id for this multipart upload. */
         struct aws_string *upload_id =
-            aws_s3_create_multipart_upload_get_upload_id(meta_request->allocator, &buffer_byte_cursor);
+            get_top_level_xml_tag_value(meta_request->allocator, &s_upload_id, &buffer_byte_cursor);
 
         if (upload_id == NULL) {
             AWS_LOGF_ERROR(
@@ -667,7 +692,8 @@ static void s_s3_auto_ranged_put_stream_complete(
                 "id=%p Could not find upload-id in create-multipart-upload response",
                 (void *)meta_request);
 
-            aws_s3_meta_request_finish(meta_request, AWS_ERROR_S3_MISSING_UPLOAD_ID);
+            aws_raise_error(AWS_ERROR_S3_MISSING_UPLOAD_ID);
+            aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_MISSING_UPLOAD_ID);
             return;
         }
 
@@ -710,7 +736,38 @@ static void s_s3_auto_ranged_put_stream_complete(
     } else if (
         request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD ||
         request_desc->request_tag == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST) {
-        aws_s3_meta_request_finish(meta_request, AWS_ERROR_SUCCESS);
+
+        if (meta_request->headers_callback != NULL) {
+            struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
+
+            /* Copy all the response headers from this request. */
+            copy_http_headers(request->response_headers, final_response_headers);
+
+            /* Copy over any response headers that we've previously determined are needed for this final response. */
+            s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+            copy_http_headers(request->response_headers, auto_ranged_put->synced_data.needed_response_headers);
+            s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+            struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
+
+            /* Grab the ETag for the entire object, and set it as a header. */
+            struct aws_string *etag_header_value =
+                get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
+
+            if (etag_header_value != NULL) {
+                aws_http_headers_set(
+                    final_response_headers, g_etag_header_name, aws_byte_cursor_from_string(etag_header_value));
+            }
+
+            /* Notify the user of the headers. */
+            meta_request->headers_callback(
+                meta_request, final_response_headers, request->response_status, meta_request->user_data);
+
+            aws_http_headers_release(final_response_headers);
+            aws_string_destroy(etag_header_value);
+        }
+
+        aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
     } else {
         AWS_FATAL_ASSERT(false);
     }

@@ -5,10 +5,68 @@
 
 #include "s3_tester.h"
 #include <aws/auth/credentials.h>
+#include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
 #include <aws/testing/aws_test_harness.h>
+#include <inttypes.h>
+
+static void s_test_s3_meta_request_header_callback(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+    (void)meta_request;
+
+    struct aws_s3_tester_meta_request *tester_meta_request = (struct aws_s3_tester_meta_request *)user_data;
+
+    tester_meta_request->response_headers = headers;
+    aws_http_headers_acquire(headers);
+
+    tester_meta_request->headers_response_status = response_status;
+}
+
+static void s_test_s3_meta_request_body_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    uint64_t range_end,
+    void *user_data) {
+    (void)meta_request;
+    (void)body;
+
+    struct aws_s3_tester_meta_request *tester_meta_request = (struct aws_s3_tester_meta_request *)user_data;
+    tester_meta_request->received_body_size += (range_end - range_start) + 1;
+
+    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_end);
+}
+
+static void s_test_s3_meta_request_finish(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data) {
+    (void)meta_request;
+
+    struct aws_s3_tester_meta_request *tester_meta_request = (struct aws_s3_tester_meta_request *)user_data;
+    struct aws_s3_tester *tester = (struct aws_s3_tester *)tester_meta_request->tester;
+
+    tester_meta_request->error_response_headers = result->error_response_headers;
+
+    if (result->error_response_headers != NULL) {
+        aws_http_headers_acquire(result->error_response_headers);
+    }
+
+    if (result->error_response_body != NULL) {
+        aws_byte_buf_init_copy(
+            &tester_meta_request->error_response_body, tester->allocator, result->error_response_body);
+    }
+
+    tester_meta_request->finished_response_status = result->response_status;
+    tester_meta_request->finished_error_code = result->error_code;
+
+    aws_s3_tester_notify_finished(tester, result);
+}
 
 /* Wait for the cleanup notification.  This, and the s_tester_notify_clean_up_signal function are meant to be used for
  * sequential clean up only, and should not overlap with the "finish" callback.  (Both currently use the same
@@ -45,7 +103,7 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     return endpoint_string;
 }
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, size_t desired_finish_count) {
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -72,8 +130,6 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 
     tester->host_resolver = aws_host_resolver_new_default(allocator, 10, tester->el_group, NULL);
     ASSERT_TRUE(tester->host_resolver != NULL);
-
-    tester->desired_finish_count = desired_finish_count;
 
     /* Setup the client boot strap. */
     {
@@ -103,6 +159,64 @@ condition_variable_failed:
     return AWS_OP_ERR;
 }
 
+int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client_config *config) {
+    AWS_PRECONDITION(tester);
+    AWS_PRECONDITION(config);
+
+    ASSERT_TRUE(config->client_bootstrap == NULL);
+    config->client_bootstrap = tester->client_bootstrap;
+
+    ASSERT_TRUE(config->credentials_provider == NULL);
+    config->credentials_provider = tester->credentials_provider;
+
+    ASSERT_TRUE(config->shutdown_callback == NULL);
+    config->shutdown_callback = s_tester_notify_clean_up_signal;
+
+    ASSERT_TRUE(config->shutdown_callback_user_data == NULL);
+    config->shutdown_callback_user_data = tester;
+
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_tester_bind_meta_request(
+    struct aws_s3_tester *tester,
+    struct aws_s3_meta_request_options *options,
+    struct aws_s3_tester_meta_request *tester_meta_request) {
+
+    AWS_ZERO_STRUCT(*tester_meta_request);
+    tester_meta_request->tester = tester;
+
+    aws_s3_tester_lock_synced_data(tester);
+    ++tester->synced_data.desired_finish_count;
+    aws_s3_tester_unlock_synced_data(tester);
+
+    ASSERT_TRUE(options->headers_callback == NULL);
+    options->headers_callback = s_test_s3_meta_request_header_callback;
+
+    ASSERT_TRUE(options->body_callback == NULL);
+    options->body_callback = s_test_s3_meta_request_body_callback;
+
+    ASSERT_TRUE(options->finish_callback == NULL);
+    options->finish_callback = s_test_s3_meta_request_finish;
+
+    ASSERT_TRUE(options->user_data == NULL);
+    options->user_data = tester_meta_request;
+
+    return AWS_OP_SUCCESS;
+}
+
+void aws_s3_tester_meta_request_clean_up(struct aws_s3_tester_meta_request *test_meta_request) {
+    if (test_meta_request == NULL) {
+        return;
+    }
+
+    aws_http_headers_release(test_meta_request->error_response_headers);
+    aws_byte_buf_clean_up(&test_meta_request->error_response_body);
+    aws_http_headers_release(test_meta_request->response_headers);
+
+    AWS_ZERO_STRUCT(*test_meta_request);
+}
+
 void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
@@ -112,18 +226,20 @@ void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester) {
     aws_s3_tester_unlock_synced_data(tester);
 }
 
-void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, int error_code) {
+void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, const struct aws_s3_meta_request_result *result) {
     AWS_PRECONDITION(tester);
+    AWS_PRECONDITION(result);
 
     bool notify = false;
 
     aws_s3_tester_lock_synced_data(tester);
     ++tester->synced_data.finish_count;
 
-    if (tester->desired_finish_count == 0 || tester->synced_data.finish_count == tester->desired_finish_count ||
-        error_code != AWS_ERROR_SUCCESS) {
+    if (tester->synced_data.desired_finish_count == 0 ||
+        tester->synced_data.finish_count == tester->synced_data.desired_finish_count ||
+        result->error_code != AWS_ERROR_SUCCESS) {
         tester->synced_data.received_finish_callback = true;
-        tester->synced_data.finish_error_code = error_code;
+        tester->synced_data.finish_error_code = result->error_code;
 
         notify = true;
     }
@@ -139,7 +255,6 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
     s_s3_tester_wait_for_clean_up_signal(tester);
-    tester->bound_to_client_shutdown = false;
 
     aws_client_bootstrap_release(tester->client_bootstrap);
     tester->client_bootstrap = NULL;
@@ -192,17 +307,6 @@ void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_si
 
         aws_byte_buf_append(out_buf, &from_byte_cursor);
     }
-}
-
-void aws_s3_tester_bind_client_shutdown(struct aws_s3_tester *tester, struct aws_s3_client_config *config) {
-    AWS_PRECONDITION(tester);
-    AWS_PRECONDITION(config);
-
-    AWS_FATAL_ASSERT(!tester->bound_to_client_shutdown && "Only one client supported for binding to shutdown");
-
-    config->shutdown_callback = s_tester_notify_clean_up_signal;
-    config->shutdown_callback_user_data = tester;
-    tester->bound_to_client_shutdown = true;
 }
 
 static void s_tester_notify_clean_up_signal(void *user_data) {

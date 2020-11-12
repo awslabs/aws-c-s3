@@ -9,7 +9,6 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/byte_buf.h>
 #include <aws/common/string.h>
-#include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
 #include <aws/s3/s3.h>
@@ -136,7 +135,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_erase(headers, g_content_length_header_name_name)) {
+    if (aws_http_headers_erase(headers, g_content_length_header_name)) {
         goto error_clean_up;
     }
 
@@ -205,7 +204,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_erase(headers, g_content_length_header_name_name)) {
+    if (aws_http_headers_erase(headers, g_content_length_header_name)) {
         goto error_clean_up;
     }
 
@@ -215,6 +214,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     /* Create XML payload with all of the etags of finished parts */
     {
+        aws_byte_buf_reset(body_buffer, false);
+
         if (aws_byte_buf_append(body_buffer, &s_complete_payload_begin)) {
             goto error_clean_up;
         }
@@ -320,99 +321,6 @@ error_clean_request_path_buf:
     return AWS_OP_ERR;
 }
 
-struct create_multipart_upload_xml_user_data {
-    struct aws_allocator *allocator;
-    struct aws_string *upload_id;
-};
-
-static bool s_s3_create_multipart_upload_root_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data);
-
-static bool s_s3_create_multipart_upload_root_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data);
-
-static bool s_s3_create_multipart_upload_child_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data);
-
-/* Parses the XML response of a create-multipart-upload to get the Upload Id */
-struct aws_string *aws_s3_create_multipart_upload_get_upload_id(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor *response_body) {
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(response_body);
-
-    struct aws_xml_parser_options parser_options = {.doc = *response_body};
-    struct aws_xml_parser *parser = aws_xml_parser_new(allocator, &parser_options);
-
-    struct create_multipart_upload_xml_user_data xml_user_data = {
-        allocator,
-        NULL,
-    };
-
-    if (aws_xml_parser_parse(parser, s_s3_create_multipart_upload_root_xml_node, (void *)&xml_user_data)) {
-        if (xml_user_data.upload_id != NULL) {
-            aws_string_destroy(xml_user_data.upload_id);
-            xml_user_data.upload_id = NULL;
-        }
-
-        goto clean_up;
-    }
-
-clean_up:
-
-    if (parser != NULL) {
-        aws_xml_parser_destroy(parser);
-        parser = NULL;
-    }
-
-    return xml_user_data.upload_id;
-}
-
-static bool s_s3_create_multipart_upload_root_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data) {
-
-    aws_xml_node_traverse(parser, node, s_s3_create_multipart_upload_child_xml_node, user_data);
-
-    return false;
-}
-
-static bool s_s3_create_multipart_upload_child_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data) {
-
-    const struct aws_byte_cursor upload_id_tag_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
-
-    struct aws_byte_cursor node_name;
-
-    if (aws_xml_node_get_name(node, &node_name)) {
-        return false;
-    }
-
-    struct create_multipart_upload_xml_user_data *multipart_upload_xml_user_data = user_data;
-
-    if (aws_byte_cursor_eq(&node_name, &upload_id_tag_name)) {
-
-        struct aws_byte_cursor node_body;
-        aws_xml_node_as_body(parser, node, &node_body);
-
-        multipart_upload_xml_user_data->upload_id =
-            aws_string_new_from_cursor(multipart_upload_xml_user_data->allocator, &node_body);
-
-        return false;
-    }
-
-    return true;
-}
-
 /* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
 static struct aws_input_stream *s_s3_message_util_assign_body(
     struct aws_allocator *allocator,
@@ -440,7 +348,7 @@ static struct aws_input_stream *s_s3_message_util_assign_body(
     struct aws_byte_cursor content_length_cursor =
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
 
-    if (aws_http_headers_set(headers, g_content_length_header_name_name, content_length_cursor)) {
+    if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
         aws_input_stream_destroy(input_stream);
         goto error_clean_up;
     }
