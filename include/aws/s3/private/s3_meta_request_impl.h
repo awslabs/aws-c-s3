@@ -29,6 +29,8 @@ typedef void(aws_s3_meta_request_write_body_finished_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
+typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
+
 enum aws_s3_meta_request_state { AWS_S3_META_REQUEST_STATE_ACTIVE, AWS_S3_META_REQUEST_STATE_FINISHED };
 
 enum aws_s3_request_desc_flags { AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001 };
@@ -36,13 +38,13 @@ enum aws_s3_request_desc_flags { AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
 struct aws_s3_request {
 
+    /* Linked list node used for queuing. */
+    struct aws_linked_list_node node;
+
     struct aws_ref_count ref_count;
 
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
-
-    /* Linked list node used for queuing. */
-    struct aws_linked_list_node node;
 
     /* Members of this structure describes the request, making it possible to generate anything needed to send the
      * request. */
@@ -81,6 +83,13 @@ struct aws_s3_request {
 
         /* Returned response status of this request. */
         int response_status;
+
+        /* Callback for when the current sending of the request has finished.  */
+        aws_s3_request_finished_callback_fn *finished_callback;
+
+        /* User data for the finish callback. */
+        void *user_data;
+
     } send_data;
 
     /* Data intended to be only be used by aws_s3_meta_request_write_body_to_caller functionality. */

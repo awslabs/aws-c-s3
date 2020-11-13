@@ -91,7 +91,6 @@ int aws_s3_meta_request_init_base(
 
     AWS_ASSERT(vtable->next_request);
     AWS_ASSERT(vtable->prepare_request);
-    AWS_ASSERT(vtable->stream_complete);
     AWS_ASSERT(vtable->destroy);
 
     const struct aws_s3_meta_request_options *options = internal_options->options;
@@ -297,18 +296,13 @@ void s_s3_request_destroy(void *user_data) {
 
 static void s_s3_meta_request_setup_work_data(
     struct aws_s3_vip_connection *vip_connection,
-    struct aws_s3_request *request,
-    aws_s3_request_finished_callback_fn *finished_callback,
-    void *user_data) {
+    struct aws_s3_request *request) {
 
     AWS_PRECONDITION(vip_connection);
     AWS_PRECONDITION(request);
 
     vip_connection->work_data.request = request;
     aws_s3_request_acquire(request);
-
-    vip_connection->work_data.finished_callback = finished_callback;
-    vip_connection->work_data.user_data = user_data;
 }
 
 static void s_s3_meta_request_clean_up_work_data(struct aws_s3_vip_connection *vip_connection) {
@@ -316,9 +310,6 @@ static void s_s3_meta_request_clean_up_work_data(struct aws_s3_vip_connection *v
 
     aws_s3_request_release(vip_connection->work_data.request);
     vip_connection->work_data.request = NULL;
-
-    vip_connection->work_data.finished_callback = NULL;
-    vip_connection->work_data.user_data = NULL;
 }
 
 bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request) {
@@ -430,7 +421,10 @@ unlock:
     AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST, "id=%p Initiating work for request %p", (void *)meta_request, (void *)request);
 
-    s_s3_meta_request_setup_work_data(vip_connection, request, finished_callback, user_data);
+    request->send_data.finished_callback = finished_callback;
+    request->send_data.user_data = user_data;
+
+    s_s3_meta_request_setup_work_data(vip_connection, request);
 
     /* Release initial reference of request to give complete ownership to the work_data. */
     aws_s3_request_release(vip_connection->work_data.request);
@@ -765,9 +759,6 @@ static void s_s3_meta_request_send_request_finish(
         /* TODO try to guarantee part buffers ara available earlier. */
         if (error_code == AWS_ERROR_S3_INTERNAL_ERROR || error_code == AWS_ERROR_S3_NO_PART_BUFFER) {
             aws_s3_meta_request_queue_retry(meta_request, request);
-
-            aws_s3_request_release(request);
-            vip_connection->work_data.request = NULL;
         } else if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
             aws_s3_meta_request_finish(meta_request, request, request->send_data.response_status, error_code);
         } else {
@@ -780,9 +771,11 @@ static void s_s3_meta_request_send_request_finish(
         stream = NULL;
     }
 
-    aws_s3_request_finished_callback_fn *finished_callback = vip_connection->work_data.finished_callback;
+    aws_s3_request_finished_callback_fn *finished_callback = request->send_data.finished_callback;
 
-    /* Release our work structure. */
+    aws_s3_request_clean_up_send_data(request);
+
+    /* Clean up anything held by the vip connection's work_data structure. */
     s_s3_meta_request_clean_up_work_data(vip_connection);
 
     /* Tell the caller that we finished processing this particular request. */

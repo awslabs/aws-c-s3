@@ -4,6 +4,7 @@
  */
 
 #include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include "s3_tester.h"
 #include <aws/common/byte_buf.h>
@@ -46,17 +47,59 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
-static struct aws_http_message *s_make_get_object_request(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
-    struct aws_byte_cursor key);
+AWS_TEST_CASE(test_s3_request_create_destroy, s_test_s3_request_create_destroy)
+static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
-static struct aws_http_message *s_make_put_object_request(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
-    struct aws_byte_cursor content_type,
-    struct aws_byte_cursor key,
-    struct aws_input_stream *body_stream);
+    const uint32_t part_number = 1234;
+    const uint32_t request_tag = 5678;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *dummy_client = aws_s3_tester_dummy_client_new(&tester);
+    ASSERT_TRUE(dummy_client != NULL);
+
+    struct aws_s3_meta_request *dummy_meta_request = aws_s3_tester_dummy_meta_request_new(&tester, dummy_client);
+    ASSERT_TRUE(dummy_meta_request != NULL);
+
+    struct aws_http_message *request_message = aws_s3_tester_dummy_http_request_new(&tester);
+    ASSERT_TRUE(request_message != NULL);
+
+    struct aws_s3_request *request =
+        aws_s3_request_new(dummy_meta_request, request_tag, part_number, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+
+    ASSERT_TRUE(request != NULL);
+
+    ASSERT_TRUE(request->meta_request == dummy_meta_request);
+    ASSERT_TRUE(request->desc_data.part_number == part_number);
+    ASSERT_TRUE(request->desc_data.request_tag == request_tag);
+    ASSERT_TRUE(request->desc_data.record_response_headers == true);
+
+    aws_s3_request_setup_send_data(request, request_message);
+
+    ASSERT_TRUE(request->send_data.message != NULL);
+    ASSERT_TRUE(request->send_data.response_headers != NULL);
+
+    aws_s3_request_clean_up_send_data(request);
+
+    ASSERT_TRUE(request->send_data.message == NULL);
+    ASSERT_TRUE(request->send_data.response_headers == NULL);
+    ASSERT_TRUE(request->send_data.part_buffer == NULL);
+    ASSERT_TRUE(request->send_data.response_status == 0);
+    ASSERT_TRUE(request->send_data.finished_callback == 0);
+    ASSERT_TRUE(request->send_data.user_data == 0);
+
+    aws_s3_request_release(request);
+    aws_http_message_release(request_message);
+    aws_s3_meta_request_release(dummy_meta_request);
+    aws_s3_client_release(dummy_client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
 
 static int s_validate_successful_get_entire_object(struct aws_s3_tester_meta_request *tester_meta_request);
 
@@ -84,7 +127,7 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        s_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+        aws_s3_test_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -156,7 +199,7 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        s_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+        aws_s3_test_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
         struct aws_s3_meta_request_options options;
@@ -230,7 +273,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
         aws_s3_tester_build_endpoint_string(allocator, &s_test_bucket_name, &s_test_s3_region);
 
     /* Put together a simple S3 Put Object request. */
-    struct aws_http_message *message = s_make_put_object_request(
+    struct aws_http_message *message = aws_s3_test_make_put_object_request(
         allocator, aws_byte_cursor_from_string(host_name), test_object_path, s_test_body_content_type, input_stream);
 
     struct aws_s3_meta_request_options options;
@@ -317,7 +360,7 @@ static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) 
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        s_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+        aws_s3_test_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -361,109 +404,6 @@ static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) 
     aws_s3_tester_clean_up(&tester);
 
     return 0;
-}
-
-static struct aws_http_message *s_make_get_object_request(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
-    struct aws_byte_cursor key) {
-
-    struct aws_http_message *message = aws_http_message_new_request(allocator);
-
-    if (message == NULL) {
-        return NULL;
-    }
-
-    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
-
-    if (aws_http_message_add_header(message, host_header)) {
-        goto error_clean_up_message;
-    }
-
-    if (aws_http_message_set_request_method(message, aws_http_method_get)) {
-        goto error_clean_up_message;
-    }
-
-    if (aws_http_message_set_request_path(message, key)) {
-        goto error_clean_up_message;
-    }
-
-    return message;
-
-error_clean_up_message:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
-}
-
-static struct aws_http_message *s_make_put_object_request(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
-    struct aws_byte_cursor key,
-    struct aws_byte_cursor content_type,
-    struct aws_input_stream *body_stream) {
-
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(body_stream);
-
-    int64_t body_stream_length = 0;
-
-    if (aws_input_stream_get_length(body_stream, &body_stream_length)) {
-        return NULL;
-    }
-
-    struct aws_http_message *message = aws_http_message_new_request(allocator);
-
-    if (message == NULL) {
-        return NULL;
-    }
-
-    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
-
-    struct aws_http_header content_type_header = {.name = g_content_type_header_name, .value = content_type};
-
-    char content_length_buffer[64] = "";
-    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRId64 "", body_stream_length);
-
-    struct aws_http_header content_length_header = {.name = g_content_length_header_name,
-                                                    .value = aws_byte_cursor_from_c_str(content_length_buffer)};
-
-    if (aws_http_message_add_header(message, host_header)) {
-        goto error_clean_up_message;
-    }
-
-    if (aws_http_message_add_header(message, content_type_header)) {
-        goto error_clean_up_message;
-    }
-
-    if (aws_http_message_add_header(message, content_length_header)) {
-        goto error_clean_up_message;
-    }
-
-    if (aws_http_message_set_request_method(message, aws_http_method_put)) {
-        goto error_clean_up_message;
-    }
-
-    if (aws_http_message_set_request_path(message, key)) {
-        goto error_clean_up_message;
-    }
-
-    aws_http_message_set_body_stream(message, body_stream);
-
-    return message;
-
-error_clean_up_message:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
 }
 
 static int s_validate_successful_get_entire_object(struct aws_s3_tester_meta_request *tester_meta_request) {

@@ -79,13 +79,6 @@ struct aws_s3_vip_connection {
         /* Request created from the above request description. */
         struct aws_s3_request *request;
 
-        /* Callback for when the request has completed. (Note: this is in relation to the single aws_s3_request above,
-         * not the meta request as a whole.) */
-        aws_s3_request_finished_callback_fn *finished_callback;
-
-        /* User data for the finish callback. */
-        void *user_data;
-
     } work_data;
 };
 

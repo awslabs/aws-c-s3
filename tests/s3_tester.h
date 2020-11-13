@@ -19,6 +19,7 @@ struct aws_client_bootstrap;
 struct aws_credentials_provider;
 struct aws_event_loop_group;
 struct aws_host_resolver;
+struct aws_input_stream;
 
 /* Utility for setting up commonly needed resources for tests. */
 struct aws_s3_tester {
@@ -29,6 +30,7 @@ struct aws_s3_tester {
     struct aws_credentials_provider *credentials_provider;
 
     struct aws_condition_variable signal;
+    bool bound_to_client;
 
     struct {
         struct aws_mutex lock;
@@ -81,6 +83,14 @@ void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, const struct aw
  * finish shutting down before releasing any resources. */
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
+struct aws_s3_client *aws_s3_tester_dummy_client_new(struct aws_s3_tester *tester);
+
+struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester);
+
+struct aws_s3_meta_request *aws_s3_tester_dummy_meta_request_new(
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *dummy_client);
+
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf);
 
 void aws_s3_tester_lock_synced_data(struct aws_s3_tester *tester);
@@ -91,5 +101,17 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *bucket_name,
     const struct aws_byte_cursor *region);
+
+struct aws_http_message *aws_s3_test_make_get_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor key);
+
+struct aws_http_message *aws_s3_test_make_put_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor content_type,
+    struct aws_byte_cursor key,
+    struct aws_input_stream *body_stream);
 
 #endif /* AWS_S3_TESTER_H */
