@@ -280,7 +280,6 @@ struct aws_s3_request *aws_s3_request_new(
     uint32_t flags);
 
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
-<<<<<<< HEAD
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */
 AWS_S3_API
 void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
@@ -288,13 +287,6 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 /* Clear out send_data members so that they can be repopulated before the next send. */
 AWS_S3_API
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request);
-=======
- * aws_s3_request_clear_send_data to clear out anything previously existing in send_data. */
-void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
-
-/* Clear out send_data members so that they can be repopulated before the next send. */
-void aws_s3_request_clear_send_data(struct aws_s3_request *request);
->>>>>>> Merging aws_s3_request_desc into aws_s3_request
 
 AWS_S3_API
 void aws_s3_request_acquire(struct aws_s3_request *request);
