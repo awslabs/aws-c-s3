@@ -51,8 +51,8 @@ AWS_TEST_CASE(test_s3_request_create_destroy, s_test_s3_request_create_destroy)
 static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const uint32_t part_number = 1234;
-    const uint32_t request_tag = 5678;
+    const int request_tag = 1234;
+    const uint32_t part_number = 5678;
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);

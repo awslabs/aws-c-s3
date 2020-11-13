@@ -330,6 +330,7 @@ static void s_s3_dummy_meta_request_destroy(struct aws_s3_meta_request *meta_req
 }
 
 static bool s_s3_dummy_meta_request_has_work(const struct aws_s3_meta_request *meta_request) {
+    (void)meta_request;
     return false;
 }
 
