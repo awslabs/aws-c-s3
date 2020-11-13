@@ -75,7 +75,7 @@ struct aws_s3_request {
          * true. */
         struct aws_http_headers *response_headers;
 
-        /* Optional part buffer to be used with this request. */
+        /* Part buffer to be used with this request. */
         struct aws_s3_part_buffer *part_buffer;
 
         /* If the request receives an error, this byte buffer will be allocated and will hold the body of that error.*/
