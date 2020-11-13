@@ -33,25 +33,6 @@ enum aws_s3_meta_request_state { AWS_S3_META_REQUEST_STATE_ACTIVE, AWS_S3_META_R
 
 enum aws_s3_request_desc_flags { AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001 };
 
-/* Represents a "description" of a request, ie, enough information to create an actual message.  This is meant to be
- * queueable for retries. */
-struct aws_s3_request_desc {
-
-    /* Linked list node used for queuing. */
-    struct aws_linked_list_node node;
-
-    /* Part number that this request first to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.) */
-    uint32_t part_number;
-
-    /* Tag that defines what the built request will actually consist of.  Request tags are different per meta request
-     * type, and do not necessarily map 1:1 with actual S3 API requests.  For example, they can be more contextual, like
-     * "first part" instead of just "part".) */
-    int request_tag;
-
-    /* When true, response headers from the request will be stored in the request's response_headers variable. */
-    uint32_t record_response_headers : 1;
-};
-
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
 struct aws_s3_request {
 
@@ -60,21 +41,47 @@ struct aws_s3_request {
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
 
-    /* The HTTP message to send for this request. */
-    struct aws_http_message *message;
+    /* Linked list node used for queuing. */
+    struct aws_linked_list_node node;
 
-    /* Recorded response headers for the request. Set only when the request_desc has record_response_headers set to
-     * true. */
-    struct aws_http_headers *response_headers;
+    /* Members of this structure describes the request, making it possible to generate anything needed to send the
+     * request. */
+    struct {
+        /* Part number that this request first to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
+         */
+        uint32_t part_number;
 
-    /* Optional part buffer to be used with this request. */
-    struct aws_s3_part_buffer *part_buffer;
+        /* Tag that defines what the built request will actually consist of.  Request tags are different per meta
+         * request type, and do not necessarily map 1:1 with actual S3 API requests.  For example, they can be more
+         * contextual, like "first part" instead of just "part".) */
+        int request_tag;
 
-    /* If the request receives an error, this byte buffer will be allocated and will hold the body of that error.*/
-    struct aws_byte_buf response_body_error;
+        /* When true, response headers from the request will be stored in the request's response_headers variable. */
+        uint32_t record_response_headers : 1;
 
-    /* Returned response status of this request. */
-    int response_status;
+    } desc;
+
+    /* Members of this structure will be repopulated each time the request is sent.  For example, If the request fails,
+     * and needs to be retried, then the members of this structure will be cleaned up and re-populated on the next send.
+     */
+    struct {
+
+        /* The HTTP message to send for this request. */
+        struct aws_http_message *message;
+
+        /* Recorded response headers for the request. Set only when the request_desc has record_response_headers set to
+         * true. */
+        struct aws_http_headers *response_headers;
+
+        /* Optional part buffer to be used with this request. */
+        struct aws_s3_part_buffer *part_buffer;
+
+        /* If the request receives an error, this byte buffer will be allocated and will hold the body of that error.*/
+        struct aws_byte_buf response_body_error;
+
+        /* Returned response status of this request. */
+        int response_status;
+    } send_data;
 
     /* Data intended to be only be used by aws_s3_meta_request_write_body_to_caller functionality. */
     struct {
@@ -97,15 +104,16 @@ struct aws_s3_meta_request_internal_options {
 struct aws_s3_meta_request_vtable {
     bool (*has_work)(const struct aws_s3_meta_request *meta_request);
 
-    /* Pass back a request description of the next request that should be created.  If no work is available, this should
-     * pass back a NULL pointer. */
-    int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc **request_desc);
+    /* Pass back a request with a populated description.  If no work is available, this is allowed to pass back a NULL
+     * pointer. */
+    int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request **out_request);
 
-    /* Given a request description, create a new in-flight request. */
-    struct aws_s3_request *(*request_factory)(
+    /* Given a request, prepare it for sending based on its description. Should call aws_s3_request_send_data before
+     * exitting. */
+    int (*prepare_request)(
         struct aws_s3_meta_request *meta_request,
         struct aws_s3_client *client,
-        struct aws_s3_request_desc *request_desc);
+        struct aws_s3_request *request);
 
     /* Callbacks for all HTTP messages being processed by this meta request. */
     int (*incoming_headers)(
@@ -235,27 +243,26 @@ void aws_s3_meta_request_write_body_to_caller(
     struct aws_s3_request *request,
     aws_s3_meta_request_write_body_finished_callback_fn *callback);
 
-/* Allocate a new request description with the given options. */
-struct aws_s3_request_desc *aws_s3_request_desc_new(
+/* Create a new s3 request structure with the given options. */
+struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
     uint32_t part_number,
     uint32_t flags);
 
-void aws_s3_request_desc_destroy(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *request_desc);
+/* Set up the request to be sent. Called each time before the request is sent. Will initially call
+ * aws_s3_request_clear_send_data to clear out anything previously existing in send_data. */
+void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
 
-/* Create a new s3 request structure with the given options. */
-struct aws_s3_request *aws_s3_request_new(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_desc *request_desc,
-    struct aws_http_message *message);
+/* Clear out send_data members so that they can be repopulated before the next send. */
+void aws_s3_request_clear_send_data(struct aws_s3_request *request);
 
 void aws_s3_request_acquire(struct aws_s3_request *request);
 
 void aws_s3_request_release(struct aws_s3_request *request);
 
 /* Push a request description into the retry queue.  This assumes ownership of the request desc, */
-void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request_desc *desc);
+void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
 /* Tells the meta request to stop, with an error code for indicating failure when necessary. */
 void aws_s3_meta_request_finish(

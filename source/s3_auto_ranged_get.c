@@ -45,12 +45,12 @@ static bool s_s3_auto_ranged_get_has_work(const struct aws_s3_meta_request *meta
 
 static int s_s3_auto_ranged_get_next_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_desc **out_request_desc);
+    struct aws_s3_request **out_request);
 
-struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
+static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_request_desc *request_desc);
+    struct aws_s3_request *request);
 
 static int s_s3_auto_ranged_get_header_block_done(
     struct aws_http_stream *stream,
@@ -73,7 +73,7 @@ static void s_s3_auto_ranged_get_write_body_callback(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .has_work = s_s3_auto_ranged_get_has_work,
     .next_request = s_s3_auto_ranged_get_next_request,
-    .request_factory = s_s3_auto_ranged_get_request_factory,
+    .prepare_request = s_s3_auto_ranged_get_prepare_request,
     .incoming_headers = NULL,
     .incoming_headers_block_done = s_s3_auto_ranged_get_header_block_done,
     .incoming_body = s_s3_auto_ranged_get_incoming_body,
@@ -166,12 +166,12 @@ static bool s_s3_auto_ranged_get_has_work(const struct aws_s3_meta_request *meta
 /* Try to get the next request that should be processed. */
 static int s_s3_auto_ranged_get_next_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request_desc **out_request_desc) {
+    struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(out_request_desc);
+    AWS_PRECONDITION(out_request);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
-    struct aws_s3_request_desc *request_desc = NULL;
+    struct aws_s3_request *request = NULL;
 
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
 
@@ -181,7 +181,7 @@ static int s_s3_auto_ranged_get_next_request(
 
             /* We initially queue just one ranged get that is the size of a single part.  The headers from this
              * first get will tell us the size of the object, and we can spin up additional gets if necessary. */
-            request_desc = aws_s3_request_desc_new(
+            request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART,
                 1,
@@ -202,7 +202,7 @@ static int s_s3_auto_ranged_get_next_request(
             /* Keep returning returning requests until we've returned up to the total amount of parts. */
             if (auto_ranged_get->synced_data.next_part_number <= auto_ranged_get->synced_data.total_num_parts) {
 
-                request_desc = aws_s3_request_desc_new(
+                request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                     auto_ranged_get->synced_data.next_part_number,
@@ -225,35 +225,35 @@ static int s_s3_auto_ranged_get_next_request(
             break;
     }
 
-    if (request_desc != NULL) {
+    if (request != NULL) {
         AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Returning request desc for part %d of %d",
+            "id=%p: Returning request %p for part %d of %d",
             (void *)meta_request,
-            request_desc->part_number,
+            (void *)request,
+            request->desc.part_number,
             auto_ranged_get->synced_data.total_num_parts);
     }
 
     s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
 
-    *out_request_desc = request_desc;
+    *out_request = request;
 
     return AWS_OP_SUCCESS;
 }
-
-/* Given a request description, spin up an in flight request. */
-struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
+/* Given a request, prepare it for sending based on its description. */
+static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_request_desc *request_desc) {
+    struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(client);
-    AWS_PRECONDITION(request_desc);
+    AWS_PRECONDITION(request);
 
     struct aws_http_message *message = NULL;
     struct aws_s3_part_buffer *part_buffer = NULL;
 
-    switch (request_desc->request_tag) {
+    switch (request->desc.request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART:
             /* Bleed-through is intentional */
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART: {
@@ -262,7 +262,7 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
             message = aws_s3_get_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
-                request_desc->part_number,
+                request->desc.part_number,
                 meta_request->part_size);
 
             if (message == NULL) {
@@ -270,19 +270,19 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not create message for request with tag %d for auto-ranged-get meta request.",
                     (void *)meta_request,
-                    request_desc->request_tag);
+                    request->desc.request_tag);
                 goto message_alloc_failed;
             }
 
             /* Grab a part buffer that we can write the contents to and pass back to the user. */
-            part_buffer = aws_s3_client_get_part_buffer(client, request_desc->part_number);
+            part_buffer = aws_s3_client_get_part_buffer(client, request->desc.part_number);
 
             if (part_buffer == NULL) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not get part buffer for request with tag %d for auto-ranged-get meta request.",
                     (void *)meta_request,
-                    request_desc->request_tag);
+                    request->desc.request_tag);
 
                 aws_raise_error(AWS_ERROR_S3_NO_PART_BUFFER);
 
@@ -293,9 +293,9 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
         }
     }
 
-    struct aws_s3_request *request = aws_s3_request_new(meta_request, request_desc, message);
+    aws_s3_request_setup_send_data(request, message);
 
-    request->part_buffer = part_buffer;
+    request->send_data.part_buffer = part_buffer;
     aws_http_message_release(message);
 
     AWS_LOGF_TRACE(
@@ -303,9 +303,9 @@ struct aws_s3_request *s_s3_auto_ranged_get_request_factory(
         "id=%p: Created request %p for part %d",
         (void *)meta_request,
         (void *)request,
-        request_desc->part_number);
+        request->desc.part_number);
 
-    return request;
+    return AWS_OP_SUCCESS;
 
 part_buffer_get_failed:
 
@@ -316,7 +316,7 @@ part_buffer_get_failed:
 
 message_alloc_failed:
 
-    return NULL;
+    return AWS_OP_ERR;
 }
 
 static int s_s3_auto_ranged_get_header_block_done(
@@ -330,25 +330,22 @@ static int s_s3_auto_ranged_get_header_block_done(
     AWS_PRECONDITION(stream);
     AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_request_desc *request_desc = vip_connection->work_data.request_desc;
-    AWS_PRECONDITION(request_desc);
-
     struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_ASSERT(meta_request);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     AWS_ASSERT(auto_ranged_get);
 
-    if (request_desc->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART) {
+    if (request->desc.request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART) {
         return AWS_OP_SUCCESS;
     }
 
     struct aws_byte_cursor content_range_header_value;
 
-    if (aws_http_headers_get(request->response_headers, g_content_range_header_name, &content_range_header_value)) {
+    if (aws_http_headers_get(request->send_data.response_headers, g_content_range_header_name, &content_range_header_value)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not find content range header for request %p",
@@ -409,7 +406,7 @@ static int s_s3_auto_ranged_get_header_block_done(
     if (meta_request->headers_callback != NULL) {
         struct aws_http_headers *response_headers = aws_http_headers_new(meta_request->allocator);
 
-        copy_http_headers(request->response_headers, response_headers);
+        copy_http_headers(request->send_data.response_headers, response_headers);
 
         aws_http_headers_erase(response_headers, g_accept_ranges_header_name);
         aws_http_headers_erase(response_headers, g_content_range_header_name);
@@ -437,9 +434,11 @@ static int s_s3_auto_ranged_get_incoming_body(
     (void)stream;
 
     AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->work_data.request);
 
-    struct aws_s3_part_buffer *part_buffer = vip_connection->work_data.request->part_buffer;
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_part_buffer *part_buffer = request->send_data.part_buffer;
     AWS_PRECONDITION(part_buffer);
 
     /* Store the contents in our part buffer */
@@ -457,12 +456,12 @@ static void s_s3_auto_ranged_get_stream_complete(
 
     AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_meta_request *meta_request = vip_connection->work_data.meta_request;
-    AWS_PRECONDITION(meta_request);
-
     struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
-    AWS_PRECONDITION(request->part_buffer);
+    AWS_PRECONDITION(request->send_data.part_buffer);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
 
     aws_s3_meta_request_internal_acquire(meta_request);
 

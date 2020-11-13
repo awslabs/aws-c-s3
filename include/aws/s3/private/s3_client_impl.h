@@ -75,11 +75,6 @@ struct aws_s3_vip_connection {
 
     /* work_data members accessible to the meta request while it is processing an HTTP request. */
     struct {
-        /* Meta Request currently processing an HTTP request. */
-        struct aws_s3_meta_request *meta_request;
-
-        /* Current request description for the created request. */
-        struct aws_s3_request_desc *request_desc;
 
         /* Request created from the above request description. */
         struct aws_s3_request *request;
