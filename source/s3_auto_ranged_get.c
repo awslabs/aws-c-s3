@@ -250,7 +250,6 @@ static int s_s3_auto_ranged_get_next_request(
 
     return AWS_OP_SUCCESS;
 }
-
 /* Given a request, prepare it for sending based on its description. */
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
