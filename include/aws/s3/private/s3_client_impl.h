@@ -18,8 +18,6 @@
 
 struct aws_http_connection_manager;
 
-typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
-
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
 struct aws_s3_vip {
     struct aws_linked_list_node node;
