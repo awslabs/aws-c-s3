@@ -309,7 +309,7 @@ unlock:
             "id=%p: Returning request %p for part %d of %d",
             (void *)meta_request,
             (void *)request,
-            request->desc.part_number,
+            request->desc_data.part_number,
             auto_ranged_put->synced_data.total_num_parts);
     }
 
@@ -334,23 +334,23 @@ static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_part_buffer *part_buffer = NULL;
 
     /* If we're not sending the entire object, then we need to grab a part buffer */
-    if (request->desc.request_tag != AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT) {
+    if (request->desc_data.request_tag != AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT) {
 
-        part_buffer = aws_s3_client_get_part_buffer(client, request->desc.part_number);
+        part_buffer = aws_s3_client_get_part_buffer(client, request->desc_data.part_number);
 
         if (part_buffer == NULL) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p Could not get part buffer for request with tag %d for auto-ranged-get meta request.",
                 (void *)meta_request,
-                request->desc.request_tag);
+                request->desc_data.request_tag);
 
             aws_raise_error(AWS_ERROR_S3_NO_PART_BUFFER);
             goto part_buffer_get_failed;
         }
     }
 
-    switch (request->desc.request_tag) {
+    switch (request->desc_data.request_tag) {
 
         /* If we're grabbing the whole object, just use the original message. */
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT: {
@@ -368,7 +368,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
 
-            uint64_t range_start = (request->desc.part_number - 1) * meta_request->part_size;
+            uint64_t range_start = (request->desc_data.part_number - 1) * meta_request->part_size;
             struct aws_input_stream *initial_body_stream = meta_request->synced_data.initial_body_stream;
 
             AWS_FATAL_ASSERT(initial_body_stream);
@@ -384,7 +384,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     "id=%p Could not seek initial body stream for request with tag %d for auto-ranged-put meta "
                     "request.",
                     (void *)meta_request,
-                    request->desc.request_tag);
+                    request->desc_data.request_tag);
                 error_occurred = true;
                 goto unlock;
             }
@@ -397,7 +397,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     "meta "
                     "request.",
                     (void *)meta_request,
-                    request->desc.request_tag);
+                    request->desc_data.request_tag);
                 error_occurred = true;
                 goto unlock;
             }
@@ -414,7 +414,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &part_buffer->buffer,
-                request->desc.part_number,
+                request->desc_data.part_number,
                 auto_ranged_put->synced_data.upload_id);
 
             if (message == NULL) {
@@ -422,7 +422,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
                     (void *)meta_request,
-                    request->desc.request_tag);
+                    request->desc_data.request_tag);
                 goto message_create_failed;
             }
 
@@ -438,7 +438,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
                     (void *)meta_request,
-                    request->desc.request_tag);
+                    request->desc_data.request_tag);
                 goto message_create_failed;
             }
 
@@ -465,7 +465,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
                     (void *)meta_request,
-                    request->desc.request_tag);
+                    request->desc_data.request_tag);
                 goto message_create_failed;
             }
 
@@ -482,7 +482,7 @@ static int s_s3_auto_ranged_put_prepare_request(
         "id=%p: Prepared request %p for part %d",
         (void *)meta_request,
         (void *)request,
-        request->desc.part_number);
+        request->desc_data.part_number);
 
     request->send_data.part_buffer = part_buffer;
 
@@ -521,7 +521,7 @@ static int s_s3_auto_ranged_put_header_block_done(
     struct aws_allocator *allocator = meta_request->allocator;
     AWS_PRECONDITION(allocator);
 
-    if (request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
+    if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
         AWS_ASSERT(request->send_data.response_headers);
 
         struct aws_http_headers *needed_response_headers = aws_http_headers_new(allocator);
@@ -547,9 +547,9 @@ static int s_s3_auto_ranged_put_header_block_done(
 
         return AWS_OP_SUCCESS;
 
-    } else if (request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+    } else if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 
-        size_t part_number = request->desc.part_number;
+        size_t part_number = request->desc_data.part_number;
         AWS_FATAL_ASSERT(part_number > 0);
         size_t part_index = part_number - 1;
 
@@ -598,7 +598,7 @@ static int s_s3_auto_ranged_put_header_block_done(
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         return result;
-    } else if (request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
+    } else if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
         aws_byte_buf_reset(&request->send_data.part_buffer->buffer, false);
         return AWS_OP_SUCCESS;
     }
@@ -622,8 +622,8 @@ static int s_s3_auto_ranged_put_incoming_body(
     struct aws_s3_part_buffer *part_buffer = request->send_data.part_buffer;
     AWS_PRECONDITION(part_buffer);
 
-    if (request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD ||
-        request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
+    if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD ||
+        request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
         if (aws_byte_buf_append(&part_buffer->buffer, data)) {
             return AWS_OP_ERR;
         }
@@ -652,7 +652,7 @@ static void s_s3_auto_ranged_put_stream_complete(
     struct aws_s3_part_buffer *part_buffer = request->send_data.part_buffer;
     AWS_PRECONDITION(part_buffer);
 
-    if (request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
+    if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
 
         struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
 
@@ -682,7 +682,7 @@ static void s_s3_auto_ranged_put_stream_complete(
         /* Create Multipart Upload finished successfully, so now we should have parts to send. */
         aws_s3_client_schedule_meta_request_work(meta_request->client, &auto_ranged_put->base);
 
-    } else if (request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+    } else if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 
         bool notify_work_available = false;
 
@@ -708,8 +708,8 @@ static void s_s3_auto_ranged_put_stream_complete(
         }
 
     } else if (
-        request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD ||
-        request->desc.request_tag == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST) {
+        request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD ||
+        request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST) {
 
         if (meta_request->headers_callback != NULL) {
             struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);

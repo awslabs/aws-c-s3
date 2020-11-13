@@ -231,7 +231,7 @@ static int s_s3_auto_ranged_get_next_request(
             "id=%p: Returning request %p for part %d of %d",
             (void *)meta_request,
             (void *)request,
-            request->desc.part_number,
+            request->desc_data.part_number,
             auto_ranged_get->synced_data.total_num_parts);
     }
 
@@ -241,6 +241,7 @@ static int s_s3_auto_ranged_get_next_request(
 
     return AWS_OP_SUCCESS;
 }
+
 /* Given a request, prepare it for sending based on its description. */
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -253,7 +254,7 @@ static int s_s3_auto_ranged_get_prepare_request(
     struct aws_http_message *message = NULL;
     struct aws_s3_part_buffer *part_buffer = NULL;
 
-    switch (request->desc.request_tag) {
+    switch (request->desc_data.request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART:
             /* Bleed-through is intentional */
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART: {
@@ -262,7 +263,7 @@ static int s_s3_auto_ranged_get_prepare_request(
             message = aws_s3_get_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
-                request->desc.part_number,
+                request->desc_data.part_number,
                 meta_request->part_size);
 
             if (message == NULL) {
@@ -270,19 +271,19 @@ static int s_s3_auto_ranged_get_prepare_request(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not create message for request with tag %d for auto-ranged-get meta request.",
                     (void *)meta_request,
-                    request->desc.request_tag);
+                    request->desc_data.request_tag);
                 goto message_alloc_failed;
             }
 
             /* Grab a part buffer that we can write the contents to and pass back to the user. */
-            part_buffer = aws_s3_client_get_part_buffer(client, request->desc.part_number);
+            part_buffer = aws_s3_client_get_part_buffer(client, request->desc_data.part_number);
 
             if (part_buffer == NULL) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not get part buffer for request with tag %d for auto-ranged-get meta request.",
                     (void *)meta_request,
-                    request->desc.request_tag);
+                    request->desc_data.request_tag);
 
                 aws_raise_error(AWS_ERROR_S3_NO_PART_BUFFER);
 
@@ -303,7 +304,7 @@ static int s_s3_auto_ranged_get_prepare_request(
         "id=%p: Created request %p for part %d",
         (void *)meta_request,
         (void *)request,
-        request->desc.part_number);
+        request->desc_data.part_number);
 
     return AWS_OP_SUCCESS;
 
@@ -339,14 +340,13 @@ static int s_s3_auto_ranged_get_header_block_done(
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     AWS_ASSERT(auto_ranged_get);
 
-    if (request->desc.request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART) {
+    if (request->desc_data.request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART) {
         return AWS_OP_SUCCESS;
     }
 
     struct aws_byte_cursor content_range_header_value;
 
-    if (aws_http_headers_get(
-            request->send_data.response_headers, g_content_range_header_name, &content_range_header_value)) {
+    if (aws_http_headers_get(request->send_data.response_headers, g_content_range_header_name, &content_range_header_value)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not find content range header for request %p",

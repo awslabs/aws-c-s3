@@ -206,9 +206,9 @@ struct aws_s3_request *aws_s3_request_new(
     request->meta_request = meta_request;
     aws_s3_meta_request_acquire(meta_request);
 
-    request->desc.request_tag = request_tag;
-    request->desc.part_number = part_number;
-    request->desc.record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
+    request->desc_data.request_tag = request_tag;
+    request->desc_data.part_number = part_number;
+    request->desc_data.record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
 
     return request;
 }
@@ -220,17 +220,17 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    aws_s3_request_clear_send_data(request);
+    aws_s3_request_clean_up_send_data(request);
 
     request->send_data.message = message;
     aws_http_message_acquire(message);
 
-    if (request->desc.record_response_headers) {
+    if (request->desc_data.record_response_headers) {
         request->send_data.response_headers = aws_http_headers_new(meta_request->allocator);
     }
 }
 
-void aws_s3_request_clear_send_data(struct aws_s3_request *request) {
+void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -260,6 +260,8 @@ void aws_s3_request_clear_send_data(struct aws_s3_request *request) {
 
     aws_s3_part_buffer_release(request->send_data.part_buffer);
     request->send_data.part_buffer = NULL;
+
+    AWS_ZERO_STRUCT(request->send_data);
 }
 
 void aws_s3_request_acquire(struct aws_s3_request *request) {
@@ -283,7 +285,7 @@ void s_s3_request_destroy(void *user_data) {
         return;
     }
 
-    aws_s3_request_clear_send_data(request);
+    aws_s3_request_clean_up_send_data(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
@@ -606,7 +608,7 @@ static int s_s3_meta_request_incoming_headers(
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
 
     /* Only record headers if an error has taken place, or if the reqest_desc has asked for them. */
-    bool should_record_headers = !successful_response || request->desc.record_response_headers;
+    bool should_record_headers = !successful_response || request->desc_data.record_response_headers;
 
     if (should_record_headers) {
         for (size_t i = 0; i < headers_count; ++i) {
