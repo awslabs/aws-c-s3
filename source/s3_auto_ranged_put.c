@@ -719,7 +719,8 @@ static void s_s3_auto_ranged_put_stream_complete(
 
             /* Copy over any response headers that we've previously determined are needed for this final response. */
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-            copy_http_headers(request->send_data.response_headers, auto_ranged_put->synced_data.needed_response_headers);
+            copy_http_headers(
+                request->send_data.response_headers, auto_ranged_put->synced_data.needed_response_headers);
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
             struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
