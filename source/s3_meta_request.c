@@ -773,8 +773,6 @@ static void s_s3_meta_request_send_request_finish(
 
     aws_s3_request_finished_callback_fn *finished_callback = request->send_data.finished_callback;
 
-    aws_s3_request_clean_up_send_data(request);
-
     /* Clean up anything held by the vip connection's work_data structure. */
     s_s3_meta_request_clean_up_work_data(vip_connection);
 
