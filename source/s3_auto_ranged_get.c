@@ -256,7 +256,7 @@ static int s_s3_auto_ranged_get_prepare_request(
 
     switch (request->desc_data.request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART:
-            /* Bleed-through is intentional */
+            /* FALLTHROUGH */
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART: {
 
             /* Generate a new ranged get request based on the original message. */
