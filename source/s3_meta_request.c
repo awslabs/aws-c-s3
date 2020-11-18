@@ -990,19 +990,24 @@ void aws_s3_meta_request_handle_error(
     int error_code) {
     AWS_PRECONDITION(meta_request);
 
+    AWS_LOGF_ERROR(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Meta request handling error %d (%s). (request=%p)",
+        (void *)meta_request,
+        error_code,
+        aws_error_str(error_code),
+        (void *)request);
+
+    int response_status = 0;
+
     if (request != NULL) {
         request->send_data.error_code = error_code;
+        response_status = request->send_data.response_status;
     }
 
     /* If the request is NULL or we have a response that indicates retrying would be futile, then bail on the entire
      * meta request. */
     if (request == NULL || error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
-
-        int response_status = 0;
-
-        if (request != NULL) {
-            response_status = request->send_data.response_status;
-        }
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -1045,6 +1050,7 @@ void aws_s3_meta_request_handle_error(
             client->retry_strategy, AWS_ERROR_SUCCESS, request->retry_token, request);
     }
 
+    /* Release the reference to the client that we got with aws_s3_meta_request_get_client. */
     aws_s3_client_release(client);
 }
 
