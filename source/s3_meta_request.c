@@ -196,7 +196,7 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
 
-	/* Clean out the retry queue*/
+    /* Clean out the retry queue*/
     while (!aws_linked_list_empty(&meta_request->synced_data.retry_queue)) {
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&meta_request->synced_data.retry_queue);
 
@@ -830,7 +830,7 @@ static void s_s3_meta_request_retry_ready(struct aws_retry_token *token, int err
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-	/* If we couldn't retry this request, then bail on the entire meta request. */
+    /* If we couldn't retry this request, then bail on the entire meta request. */
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -851,10 +851,10 @@ static void s_s3_meta_request_retry_ready(struct aws_retry_token *token, int err
         (void *)request,
         (void *)request->retry_token);
 
-	/* Push the request into the retry queue so that it can actually be retried. */
+    /* Push the request into the retry queue so that it can actually be retried. */
     aws_s3_meta_request_retry_queue_push(meta_request, request);
 
-	/* Tell the client we have additional work that can be done. */
+    /* Tell the client we have additional work that can be done. */
     aws_s3_meta_request_schedule_work(meta_request);
 
 clean_up:
@@ -913,7 +913,7 @@ static void s_s3_meta_request_queue_retry_with_token(
         (void *)request,
         (void *)token);
 
-	/* Ask the retry strategy to schedule a retry of the request. */
+    /* Ask the retry strategy to schedule a retry of the request. */
     if (aws_retry_strategy_schedule_retry(request->retry_token, error_type, s_s3_meta_request_retry_ready, request)) {
         error_code = aws_last_error();
 
@@ -948,7 +948,7 @@ static void s_s3_meta_request_acquire_retry_token(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-	/* Try to acquire a token so that we can schedule a retry. */
+    /* Try to acquire a token so that we can schedule a retry. */
     if (aws_retry_strategy_acquire_retry_token(
             retry_strategy, NULL, s_s3_meta_request_queue_retry_with_token, request, 0)) {
 
@@ -982,7 +982,8 @@ void aws_s3_meta_request_handle_error(
         request->send_data.error_code = error_code;
     }
 
-	/* If the request is NULL or we have a response that indicates retrying would be futile, then bail on the entire meta request. */
+    /* If the request is NULL or we have a response that indicates retrying would be futile, then bail on the entire
+     * meta request. */
     if (request == NULL || error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
 
         int response_status = 0;
@@ -1006,7 +1007,7 @@ void aws_s3_meta_request_handle_error(
 
     struct aws_s3_client *client = aws_s3_meta_request_get_client(meta_request);
 
-	/* If the client is NULL, then it shutdown and there's nothing we can do but bail on the meta request.*/
+    /* If the client is NULL, then it shutdown and there's nothing we can do but bail on the meta request.*/
     if (client == NULL) {
         AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
@@ -1024,7 +1025,7 @@ void aws_s3_meta_request_handle_error(
     aws_s3_request_acquire(request);
     aws_s3_meta_request_acquire(meta_request);
 
-	/* If the retry token is NULL, try to grab one, otherwise, just re-use the token from the request's last retry. */
+    /* If the retry token is NULL, try to grab one, otherwise, just re-use the token from the request's last retry. */
     if (request->retry_token == NULL) {
         s_s3_meta_request_acquire_retry_token(client->retry_strategy, request);
     } else {
@@ -1086,15 +1087,15 @@ void aws_s3_meta_request_finish(
     /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
     AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
 
-	struct aws_s3_client* client = NULL;
+    struct aws_s3_client *client = NULL;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-	client = meta_request->synced_data.client;
+    client = meta_request->synced_data.client;
     meta_request->synced_data.client = NULL;
     aws_s3_meta_request_unlock_synced_data(meta_request);
-	
+
     aws_s3_client_release(client);
-	
+
     AWS_LOGF_INFO(
         AWS_LS_S3_META_REQUEST,
         "id=%p Meta request finished with error code %d (%s)",
@@ -1196,8 +1197,8 @@ static void s_s3_meta_request_process_write_body_task(
         struct aws_byte_cursor buf_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
 
         size_t data_size = part_buffer->range_start - part_buffer->range_end + 1;
-		
-		/* If the data we got back did not use the entire buffer, make sure that the range_end is still valid. */
+
+        /* If the data we got back did not use the entire buffer, make sure that the range_end is still valid. */
         if (buf_byte_cursor.len < data_size) {
             data_size = buf_byte_cursor.len;
         }

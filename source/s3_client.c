@@ -39,6 +39,7 @@ static const uint32_t s_default_connection_timeout_ms = 3000;
 static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
+static const uint32_t s_default_max_retries = 16;
 
 struct aws_s3_client_work {
     struct aws_linked_list_node node;
@@ -288,6 +289,10 @@ struct aws_s3_client *aws_s3_client_new(
         .backoff_scale_factor_ms = client_config->backoff_scale_factor_ms,
         .jitter_mode = client_config->jitter_mode,
     };
+
+    if (retry_options.max_retries == 0) {
+        retry_options.max_retries = s_default_max_retries;
+    }
 
     client->retry_strategy = aws_retry_strategy_new_exponential_backoff(allocator, &retry_options);
 
