@@ -79,7 +79,7 @@ static int s_s3_auto_ranged_put_incoming_body(
     const struct aws_byte_cursor *data,
     struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_auto_ranged_put_stream_complete(
+static int s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection);
 
@@ -636,7 +636,7 @@ static int s_s3_auto_ranged_put_incoming_body(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_auto_ranged_put_stream_complete(
+static int s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(stream);
@@ -671,7 +671,7 @@ static void s_s3_auto_ranged_put_stream_complete(
 
             aws_raise_error(AWS_ERROR_S3_MISSING_UPLOAD_ID);
             aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_MISSING_UPLOAD_ID);
-            return;
+            return AWS_OP_SUCCESS;
         }
 
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
@@ -755,4 +755,6 @@ static void s_s3_auto_ranged_put_stream_complete(
     } else {
         AWS_FATAL_ASSERT(false);
     }
+
+    return AWS_OP_SUCCESS;
 }
