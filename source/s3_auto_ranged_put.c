@@ -79,7 +79,7 @@ static int s_s3_auto_ranged_put_incoming_body(
     const struct aws_byte_cursor *data,
     struct aws_s3_vip_connection *vip_connection);
 
-static int s_s3_auto_ranged_put_stream_complete(
+static void s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection);
 
@@ -636,7 +636,7 @@ static int s_s3_auto_ranged_put_incoming_body(
     return AWS_OP_SUCCESS;
 }
 
-static int s_s3_auto_ranged_put_stream_complete(
+static void s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(stream);
@@ -683,7 +683,7 @@ static int s_s3_auto_ranged_put_stream_complete(
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         /* Create Multipart Upload finished successfully, so now we should have parts to send. */
-        aws_s3_meta_request_schedule_work(meta_request);
+        aws_s3_client_schedule_meta_request_work(meta_request->client, &auto_ranged_put->base);
 
     } else if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 
@@ -755,6 +755,4 @@ static int s_s3_auto_ranged_put_stream_complete(
     } else {
         AWS_FATAL_ASSERT(false);
     }
-
-    return AWS_OP_SUCCESS;
 }
