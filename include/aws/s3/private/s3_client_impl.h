@@ -16,7 +16,15 @@
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
 
+struct aws_http_connection;
 struct aws_http_connection_manager;
+
+typedef void(aws_s3_client_get_http_connection_callback)(
+    struct aws_http_connection *http_connection,
+    int error_code,
+    void *user_data);
+
+typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
 struct aws_s3_vip {
@@ -80,9 +88,31 @@ struct aws_s3_vip_connection {
     } work_data;
 };
 
+struct aws_s3_client_vtable {
+
+    struct aws_s3_meta_request *(
+        *meta_request_factory)(struct aws_s3_client *client, const struct aws_s3_meta_request_options *options);
+
+    void (*schedule_meta_request_work)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+
+    int (*sign_message)(
+        struct aws_s3_client *client,
+        struct aws_http_message *message,
+        aws_s3_client_sign_callback *callback,
+        void *user_data);
+
+    int (*get_http_connection)(
+        struct aws_s3_client *client,
+        struct aws_s3_vip_connection *vip_connection,
+        aws_s3_client_get_http_connection_callback *callback,
+        void *user_data);
+};
+
 /* Represents the state of the S3 client. */
 struct aws_s3_client {
     struct aws_allocator *allocator;
+
+    struct aws_s3_client_vtable *vtable;
 
     struct aws_ref_count ref_count;
 
@@ -172,13 +202,6 @@ struct aws_s3_client {
         struct aws_linked_list meta_requests;
     } threaded_data;
 };
-
-typedef void(aws_s3_client_get_http_connection_callback)(
-    struct aws_http_connection *http_connection,
-    int error_code,
-    void *user_data);
-
-typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
 void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 

@@ -117,6 +117,12 @@ struct aws_s3_meta_request_vtable {
      * pointer. */
     int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request **out_request);
 
+    /* Called when sending of the request has finished. */
+    void (*send_request_finish)(
+        struct aws_s3_vip_connection *vip_connection,
+        struct aws_http_stream *stream,
+        int error_code);
+
     /* Given a request, prepare it for sending based on its description. Should call aws_s3_request_setup_send_data
      * before exitting. */
     int (*prepare_request)(
@@ -142,7 +148,7 @@ struct aws_s3_meta_request_vtable {
         const struct aws_byte_cursor *data,
         struct aws_s3_vip_connection *vip_connection);
 
-    void (*stream_complete)(struct aws_http_stream *stream, struct aws_s3_vip_connection *vip_connection);
+    int (*stream_complete)(struct aws_http_stream *stream, struct aws_s3_vip_connection *vip_connection);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
@@ -287,6 +293,10 @@ void aws_s3_meta_request_finish(
 void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
 
 void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request);
+
+void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
+
+void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request);
 
 /* Call to have the meta request notify the owning client (if one exists) that there is more work to be done. */
 void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request);
