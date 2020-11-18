@@ -1024,20 +1024,10 @@ void aws_s3_meta_request_handle_error(
 
     struct aws_s3_client *client = aws_s3_meta_request_get_client(meta_request);
 
-    /* If the client is NULL, then it shutdown and there's nothing we can do but bail on the meta request.*/
-    if (client == NULL) {
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request cannot recover from error %d (%s) due to decoupling from client.",
-            (void *)meta_request,
-            error_code,
-            aws_error_str(error_code));
-
-        aws_s3_meta_request_finish(meta_request, request, 0, 0);
-        return;
-    }
-
-    AWS_ASSERT(request && request->meta_request == meta_request);
+    /* If we were able to get the point of handling an error, the client should still be around. */
+    AWS_ASSERT(client);
+    AWS_ASSERT(request);
+    AWS_ASSERT(request->meta_request == meta_request);
 
     aws_s3_request_acquire(request);
     aws_s3_meta_request_acquire(meta_request);
