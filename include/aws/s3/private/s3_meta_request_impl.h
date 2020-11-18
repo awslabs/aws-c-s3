@@ -301,6 +301,10 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
 /* Call to have the meta request notify the owning client (if one exists) that there is more work to be done. */
 void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request);
 
+/* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
+ * this function, it is necessary to release that reference. */
+struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request *meta_request);
+
 /* END - Meant only for use by derived types.  */
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */
