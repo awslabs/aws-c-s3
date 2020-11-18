@@ -885,6 +885,7 @@ int aws_s3_client_get_http_connection_empty(
     (void)client;
     (void)vip_connection;
     (void)callback;
+    (void)user_data;
     return AWS_OP_SUCCESS;
 }
 
