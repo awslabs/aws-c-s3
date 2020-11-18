@@ -671,7 +671,7 @@ static int s_s3_auto_ranged_put_stream_complete(
 
             aws_raise_error(AWS_ERROR_S3_MISSING_UPLOAD_ID);
             aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_MISSING_UPLOAD_ID);
-            return AWS_OP_SUCCESS;
+            return AWS_OP_ERR;
         }
 
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
