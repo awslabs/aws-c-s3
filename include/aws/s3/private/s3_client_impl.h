@@ -153,6 +153,9 @@ struct aws_s3_client {
     /* The calculated ideal number of VIP's based on throughput target and throughput per vip. */
     const uint32_t ideal_vip_count;
 
+    /* Retry strategy used for scheduling request retries. */
+    struct aws_retry_strategy *retry_strategy;
+
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
