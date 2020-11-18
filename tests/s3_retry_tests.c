@@ -720,6 +720,7 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_stream_complete(
 
 AWS_TEST_CASE(test_s3_auto_range_put_missing_upload_id, s_test_s3_auto_range_put_missing_upload_id)
 static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
