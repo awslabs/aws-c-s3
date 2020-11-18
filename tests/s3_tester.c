@@ -33,8 +33,8 @@ static void s_test_s3_meta_request_header_callback(
     aws_http_headers_release(meta_request_test_results->response_headers);
 
     /* TODO copy this instead of making acquiring reference. */
-    tester_meta_request->response_headers = (struct aws_http_headers *)headers;
-    aws_http_headers_acquire(tester_meta_request->response_headers);
+    meta_request_test_results->response_headers = (struct aws_http_headers *)headers;
+    aws_http_headers_acquire(meta_request_test_results->response_headers);
 
     meta_request_test_results->headers_response_status = response_status;
 }
