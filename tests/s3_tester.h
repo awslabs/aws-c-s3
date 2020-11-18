@@ -104,7 +104,8 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
 
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester);
 
-/* Create a new meta request for testing meta request functionality in isolation. test_results and client are optional.  If client is not specified, a new mock client will be created for the meta request. */
+/* Create a new meta request for testing meta request functionality in isolation. test_results and client are optional.
+ * If client is not specified, a new mock client will be created for the meta request. */
 struct aws_s3_meta_request *aws_s3_tester_meta_request_new(
     struct aws_s3_tester *tester,
     struct aws_s3_meta_request_test_results *test_results,
@@ -139,7 +140,8 @@ struct aws_s3_client_vtable *aws_s3_tester_patch_client_vtable(
     struct aws_s3_client *client,
     size_t *out_index);
 
-/* Gets the vtable patch structure that was created as a result of aws_s3_tester_patch_client_vtable.  This allows access to the original vtable.*/
+/* Gets the vtable patch structure that was created as a result of aws_s3_tester_patch_client_vtable.  This allows
+ * access to the original vtable.*/
 struct aws_s3_client_vtable_patch *aws_s3_tester_get_client_vtable_patch(struct aws_s3_tester *tester, size_t index);
 
 /* Will copy the meta-request's vtable into a new vtable that can be mutated. Returns the vtable that can be mutated. */
@@ -148,7 +150,8 @@ struct aws_s3_meta_request_vtable *aws_s3_tester_patch_meta_request_vtable(
     struct aws_s3_meta_request *meta_request,
     size_t *out_index);
 
-/* Gets the vtable patch structure that was created as a result of aws_s3_tester_patch_meta_request_vtable.  This allows access to the original vtable.*/
+/* Gets the vtable patch structure that was created as a result of aws_s3_tester_patch_meta_request_vtable.  This allows
+ * access to the original vtable.*/
 struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_patch(
     struct aws_s3_tester *tester,
     size_t index);
