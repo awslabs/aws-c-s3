@@ -15,9 +15,6 @@ static const uint64_t s_response_body_error_buf_size = KB_TO_BYTES(1);
 
 static void s_s3_request_destroy(void *user_data);
 
-static void s_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
-static void s_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request);
-
 static void s_s3_meta_request_start_destroy(void *user_data);
 static void s_s3_meta_request_finish_destroy(void *user_data);
 
@@ -54,21 +51,56 @@ static int s_s3_meta_request_incoming_headers(
 
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
 
+static void s_s3_meta_request_send_request_finish_default(
+    struct aws_s3_vip_connection *vip_connection,
+    struct aws_http_stream *stream,
+    int error_code);
+
 static void s_s3_meta_request_send_request_finish(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code);
 
-static void s_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request) {
+void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_mutex_lock(&meta_request->synced_data.lock);
 }
 
-static void s_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request) {
+void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_mutex_unlock(&meta_request->synced_data.lock);
+}
+
+struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_client *client = NULL;
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    client = meta_request->synced_data.client;
+
+    if (client != NULL) {
+        aws_s3_client_acquire(client);
+    }
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    return client;
+}
+
+void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_client *client = aws_s3_meta_request_get_client(meta_request);
+
+    if (client != NULL) {
+        aws_s3_client_schedule_meta_request_work(client, meta_request);
+    }
+
+    aws_s3_client_release(client);
 }
 
 int aws_s3_meta_request_init_base(
@@ -92,6 +124,10 @@ int aws_s3_meta_request_init_base(
     AWS_ASSERT(vtable->next_request);
     AWS_ASSERT(vtable->prepare_request);
     AWS_ASSERT(vtable->destroy);
+
+    if (vtable->send_request_finish == NULL) {
+        vtable->send_request_finish = s_s3_meta_request_send_request_finish_default;
+    }
 
     const struct aws_s3_meta_request_options *options = internal_options->options;
     AWS_PRECONDITION(options->message);
@@ -124,7 +160,7 @@ int aws_s3_meta_request_init_base(
     }
 
     aws_s3_client_acquire(internal_options->client);
-    meta_request->client = internal_options->client;
+    meta_request->synced_data.client = internal_options->client;
 
     meta_request->user_data = options->user_data;
     meta_request->headers_callback = options->headers_callback;
@@ -170,6 +206,7 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     aws_s3_meta_request_shutdown_fn *shutdown_callback = meta_request->shutdown_callback;
 
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    aws_s3_client_release(meta_request->synced_data.client);
 
     meta_request->vtable->destroy(meta_request);
 
@@ -311,7 +348,7 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
     bool has_result = false;
     bool result = false;
 
-    s_s3_meta_request_lock_synced_data((struct aws_s3_meta_request *)meta_request);
+    aws_s3_meta_request_lock_synced_data((struct aws_s3_meta_request *)meta_request);
 
     if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
         has_result = true;
@@ -321,7 +358,7 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
         result = true;
     }
 
-    s_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
+    aws_s3_meta_request_unlock_synced_data((struct aws_s3_meta_request *)meta_request);
 
     if (has_result) {
         return result;
@@ -348,7 +385,7 @@ void aws_s3_meta_request_send_next_request(
     struct aws_s3_request *request = NULL;
     bool meta_request_already_finished = false;
 
-    s_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_meta_request_lock_synced_data(meta_request);
 
     /* If the meta request has been finished, don't initiate any additional work. */
     if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
@@ -366,7 +403,7 @@ void aws_s3_meta_request_send_next_request(
 
 unlock:
 
-    s_s3_meta_request_unlock_synced_data(meta_request);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (meta_request_already_finished) {
         goto call_finished_callback;
@@ -728,6 +765,24 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
+    vtable->send_request_finish(vip_connection, stream, error_code);
+}
+
+static void s_s3_meta_request_send_request_finish_default(
+    struct aws_s3_vip_connection *vip_connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    AWS_PRECONDITION(vtable);
+
     int response_status = request->send_data.response_status;
 
     if (error_code == AWS_ERROR_SUCCESS) {
@@ -786,11 +841,11 @@ void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, s
 
     aws_s3_request_acquire(request);
 
-    s_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_meta_request_lock_synced_data(meta_request);
 
     aws_linked_list_push_back(&meta_request->synced_data.retry_queue, &request->node);
 
-    s_s3_meta_request_unlock_synced_data(meta_request);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
 /* Flag the meta request as finished, immediately triggering any on-finished callbacks. */
@@ -808,8 +863,14 @@ void aws_s3_meta_request_finish(
     /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
     AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
 
-    aws_s3_client_release(meta_request->client);
-    meta_request->client = NULL;
+    struct aws_s3_client *client = NULL;
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    client = meta_request->synced_data.client;
+    meta_request->synced_data.client = NULL;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    aws_s3_client_release(client);
 
     AWS_LOGF_INFO(
         AWS_LS_S3_META_REQUEST,
@@ -841,7 +902,7 @@ static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request,
 
     int result = AWS_OP_SUCCESS;
 
-    s_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_meta_request_lock_synced_data(meta_request);
 
     if (meta_request->synced_data.state == state) {
         result = AWS_OP_ERR;
@@ -849,7 +910,7 @@ static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request,
 
     meta_request->synced_data.state = state;
 
-    s_s3_meta_request_unlock_synced_data(meta_request);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 
     return result;
 }
@@ -910,6 +971,15 @@ static void s_s3_meta_request_process_write_body_task(
     /* Send the data to the user through the body callback. */
     if (meta_request->body_callback != NULL) {
         struct aws_byte_cursor buf_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
+
+        size_t data_size = part_buffer->range_start - part_buffer->range_end + 1;
+
+        /* If the data we got back did not use the entire buffer, make sure that the range_end is still valid. */
+        if (buf_byte_cursor.len < data_size) {
+            data_size = buf_byte_cursor.len;
+        }
+
+        part_buffer->range_end = part_buffer->range_start + data_size - 1;
 
         meta_request->body_callback(
             meta_request, &buf_byte_cursor, part_buffer->range_start, part_buffer->range_end, meta_request->user_data);

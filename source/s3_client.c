@@ -104,7 +104,15 @@ static void s_s3_part_buffer_pool_init(struct aws_s3_part_buffer_pool *pool);
 static void s_s3_client_add_new_part_buffers_to_pool_synced(struct aws_s3_client *client, const size_t num_buffers);
 static void s_s3_client_destroy_part_buffer_pool(struct aws_s3_client *client);
 
+static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options);
+
 static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+static void s_s3_client_schedule_meta_request_work(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request);
 
 static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
 
@@ -113,9 +121,23 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 /* Callback for when a single request (not an entire meta request) has finished on a VIP connection. */
 static void s_s3_client_vip_connection_request_finished(void *user_data);
 
+/* Handles signing a message for the caller. */
+static int s_s3_client_sign_message(
+    struct aws_s3_client *client,
+    struct aws_http_message *message,
+    aws_s3_client_sign_callback *callback,
+    void *user_data);
+
 static void s_s3_vip_connection_request_signing_complete(
     struct aws_signing_result *result,
     int error_code,
+    void *user_data);
+
+/* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
+static int s_s3_client_get_http_connection(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    aws_s3_client_get_http_connection_callback *callback,
     void *user_data);
 
 static void s_s3_client_vip_connection_on_acquire_request_connection(
@@ -132,6 +154,13 @@ static void s_s3_client_lock_synced_data(struct aws_s3_client *client) {
 static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
     aws_mutex_unlock(&client->synced_data.lock);
 }
+
+static struct aws_s3_client_vtable s_s3_client_default_vtable = {
+    .meta_request_factory = s_s3_client_meta_request_factory,
+    .schedule_meta_request_work = s_s3_client_schedule_meta_request_work,
+    .sign_message = s_s3_client_sign_message,
+    .get_http_connection = s_s3_client_get_http_connection,
+};
 
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
@@ -177,6 +206,7 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
+    client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
     aws_ref_count_init(
@@ -271,6 +301,40 @@ void aws_s3_client_release(struct aws_s3_client *client) {
     }
 
     aws_ref_count_release(&client->ref_count);
+}
+
+void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->schedule_meta_request_work);
+
+    client->vtable->schedule_meta_request_work(client, meta_request);
+}
+
+int aws_s3_client_sign_message(
+    struct aws_s3_client *client,
+    struct aws_http_message *message,
+    aws_s3_client_sign_callback *callback,
+    void *user_data) {
+
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->sign_message);
+
+    return client->vtable->sign_message(client, message, callback, user_data);
+}
+
+int aws_s3_client_get_http_connection(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    aws_s3_client_get_http_connection_callback *callback,
+    void *user_data) {
+
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->get_http_connection);
+
+    return client->vtable->get_http_connection(client, vip_connection, callback, user_data);
 }
 
 static void s_s3_client_start_destroy(void *user_data) {
@@ -675,6 +739,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p Initiating making of meta request", (void *)client);
 
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->meta_request_factory);
     AWS_PRECONDITION(options);
 
     if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT && options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
@@ -735,19 +801,37 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     s_s3_client_unlock_synced_data(client);
 
+    struct aws_s3_meta_request *meta_request = client->vtable->meta_request_factory(client, options);
+
+    if (meta_request == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not create new meta request.", (void *)client);
+        return NULL;
+    }
+
+    aws_s3_client_schedule_meta_request_work(client, meta_request);
+
+    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
+
+    return meta_request;
+}
+
+static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+
     /* TODO just pass in client? */
     struct aws_s3_meta_request_internal_options internal_options;
     AWS_ZERO_STRUCT(internal_options);
     internal_options.options = options;
     internal_options.client = client;
 
-    struct aws_s3_meta_request *meta_request = NULL;
-
     /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-        meta_request = aws_s3_meta_request_auto_ranged_get_new(client->allocator, &internal_options);
+        return aws_s3_meta_request_auto_ranged_get_new(client->allocator, &internal_options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
-        meta_request = aws_s3_meta_request_auto_ranged_put_new(client->allocator, &internal_options);
+        return aws_s3_meta_request_auto_ranged_put_new(client->allocator, &internal_options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         /* TODO */
         AWS_FATAL_ASSERT(false);
@@ -755,19 +839,12 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         AWS_FATAL_ASSERT(false);
     }
 
-    if (meta_request == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not create new meta request.", (void *)client);
-        return NULL;
-    }
-
-    aws_s3_client_schedule_meta_request_work(meta_request->client, meta_request);
-
-    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
-
-    return meta_request;
+    return NULL;
 }
 
-void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
+static void s_s3_client_schedule_meta_request_work(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(meta_request);
 
@@ -1116,7 +1193,7 @@ struct s3_client_siging_payload {
 };
 
 /* Handles signing a message for the caller. */
-int aws_s3_client_sign_message(
+static int s_s3_client_sign_message(
     struct aws_s3_client *client,
     struct aws_http_message *message,
     aws_s3_client_sign_callback *callback,
@@ -1221,7 +1298,7 @@ struct s3_client_get_http_connection_payload {
 };
 
 /* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
-int aws_s3_client_get_http_connection(
+static int s_s3_client_get_http_connection(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_s3_client_get_http_connection_callback *callback,

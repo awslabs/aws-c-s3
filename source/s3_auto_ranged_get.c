@@ -62,7 +62,7 @@ static int s_s3_auto_ranged_get_incoming_body(
     const struct aws_byte_cursor *data,
     struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_auto_ranged_get_stream_complete(
+static int s_s3_auto_ranged_get_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection);
 
@@ -401,7 +401,13 @@ static int s_s3_auto_ranged_get_header_block_done(
         meta_request->part_size);
 
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
-    auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS;
+
+    if (num_parts == 1) {
+        auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS_MADE;
+    } else {
+        auto_ranged_get->synced_data.state = AWS_S3_AUTO_RANGED_GET_STATE_ALL_REQUESTS;
+    }
+
     auto_ranged_get->synced_data.total_num_parts = num_parts;
     s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
 
@@ -424,7 +430,9 @@ static int s_s3_auto_ranged_get_header_block_done(
         aws_http_headers_release(response_headers);
     }
 
-    aws_s3_client_schedule_meta_request_work(meta_request->client, &auto_ranged_get->base);
+    if (num_parts > 1) {
+        aws_s3_meta_request_schedule_work(meta_request);
+    }
 
     return AWS_OP_SUCCESS;
 }
@@ -451,7 +459,7 @@ static int s_s3_auto_ranged_get_incoming_body(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_auto_ranged_get_stream_complete(
+static int s_s3_auto_ranged_get_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection) {
     (void)stream;
@@ -469,6 +477,8 @@ static void s_s3_auto_ranged_get_stream_complete(
 
     /* Schedule the part buffer to be sent back to the user so that they can process it. */
     aws_s3_meta_request_write_body_to_caller(request, s_s3_auto_ranged_get_write_body_callback);
+
+    return AWS_OP_SUCCESS;
 }
 
 static void s_s3_auto_ranged_get_write_body_callback(
