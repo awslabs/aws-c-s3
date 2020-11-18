@@ -22,6 +22,7 @@ struct aws_s3_meta_request;
 struct aws_s3_request;
 struct aws_s3_request_options;
 struct aws_http_headers;
+struct aws_retry_strategy;
 
 typedef void(aws_s3_meta_request_work_available_fn)(struct aws_s3_meta_request *meta_request, void *user_data);
 
@@ -43,8 +44,13 @@ struct aws_s3_request {
 
     struct aws_ref_count ref_count;
 
+    struct aws_allocator *allocator;
+
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
+
+	/* Current retry token for the request. If it has never been retried, this will be NULL. */
+    struct aws_retry_token *retry_token;
 
     /* Members of this structure describes the request, making it possible to generate anything needed to send the
      * request. */
@@ -84,6 +90,9 @@ struct aws_s3_request {
         /* Returned response status of this request. */
         int response_status;
 
+        /* Error code result for this sending of the request. */
+        int error_code;
+
         /* Callback for when the current sending of the request has finished.  */
         aws_s3_request_finished_callback_fn *finished_callback;
 
@@ -117,7 +126,7 @@ struct aws_s3_meta_request_vtable {
      * pointer. */
     int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request **out_request);
 
-    /* Called when sending of the request has finished. */
+	/* Called when sending of the request has finished. */
     void (*send_request_finish)(
         struct aws_s3_vip_connection *vip_connection,
         struct aws_http_stream *stream,
@@ -170,10 +179,6 @@ struct aws_s3_meta_request {
 
     void *impl;
     struct aws_s3_meta_request_vtable *vtable;
-
-    /* Client that created this meta request which also processes this request.  After the meta request is finished,
-     * this reference is removed. */
-    struct aws_s3_client *client;
 
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
@@ -285,9 +290,6 @@ void aws_s3_request_acquire(struct aws_s3_request *request);
 
 void aws_s3_request_release(struct aws_s3_request *request);
 
-/* Push a request description into the retry queue.  This assumes ownership of the request desc, */
-void aws_s3_meta_request_queue_retry(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
-
 /* Tells the meta request to stop, with an error code for indicating failure when necessary. */
 void aws_s3_meta_request_finish(
     struct aws_s3_meta_request *meta_request,
@@ -311,5 +313,20 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
 struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
 
 /* END - Meant only for use by derived types.  */
+
+/* BEGIN - Exposed only for use in tests */
+
+void aws_s3_meta_request_handle_error(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code);
+
+void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+
+struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
+
+struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request *meta_request);
+
+/* END - Exposed only for use in tests */
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */
