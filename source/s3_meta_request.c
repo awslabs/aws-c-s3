@@ -519,8 +519,6 @@ void aws_s3_meta_request_send_next_request(
         goto call_finished_callback;
     }
 
-    return;
-
 call_finished_callback:
 
     s_s3_meta_request_clean_up_work_data(vip_connection);
@@ -1280,15 +1278,15 @@ void aws_s3_meta_request_finish(
     /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
     AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
 
-    struct aws_s3_client *client = NULL;
+	struct aws_s3_client* client = NULL;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-    client = meta_request->synced_data.client;
+	client = meta_request->synced_data.client;
     meta_request->synced_data.client = NULL;
     aws_s3_meta_request_unlock_synced_data(meta_request);
-
+	
     aws_s3_client_release(client);
-
+	
     AWS_LOGF_INFO(
         AWS_LS_S3_META_REQUEST,
         "id=%p Meta request finished with error code %d (%s)",

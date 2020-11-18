@@ -1,4 +1,3 @@
-#ifndef AWS_S3_CLIENT_H
 #define AWS_S3_CLIENT_H
 
 /**
