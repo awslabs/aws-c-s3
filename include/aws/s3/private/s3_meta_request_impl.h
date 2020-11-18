@@ -325,10 +325,6 @@ void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_reque
 
 struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
 
-/* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
- * this function, it is necessary to release that reference. */
-struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request *meta_request);
-
 /* END - Exposed only for use in tests */
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */
