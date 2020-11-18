@@ -4,11 +4,15 @@
  */
 
 #include "s3_tester.h"
+#include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
+#include <aws/io/stream.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
@@ -164,6 +168,9 @@ int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client
     AWS_PRECONDITION(tester);
     AWS_PRECONDITION(config);
 
+    ASSERT_TRUE(!tester->bound_to_client);
+    tester->bound_to_client = true;
+
     ASSERT_TRUE(config->client_bootstrap == NULL);
     config->client_bootstrap = tester->client_bootstrap;
 
@@ -255,7 +262,10 @@ void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, const struct aw
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
-    s_s3_tester_wait_for_clean_up_signal(tester);
+    if (tester->bound_to_client) {
+        s_s3_tester_wait_for_clean_up_signal(tester);
+        tester->bound_to_client = false;
+    }
 
     aws_client_bootstrap_release(tester->client_bootstrap);
     tester->client_bootstrap = NULL;
@@ -286,6 +296,109 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
     aws_mutex_unlock(&tester->synced_data.lock);
+}
+
+struct aws_s3_client *aws_s3_tester_dummy_client_new(struct aws_s3_tester *tester) {
+    AWS_PRECONDITION(tester);
+
+    struct aws_s3_client_config client_config = {
+        .region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_region"),
+        .credentials_provider = tester->credentials_provider,
+        .client_bootstrap = tester->client_bootstrap,
+    };
+
+    return aws_s3_client_new(tester->allocator, &client_config);
+}
+
+struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester) {
+    AWS_PRECONDITION(tester);
+
+    struct aws_http_message *message = aws_http_message_new_request(tester->allocator);
+
+    struct aws_http_header host_header = {.name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host"),
+                                          .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DummyHost")};
+
+    aws_http_message_add_header(message, host_header);
+
+    return message;
+}
+
+static void s_s3_dummy_meta_request_destroy(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    aws_mem_release(meta_request->allocator, meta_request);
+}
+
+static bool s_s3_dummy_meta_request_has_work(const struct aws_s3_meta_request *meta_request) {
+    (void)meta_request;
+    return false;
+}
+
+static int s_s3_dummy_meta_request_next_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request **out_request) {
+    (void)meta_request;
+    (void)out_request;
+    return AWS_OP_ERR;
+}
+
+static int s_s3_dummy_meta_request_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_client *client,
+    struct aws_s3_request *request) {
+    (void)meta_request;
+    (void)client;
+    (void)request;
+    return AWS_OP_ERR;
+}
+
+static struct aws_s3_meta_request_vtable s_s3_dummy_meta_request_vtable = {
+    .has_work = s_s3_dummy_meta_request_has_work,
+    .next_request = s_s3_dummy_meta_request_next_request,
+    .prepare_request = s_s3_dummy_meta_request_prepare_request,
+    .incoming_headers = NULL,
+    .incoming_headers_block_done = NULL,
+    .incoming_body = NULL,
+    .stream_complete = NULL,
+    .destroy = s_s3_dummy_meta_request_destroy,
+};
+
+struct aws_s3_dummy_meta_request {
+    struct aws_s3_meta_request base;
+};
+
+struct aws_s3_meta_request *aws_s3_tester_dummy_meta_request_new(
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *dummy_client) {
+    AWS_PRECONDITION(tester);
+
+    struct aws_s3_dummy_meta_request *dummy_meta_request =
+        aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_dummy_meta_request));
+
+    struct aws_http_message *dummy_http_message = aws_s3_tester_dummy_http_request_new(tester);
+
+    struct aws_s3_meta_request_options options = {
+        .message = dummy_http_message,
+    };
+
+    struct aws_s3_meta_request_internal_options internal_options;
+    internal_options.options = &options;
+    internal_options.client = dummy_client;
+
+    aws_s3_meta_request_init_base(
+        tester->allocator,
+        &internal_options,
+        dummy_meta_request,
+        &s_s3_dummy_meta_request_vtable,
+        &dummy_meta_request->base);
+
+    aws_http_message_release(dummy_http_message);
+    dummy_http_message = NULL;
+
+    aws_s3_client_release(dummy_meta_request->base.client);
+    dummy_meta_request->base.client = NULL;
+
+    return &dummy_meta_request->base;
 }
 
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf) {
@@ -347,4 +460,107 @@ static void s_s3_tester_wait_for_clean_up_signal(struct aws_s3_tester *tester) {
     tester->synced_data.clean_up_flag = false;
 
     aws_s3_tester_unlock_synced_data(tester);
+}
+
+struct aws_http_message *aws_s3_test_make_get_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor key) {
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
+
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_method(message, aws_http_method_get)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_path(message, key)) {
+        goto error_clean_up_message;
+    }
+
+    return message;
+
+error_clean_up_message:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+struct aws_http_message *aws_s3_test_make_put_object_request(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor key,
+    struct aws_byte_cursor content_type,
+    struct aws_input_stream *body_stream) {
+
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(body_stream);
+
+    int64_t body_stream_length = 0;
+
+    if (aws_input_stream_get_length(body_stream, &body_stream_length)) {
+        return NULL;
+    }
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
+
+    struct aws_http_header content_type_header = {.name = g_content_type_header_name, .value = content_type};
+
+    char content_length_buffer[64] = "";
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRId64 "", body_stream_length);
+
+    struct aws_http_header content_length_header = {.name = g_content_length_header_name,
+                                                    .value = aws_byte_cursor_from_c_str(content_length_buffer)};
+
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_add_header(message, content_type_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_add_header(message, content_length_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_method(message, aws_http_method_put)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_path(message, key)) {
+        goto error_clean_up_message;
+    }
+
+    aws_http_message_set_body_stream(message, body_stream);
+
+    return message;
+
+error_clean_up_message:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
 }

@@ -18,8 +18,6 @@
 
 struct aws_http_connection_manager;
 
-typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
-
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
 struct aws_s3_vip {
     struct aws_linked_list_node node;
@@ -75,21 +73,9 @@ struct aws_s3_vip_connection {
 
     /* work_data members accessible to the meta request while it is processing an HTTP request. */
     struct {
-        /* Meta Request currently processing an HTTP request. */
-        struct aws_s3_meta_request *meta_request;
-
-        /* Current request description for the created request. */
-        struct aws_s3_request_desc *request_desc;
 
         /* Request created from the above request description. */
         struct aws_s3_request *request;
-
-        /* Callback for when the request has completed. (Note: this is in relation to the single aws_s3_request above,
-         * not the meta request as a whole.) */
-        aws_s3_request_finished_callback_fn *finished_callback;
-
-        /* User data for the finish callback. */
-        void *user_data;
 
     } work_data;
 };
