@@ -28,7 +28,7 @@ enum aws_s3_meta_request_type {
 
 typedef void(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
-    struct aws_http_headers *headers,
+    const struct aws_http_headers *headers,
     int response_status,
     void *user_data);
 

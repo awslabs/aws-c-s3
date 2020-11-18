@@ -14,15 +14,16 @@
 
 static void s_test_s3_meta_request_header_callback(
     struct aws_s3_meta_request *meta_request,
-    struct aws_http_headers *headers,
+    const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
     (void)meta_request;
 
     struct aws_s3_tester_meta_request *tester_meta_request = (struct aws_s3_tester_meta_request *)user_data;
 
-    tester_meta_request->response_headers = headers;
-    aws_http_headers_acquire(headers);
+    /* TODO copy this instead of making acquiring reference. */
+    tester_meta_request->response_headers = (struct aws_http_headers *)headers;
+    aws_http_headers_acquire(tester_meta_request->response_headers);
 
     tester_meta_request->headers_response_status = response_status;
 }
