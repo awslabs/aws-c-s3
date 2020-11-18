@@ -79,7 +79,7 @@ static int s_s3_auto_ranged_put_incoming_body(
     const struct aws_byte_cursor *data,
     struct aws_s3_vip_connection *vip_connection);
 
-static int s_s3_auto_ranged_put_stream_complete(
+static void s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection);
 
@@ -639,7 +639,7 @@ static int s_s3_auto_ranged_put_incoming_body(
     return AWS_OP_SUCCESS;
 }
 
-static int s_s3_auto_ranged_put_stream_complete(
+static void s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(stream);
@@ -757,6 +757,4 @@ static int s_s3_auto_ranged_put_stream_complete(
     } else {
         AWS_FATAL_ASSERT(false);
     }
-
-    return AWS_OP_SUCCESS;
 }
