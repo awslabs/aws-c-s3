@@ -49,7 +49,7 @@ struct aws_s3_request {
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
 
-	/* Current retry token for the request. If it has never been retried, this will be NULL. */
+    /* Current retry token for the request. If it has never been retried, this will be NULL. */
     struct aws_retry_token *retry_token;
 
     /* Members of this structure describes the request, making it possible to generate anything needed to send the
@@ -118,7 +118,7 @@ struct aws_s3_meta_request_vtable {
      * pointer. */
     int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request **out_request);
 
-	/* Called when sending of the request has finished. */
+    /* Called when sending of the request has finished. */
     void (*send_request_finish)(
         struct aws_s3_vip_connection *vip_connection,
         struct aws_http_stream *stream,
