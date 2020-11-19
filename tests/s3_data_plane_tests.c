@@ -80,6 +80,9 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     aws_s3_request_setup_send_data(request, request_message);
 
     ASSERT_TRUE(request->send_data.message != NULL);
+    ASSERT_TRUE(request->send_data.response_headers == NULL);
+
+    request->send_data.response_headers = aws_http_headers_new(allocator);
     ASSERT_TRUE(request->send_data.response_headers != NULL);
 
     aws_s3_request_clean_up_send_data(request);
