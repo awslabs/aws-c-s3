@@ -216,17 +216,10 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(message);
 
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
     aws_s3_request_clean_up_send_data(request);
 
     request->send_data.message = message;
     aws_http_message_acquire(message);
-
-    if (request->desc_data.record_response_headers) {
-        request->send_data.response_headers = aws_http_headers_new(meta_request->allocator);
-    }
 }
 
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
@@ -605,6 +598,10 @@ static int s_s3_meta_request_incoming_headers(
     bool should_record_headers = !successful_response || request->desc_data.record_response_headers;
 
     if (should_record_headers) {
+        if (request->send_data.response_headers == NULL) {
+            request->send_data.response_headers = aws_http_headers_new(meta_request->allocator);
+        }
+
         for (size_t i = 0; i < headers_count; ++i) {
             const struct aws_byte_cursor *name = &headers[i].name;
             const struct aws_byte_cursor *value = &headers[i].value;
