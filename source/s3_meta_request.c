@@ -628,7 +628,7 @@ static int s_s3_meta_request_headers_block_done(
     AWS_PRECONDITION(vip_connection);
 
     struct aws_s3_request *request = vip_connection->work_data.request;
-    AWS_PRECONDITION(request && request->send_data.part_buffer);
+    AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request && meta_request->vtable);
