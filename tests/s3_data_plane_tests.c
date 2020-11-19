@@ -252,6 +252,71 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_meta_request_default, s_test_s3_meta_request_default)
+static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void *ctx) {
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .region = g_test_s3_region,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+
+    /* Put together a simple S3 Get Object request. */
+    struct aws_http_message *message = aws_s3_test_make_get_object_request(
+        allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+    options.type = AWS_S3_META_REQUEST_TYPE_DEFAULT;
+    options.message = message;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+
+    ASSERT_TRUE(meta_request != NULL);
+
+    /* Wait for the request to finish. */
+    aws_s3_tester_wait_for_finish(&tester);
+
+    aws_s3_tester_lock_synced_data(&tester);
+
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_http_message_release(message);
+    message = NULL;
+
+    aws_string_destroy(host_name);
+    host_name = NULL;
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_error_response, s_test_s3_error_response)
 static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

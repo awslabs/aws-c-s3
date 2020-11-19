@@ -24,6 +24,7 @@ add_test_case(test_s3_get_object)
 add_test_case(test_s3_get_object_less_than_part_size)
 add_test_case(test_s3_get_object_multiple)
 add_test_case(test_s3_put_object)
+add_test_case(test_s3_meta_request_default)
 add_test_case(test_s3_error_response)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)

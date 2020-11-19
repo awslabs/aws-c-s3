@@ -849,8 +849,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
         return aws_s3_meta_request_auto_ranged_put_new(client->allocator, &internal_options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-        /* TODO */
-        AWS_FATAL_ASSERT(false);
+        return aws_s3_meta_request_default_new(client->allocator, &internal_options);
     } else {
         AWS_FATAL_ASSERT(false);
     }

@@ -53,4 +53,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     const struct aws_string *upload_id,
     const struct aws_array_list *etags);
 
+struct aws_http_message *aws_s3_message_util_copy_http_message(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message);
+
 #endif /* AWS_S3_REQUEST_H */

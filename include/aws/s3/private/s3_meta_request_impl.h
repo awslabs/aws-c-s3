@@ -243,6 +243,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_internal_options *options);
 
+/* Creates a new default meta request. This will send the request as is and pass back the response. */
+struct aws_s3_meta_request *aws_s3_meta_request_default_new(
+    struct aws_allocator *allocator,
+    const struct aws_s3_meta_request_internal_options *options);
+
 /* Tells the meta request to start sending another request, if there is one currently to send.  This is used by the
  * client.
  */
