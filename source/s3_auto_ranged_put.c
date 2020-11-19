@@ -233,7 +233,11 @@ static int s_s3_auto_ranged_put_next_request(
 
             /* If we're less than a part size, don't bother with a multipart upload. */
             if (request_body_length <= (int64_t)meta_request->part_size) {
-                request = aws_s3_request_new(meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT, 0, 0);
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT,
+                    0,
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
                 /* Wait for this request to be processed before quitting. */
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST;
@@ -510,7 +514,7 @@ static int s_s3_auto_ranged_put_header_block_done(
     AWS_PRECONDITION(vip_connection);
 
     struct aws_s3_request *request = vip_connection->work_data.request;
-    AWS_PRECONDITION(request && request->send_data.part_buffer);
+    AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
@@ -649,10 +653,9 @@ static void s_s3_auto_ranged_put_stream_complete(
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     AWS_PRECONDITION(auto_ranged_put);
 
-    struct aws_s3_part_buffer *part_buffer = request->send_data.part_buffer;
-    AWS_PRECONDITION(part_buffer);
-
     if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
+        struct aws_s3_part_buffer *part_buffer = request->send_data.part_buffer;
+        AWS_ASSERT(part_buffer);
 
         struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
 
@@ -709,7 +712,7 @@ static void s_s3_auto_ranged_put_stream_complete(
 
     } else if (
         request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD ||
-        request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST) {
+        request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT) {
 
         if (meta_request->headers_callback != NULL) {
             struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
@@ -717,21 +720,28 @@ static void s_s3_auto_ranged_put_stream_complete(
             /* Copy all the response headers from this request. */
             copy_http_headers(request->send_data.response_headers, final_response_headers);
 
-            /* Copy over any response headers that we've previously determined are needed for this final response. */
-            s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-            copy_http_headers(
-                request->send_data.response_headers, auto_ranged_put->synced_data.needed_response_headers);
-            s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+            if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
+                /* Copy over any response headers that we've previously determined are needed for this final response.
+                 */
+                s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+                copy_http_headers(
+                    request->send_data.response_headers, auto_ranged_put->synced_data.needed_response_headers);
+                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
-            struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
+                struct aws_s3_part_buffer *part_buffer = request->send_data.part_buffer;
+                AWS_ASSERT(part_buffer);
 
-            /* Grab the ETag for the entire object, and set it as a header. */
-            struct aws_string *etag_header_value =
-                get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
+                struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
 
-            if (etag_header_value != NULL) {
-                aws_http_headers_set(
-                    final_response_headers, g_etag_header_name, aws_byte_cursor_from_string(etag_header_value));
+                /* Grab the ETag for the entire object, and set it as a header. */
+                struct aws_string *etag_header_value =
+                    get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
+
+                if (etag_header_value != NULL) {
+                    aws_http_headers_set(
+                        final_response_headers, g_etag_header_name, aws_byte_cursor_from_string(etag_header_value));
+                    aws_string_destroy(etag_header_value);
+                }
             }
 
             /* Notify the user of the headers. */
@@ -739,7 +749,6 @@ static void s_s3_auto_ranged_put_stream_complete(
                 meta_request, final_response_headers, request->send_data.response_status, meta_request->user_data);
 
             aws_http_headers_release(final_response_headers);
-            aws_string_destroy(etag_header_value);
         }
 
         aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
