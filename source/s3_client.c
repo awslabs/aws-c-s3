@@ -1000,9 +1000,9 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
         }
 
         /* Remove the meta request from our list. */
-        aws_s3_meta_request_release(meta_request);
         aws_linked_list_remove(&meta_request->threaded_data.node);
         meta_request->threaded_data.added_to_client = false;
+        aws_s3_meta_request_release(meta_request);
     }
 
     /*******************/
