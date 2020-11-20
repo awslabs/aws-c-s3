@@ -415,7 +415,6 @@ static int s_s3_auto_ranged_get_header_block_done(
 
         copy_http_headers(request->send_data.response_headers, response_headers);
 
-        aws_http_headers_erase(response_headers, g_accept_ranges_header_name);
         aws_http_headers_erase(response_headers, g_content_range_header_name);
 
         char content_length_buffer[64] = "";
