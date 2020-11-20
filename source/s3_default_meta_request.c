@@ -219,7 +219,7 @@ static int s_s3_meta_request_default_header_block_done(
 
     if (meta_request->headers_callback != NULL) {
         meta_request->headers_callback(
-            meta_request, request->send_data.response_headers, AWS_S3_RESPONSE_STATUS_SUCCESS, meta_request->user_data);
+            meta_request, request->send_data.response_headers, request->send_data.response_status, meta_request->user_data);
     }
 
     return AWS_OP_SUCCESS;
@@ -257,9 +257,6 @@ static int s_s3_meta_request_default_stream_complete(
     struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(request->send_data.part_buffer);
-
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
 
     /* Schedule the part buffer to be sent back to the user so that they can process it. */
     aws_s3_meta_request_write_body_to_caller(request, s_s3_meta_request_default_write_body_callback);
