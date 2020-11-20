@@ -259,7 +259,7 @@ void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, const struct aw
 
     int error_code = AWS_ERROR_SUCCESS;
 
-    if(result != NULL) {
+    if (result != NULL) {
         error_code = result->error_code;
     }
 
@@ -741,8 +741,6 @@ int aws_s3_tester_validate_get_object_results(struct aws_s3_meta_request_test_re
     ASSERT_TRUE(meta_request_test_results->error_response_headers == NULL);
     ASSERT_TRUE(meta_request_test_results->error_response_body.len == 0);
 
-//    ASSERT_FALSE(
-//        aws_http_headers_has(meta_request_test_results->response_headers, aws_byte_cursor_from_c_str("accept-ranges")));
     ASSERT_FALSE(
         aws_http_headers_has(meta_request_test_results->response_headers, aws_byte_cursor_from_c_str("Content-Range")));
 
