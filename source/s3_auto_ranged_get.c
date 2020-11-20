@@ -349,7 +349,8 @@ static int s_s3_auto_ranged_get_header_block_done(
 
     struct aws_byte_cursor content_range_header_value;
 
-    if (aws_http_headers_get(request->send_data.response_headers, g_content_range_header_name, &content_range_header_value)) {
+    if (aws_http_headers_get(
+            request->send_data.response_headers, g_content_range_header_name, &content_range_header_value)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not find content range header for request %p",
