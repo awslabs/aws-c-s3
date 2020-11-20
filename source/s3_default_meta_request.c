@@ -188,6 +188,8 @@ static int s_s3_meta_request_default_prepare_request(
     aws_s3_request_setup_send_data(request, message);
     request->send_data.part_buffer = part_buffer;
 
+    aws_http_message_release(message);
+
     AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Default Meta Request created request %p for part %d",
@@ -271,6 +273,6 @@ static void s_s3_meta_request_default_write_body_callback(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->impl);
     AWS_PRECONDITION(request);
-    
+
     aws_s3_meta_request_finish(meta_request, NULL, request->send_data.response_status, AWS_ERROR_SUCCESS);
 }
