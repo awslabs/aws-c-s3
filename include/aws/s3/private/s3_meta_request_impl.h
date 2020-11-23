@@ -71,7 +71,7 @@ struct aws_s3_request {
         /* The HTTP message to send for this request. */
         struct aws_http_message *message;
 
-        /* Recorded response headers for the request. Set only when the request_desc has record_response_headers set to
+        /* Recorded response headers for the request. Set only when the request desc has record_response_headers set to
          * true. */
         struct aws_http_headers *response_headers;
 
@@ -117,8 +117,8 @@ struct aws_s3_meta_request_vtable {
      * pointer. */
     int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request **out_request);
 
-    /* Given a request, prepare it for sending based on its description. Should call aws_s3_request_send_data before
-     * exitting. */
+    /* Given a request, prepare it for sending based on its description. Should call aws_s3_request_setup_send_data
+     * before exitting. */
     int (*prepare_request)(
         struct aws_s3_meta_request *meta_request,
         struct aws_s3_client *client,
@@ -204,14 +204,18 @@ struct aws_s3_meta_request {
     struct {
         struct aws_mutex lock;
 
-        enum aws_s3_meta_request_state state;
+        /* Client that created this meta request which also processes this request.  After the meta request is finished,
+         * this reference is removed. */
+        struct aws_s3_client *client;
 
-        /* Queue of aws_s3_request_desc structures that will be retried. */
+        /* Queue of aws_s3_request structures that will be retried. */
         struct aws_linked_list retry_queue;
 
         /* Body of stream of the initial_request_message.  We store this here so that parts can take turns seeking to
          * their own specific position (which should be in close proximity of one another). */
         struct aws_input_stream *initial_body_stream;
+
+        enum aws_s3_meta_request_state state;
 
     } synced_data;
 };
@@ -283,6 +287,13 @@ void aws_s3_meta_request_finish(
 void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
 
 void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request);
+
+/* Call to have the meta request notify the owning client (if one exists) that there is more work to be done. */
+void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request);
+
+/* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
+ * this function, it is necessary to release that reference. */
+struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request *meta_request);
 
 /* END - Meant only for use by derived types.  */
 
