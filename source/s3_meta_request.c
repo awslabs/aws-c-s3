@@ -102,10 +102,6 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
     struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
 
     if (client != NULL) {
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request trying to schedule work, but client is null.",
-            (void *)meta_request);
         aws_s3_client_schedule_meta_request_work(client, meta_request);
     } else {
         AWS_LOGF_TRACE(
