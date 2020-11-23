@@ -81,11 +81,12 @@ struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request 
     client = meta_request->synced_data.client;
 
     if (client != NULL) {
+        aws_s3_client_acquire(client);
+    } else {
         AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request trying to get reference to client, but client is null.",
+            "id=%p Meta request trying to get reference to client but client is null.",
             (void *)meta_request);
-        aws_s3_client_acquire(client);
     }
 
     s_s3_meta_request_unlock_synced_data(meta_request);
@@ -103,7 +104,7 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
     } else {
         AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request trying to schedule work, but client is null.",
+            "id=%p Meta request trying to schedule work but client is null.",
             (void *)meta_request);
     }
 
