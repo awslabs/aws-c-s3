@@ -47,8 +47,8 @@ static void s_test_s3_meta_request_body_callback(
     (void)meta_request;
     (void)body;
 
-    struct aws_s3_tester_meta_request *tester_meta_request = (struct aws_s3_tester_meta_request *)user_data;
-    tester_meta_request->received_body_size += body->len;
+    struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
+    meta_request_test_results->received_body_size += body->len;
 
     AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_start + body->len - 1);
 }
