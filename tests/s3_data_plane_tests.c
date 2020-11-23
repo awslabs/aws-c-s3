@@ -254,6 +254,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
 AWS_TEST_CASE(test_s3_meta_request_default, s_test_s3_meta_request_default)
 static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
