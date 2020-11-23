@@ -765,9 +765,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     return meta_request;
 }
 
-void aws_s3_client_schedule_meta_request_work(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request) {
+void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(meta_request);
 
