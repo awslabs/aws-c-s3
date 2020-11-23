@@ -149,17 +149,24 @@ static int s_s3_meta_request_default_next_request(
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     struct aws_s3_request *request = NULL;
 
+    bool create_request = false;
+
     s_s3_meta_request_default_lock_synced_data(meta_request_default);
 
+    /* We only have one request to potentially create, which is for the original message as-is. */
     if (meta_request_default->synced_data.state == AWS_S3_META_REQUEST_DEFAULT_STATE_START) {
-        request = aws_s3_request_new(meta_request, 0, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+        create_request = true;
         meta_request_default->synced_data.state = AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
     }
 
     s_s3_meta_request_default_unlock_synced_data(meta_request_default);
 
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
+    if (create_request) {
+        request = aws_s3_request_new(meta_request, 0, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
+    }
 
     *out_request = request;
 
