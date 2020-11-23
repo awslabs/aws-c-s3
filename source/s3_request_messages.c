@@ -19,10 +19,6 @@ static struct aws_input_stream *s_s3_message_util_assign_body(
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message);
 
-static struct aws_http_message *s_s3_message_util_copy_http_message(
-    struct aws_allocator *allocator,
-    struct aws_http_message *message);
-
 static int s_s3_message_util_set_multipart_request_path(
     struct aws_allocator *allocator,
     const struct aws_string *upload_id,
@@ -46,7 +42,7 @@ struct aws_http_message *aws_s3_get_object_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
-    struct aws_http_message *message = s_s3_message_util_copy_http_message(allocator, base_message);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message);
 
     if (message == NULL) {
         return NULL;
@@ -81,7 +77,7 @@ struct aws_http_message *aws_s3_put_object_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
-    struct aws_http_message *message = s_s3_message_util_copy_http_message(allocator, base_message);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -118,7 +114,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_http_message *base_message) {
     AWS_PRECONDITION(allocator);
 
-    struct aws_http_message *message = s_s3_message_util_copy_http_message(allocator, base_message);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message);
     struct aws_http_headers *headers = NULL;
 
     if (message == NULL) {
@@ -185,7 +181,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
 
-    struct aws_http_message *message = s_s3_message_util_copy_http_message(allocator, base_message);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message);
     struct aws_http_headers *headers = NULL;
 
     if (message == NULL) {
@@ -368,7 +364,7 @@ error_clean_up:
 }
 
 /* Copy an existing HTTP message's headers and body. */
-static struct aws_http_message *s_s3_message_util_copy_http_message(
+struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
     AWS_PRECONDITION(allocator);
