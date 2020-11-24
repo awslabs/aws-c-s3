@@ -19,8 +19,6 @@ struct aws_s3_part_buffer {
     /* What part of the overall file transfer this part is currently designated to. */
     uint64_t range_start;
 
-    uint64_t range_end;
-
     /* Re-usable byte buffer. */
     struct aws_byte_buf buffer;
 };
