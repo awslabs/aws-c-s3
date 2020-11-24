@@ -293,7 +293,7 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
 
 /* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
  * this function, it is necessary to release that reference. */
-struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request *meta_request);
+struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
 
 /* END - Meant only for use by derived types.  */
 

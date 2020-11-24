@@ -71,7 +71,7 @@ static void s_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *met
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request *meta_request) {
+struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_client *client = NULL;
@@ -97,7 +97,7 @@ struct aws_s3_client *aws_s3_meta_request_get_client(struct aws_s3_meta_request 
 void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_client *client = aws_s3_meta_request_get_client(meta_request);
+    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
 
     if (client != NULL) {
         aws_s3_client_schedule_meta_request_work(client, meta_request);
