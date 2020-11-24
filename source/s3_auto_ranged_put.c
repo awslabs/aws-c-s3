@@ -140,6 +140,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         goto error_clean_up;
     }
 
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
+
     return &auto_ranged_put->base;
 
 error_clean_up:

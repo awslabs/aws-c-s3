@@ -126,6 +126,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         goto error_clean_up;
     }
 
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
+
     return &auto_ranged_get->base;
 
 error_clean_up:
@@ -416,7 +419,6 @@ static int s_s3_auto_ranged_get_header_block_done(
 
         copy_http_headers(request->send_data.response_headers, response_headers);
 
-        aws_http_headers_erase(response_headers, g_accept_ranges_header_name);
         aws_http_headers_erase(response_headers, g_content_range_header_name);
 
         char content_length_buffer[64] = "";
