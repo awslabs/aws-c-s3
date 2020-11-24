@@ -758,7 +758,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    aws_s3_client_schedule_meta_request_work(meta_request->client, meta_request);
+    aws_s3_client_schedule_meta_request_work(client, meta_request);
 
     AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
 

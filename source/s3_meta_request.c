@@ -71,6 +71,46 @@ static void s_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *met
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
+struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_client *client = NULL;
+
+    s_s3_meta_request_lock_synced_data(meta_request);
+
+    client = meta_request->synced_data.client;
+
+    if (client != NULL) {
+        aws_s3_client_acquire(client);
+    } else {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Meta request trying to get reference to client but client is null.",
+            (void *)meta_request);
+    }
+
+    s_s3_meta_request_unlock_synced_data(meta_request);
+
+    return client;
+}
+
+void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
+
+    if (client != NULL) {
+        aws_s3_client_schedule_meta_request_work(client, meta_request);
+    } else {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Meta request trying to schedule work but client is null.",
+            (void *)meta_request);
+    }
+
+    aws_s3_client_release(client);
+}
+
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_internal_options *internal_options,
@@ -124,7 +164,7 @@ int aws_s3_meta_request_init_base(
     }
 
     aws_s3_client_acquire(internal_options->client);
-    meta_request->client = internal_options->client;
+    meta_request->synced_data.client = internal_options->client;
 
     meta_request->user_data = options->user_data;
     meta_request->headers_callback = options->headers_callback;
@@ -170,6 +210,7 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     aws_s3_meta_request_shutdown_fn *shutdown_callback = meta_request->shutdown_callback;
 
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    aws_s3_client_release(meta_request->synced_data.client);
 
     meta_request->vtable->destroy(meta_request);
 
@@ -808,8 +849,14 @@ void aws_s3_meta_request_finish(
     /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
     AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
 
-    aws_s3_client_release(meta_request->client);
-    meta_request->client = NULL;
+    struct aws_s3_client *client = NULL;
+
+    s_s3_meta_request_lock_synced_data(meta_request);
+    client = meta_request->synced_data.client;
+    meta_request->synced_data.client = NULL;
+    s_s3_meta_request_unlock_synced_data(meta_request);
+
+    aws_s3_client_release(client);
 
     AWS_LOGF_INFO(
         AWS_LS_S3_META_REQUEST,

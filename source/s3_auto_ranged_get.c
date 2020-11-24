@@ -424,7 +424,7 @@ static int s_s3_auto_ranged_get_header_block_done(
         aws_http_headers_release(response_headers);
     }
 
-    aws_s3_client_schedule_meta_request_work(meta_request->client, &auto_ranged_get->base);
+    aws_s3_meta_request_schedule_work(&auto_ranged_get->base);
 
     return AWS_OP_SUCCESS;
 }
