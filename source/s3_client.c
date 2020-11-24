@@ -592,8 +592,6 @@ struct aws_s3_part_buffer *aws_s3_client_get_part_buffer(struct aws_s3_client *c
             result->range_start = 0;
         }
 
-        result->range_end = result->range_start + client->part_size - 1;
-
         aws_byte_buf_reset(&result->buffer, false);
     }
 

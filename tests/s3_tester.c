@@ -36,15 +36,14 @@ static void s_test_s3_meta_request_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t range_start,
-    uint64_t range_end,
     void *user_data) {
     (void)meta_request;
     (void)body;
 
     struct aws_s3_tester_meta_request *tester_meta_request = (struct aws_s3_tester_meta_request *)user_data;
-    tester_meta_request->received_body_size += (range_end - range_start) + 1;
+    tester_meta_request->received_body_size += body->len;
 
-    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_end);
+    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_start + body->len - 1);
 }
 
 static void s_test_s3_meta_request_finish(

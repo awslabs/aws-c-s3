@@ -958,8 +958,7 @@ static void s_s3_meta_request_process_write_body_task(
     if (meta_request->body_callback != NULL) {
         struct aws_byte_cursor buf_byte_cursor = aws_byte_cursor_from_buf(&part_buffer->buffer);
 
-        meta_request->body_callback(
-            meta_request, &buf_byte_cursor, part_buffer->range_start, part_buffer->range_end, meta_request->user_data);
+        meta_request->body_callback(meta_request, &buf_byte_cursor, part_buffer->range_start, meta_request->user_data);
     }
 
 clean_up:
