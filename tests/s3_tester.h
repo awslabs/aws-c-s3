@@ -40,6 +40,7 @@ struct aws_s3_tester {
     struct aws_host_resolver *host_resolver;
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
+    struct aws_signing_config_aws default_signing_config;
 
     struct aws_condition_variable signal;
     bool bound_to_client;
