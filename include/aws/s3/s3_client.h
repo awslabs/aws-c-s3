@@ -59,14 +59,13 @@ struct aws_s3_client_config {
     /* Client bootstrap used for common staples such as event loop group, host resolver, etc.. s*/
     struct aws_client_bootstrap *client_bootstrap;
 
-    /* Credentials provider used to sign requests. */
-    struct aws_credentials_provider *credentials_provider;
+    /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
+    struct aws_tls_connection_options *tls_connection_options;
+
+    struct aws_signing_config_aws *signing_config;
 
     /* Size of parts the files will be downloaded or uploaded in. */
     uint64_t part_size;
-
-    /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
-    struct aws_tls_connection_options *tls_connection_options;
 
     /* Timeout value, in milliseconds, used for each connection. */
     uint32_t connection_timeout_ms;
@@ -94,20 +93,8 @@ struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 
-    /* Optional. Name of the service used to sign the request. Defaults to "s3" */
-    struct aws_byte_cursor signing_service;
-
-    /* Optional. Name of the region used to sign the request with. Defaults to the region specified for the client.*/
-    struct aws_byte_cursor signing_region;
-
-    /* Optional. Algorithm used to sign the request. Defaults to SigV4. */
-    enum aws_signing_algorithm signing_algorithm;
-
-    /* Optional. How to sign to sign the header. Defaults to SHA256. */
-    enum aws_signed_body_header_type signed_body_header;
-
-    /* Optional. How to sign the body. Defaults to unsigned-body. */
-    struct aws_byte_cursor signed_body_value;
+    /* Signing configuration for the client. */
+    struct aws_signing_config_aws *signing_config;
 
     /* Initial HTTP message that defines what operation we are doing. */
     struct aws_http_message *message;
@@ -176,6 +163,12 @@ void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
 void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request);
+
+AWS_S3_API
+void aws_s3_default_signing_config(
+    struct aws_signing_config_aws *signing_config,
+    const struct aws_byte_cursor region,
+    struct aws_credentials_provider *credentials_provider);
 
 AWS_EXTERN_C_END
 
