@@ -459,8 +459,9 @@ void aws_s3_meta_request_send_next_request(
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)meta_request, (void *)request);
 
     /* Sign the newly created message. */
-    if (aws_s3_client_sign_message(
-            client, request->send_data.message, s_s3_meta_request_request_on_signed, vip_connection)) {
+    if (aws_s3_client_sign_request(client, request, s_s3_meta_request_request_on_signed, vip_connection)) {
+        goto error_finish;
+    }
 
         aws_s3_meta_request_handle_error(meta_request, request, aws_last_error());
 

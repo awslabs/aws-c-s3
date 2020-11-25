@@ -97,7 +97,7 @@ struct aws_s3_client_vtable {
 
     int (*sign_message)(
         struct aws_s3_client *client,
-        struct aws_http_message *message,
+        struct aws_s3_request *request,
         aws_s3_client_sign_callback *callback,
         void *user_data);
 
@@ -208,9 +208,9 @@ struct aws_s3_client {
 
 void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-int aws_s3_client_sign_message(
+int aws_s3_client_sign_request(
     struct aws_s3_client *client,
-    struct aws_http_message *message,
+    struct aws_s3_request *request,
     aws_s3_client_sign_callback *callback,
     void *user_data);
 
