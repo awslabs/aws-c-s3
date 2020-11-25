@@ -850,9 +850,6 @@ int aws_s3_tester_validate_put_object_results(struct aws_s3_meta_request_test_re
     ASSERT_TRUE(meta_request_test_results->error_response_headers == NULL);
     ASSERT_TRUE(meta_request_test_results->error_response_body.len == 0);
 
-    ASSERT_FALSE(aws_http_headers_has(
-        meta_request_test_results->response_headers, aws_byte_cursor_from_c_str("Content-Length")));
-
     struct aws_byte_cursor etag_byte_cursor;
     AWS_ZERO_STRUCT(etag_byte_cursor);
     ASSERT_SUCCESS(aws_http_headers_get(

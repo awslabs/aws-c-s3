@@ -41,6 +41,10 @@ static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide an
 static const uint32_t s_default_num_connections_per_vip = 10;
 static const uint32_t s_default_max_retries = 16;
 
+static const struct aws_byte_cursor s_default_signing_service = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
+static const enum aws_signing_algorithm s_default_signing_algorithm = AWS_SIGNING_ALGORITHM_V4;
+static const enum aws_signed_body_header_type s_default_signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
+
 struct aws_s3_client_work {
     struct aws_linked_list_node node;
     void *user_data;
@@ -1231,10 +1235,10 @@ static int s_s3_client_sign_request(
     struct aws_date_time now;
     aws_date_time_init_now(&now);
 
-    struct aws_byte_cursor signing_service = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
+    struct aws_byte_cursor signing_service = s_default_signing_service;
     struct aws_byte_cursor signing_region = aws_byte_cursor_from_array(client->region->bytes, client->region->len);
-    int signing_algorithm = AWS_SIGNING_ALGORITHM_V4;
-    int signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
+    enum aws_signing_algorithm signing_algorithm = s_default_signing_algorithm;
+    enum aws_signed_body_header_type signed_body_header = s_default_signed_body_header;
     struct aws_byte_cursor signed_body_value = g_aws_signed_body_value_unsigned_payload;
 
     if (meta_request->signing_service != NULL) {
@@ -1272,7 +1276,7 @@ static int s_s3_client_sign_request(
     signing_config.signed_body_value = signed_body_value;
 
     if (aws_sign_request_aws(
-            client->allocator,
+            meta_request->allocator,
             payload->signable,
             (struct aws_signing_config_base *)&signing_config,
             s_s3_vip_connection_request_signing_complete,
@@ -1287,7 +1291,7 @@ static int s_s3_client_sign_request(
 error_clean_up:
 
     aws_s3_request_release(payload->request);
-    aws_mem_release(client->allocator, payload);
+    aws_mem_release(meta_request->allocator, payload);
 
     return AWS_OP_ERR;
 }
@@ -1322,12 +1326,12 @@ static void s_s3_vip_connection_request_signing_complete(
         payload->callback(error_code, payload->user_data);
     }
 
-    aws_signable_destroy(payload->signable);
-    payload->signable = NULL;
-
     aws_s3_meta_request_acquire(meta_request);
+
+    aws_signable_destroy(payload->signable);
     aws_s3_request_release(payload->request);
     aws_mem_release(meta_request->allocator, payload);
+
     aws_s3_meta_request_release(meta_request);
 }
 
