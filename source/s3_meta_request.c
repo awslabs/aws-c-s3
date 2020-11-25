@@ -154,15 +154,21 @@ int aws_s3_meta_request_init_base(
 
     *((uint64_t *)&meta_request->part_size) = internal_options->client->part_size;
 
-    if (aws_byte_cursor_is_valid(&options->signing_service)) {
+    AWS_ASSERT(aws_byte_cursor_is_valid(&options->signing_service));
+
+    if (aws_byte_cursor_is_valid(&options->signing_service) && options->signing_service.len > 0) {
         meta_request->signing_service = aws_string_new_from_cursor(meta_request->allocator, &options->signing_service);
     }
 
-    if (aws_byte_cursor_is_valid(&options->signing_region)) {
+    AWS_ASSERT(aws_byte_cursor_is_valid(&options->signing_region));
+
+    if (options->signing_region.len > 0) {
         meta_request->signing_region = aws_string_new_from_cursor(meta_request->allocator, &options->signing_region);
     }
 
-    if (aws_byte_cursor_is_valid(&options->signing_service)) {
+    AWS_ASSERT(aws_byte_cursor_is_valid(&options->signed_body_value));
+
+    if (options->signed_body_value.len > 0) {
         meta_request->signed_body_value =
             aws_string_new_from_cursor(meta_request->allocator, &options->signed_body_value);
     }
