@@ -163,7 +163,8 @@ int aws_s3_meta_request_init_base(
     }
 
     if (aws_byte_cursor_is_valid(&options->signing_service)) {
-        meta_request->signed_body_value = aws_string_new_from_cursor(meta_request->allocator, &options->signed_body_value);
+        meta_request->signed_body_value =
+            aws_string_new_from_cursor(meta_request->allocator, &options->signed_body_value);
     }
 
     meta_request->signing_algorithm = options->signing_algorithm;
