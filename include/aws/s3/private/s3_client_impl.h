@@ -130,7 +130,10 @@ struct aws_s3_client {
     /* TLS Options to be used for each connection. */
     struct aws_tls_connection_options *tls_connection_options;
 
+<<<<<<< HEAD
     /* Cached signing config. Can be NULL if no signing config was specified. */
+=======
+>>>>>>> Changing signing approach
     struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Timeout value, in milliseconds, used for each connection. */
