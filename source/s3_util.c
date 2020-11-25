@@ -142,6 +142,9 @@ struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
 
     cached_signing_config->config.date = signing_config->date;
 
+    cached_signing_config->config.should_sign_header = signing_config->should_sign_header;
+    cached_signing_config->config.flags = signing_config->flags;
+
     AWS_ASSERT(aws_byte_cursor_is_valid(&signing_config->signed_body_value));
 
     if (signing_config->service.len > 0) {
@@ -152,8 +155,7 @@ struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
             aws_byte_cursor_from_string(cached_signing_config->signed_body_value);
     }
 
-    cached_signing_config->config.should_sign_header = signing_config->should_sign_header;
-    cached_signing_config->config.flags = signing_config->flags;
+    cached_signing_config->config.signed_body_header = signing_config->signed_body_header;
 
     if (signing_config->credentials != NULL) {
         aws_credentials_acquire(signing_config->credentials);

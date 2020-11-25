@@ -201,24 +201,6 @@ void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request) {
     aws_ref_count_release(&meta_request->ref_count);
 }
 
-void aws_s3_default_signing_config(
-    struct aws_signing_config_aws *signing_config,
-    const struct aws_byte_cursor region,
-    struct aws_credentials_provider *credentials_provider) {
-    AWS_PRECONDITION(signing_config);
-    AWS_PRECONDITION(credentials_provider);
-
-    AWS_ZERO_STRUCT(*signing_config);
-
-    signing_config->config_type = AWS_SIGNING_CONFIG_AWS;
-    signing_config->algorithm = AWS_SIGNING_ALGORITHM_V4;
-    signing_config->credentials_provider = credentials_provider;
-    signing_config->region = region;
-    signing_config->service = aws_byte_cursor_from_c_str("s3");
-    signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
-    signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
-}
-
 static void s_s3_meta_request_start_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
