@@ -82,16 +82,23 @@ static void s_s3_meta_request_default_unlock_synced_data(struct aws_s3_meta_requ
 /* Allocate a new default meta request. */
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *options) {
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(options && options->options && options->options->message);
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options && options->message);
 
     struct aws_s3_meta_request_default *meta_request_default =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_default));
 
     /* Try to initialize the base type. */
     if (aws_s3_meta_request_init_base(
-            allocator, options, meta_request_default, &s_s3_meta_request_default_vtable, &meta_request_default->base)) {
+            allocator,
+            client,
+            options,
+            meta_request_default,
+            &s_s3_meta_request_default_vtable,
+            &meta_request_default->base)) {
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,

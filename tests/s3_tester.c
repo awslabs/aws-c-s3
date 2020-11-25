@@ -408,13 +408,10 @@ struct aws_s3_meta_request *aws_s3_tester_meta_request_new(
 
     AWS_ASSERT(client);
 
-    struct aws_s3_meta_request_internal_options internal_options;
-    internal_options.options = &options;
-    internal_options.client = client;
-
     aws_s3_meta_request_init_base(
         tester->allocator,
-        &internal_options,
+        client,
+        &options,
         empty_meta_request,
         &s_s3_empty_meta_request_vtable,
         &empty_meta_request->base);

@@ -102,14 +102,6 @@ struct aws_s3_request {
     } write_body_data;
 };
 
-/* Additional options that can be used internally (ie: by the client) without having to interfere with any user
- * specified options. */
-struct aws_s3_meta_request_internal_options {
-    const struct aws_s3_meta_request_options *options;
-
-    struct aws_s3_client *client;
-};
-
 struct aws_s3_meta_request_vtable {
     bool (*has_work)(const struct aws_s3_meta_request *meta_request);
 
@@ -231,17 +223,20 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
 /* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *options);
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options);
 
 /* Creates a new auto-ranged put meta request.  This will do a multipart upload in parallel when appropriate. */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *options);
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options);
 
 /* Creates a new default meta request. This will send the request as is and pass back the response. */
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *options);
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options);
 
 /* Tells the meta request to start sending another request, if there is one currently to send.  This is used by the
  * client.
@@ -257,7 +252,8 @@ void aws_s3_meta_request_send_next_request(
 /* Initialize the base meta request structure. */
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *options,
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
     struct aws_s3_meta_request *base_type);

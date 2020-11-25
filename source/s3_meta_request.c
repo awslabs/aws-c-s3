@@ -115,16 +115,17 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
 
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *internal_options,
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
     struct aws_s3_meta_request *meta_request) {
 
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(internal_options);
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+    AWS_PRECONDITION(options->message);
     AWS_PRECONDITION(impl);
-    AWS_PRECONDITION(internal_options->options);
-    AWS_PRECONDITION(internal_options->client);
     AWS_PRECONDITION(meta_request);
 
     AWS_ZERO_STRUCT(*meta_request);
@@ -139,17 +140,14 @@ int aws_s3_meta_request_init_base(
         vtable->send_request_finish = s_s3_meta_request_send_request_finish_default;
     }
 
-    const struct aws_s3_meta_request_options *options = internal_options->options;
-    AWS_PRECONDITION(options->message);
-
     meta_request->allocator = allocator;
 
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_start_destroy);
     aws_ref_count_init(&meta_request->internal_ref_count, meta_request, s_s3_meta_request_finish_destroy);
 
-    *((uint64_t *)&meta_request->part_size) = internal_options->client->part_size;
-    meta_request->event_loop = internal_options->client->event_loop;
+    *((uint64_t *)&meta_request->part_size) = client->part_size;
+    meta_request->event_loop = client->event_loop;
 
     /* Keep a reference to the original message structure passed in. */
     meta_request->initial_request_message = options->message;
@@ -169,8 +167,8 @@ int aws_s3_meta_request_init_base(
         return AWS_OP_ERR;
     }
 
-    aws_s3_client_acquire(internal_options->client);
-    meta_request->synced_data.client = internal_options->client;
+    aws_s3_client_acquire(client);
+    meta_request->synced_data.client = client;
 
     meta_request->user_data = options->user_data;
     meta_request->headers_callback = options->headers_callback;
