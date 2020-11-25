@@ -24,13 +24,8 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_signing_config_aws signing_config;
-
-    aws_s3_default_signing_config(&signing_config, g_test_s3_region, tester.credentials_provider);
-
     struct aws_s3_client_config client_config = {
         .region = g_test_s3_region,
-        .signing_config = &signing_config
     };
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
