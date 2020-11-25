@@ -98,7 +98,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(options && options->message);
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+    AWS_PRECONDITION(options->message);
 
     struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
 

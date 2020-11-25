@@ -86,7 +86,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
-    AWS_PRECONDITION(options && options->message);
+    AWS_PRECONDITION(options);
+    AWS_PRECONDITION(options->message);
 
     struct aws_s3_meta_request_default *meta_request_default =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_default));
