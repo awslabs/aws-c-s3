@@ -319,7 +319,7 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .schedule_meta_request_work = aws_s3_client_schedule_meta_request_work_empty,
-    .sign_message = aws_s3_client_sign_request_empty,
+    .sign_request = aws_s3_client_sign_request_empty,
     .get_http_connection = aws_s3_client_get_http_connection_empty,
 };
 

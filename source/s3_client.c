@@ -159,7 +159,7 @@ static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory,
     .schedule_meta_request_work = s_s3_client_schedule_meta_request_work,
-    .sign_message = s_s3_client_sign_request,
+    .sign_request = s_s3_client_sign_request,
     .get_http_connection = s_s3_client_get_http_connection,
 };
 
@@ -324,9 +324,9 @@ int aws_s3_client_sign_request(
 
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->vtable);
-    AWS_PRECONDITION(client->vtable->sign_message);
+    AWS_PRECONDITION(client->vtable->sign_request);
 
-    return client->vtable->sign_message(client, request, callback, user_data);
+    return client->vtable->sign_request(client, request, callback, user_data);
 }
 
 int aws_s3_client_get_http_connection(
