@@ -322,7 +322,7 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .schedule_meta_request_work = aws_s3_client_schedule_meta_request_work_empty,
-    .sign_message = aws_s3_client_sign_message_empty,
+    .sign_message = aws_s3_client_sign_request_empty,
     .get_http_connection = aws_s3_client_get_http_connection_empty,
 };
 
@@ -869,13 +869,13 @@ void aws_s3_client_schedule_meta_request_work_empty(
     (void)meta_request;
 }
 
-int aws_s3_client_sign_message_empty(
+int aws_s3_client_sign_request_empty(
     struct aws_s3_client *client,
-    struct aws_http_message *message,
+    struct aws_s3_request *request,
     aws_s3_client_sign_callback *callback,
     void *user_data) {
     (void)client;
-    (void)message;
+    (void)request;
     (void)callback;
     (void)user_data;
     return AWS_OP_SUCCESS;

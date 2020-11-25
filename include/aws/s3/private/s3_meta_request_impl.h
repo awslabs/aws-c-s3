@@ -178,6 +178,7 @@ struct aws_s3_meta_request {
     struct aws_ref_count internal_ref_count;
 
     void *impl;
+
     struct aws_s3_meta_request_vtable *vtable;
 
     /* Initial HTTP Message that this meta request is based on. */
@@ -185,6 +186,21 @@ struct aws_s3_meta_request {
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const uint64_t part_size;
+
+    /* Name of the service used to sign the request. */
+    struct aws_string *signing_service;
+
+    /* Name of the region used to sign the request with. */
+    struct aws_string *signing_region;
+
+    /* How to sign the body. */
+    struct aws_string *signed_body_value;
+
+    /* Algorithm used to sign the request. */
+    int signing_algorithm;
+
+    /* How to sign to sign the header.*/
+    int signed_body_header;
 
     /* Event loop used for scheduling.  Passed down by the creating client. */
     struct aws_event_loop *event_loop;

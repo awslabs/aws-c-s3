@@ -153,6 +153,23 @@ int aws_s3_meta_request_init_base(
     aws_ref_count_init(&meta_request->internal_ref_count, meta_request, s_s3_meta_request_finish_destroy);
 
     *((uint64_t *)&meta_request->part_size) = internal_options->client->part_size;
+
+    if (aws_byte_cursor_is_valid(&options->signing_service)) {
+        meta_request->signing_service = aws_string_new_from_cursor(meta_request->allocator, &options->signing_service);
+    }
+
+    if (aws_byte_cursor_is_valid(&options->signing_region)) {
+        meta_request->signing_region = aws_string_new_from_cursor(meta_request->allocator, &options->signing_region);
+    }
+
+    if (aws_byte_cursor_is_valid(&options->signing_service)) {
+        meta_request->signed_body_value = aws_string_new_from_cursor(meta_request->allocator, &options->signed_body_value);
+    }
+
+    meta_request->signing_algorithm = options->signing_algorithm;
+
+    meta_request->signed_body_header = options->signed_body_header;
+
     meta_request->event_loop = internal_options->client->event_loop;
 
     /* Keep a reference to the original message structure passed in. */
@@ -463,8 +480,9 @@ unlock:
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)meta_request, (void *)request);
 
     /* Sign the newly created message. */
-    if (aws_s3_client_sign_message(
-            client, request->send_data.message, s_s3_meta_request_request_on_signed, vip_connection)) {
+    if (aws_s3_client_sign_request(client, request, s_s3_meta_request_request_on_signed, vip_connection)) {
+        goto error_finish;
+    }
 
         aws_s3_meta_request_handle_error(meta_request, request, aws_last_error());
 
