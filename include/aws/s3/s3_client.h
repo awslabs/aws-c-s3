@@ -92,6 +92,21 @@ struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 
+    /* Optional. Name of the service used to sign the request. Defaults to "s3" */
+    struct aws_byte_cursor signing_service;
+
+    /* Optional. Name of the region used to sign the request with. Defaults to the region specified for the client.*/
+    struct aws_byte_cursor signing_region;
+
+    /* Optional. Algorithm used to sign the request. Defaults to SigV4. */
+    int signing_algorithm;
+
+    /* Optional. How to sign to sign the header. Defaults to SHA256. */
+    int signed_body_header;
+
+    /* Optional. How to sign the body. Defaults to unsigned-body. */
+    struct aws_byte_cursor signed_body_value;
+
     /* Initial HTTP message that defines what operation we are doing. */
     struct aws_http_message *message;
 
