@@ -1253,7 +1253,8 @@ static int s_s3_client_sign_request(
     }
 
     if (meta_request->signed_body_value != NULL) {
-        signed_body_value = aws_byte_cursor_from_array(meta_request->signed_body_value->bytes, meta_request->signed_body_value->len);
+        signed_body_value =
+            aws_byte_cursor_from_array(meta_request->signed_body_value->bytes, meta_request->signed_body_value->len);
     }
 
     struct aws_signing_config_aws signing_config;
@@ -1307,7 +1308,8 @@ static void s_s3_vip_connection_request_signing_complete(
             aws_raise_error(AWS_ERROR_UNKNOWN);
             error_code = AWS_ERROR_UNKNOWN;
 
-        } else if (aws_apply_signing_result_to_http_request(request->send_data.message, meta_request->allocator, signing_result)) {
+        } else if (aws_apply_signing_result_to_http_request(
+                       request->send_data.message, meta_request->allocator, signing_result)) {
             error_code = aws_last_error();
         }
     }
