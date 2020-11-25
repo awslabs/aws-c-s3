@@ -710,7 +710,6 @@ static int s_s3_meta_request_incoming_body(
 
     struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
-    AWS_PRECONDITION(request->send_data.part_buffer);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
