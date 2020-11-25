@@ -1184,6 +1184,24 @@ static void s_s3_client_vip_connection_request_finished(void *user_data) {
     s_s3_client_internal_release(client);
 }
 
+void aws_s3_default_signing_config(
+    struct aws_signing_config_aws *signing_config,
+    const struct aws_byte_cursor region,
+    struct aws_credentials_provider *credentials_provider) {
+    AWS_PRECONDITION(signing_config);
+    AWS_PRECONDITION(credentials_provider);
+
+    AWS_ZERO_STRUCT(*signing_config);
+
+    signing_config->config_type = AWS_SIGNING_CONFIG_AWS;
+    signing_config->algorithm = AWS_SIGNING_ALGORITHM_V4;
+    signing_config->credentials_provider = credentials_provider;
+    signing_config->region = region;
+    signing_config->service = aws_byte_cursor_from_c_str("s3");
+    signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
+    signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
+}
+
 struct s3_client_siging_payload {
     struct aws_s3_request *request;
     struct aws_signable *signable;
@@ -1222,7 +1240,7 @@ static int s_s3_client_sign_request(
     aws_date_time_init_now(&signing_config.date);
 
     struct s3_client_siging_payload *payload =
-        aws_mem_acquire(client->allocator, sizeof(struct s3_client_siging_payload));
+        aws_mem_acquire(meta_request->allocator, sizeof(struct s3_client_siging_payload));
 
     aws_s3_request_acquire(request);
     payload->request = request;
