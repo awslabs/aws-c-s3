@@ -243,6 +243,9 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
     aws_s3_client_release(meta_request->synced_data.client);
+    aws_string_destroy(meta_request->signing_service);
+    aws_string_destroy(meta_request->signing_region);
+    aws_string_destroy(meta_request->signed_body_value);
 
     meta_request->vtable->destroy(meta_request);
 
