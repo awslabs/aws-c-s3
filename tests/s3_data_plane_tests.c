@@ -424,6 +424,35 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
+
+AWS_TEST_CASE(test_s3_put_object_less_than_part_size, s_test_s3_put_object_less_than_part_size)
+static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .region = g_test_s3_region,
+        .part_size = 20 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    aws_s3_tester_send_put_object_meta_request(&tester, client, true);
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_meta_request_default, s_test_s3_meta_request_default)
 static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
