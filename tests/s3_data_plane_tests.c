@@ -252,7 +252,6 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
-
 AWS_TEST_CASE(test_s3_put_object_less_than_part_size, s_test_s3_put_object_less_than_part_size)
 static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
