@@ -187,9 +187,6 @@ int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client
     ASSERT_TRUE(config->client_bootstrap == NULL);
     config->client_bootstrap = tester->client_bootstrap;
 
-    ASSERT_TRUE(config->credentials_provider == NULL);
-    config->credentials_provider = tester->credentials_provider;
-
     ASSERT_TRUE(config->shutdown_callback == NULL);
     config->shutdown_callback = s_tester_notify_clean_up_signal;
 
@@ -331,7 +328,6 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
 
     struct aws_s3_client_config client_config = {
         .region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_region"),
-        .credentials_provider = tester->credentials_provider,
         .client_bootstrap = tester->client_bootstrap,
     };
 

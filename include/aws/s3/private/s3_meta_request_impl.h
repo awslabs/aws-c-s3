@@ -187,20 +187,7 @@ struct aws_s3_meta_request {
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const uint64_t part_size;
 
-    /* Name of the service used to sign the request. */
-    struct aws_string *signing_service;
-
-    /* Name of the region used to sign the request with. */
-    struct aws_string *signing_region;
-
-    /* How to sign the body. */
-    struct aws_string *signed_body_value;
-
-    /* Algorithm used to sign the request. */
-    enum aws_signing_algorithm signing_algorithm;
-
-    /* How to sign to sign the header.*/
-    enum aws_signed_body_header_type signed_body_header;
+    struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Event loop used for scheduling.  Passed down by the creating client. */
     struct aws_event_loop *event_loop;

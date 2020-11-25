@@ -126,8 +126,6 @@ struct aws_s3_client {
 
     struct aws_event_loop *event_loop;
 
-    struct aws_credentials_provider *credentials_provider;
-
     /* Region of the S3 bucket. */
     struct aws_string *region;
 
@@ -137,6 +135,8 @@ struct aws_s3_client {
 
     /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
     struct aws_tls_connection_options *tls_connection_options;
+
+    struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Timeout value, in milliseconds, used for each connection. */
     const uint32_t connection_timeout_ms;

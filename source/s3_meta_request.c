@@ -154,28 +154,9 @@ int aws_s3_meta_request_init_base(
 
     *((uint64_t *)&meta_request->part_size) = internal_options->client->part_size;
 
-    AWS_ASSERT(aws_byte_cursor_is_valid(&options->signing_service));
-
-    if (aws_byte_cursor_is_valid(&options->signing_service) && options->signing_service.len > 0) {
-        meta_request->signing_service = aws_string_new_from_cursor(meta_request->allocator, &options->signing_service);
+    if (options->signing_config) {
+        meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
-
-    AWS_ASSERT(aws_byte_cursor_is_valid(&options->signing_region));
-
-    if (options->signing_region.len > 0) {
-        meta_request->signing_region = aws_string_new_from_cursor(meta_request->allocator, &options->signing_region);
-    }
-
-    AWS_ASSERT(aws_byte_cursor_is_valid(&options->signed_body_value));
-
-    if (options->signed_body_value.len > 0) {
-        meta_request->signed_body_value =
-            aws_string_new_from_cursor(meta_request->allocator, &options->signed_body_value);
-    }
-
-    meta_request->signing_algorithm = options->signing_algorithm;
-
-    meta_request->signed_body_header = options->signed_body_header;
 
     meta_request->event_loop = internal_options->client->event_loop;
 
@@ -184,7 +165,6 @@ int aws_s3_meta_request_init_base(
     aws_http_message_acquire(options->message);
 
     aws_linked_list_init(&meta_request->threaded_data.referenced_vip_connections);
-
     aws_linked_list_init(&meta_request->synced_data.retry_queue);
 
     /* Store a copy of the original message's initial body stream in our synced data, so that concurrent requests can
@@ -223,6 +203,24 @@ void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request) {
     aws_ref_count_release(&meta_request->ref_count);
 }
 
+void aws_s3_default_signing_config(
+    struct aws_signing_config_aws *signing_config,
+    const struct aws_byte_cursor region,
+    struct aws_credentials_provider *credentials_provider) {
+    AWS_PRECONDITION(signing_config);
+    AWS_PRECONDITION(credentials_provider);
+
+    AWS_ZERO_STRUCT(*signing_config);
+
+    signing_config->config_type = AWS_SIGNING_CONFIG_AWS;
+    signing_config->algorithm = AWS_SIGNING_ALGORITHM_V4;
+    signing_config->credentials_provider = credentials_provider;
+    signing_config->region = region;
+    signing_config->service = aws_byte_cursor_from_c_str("s3");
+    signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
+    signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
+}
+
 static void s_s3_meta_request_start_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
@@ -253,11 +251,9 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     void *meta_request_user_data = meta_request->user_data;
     aws_s3_meta_request_shutdown_fn *shutdown_callback = meta_request->shutdown_callback;
 
+    aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
     aws_s3_client_release(meta_request->synced_data.client);
-    aws_string_destroy(meta_request->signing_service);
-    aws_string_destroy(meta_request->signing_region);
-    aws_string_destroy(meta_request->signed_body_value);
 
     meta_request->vtable->destroy(meta_request);
 
