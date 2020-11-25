@@ -172,6 +172,8 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
     }
 
+    aws_s3_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
+
     return AWS_OP_SUCCESS;
 
 condition_variable_failed:
@@ -190,6 +192,9 @@ int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client
 
     ASSERT_TRUE(config->client_bootstrap == NULL);
     config->client_bootstrap = tester->client_bootstrap;
+
+    ASSERT_TRUE(config->signing_config == NULL);
+    config->signing_config = &tester->default_signing_config;
 
     ASSERT_TRUE(config->shutdown_callback == NULL);
     config->shutdown_callback = s_tester_notify_clean_up_signal;
