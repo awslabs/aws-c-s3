@@ -197,10 +197,10 @@ struct aws_s3_meta_request {
     struct aws_string *signed_body_value;
 
     /* Algorithm used to sign the request. */
-    int signing_algorithm;
+    enum aws_signing_algorithm signing_algorithm;
 
     /* How to sign to sign the header.*/
-    int signed_body_header;
+    enum aws_signed_body_header_type signed_body_header;
 
     /* Event loop used for scheduling.  Passed down by the creating client. */
     struct aws_event_loop *event_loop;

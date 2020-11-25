@@ -9,6 +9,8 @@
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 
+#include <aws/auth/signing_config.h>
+
 struct aws_allocator;
 
 struct aws_http_stream;
@@ -99,10 +101,10 @@ struct aws_s3_meta_request_options {
     struct aws_byte_cursor signing_region;
 
     /* Optional. Algorithm used to sign the request. Defaults to SigV4. */
-    int signing_algorithm;
+    enum aws_signing_algorithm signing_algorithm;
 
     /* Optional. How to sign to sign the header. Defaults to SHA256. */
-    int signed_body_header;
+    enum aws_signed_body_header_type signed_body_header;
 
     /* Optional. How to sign the body. Defaults to unsigned-body. */
     struct aws_byte_cursor signed_body_value;
