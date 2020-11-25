@@ -39,10 +39,6 @@ static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide an
 static const uint32_t s_default_num_connections_per_vip = 10;
 static const uint32_t s_default_max_retries = 5;
 
-static const struct aws_byte_cursor s_default_signing_service = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
-static const enum aws_signing_algorithm s_default_signing_algorithm = AWS_SIGNING_ALGORITHM_V4;
-static const enum aws_signed_body_header_type s_default_signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
-
 struct aws_s3_client_work {
     struct aws_linked_list_node node;
     void *user_data;
