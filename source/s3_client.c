@@ -1215,6 +1215,7 @@ static int s_s3_client_sign_request(
     struct s3_client_siging_payload *payload =
         aws_mem_acquire(client->allocator, sizeof(struct s3_client_siging_payload));
 
+    aws_s3_request_acquire(request);
     payload->request = request;
     payload->callback = callback;
     payload->user_data = user_data;
