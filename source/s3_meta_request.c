@@ -1022,7 +1022,7 @@ void aws_s3_meta_request_handle_error(
         return;
     }
 
-    struct aws_s3_client *client = aws_s3_meta_request_get_client(meta_request);
+    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
 
     /* If we were able to get the point of handling an error, the client should still be around. */
     AWS_ASSERT(client);
