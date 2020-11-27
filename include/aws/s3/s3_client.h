@@ -62,6 +62,7 @@ struct aws_s3_client_config {
     /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
     struct aws_tls_connection_options *tls_connection_options;
 
+    /* Signing options to be used for each request. Specify NULL to not sign requests. */
     struct aws_signing_config_aws *signing_config;
 
     /* Size of parts the files will be downloaded or uploaded in. */
@@ -93,7 +94,8 @@ struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 
-    /* Signing configuration for the client. */
+    /* Signing options to be used for each request created for this meta request.  If NULL, options in the client will
+     * be used. If not NULL, these options will override the client options. */
     struct aws_signing_config_aws *signing_config;
 
     /* Initial HTTP message that defines what operation we are doing. */

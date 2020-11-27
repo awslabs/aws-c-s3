@@ -127,9 +127,10 @@ struct aws_s3_client {
      * to meta requests for use. */
     const uint64_t part_size;
 
-    /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
+    /* TLS Options to be used for each connection. */
     struct aws_tls_connection_options *tls_connection_options;
 
+    /* Cached signing config. Can be NULL if no signing config was specified. */
     struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Timeout value, in milliseconds, used for each connection. */
