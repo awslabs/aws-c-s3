@@ -6,6 +6,10 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
+#include <aws/auth/signable.h>
+#include <aws/auth/signing.h>
+#include <aws/auth/signing_config.h>
+#include <aws/auth/signing_result.h>
 #include <aws/common/string.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/stream.h>
@@ -25,7 +29,10 @@ static void s_s3_meta_request_process_write_body_task(
     void *arg,
     enum aws_task_status task_status);
 
-static void s_s3_meta_request_request_on_signed(int error_code, void *user_data);
+static void s_s3_meta_request_request_on_signed(
+    struct aws_signing_result *signing_result,
+    int error_code,
+    void *user_data);
 
 static void s_s3_meta_request_send_http_request(
     struct aws_http_connection *http_connection,
@@ -341,17 +348,6 @@ void s_s3_request_destroy(void *user_data) {
     aws_mem_release(request->allocator, request);
 }
 
-static void s_s3_meta_request_setup_work_data(
-    struct aws_s3_vip_connection *vip_connection,
-    struct aws_s3_request *request) {
-
-    AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(request);
-
-    vip_connection->work_data.request = request;
-    aws_s3_request_acquire(request);
-}
-
 static void s_s3_meta_request_clean_up_work_data(struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(vip_connection);
 
@@ -386,6 +382,10 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
 
     return vtable->has_work(meta_request);
 }
+
+static int s_s3_meta_request_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection);
 
 void aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
@@ -458,7 +458,8 @@ unlock:
     request->send_data.finished_callback = finished_callback;
     request->send_data.user_data = user_data;
 
-    s_s3_meta_request_setup_work_data(vip_connection, request);
+    aws_s3_request_acquire(request);
+    vip_connection->work_data.request = request;
 
     /* Release initial reference of request to give complete ownership to the work_data. */
     aws_s3_request_release(vip_connection->work_data.request);
@@ -466,7 +467,7 @@ unlock:
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)meta_request, (void *)request);
 
     /* Sign the newly created message. */
-    if (aws_s3_client_sign_request(client, request, s_s3_meta_request_request_on_signed, vip_connection)) {
+    if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
         goto error_finish;
     }
 
@@ -486,11 +487,85 @@ call_finished_callback:
     }
 }
 
+/* Handles signing a message for the caller. */
+static int s_s3_meta_request_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(meta_request)
+    AWS_PRECONDITION(vip_connection);
+    AWS_PRECONDITION(vip_connection->owning_vip);
+
+    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
+    AWS_PRECONDITION(client);
+
+    struct aws_s3_request *request = vip_connection->work_data.request;
+    AWS_PRECONDITION(request);
+
+    struct aws_signing_config_aws signing_config;
+
+    if (meta_request->cached_signing_config != NULL) {
+        signing_config = meta_request->cached_signing_config->config;
+    } else if (client->cached_signing_config != NULL) {
+        signing_config = client->cached_signing_config->config;
+    } else {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: No signing config present. Not signing request %p.",
+            (void *)meta_request,
+            (void *)request);
+
+        s_s3_meta_request_request_on_signed(NULL, AWS_ERROR_SUCCESS, vip_connection);
+        return AWS_OP_SUCCESS;
+    }
+
+    aws_date_time_init_now(&signing_config.date);
+
+    int result = AWS_OP_SUCCESS;
+    struct aws_signable *signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
+
+    if (signable == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Could not allocate signable for request %p",
+            (void *)meta_request,
+            (void *)request);
+
+        result = AWS_OP_ERR;
+        goto clean_up;
+    }
+
+    if (aws_sign_request_aws(
+            meta_request->allocator,
+            signable,
+            (struct aws_signing_config_base *)&signing_config,
+            s_s3_meta_request_request_on_signed,
+            vip_connection)) {
+
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "id=%p: Could not sign request %p", (void *)meta_request, (void *)request);
+
+        result = AWS_OP_ERR;
+        goto clean_up;
+    }
+
+clean_up:
+
+    aws_signable_destroy(signable);
+
+    return result;
+}
+
 /* Handle the signing result, getting an HTTP connection for the request if signing succeeded. */
-static void s_s3_meta_request_request_on_signed(int error_code, void *user_data) {
+static void s_s3_meta_request_request_on_signed(
+    struct aws_signing_result *signing_result,
+    int error_code,
+    void *user_data) {
 
     struct aws_s3_vip_connection *vip_connection = user_data;
     AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
+    AWS_PRECONDITION(client);
 
     struct aws_s3_request *request = vip_connection->work_data.request;
     AWS_PRECONDITION(request);
@@ -498,19 +573,13 @@ static void s_s3_meta_request_request_on_signed(int error_code, void *user_data)
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_vip *vip = vip_connection->owning_vip;
-    AWS_PRECONDITION(vip);
-
-    struct aws_s3_client *client = vip->owning_client;
-    AWS_PRECONDITION(client);
-
-    /* If we couldn't sign, finish the request with an error. */
     if (error_code != AWS_ERROR_SUCCESS) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "id=%p Unable to sign request %p", (void *)meta_request, (void *)request);
+        goto error_finish;
+    }
 
-        s_s3_meta_request_send_request_finish(vip_connection, NULL, error_code);
-        return;
+    if (signing_result != NULL &&
+        aws_apply_signing_result_to_http_request(request->send_data.message, meta_request->allocator, signing_result)) {
+        goto error_finish;
     }
 
     AWS_LOGF_TRACE(
@@ -520,9 +589,14 @@ static void s_s3_meta_request_request_on_signed(int error_code, void *user_data)
     if (aws_s3_client_get_http_connection(
             client, vip_connection, s_s3_meta_request_send_http_request, vip_connection)) {
 
-        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
-        return;
+        goto error_finish;
     }
+
+    return;
+
+error_finish:
+
+    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
 }
 
 /* Set up a stream to actually process the request. */
