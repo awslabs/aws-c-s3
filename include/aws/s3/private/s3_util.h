@@ -22,7 +22,8 @@ struct aws_event_loop;
 enum aws_s3_response_status {
     AWS_S3_RESPONSE_STATUS_SUCCESS = 200,
     AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS = 206,
-    AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR = 500
+    AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR = 500,
+    AWS_S3_RESPONSE_STATUS_SLOW_DOWN = 503,
 };
 
 extern const struct aws_byte_cursor g_host_header_name;

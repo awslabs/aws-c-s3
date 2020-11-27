@@ -466,11 +466,7 @@ void aws_s3_meta_request_send_next_request(
 
     /* Sign the newly created message. */
     if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
-        goto error_finish;
-    }
-
         aws_s3_meta_request_handle_error(meta_request, request, aws_last_error());
-
         goto call_finished_callback;
     }
 
