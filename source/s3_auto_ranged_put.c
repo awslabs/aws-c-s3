@@ -240,7 +240,7 @@ static int s_s3_auto_ranged_put_next_request(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT,
                     0,
-                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_DONT_DESTROY_MESSAGE_STREAM);
 
                 /* Wait for this request to be processed before quitting. */
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST;

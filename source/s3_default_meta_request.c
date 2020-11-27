@@ -170,7 +170,11 @@ static int s_s3_meta_request_default_next_request(
     s_s3_meta_request_default_unlock_synced_data(meta_request_default);
 
     if (create_request) {
-        request = aws_s3_request_new(meta_request, 0, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+        request = aws_s3_request_new(
+            meta_request,
+            0,
+            0,
+            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_DONT_DESTROY_MESSAGE_STREAM);
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
@@ -196,10 +200,7 @@ static int s_s3_meta_request_default_prepare_request(
         return AWS_OP_ERR;
     }
 
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message);
-
-    aws_s3_request_setup_send_data(request, message);
+    aws_s3_request_setup_send_data(request, meta_request->initial_request_message);
     request->send_data.part_buffer = part_buffer;
 
     aws_http_message_release(message);
