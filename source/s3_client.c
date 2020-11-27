@@ -20,6 +20,7 @@
 #include <aws/io/host_resolver.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/io/socket.h>
+#include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 
 #include <inttypes.h>
