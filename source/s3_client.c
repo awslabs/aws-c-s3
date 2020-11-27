@@ -19,6 +19,7 @@
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
 #include <aws/io/socket.h>
+#include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 
 #include <inttypes.h>
@@ -35,7 +36,7 @@ static const uint32_t s_default_connection_timeout_ms = 3000;
 static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
-static const uint32_t s_default_max_retries = 16;
+static const uint32_t s_default_max_retries = 5;
 
 struct aws_s3_client_work {
     struct aws_linked_list_node node;

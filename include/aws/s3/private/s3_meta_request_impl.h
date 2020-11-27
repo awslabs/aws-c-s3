@@ -139,6 +139,9 @@ struct aws_s3_meta_request_vtable {
         struct aws_s3_client *client,
         struct aws_s3_request *request);
 
+    /* Sign the request on the given VIP Connection. */
+    int (*sign_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_vip_connection *vip_connection);
+
     /* Callbacks for all HTTP messages being processed by this meta request. */
     int (*incoming_headers)(
         struct aws_http_stream *stream,
