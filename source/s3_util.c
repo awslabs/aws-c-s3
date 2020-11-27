@@ -186,3 +186,21 @@ void aws_cached_signing_config_destroy(struct aws_cached_signing_config_aws *cac
 
     aws_mem_release(cached_signing_config->allocator, cached_signing_config);
 }
+
+void aws_s3_default_signing_config(
+    struct aws_signing_config_aws *signing_config,
+    const struct aws_byte_cursor region,
+    struct aws_credentials_provider *credentials_provider) {
+    AWS_PRECONDITION(signing_config);
+    AWS_PRECONDITION(credentials_provider);
+
+    AWS_ZERO_STRUCT(*signing_config);
+
+    signing_config->config_type = AWS_SIGNING_CONFIG_AWS;
+    signing_config->algorithm = AWS_SIGNING_ALGORITHM_V4;
+    signing_config->credentials_provider = credentials_provider;
+    signing_config->region = region;
+    signing_config->service = aws_byte_cursor_from_c_str("s3");
+    signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
+    signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
+}
