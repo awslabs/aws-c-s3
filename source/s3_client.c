@@ -283,18 +283,17 @@ struct aws_s3_client *aws_s3_client_new(
 
     s_s3_part_buffer_pool_init(&client->synced_data.part_buffer_pool);
 
-    struct aws_exponential_backoff_retry_options retry_options = {
-        .el_group = client_config->client_bootstrap->event_loop_group,
-        .max_retries = client_config->max_retries,
-        .backoff_scale_factor_ms = client_config->backoff_scale_factor_ms,
-        .jitter_mode = client_config->jitter_mode,
-    };
+    if (client_config->retry_strategy != NULL) {
+        aws_retry_strategy_acquire(client_config->retry_strategy);
+        client->retry_strategy = client_config->retry_strategy;
+    } else {
+        struct aws_exponential_backoff_retry_options retry_options = {
+            .el_group = client_config->client_bootstrap->event_loop_group,
+            .max_retries = s_default_max_retries,
+        };
 
-    if (retry_options.max_retries == 0) {
-        retry_options.max_retries = s_default_max_retries;
+        client->retry_strategy = aws_retry_strategy_new_exponential_backoff(allocator, &retry_options);
     }
-
-    client->retry_strategy = aws_retry_strategy_new_exponential_backoff(allocator, &retry_options);
 
     /* Initialize shutdown options and tracking. */
     client->shutdown_callback = client_config->shutdown_callback;
