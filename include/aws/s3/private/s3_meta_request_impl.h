@@ -32,9 +32,15 @@ typedef void(aws_s3_meta_request_write_body_finished_callback_fn)(
 
 typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
 
-enum aws_s3_meta_request_state { AWS_S3_META_REQUEST_STATE_ACTIVE, AWS_S3_META_REQUEST_STATE_FINISHED };
+enum aws_s3_meta_request_state {
+    AWS_S3_META_REQUEST_STATE_ACTIVE,
+    AWS_S3_META_REQUEST_STATE_FINISHED,
+};
 
-enum aws_s3_request_desc_flags { AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001 };
+enum aws_s3_request_desc_flags {
+    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
+    AWS_S3_REQUEST_DESC_DONT_DESTROY_MESSAGE_STREAM = 0x00000002
+};
 
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
 struct aws_s3_request {
@@ -66,6 +72,9 @@ struct aws_s3_request {
 
         /* When true, response headers from the request will be stored in the request's response_headers variable. */
         uint32_t record_response_headers : 1;
+
+        /* When true, the stream on the send data message will be destroyed. */
+        uint32_t destroy_message_stream : 1;
 
     } desc_data;
 
