@@ -427,7 +427,8 @@ static int s_test_s3_meta_request_fail_next_request(struct aws_allocator *alloca
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, 0));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -592,7 +593,7 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
     aws_s3_tester_clean_up(&tester);
 
     return 0;
-}*/
+}
 
 static int s_s3_meta_request_prepare_request_fail_first(
     struct aws_s3_meta_request *meta_request,

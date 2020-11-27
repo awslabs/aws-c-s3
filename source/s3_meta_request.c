@@ -437,10 +437,6 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
     return vtable->has_work(meta_request);
 }
 
-static int s_s3_meta_request_sign_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
-
 void aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection,
