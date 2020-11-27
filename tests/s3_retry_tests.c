@@ -592,7 +592,7 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
     aws_s3_tester_clean_up(&tester);
 
     return 0;
-}
+}*/
 
 static int s_s3_meta_request_prepare_request_fail_first(
     struct aws_s3_meta_request *meta_request,
