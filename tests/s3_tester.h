@@ -78,9 +78,14 @@ struct aws_s3_client_config;
 
 int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
 
+enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
+    AWS_S3_TESTER_BIND_CLIENT_REGION = 0x00000001,
+    AWS_S3_TESTER_BIND_CLIENT_SIGNING = 0x00000002,
+};
+
 /* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
  * client to clean up. */
-int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client_config *config);
+int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client_config *config, uint32_t flags);
 
 int aws_s3_tester_bind_meta_request(
     struct aws_s3_tester *tester,
@@ -157,15 +162,28 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
     struct aws_s3_tester *tester,
     size_t index);
 
+enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
+    AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
+};
+
+int aws_s3_tester_send_meta_request(
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request_options *options,
+    struct aws_s3_meta_request_test_results *test_results,
+    uint32_t flags);
+
 int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
-    bool expect_success);
+    struct aws_byte_cursor s3_path,
+    uint32_t flags);
 
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
-    bool expect_success);
+    uint32_t object_size_mb,
+    uint32_t flags);
 
 int aws_s3_tester_validate_get_object_results(struct aws_s3_meta_request_test_results *meta_request_test_results);
 
@@ -176,12 +194,6 @@ int aws_s3_tester_validate_put_object_results(struct aws_s3_meta_request_test_re
 void aws_s3_client_schedule_meta_request_work_empty(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request);
-
-int aws_s3_client_sign_request_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_request *request,
-    aws_s3_client_sign_callback *callback,
-    void *user_data);
 
 int aws_s3_client_get_http_connection_empty(
     struct aws_s3_client *client,
@@ -206,5 +218,7 @@ extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 extern const struct aws_byte_cursor g_test_body_content_type;
 extern const struct aws_byte_cursor g_test_s3_region;
 extern const struct aws_byte_cursor g_test_bucket_name;
+extern const struct aws_byte_cursor g_test_public_bucket_name;
+extern const struct aws_byte_cursor g_s3_path_get_object_test_1MB;
 
 #endif /* AWS_S3_TESTER_H */
