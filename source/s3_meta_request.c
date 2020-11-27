@@ -29,6 +29,14 @@ static void s_s3_meta_request_process_write_body_task(
     void *arg,
     enum aws_task_status task_status);
 
+static int s_s3_meta_request_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection);
+
+static int s_s3_meta_request_sign_request_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection);
+
 static void s_s3_meta_request_request_on_signed(
     struct aws_signing_result *signing_result,
     int error_code,
@@ -58,12 +66,12 @@ static int s_s3_meta_request_incoming_headers(
 
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
 
-static void s_s3_meta_request_send_request_finish_default(
+static void s_s3_meta_request_send_request_finish(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code);
 
-static void s_s3_meta_request_send_request_finish(
+static void s_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code);
@@ -146,6 +154,10 @@ int aws_s3_meta_request_init_base(
     AWS_ASSERT(vtable->next_request);
     AWS_ASSERT(vtable->prepare_request);
     AWS_ASSERT(vtable->destroy);
+
+    if (vtable->sign_request == NULL) {
+        vtable->sign_request = s_s3_meta_request_sign_request_default;
+    }
 
     if (vtable->send_request_finish == NULL) {
         vtable->send_request_finish = s_s3_meta_request_send_request_finish_default;
@@ -297,10 +309,17 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
 
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
     if (request->send_data.message != NULL) {
         struct aws_input_stream *input_stream = aws_http_message_get_body_stream(request->send_data.message);
 
-        if (input_stream != NULL) {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        bool destroy_stream = input_stream != meta_request->synced_data.initial_body_stream;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+
+        if (destroy_stream) {
             aws_input_stream_destroy(input_stream);
             input_stream = NULL;
             aws_http_message_set_body_stream(request->send_data.message, NULL);
@@ -382,10 +401,6 @@ bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request
 
     return vtable->has_work(meta_request);
 }
-
-static int s_s3_meta_request_sign_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
 
 void aws_s3_meta_request_send_next_request(
     struct aws_s3_meta_request *meta_request,
@@ -483,8 +498,20 @@ call_finished_callback:
     }
 }
 
-/* Handles signing a message for the caller. */
 static int s_s3_meta_request_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    AWS_PRECONDITION(vtable);
+    AWS_PRECONDITION(vtable->send_request_finish);
+
+    return vtable->sign_request(meta_request, vip_connection);
+}
+
+/* Handles signing a message for the caller. */
+static int s_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(meta_request)
