@@ -238,10 +238,11 @@ static int s_test_s3_meta_request_handle_error_exceed_retries(struct aws_allocat
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config = {.region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_region"),
-                                                 .credentials_provider = tester.credentials_provider,
-                                                 .client_bootstrap = tester.client_bootstrap,
-                                                 .max_retries = 4};
+    struct aws_s3_client_config client_config = {
+        .region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_region"),
+        .credentials_provider = tester.credentials_provider,
+        .client_bootstrap = tester.client_bootstrap,
+    };
 
     struct aws_s3_client *client = aws_s3_client_new(tester.allocator, &client_config);
     AWS_ASSERT(client);

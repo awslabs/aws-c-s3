@@ -78,14 +78,8 @@ struct aws_s3_client_config {
     /* The number of connections that each VIP will have. */
     uint32_t num_connections_per_vip;
 
-    /* Max amount of times to retry a particular request. */
-    size_t max_retries;
-
-    /* Back off scale factor used for exponential backoff when retrying a request. */
-    uint32_t backoff_scale_factor_ms;
-
-    /* Type of jitter to use for exponential backoff when retrying a request. */
-    enum aws_exponential_backoff_jitter_mode jitter_mode;
+    /* Retry strategy to use. If NULL, a default retry strategy will be used. */
+    struct aws_retry_strategy *retry_strategy;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
