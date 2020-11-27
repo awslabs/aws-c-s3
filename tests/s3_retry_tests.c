@@ -364,7 +364,7 @@ static int s_test_s3_meta_request_handle_error_fail(struct aws_allocator *alloca
 static int s_s3_fail_first_next_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request **out_request) {
     AWS_ASSERT(meta_request != NULL);
 
-    struct aws_s3_client *client = aws_s3_meta_request_get_client(meta_request);
+    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
     AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
@@ -601,7 +601,7 @@ static void s_s3_meta_request_send_request_finish_fail_first(
     struct aws_http_stream *stream,
     int error_code) {
 
-    struct aws_s3_client *client = aws_s3_meta_request_get_client(vip_connection->work_data.request->meta_request);
+    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(vip_connection->work_data.request->meta_request);
     AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
@@ -678,7 +678,7 @@ static int s_auto_range_put_stream_complete_remove_first_upload_id(
 
     AWS_ASSERT(vip_connection);
 
-    struct aws_s3_client *client = aws_s3_meta_request_get_client(vip_connection->work_data.request->meta_request);
+    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(vip_connection->work_data.request->meta_request);
     AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
