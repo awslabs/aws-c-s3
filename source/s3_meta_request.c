@@ -324,19 +324,10 @@ void aws_s3_request_setup_send_data(
     if (request->desc_data.use_initial_body_stream) {
         aws_s3_meta_request_lock_synced_data(meta_request);
 
-        struct aws_input_stream *input_stream = meta_request->synced_data.initial_body_stream;
-
-        if (input_stream != NULL) {
-            aws_http_message_set_body_stream(message, input_stream);
-            meta_request->synced_data.initial_body_stream = NULL;
-        }
+        aws_http_message_set_body_stream(message, meta_request->synced_data.initial_body_stream);
+        meta_request->synced_data.initial_body_stream = NULL;
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
-
-        /* TODO don't assume that the stream is seekable or that it started at the beginning. */
-        if (input_stream != NULL) {
-            aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
-        }
     }
 
     request->send_data.part_buffer = part_buffer;
