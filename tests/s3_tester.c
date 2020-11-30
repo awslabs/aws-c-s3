@@ -298,7 +298,7 @@ static bool s_s3_tester_have_meta_requests_finished(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
 
-    return tester->synced_data.meta_requests_finished == 1;
+    return tester->synced_data.meta_requests_finished > 0;
 }
 
 void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester) {
@@ -336,7 +336,7 @@ static bool s_s3_tester_have_meta_requests_shutdown(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
 
-    return tester->synced_data.meta_requests_shutdown;
+    return tester->synced_data.meta_requests_shutdown > 0;
 }
 
 void aws_s3_tester_wait_for_meta_request_shutdown(struct aws_s3_tester *tester) {
@@ -536,7 +536,7 @@ static bool s_s3_tester_has_client_shutdown(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
 
-    return tester->synced_data.client_shutdown;
+    return tester->synced_data.client_shutdown > 0;
 }
 
 static void s_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester) {
