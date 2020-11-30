@@ -232,6 +232,7 @@ int aws_s3_tester_bind_meta_request(
 
     aws_s3_tester_lock_synced_data(tester);
     ++tester->synced_data.desired_meta_request_finish_count;
+    ++tester->synced_data.desired_meta_request_shutdown_count;
     aws_s3_tester_unlock_synced_data(tester);
 
     ASSERT_TRUE(options->headers_callback == NULL);
