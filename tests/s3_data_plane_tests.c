@@ -69,7 +69,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     ASSERT_TRUE(request->desc_data.request_tag == request_tag);
     ASSERT_TRUE(request->desc_data.record_response_headers == true);
 
-    aws_s3_request_setup_send_data(request, request_message);
+    aws_s3_request_setup_send_data(request, request_message, NULL);
 
     ASSERT_TRUE(request->send_data.message != NULL);
     ASSERT_TRUE(request->send_data.response_headers == NULL);
@@ -141,7 +141,7 @@ static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
         aws_s3_tester_build_endpoint_string(allocator, &g_test_public_bucket_name, &g_test_s3_region);
 
     /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message = aws_s3_test_make_get_object_request(
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
         allocator, aws_byte_cursor_from_string(host_name), g_s3_path_get_object_test_1MB);
 
     struct aws_s3_meta_request_options options;
@@ -185,7 +185,7 @@ static int s_test_s3_signing_override(struct aws_allocator *allocator, void *ctx
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
     /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message = aws_s3_test_make_get_object_request(
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
         allocator, aws_byte_cursor_from_string(host_name), g_s3_path_get_object_test_1MB);
 
     /* Getting without signing should fail since the client has no signing set up. */
@@ -288,7 +288,7 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        aws_s3_test_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
         struct aws_s3_meta_request_options options;
@@ -305,18 +305,20 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     }
 
     /* Wait for the request to finish. */
-    aws_s3_tester_wait_for_finish(&tester);
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
 
     aws_s3_tester_lock_synced_data(&tester);
     ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     aws_s3_tester_unlock_synced_data(&tester);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
+        aws_s3_meta_request_release(meta_requests[i]);
         aws_s3_tester_validate_get_object_results(&meta_request_test_resultss[i]);
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_resultss[i]);
-        aws_s3_meta_request_release(meta_requests[i]);
         meta_requests[i] = NULL;
     }
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
     aws_http_message_release(message);
     message = NULL;
@@ -413,7 +415,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        aws_s3_test_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -431,7 +433,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     ASSERT_TRUE(meta_request != NULL);
 
     /* Wait for the request to finish. */
-    aws_s3_tester_wait_for_finish(&tester);
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
 
     aws_s3_tester_lock_synced_data(&tester);
 
@@ -483,7 +485,7 @@ static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) 
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        aws_s3_test_make_get_object_request(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -500,7 +502,7 @@ static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) 
     ASSERT_TRUE(meta_request != NULL);
 
     /* Wait for the request to finish. */
-    aws_s3_tester_wait_for_finish(&tester);
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
 
     aws_s3_tester_lock_synced_data(&tester);
     ASSERT_TRUE(tester.synced_data.finish_error_code != AWS_ERROR_SUCCESS);
