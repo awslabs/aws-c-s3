@@ -302,7 +302,7 @@ static bool s_s3_tester_have_meta_requests_finished(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_tester *tester = (struct aws_s3_tester *)user_data;
 
-    return tester->synced_data.meta_requests_finished;
+    return tester->synced_data.meta_requests_finished == 1;
 }
 
 void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester) {
