@@ -444,6 +444,9 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
 
     aws_s3_meta_request_release(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_http_message_release(message);
