@@ -444,6 +444,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
 
     aws_s3_meta_request_release(meta_request);
+    meta_request = NULL;
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
@@ -518,6 +519,9 @@ static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) 
     ASSERT_TRUE(meta_request_test_results.error_response_body.len > 0);
 
     aws_s3_meta_request_release(meta_request);
+    meta_request = NULL;
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_http_message_release(message);
