@@ -293,32 +293,78 @@ struct aws_s3_request *aws_s3_request_new(
     request->desc_data.request_tag = request_tag;
     request->desc_data.part_number = part_number;
     request->desc_data.record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
-    request->desc_data.destroy_message_stream = (flags & AWS_S3_REQUEST_DESC_DONT_DESTROY_MESSAGE_STREAM) == 0;
+    request->desc_data.use_initial_body_stream = (flags & AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM) != 0;
 
     return request;
 }
 
-void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message) {
+void aws_s3_request_setup_send_data(
+    struct aws_s3_request *request,
+    struct aws_http_message *message,
+    struct aws_s3_part_buffer *part_buffer) {
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(message);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
 
     aws_s3_request_clean_up_send_data(request);
 
     request->send_data.message = message;
     aws_http_message_acquire(message);
+
+    if (request->desc_data.use_initial_body_stream) {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+
+        aws_http_message_set_body_stream(message, meta_request->synced_data.initial_body_stream);
+        meta_request->synced_data.initial_body_stream = NULL;
+
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+
+    request->send_data.part_buffer = part_buffer;
+}
+
+void s_s3_request_clean_up_send_data_message(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+
+    struct aws_http_message *message = request->send_data.message;
+
+    if (message == NULL) {
+        return;
+    }
+
+    request->send_data.message = NULL;
+
+    struct aws_input_stream *input_stream = aws_http_message_get_body_stream(message);
+
+    if (input_stream != NULL) {
+        if (request->desc_data.use_initial_body_stream) {
+            struct aws_s3_meta_request *meta_request = request->meta_request;
+            AWS_ASSERT(meta_request);
+
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
+
+            meta_request->synced_data.initial_body_stream = input_stream;
+
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+        } else {
+            aws_input_stream_destroy(input_stream);
+        }
+
+        input_stream = NULL;
+    }
+
+    aws_http_message_set_body_stream(message, NULL);
+    aws_http_message_release(message);
 }
 
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
 
-    if (request->desc_data.destroy_message_stream && request->send_data.message != NULL) {
-        struct aws_input_stream *input_stream = aws_http_message_get_body_stream(request->send_data.message);
-        aws_input_stream_destroy(input_stream);
-        aws_http_message_set_body_stream(request->send_data.message, NULL);
-    }
-
-    aws_http_message_release(request->send_data.message);
-    request->send_data.message = NULL;
+    s_s3_request_clean_up_send_data_message(request);
 
     aws_http_headers_release(request->send_data.response_headers);
     request->send_data.response_headers = NULL;

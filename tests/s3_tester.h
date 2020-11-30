@@ -52,12 +52,17 @@ struct aws_s3_tester {
     struct {
         struct aws_mutex lock;
 
-        size_t desired_finish_count;
-        size_t finish_count;
+        size_t desired_meta_request_finish_count;
+        size_t meta_request_finish_count;
+
+        size_t desired_meta_request_shutdown_count;
+        size_t meta_request_shutdown_count;
+
         int finish_error_code;
 
-        bool received_finish_callback;
-        bool clean_up_flag;
+        uint32_t meta_requests_finished : 1;
+        uint32_t meta_requests_shutdown : 1;
+        uint32_t client_shutdown : 1;
     } synced_data;
 };
 
@@ -94,12 +99,19 @@ int aws_s3_tester_bind_meta_request(
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request);
 
-/* Wait for aws_s3_tester_notify_finished to be called */
-void aws_s3_tester_wait_for_finish(struct aws_s3_tester *tester);
+/* Wait for the correct number of aws_s3_tester_notify_meta_request_finished to be called */
+void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester);
 
-/* Notify the tester that an operation has finished and that anyway waiting with aws_s3_tester_wait_for_finish can
- * continue */
-void aws_s3_tester_notify_finished(struct aws_s3_tester *tester, const struct aws_s3_meta_request_result *result);
+/* Wait forthe correct number of aws_s3_tester_notify_meta_request_shutdown to be called. */
+void aws_s3_tester_wait_for_meta_request_shutdown(struct aws_s3_tester *tester);
+
+/* Notify the tester that a meta request has finished. */
+void aws_s3_tester_notify_meta_request_finished(
+    struct aws_s3_tester *tester,
+    const struct aws_s3_meta_request_result *result);
+
+/* Notify the tester that a meta request has finished. */
+void aws_s3_tester_notify_meta_request_shutdown(struct aws_s3_tester *tester);
 
 /* Handle cleaning up the tester.  If aws_s3_tester_bind_client_shutdown was used, then it will wait for the client to
  * finish shutting down before releasing any resources. */
@@ -128,12 +140,12 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     const struct aws_byte_cursor *bucket_name,
     const struct aws_byte_cursor *region);
 
-struct aws_http_message *aws_s3_test_make_get_object_request(
+struct aws_http_message *aws_s3_test_get_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host,
     struct aws_byte_cursor key);
 
-struct aws_http_message *aws_s3_test_make_put_object_request(
+struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host,
     struct aws_byte_cursor content_type,
@@ -164,6 +176,7 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
 
 enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
+    AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
 };
 
 int aws_s3_tester_send_meta_request(
