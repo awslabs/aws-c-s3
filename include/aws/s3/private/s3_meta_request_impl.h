@@ -39,7 +39,7 @@ enum aws_s3_meta_request_state {
 
 enum aws_s3_request_desc_flags {
     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_DESC_DONT_DESTROY_MESSAGE_STREAM = 0x00000002
+    AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM = 0x00000002
 };
 
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
@@ -74,7 +74,7 @@ struct aws_s3_request {
         uint32_t record_response_headers : 1;
 
         /* When true, the stream on the send data message will be destroyed. */
-        uint32_t destroy_message_stream : 1;
+        uint32_t use_initial_body_stream : 1;
 
     } desc_data;
 
@@ -297,7 +297,10 @@ struct aws_s3_request *aws_s3_request_new(
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */
 AWS_S3_API
-void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
+void aws_s3_request_setup_send_data(
+    struct aws_s3_request *request,
+    struct aws_http_message *message,
+    struct aws_s3_part_buffer *part_buffer);
 
 /* Clear out send_data members so that they can be repopulated before the next send. */
 AWS_S3_API

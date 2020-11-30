@@ -300,9 +300,8 @@ static int s_s3_auto_ranged_get_prepare_request(
         }
     }
 
-    aws_s3_request_setup_send_data(request, message);
+    aws_s3_request_setup_send_data(request, message, part_buffer);
 
-    request->send_data.part_buffer = part_buffer;
     aws_http_message_release(message);
 
     AWS_LOGF_TRACE(
