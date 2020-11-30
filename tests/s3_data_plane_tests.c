@@ -313,12 +313,15 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
         aws_s3_meta_request_release(meta_requests[i]);
-        aws_s3_tester_validate_get_object_results(&meta_request_test_resultss[i]);
-        aws_s3_meta_request_test_results_clean_up(&meta_request_test_resultss[i]);
         meta_requests[i] = NULL;
     }
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        aws_s3_tester_validate_get_object_results(&meta_request_test_resultss[i]);
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_resultss[i]);
+    }
 
     aws_http_message_release(message);
     message = NULL;
