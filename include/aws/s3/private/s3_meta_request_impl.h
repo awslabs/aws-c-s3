@@ -73,8 +73,7 @@ struct aws_s3_request {
         /* When true, response headers from the request will be stored in the request's response_headers variable. */
         uint32_t record_response_headers : 1;
 
-        /* When true, this request is using the original body stream from the original request, and will not
-         * assume ownership of the memory for the stream. */
+        /* When true, the stream on the send data message will be destroyed. */
         uint32_t use_initial_body_stream : 1;
 
     } desc_data;
