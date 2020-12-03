@@ -112,8 +112,8 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_10MB, 0, NULL));
+    ASSERT_SUCCESS(
+        aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_10MB, 0, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -153,8 +153,7 @@ static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
     /* Trigger accelerating of our Get Object request. */
     struct aws_s3_meta_request_test_results meta_request_test_results;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
-        &tester, client, &options, &meta_request_test_results, 0));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -216,8 +215,7 @@ static int s_test_s3_signing_override(struct aws_allocator *allocator, void *ctx
         /* Trigger accelerating of our Get Object request. */
         struct aws_s3_meta_request_test_results meta_request_test_results;
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
-            &tester, client, &options, &meta_request_test_results, 0));
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
         ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -248,8 +246,7 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -355,8 +352,7 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, 0, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 10, 0, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -384,8 +380,7 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, 0, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 10, 0, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -484,8 +479,7 @@ static int s_test_s3_put_object_unsupported_md5(struct aws_allocator *allocator,
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, 0, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 10, 0, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
