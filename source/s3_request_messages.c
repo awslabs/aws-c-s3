@@ -177,7 +177,9 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         goto error_clean_up;
     }
 
-    aws_http_message_set_request_method(message, g_post_method);
+    if (aws_http_message_set_request_method(message, g_post_method)) {
+        goto error_clean_up;
+    }
 
     headers = aws_http_message_get_headers(message);
     AWS_ASSERT(headers);
@@ -186,7 +188,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_erase(headers, g_content_type_header_name)) {
+    if (aws_http_headers_erase(headers, g_content_type_header_name) &&
+        aws_last_error() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
         goto error_clean_up;
     }
 
