@@ -198,7 +198,8 @@ static int s_test_s3_signing_override(struct aws_allocator *allocator, void *ctx
         /* Trigger accelerating of our Get Object request.*/
         struct aws_s3_meta_request_test_results meta_request_test_results;
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
+            &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_FAILURE));
         ASSERT_TRUE(aws_s3_tester_validate_get_object_results(&meta_request_test_results) != AWS_OP_SUCCESS);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
