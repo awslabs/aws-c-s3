@@ -58,17 +58,12 @@ struct aws_http_message *aws_s3_get_object_message_new(
 
 error_clean_up:
 
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
+    aws_http_message_release(message);
     return NULL;
 }
 
-/* Create a new put object request from an existing put object request.  Currently just optionall adds part information
- * for a multipart upload. */
-struct aws_http_message *aws_s3_put_object_message_new(
+/* Create an upload part request. */
+struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
@@ -83,16 +78,13 @@ struct aws_http_message *aws_s3_put_object_message_new(
         goto error_clean_up;
     }
 
-    if (part_number > 0) {
+    if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, message)) {
+        goto error_clean_up;
+    }
 
-        if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, message)) {
+    if (buffer != NULL) {
+        if (s_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
             goto error_clean_up;
-        }
-
-        if (buffer != NULL) {
-            if (s_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
-                goto error_clean_up;
-            }
         }
     }
 
@@ -100,11 +92,7 @@ struct aws_http_message *aws_s3_put_object_message_new(
 
 error_clean_up:
 
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
+    aws_http_message_release(message);
     return NULL;
 }
 
@@ -126,10 +114,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     }
 
     headers = aws_http_message_get_headers(message);
-
-    if (headers == NULL) {
-        goto error_clean_up;
-    }
+    AWS_ASSERT(headers != NULL);
 
     if (aws_http_headers_erase(headers, g_content_length_header_name)) {
         goto error_clean_up;
@@ -195,10 +180,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     aws_http_message_set_request_method(message, g_post_method);
 
     headers = aws_http_message_get_headers(message);
-
-    if (headers == NULL) {
-        goto error_clean_up;
-    }
+    AWS_ASSERT(headers);
 
     if (aws_http_headers_erase(headers, g_content_length_header_name)) {
         goto error_clean_up;
@@ -265,11 +247,7 @@ error_clean_up:
 
     AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Could not create complete multipart message");
 
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
+    aws_http_message_release(message);
     return NULL;
 }
 

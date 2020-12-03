@@ -26,11 +26,12 @@
 #include <math.h>
 
 static const uint32_t s_s3_max_request_count_per_connection = 100;
+static const uint32_t s_s3_min_part_size_MB = 5;
 
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
-static const uint64_t s_default_part_size = 20 * 1024 * 1024;
+static const uint64_t s_default_part_size = MB_TO_BYTES(20);
 static const size_t s_default_dns_host_address_ttl_seconds = 2 * 60;
 static const uint32_t s_default_connection_timeout_ms = 3000;
 static const double s_default_throughput_target_gbps = 5.0;
@@ -176,6 +177,16 @@ struct aws_s3_client *aws_s3_client_new(
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; throughput_per_vip_gbps cannot less than or equal to 0.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    /* Cannot be less than zero.  If zero, use default. */
+    if (client_config->part_size != 0 && client_config->part_size < MB_TO_BYTES(s_s3_min_part_size_MB)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; part size is less than the minimum part size of %d MB.",
+            s_s3_min_part_size_MB);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -742,6 +753,16 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request; message provided in options does not contain headers.",
             (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    if (aws_http_headers_has(message_headers, g_content_md5_header_name)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "id=%p Cannot create meta s3 request; ContentMD5 not currently supported.",
+            (void *)client);
+
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }

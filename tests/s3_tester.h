@@ -81,6 +81,8 @@ struct aws_s3_meta_request_test_results {
 
 struct aws_s3_client_config;
 
+typedef int(transform_message_fn)(struct aws_s3_tester *tester, struct aws_http_message *message);
+
 int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
 
 enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
@@ -175,7 +177,7 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
     size_t index);
 
 enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
-    AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
+    AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_FAILURE = 0x00000001,
     AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
 };
 
@@ -190,13 +192,15 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
-    uint32_t flags);
+    uint32_t flags,
+    transform_message_fn *transform_message);
 
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
     uint32_t object_size_mb,
-    uint32_t flags);
+    uint32_t flags,
+    transform_message_fn *transform_message);
 
 int aws_s3_tester_validate_get_object_results(struct aws_s3_meta_request_test_results *meta_request_test_results);
 
@@ -233,5 +237,6 @@ extern const struct aws_byte_cursor g_test_s3_region;
 extern const struct aws_byte_cursor g_test_bucket_name;
 extern const struct aws_byte_cursor g_test_public_bucket_name;
 extern const struct aws_byte_cursor g_s3_path_get_object_test_1MB;
+extern const struct aws_byte_cursor g_s3_path_get_object_test_10MB;
 
 #endif /* AWS_S3_TESTER_H */

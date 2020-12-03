@@ -23,6 +23,8 @@ const struct aws_byte_cursor g_test_public_bucket_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff-us-west-2");
 const struct aws_byte_cursor g_s3_path_get_object_test_1MB =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
+const struct aws_byte_cursor g_s3_path_get_object_test_10MB =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_10MB.txt");
 
 static void s_s3_test_meta_request_header_callback(
     struct aws_s3_meta_request *meta_request,
@@ -749,10 +751,10 @@ int aws_s3_tester_send_meta_request(
 
     aws_s3_tester_lock_synced_data(tester);
 
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
-    } else {
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_FAILURE) {
         ASSERT_FALSE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    } else {
+        ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     }
 
     aws_s3_tester_unlock_synced_data(tester);
@@ -770,7 +772,8 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
-    uint32_t flags) {
+    uint32_t flags,
+    transform_message_fn *transform_message) {
 
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -778,6 +781,10 @@ int aws_s3_tester_send_get_object_meta_request(
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
         aws_s3_test_get_object_request_new(tester->allocator, aws_byte_cursor_from_string(host_name), s3_path);
+
+    if (transform_message != NULL) {
+        ASSERT_SUCCESS(transform_message(tester, message));
+    }
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -789,7 +796,7 @@ int aws_s3_tester_send_get_object_meta_request(
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, &meta_request_test_results, flags));
 
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
+    if ((flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_FAILURE) == 0) {
         ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
     }
 
@@ -847,7 +854,8 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
     uint32_t file_size_mb,
-    uint32_t flags) {
+    uint32_t flags,
+    transform_message_fn *transform_message) {
     ASSERT_TRUE(tester != NULL);
     ASSERT_TRUE(client != NULL);
 
@@ -863,12 +871,16 @@ int aws_s3_tester_send_put_object_meta_request(
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
     char object_path_buffer[128] = "";
-    snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_%uMB.txt", file_size_mb);
+    snprintf(object_path_buffer, sizeof(object_path_buffer), "/put_object_test_%uMB.txt", file_size_mb);
     struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, aws_byte_cursor_from_string(host_name), test_object_path, g_test_body_content_type, input_stream);
+
+    if (transform_message != NULL) {
+        ASSERT_SUCCESS(transform_message(tester, message));
+    }
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -879,7 +891,7 @@ int aws_s3_tester_send_put_object_meta_request(
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, &meta_request_test_results, flags));
 
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
+    if ((flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_FAILURE) == 0) {
         ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(&meta_request_test_results));
     }
 
