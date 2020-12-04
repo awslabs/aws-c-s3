@@ -170,13 +170,13 @@ int aws_s3_meta_request_init_base(
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_start_destroy);
     aws_ref_count_init(&meta_request->internal_ref_count, meta_request, s_s3_meta_request_finish_destroy);
 
-    *((uint64_t *)&meta_request->part_size) = internal_options->client->part_size;
+    *((uint64_t *)&meta_request->part_size) = client->part_size;
 
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
 
-    meta_request->event_loop = internal_options->client->event_loop;
+    meta_request->event_loop = client->event_loop;
 
     /* Keep a reference to the original message structure passed in. */
     meta_request->initial_request_message = options->message;
