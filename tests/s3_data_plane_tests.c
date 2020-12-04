@@ -65,11 +65,11 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     ASSERT_TRUE(request != NULL);
 
     ASSERT_TRUE(request->meta_request == meta_request);
-    ASSERT_TRUE(request->desc_data.part_number == part_number);
-    ASSERT_TRUE(request->desc_data.request_tag == request_tag);
-    ASSERT_TRUE(request->desc_data.record_response_headers == true);
+    ASSERT_TRUE(request->part_number == part_number);
+    ASSERT_TRUE(request->request_tag == request_tag);
+    ASSERT_TRUE(request->record_response_headers == true);
 
-    aws_s3_request_setup_send_data(request, request_message, NULL);
+    aws_s3_request_setup_send_data(request, request_message);
 
     ASSERT_TRUE(request->send_data.message != NULL);
     ASSERT_TRUE(request->send_data.response_headers == NULL);
@@ -81,10 +81,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
 
     ASSERT_TRUE(request->send_data.message == NULL);
     ASSERT_TRUE(request->send_data.response_headers == NULL);
-    ASSERT_TRUE(request->send_data.part_buffer == NULL);
     ASSERT_TRUE(request->send_data.response_status == 0);
-    ASSERT_TRUE(request->send_data.finished_callback == 0);
-    ASSERT_TRUE(request->send_data.user_data == 0);
 
     aws_s3_request_release(request);
     aws_http_message_release(request_message);
@@ -386,34 +383,6 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
         &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
-
-    aws_s3_client_release(client);
-    client = NULL;
-
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_put_object_less_than_part_size, s_test_s3_put_object_less_than_part_size)
-static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .region = g_test_s3_region,
-        .part_size = 20 * 1024 * 1024,
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    ASSERT_TRUE(client != NULL);
-
-    aws_s3_tester_send_put_object_meta_request(&tester, client, true);
 
     aws_s3_client_release(client);
     client = NULL;

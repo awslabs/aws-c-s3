@@ -437,7 +437,6 @@ static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_req
 }
 
 static struct aws_s3_meta_request_vtable s_s3_empty_meta_request_vtable = {
-    .has_work = aws_s3_meta_request_has_work_empty,
     .next_request = aws_s3_meta_request_next_request_empty,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = aws_s3_meta_request_prepare_request_empty,
@@ -488,6 +487,7 @@ struct aws_s3_meta_request *aws_s3_tester_meta_request_new(
     aws_s3_meta_request_init_base(
         tester->allocator,
         client,
+        0,
         &options,
         empty_meta_request,
         &s_s3_empty_meta_request_vtable,
@@ -930,19 +930,10 @@ void aws_s3_client_schedule_meta_request_work_empty(
 
 int aws_s3_client_get_http_connection_empty(
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_s3_client_get_http_connection_callback *callback,
-    void *user_data) {
+    struct aws_s3_vip_connection *vip_connection) {
     (void)client;
     (void)vip_connection;
-    (void)callback;
-    (void)user_data;
     return AWS_OP_SUCCESS;
-}
-
-bool aws_s3_meta_request_has_work_empty(const struct aws_s3_meta_request *meta_request) {
-    (void)meta_request;
-    return false;
 }
 
 int aws_s3_meta_request_next_request_empty(
@@ -956,9 +947,9 @@ int aws_s3_meta_request_next_request_empty(
 int aws_s3_meta_request_prepare_request_empty(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_request *request) {
+    struct aws_s3_vip_connection *vip_connection) {
     (void)meta_request;
     (void)client;
-    (void)request;
+    (void)vip_connection;
     return AWS_OP_ERR;
 }

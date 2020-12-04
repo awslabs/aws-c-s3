@@ -19,7 +19,6 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_SLOW_DOWN, "Response code indicates throttling"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_RESPONSE_STATUS, "Invalid response status from request"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_UPLOAD_ID, "Upload Id not found in create-multipart-upload response"),
-    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_NO_PART_BUFFER, "No part buffer was available for use")
 };
 /* clang-format on */
 

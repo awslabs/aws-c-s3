@@ -36,6 +36,8 @@ extern const struct aws_byte_cursor g_accept_ranges_header_name;
 extern const struct aws_byte_cursor g_etag_header_name;
 extern const struct aws_byte_cursor g_post_method;
 
+extern const uint64_t g_max_num_upload_parts;
+
 struct aws_cached_signing_config_aws {
     struct aws_allocator *allocator;
     struct aws_string *service;
