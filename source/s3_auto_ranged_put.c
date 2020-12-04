@@ -108,17 +108,17 @@ static void s_s3_auto_ranged_put_unlock_synced_data(struct aws_s3_auto_ranged_pu
 /* Allocate a new auto-ranged put meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *options) {
-
-    AWS_PRECONDITION(options);
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
 
     /* These should already have been validated by the caller. */
-    const struct aws_s3_meta_request_options *meta_request_options = options->options;
-    AWS_PRECONDITION(meta_request_options);
-    AWS_PRECONDITION(meta_request_options->message);
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+    AWS_PRECONDITION(options->message);
 
     /* We are not guaranteed a body stream from the user at this point, so make sure that we have one. */
-    if (aws_http_message_get_body_stream(meta_request_options->message) == NULL) {
+    if (aws_http_message_get_body_stream(options->message) == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not create auto-ranged-put meta request; body stream is NULL.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
@@ -128,7 +128,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
     if (aws_s3_meta_request_init_base(
-            allocator, options, auto_ranged_put, &s_s3_auto_ranged_put_vtable, &auto_ranged_put->base)) {
+            allocator, client, options, auto_ranged_put, &s_s3_auto_ranged_put_vtable, &auto_ranged_put->base)) {
         goto error_clean_up;
     }
 
