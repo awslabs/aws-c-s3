@@ -10,6 +10,7 @@
 #include <aws/http/request_response.h>
 #include <aws/s3/s3.h>
 
+const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
 const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
 const struct aws_byte_cursor g_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Range");
 const struct aws_byte_cursor g_etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
@@ -187,7 +188,7 @@ void aws_cached_signing_config_destroy(struct aws_cached_signing_config_aws *cac
     aws_mem_release(cached_signing_config->allocator, cached_signing_config);
 }
 
-void aws_s3_default_signing_config(
+void aws_s3_init_default_signing_config(
     struct aws_signing_config_aws *signing_config,
     const struct aws_byte_cursor region,
     struct aws_credentials_provider *credentials_provider) {
@@ -200,7 +201,18 @@ void aws_s3_default_signing_config(
     signing_config->algorithm = AWS_SIGNING_ALGORITHM_V4;
     signing_config->credentials_provider = credentials_provider;
     signing_config->region = region;
-    signing_config->service = aws_byte_cursor_from_c_str("s3");
+    signing_config->service = g_s3_service_name;
     signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
+    signing_config->flags.should_normalize_uri_path = true;
+}
+
+int aws_last_error_or_unknown() {
+    int error = aws_last_error();
+
+    if (error == AWS_ERROR_SUCCESS) {
+        return AWS_ERROR_UNKNOWN;
+    }
+
+    return error;
 }

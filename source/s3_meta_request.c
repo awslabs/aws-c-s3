@@ -481,7 +481,7 @@ unlock:
     if (request == NULL) {
         if (vtable->next_request(meta_request, &request)) {
 
-            aws_s3_meta_request_handle_error(meta_request, NULL, aws_last_error());
+            aws_s3_meta_request_handle_error(meta_request, NULL, aws_last_error_or_unknown());
 
             goto call_finished_callback;
         }
@@ -501,7 +501,7 @@ unlock:
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not prepare request %p", (void *)meta_request, (void *)request);
 
-        aws_s3_meta_request_handle_error(meta_request, request, aws_last_error());
+        aws_s3_meta_request_handle_error(meta_request, request, aws_last_error_or_unknown());
 
         aws_s3_request_release(request);
 
@@ -524,7 +524,7 @@ unlock:
 
     /* Sign the newly created message. */
     if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
-        aws_s3_meta_request_handle_error(meta_request, request, aws_last_error());
+        aws_s3_meta_request_handle_error(meta_request, request, aws_last_error_or_unknown());
         goto call_finished_callback;
     }
 
@@ -584,7 +584,7 @@ static int s_s3_meta_request_sign_request_default(
 
     aws_date_time_init_now(&signing_config.date);
 
-    int result = AWS_OP_SUCCESS;
+    int result = AWS_OP_ERR;
     struct aws_signable *signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
 
     if (signable == NULL) {
@@ -594,7 +594,6 @@ static int s_s3_meta_request_sign_request_default(
             (void *)meta_request,
             (void *)request);
 
-        result = AWS_OP_ERR;
         goto clean_up;
     }
 
@@ -608,9 +607,10 @@ static int s_s3_meta_request_sign_request_default(
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p: Could not sign request %p", (void *)meta_request, (void *)request);
 
-        result = AWS_OP_ERR;
         goto clean_up;
     }
+
+    result = AWS_OP_SUCCESS;
 
 clean_up:
 
@@ -660,7 +660,7 @@ static void s_s3_meta_request_request_on_signed(
 
 error_finish:
 
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
+    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
 }
 
 /* Set up a stream to actually process the request. */
@@ -703,7 +703,7 @@ static void s_s3_meta_request_send_http_request(
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p: Could not make HTTP request %p", (void *)meta_request, (void *)request);
 
-        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
+        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
         return;
     }
 
@@ -716,7 +716,7 @@ static void s_s3_meta_request_send_http_request(
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p: Could not activate HTTP stream %p", (void *)meta_request, (void *)request);
 
-        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
+        s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
         return;
     }
 }
@@ -937,7 +937,7 @@ static void s_s3_meta_request_send_request_finish_default(
             if (vtable->stream_complete) {
                 /* Call the derived type, having it handle what to do with the current success. */
                 if (vtable->stream_complete(stream, vip_connection)) {
-                    error_code = aws_last_error();
+                    error_code = aws_last_error_or_unknown();
                 }
             }
         } else {
@@ -1072,7 +1072,7 @@ static void s_s3_meta_request_queue_retry_with_token(
 
     /* Ask the retry strategy to schedule a retry of the request. */
     if (aws_retry_strategy_schedule_retry(request->retry_token, error_type, s_s3_meta_request_retry_ready, request)) {
-        error_code = aws_last_error();
+        error_code = aws_last_error_or_unknown();
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -1093,7 +1093,7 @@ error_ref_clean_up:
     aws_s3_request_release(request);
     aws_s3_meta_request_release(meta_request);
 
-    aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error());
+    aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
 }
 
 static void s_s3_meta_request_acquire_retry_token(
@@ -1129,8 +1129,8 @@ static void s_s3_meta_request_acquire_retry_token(
             "id=%p Meta request could not acquire retry token for request %p due to error %d (%s)",
             (void *)request->meta_request,
             (void *)request,
-            aws_last_error(),
-            aws_error_str(aws_last_error()));
+            aws_last_error_or_unknown(),
+            aws_error_str(aws_last_error_or_unknown()));
 
         goto error_ref_clean_up;
     }
@@ -1140,7 +1140,7 @@ static void s_s3_meta_request_acquire_retry_token(
 error_ref_clean_up:
 
     aws_s3_request_release(request);
-    aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error());
+    aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
     aws_s3_meta_request_release(meta_request);
 }
 

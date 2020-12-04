@@ -26,6 +26,7 @@ enum aws_s3_response_status {
     AWS_S3_RESPONSE_STATUS_SLOW_DOWN = 503,
 };
 
+extern const struct aws_byte_cursor g_s3_service_name;
 extern const struct aws_byte_cursor g_host_header_name;
 extern const struct aws_byte_cursor g_range_header_name;
 extern const struct aws_byte_cursor g_content_range_header_name;
@@ -58,5 +59,8 @@ struct aws_string *get_top_level_xml_tag_value(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
     struct aws_byte_cursor *xml_body);
+
+/* TODO could be moved to aws-c-common. */
+int aws_last_error_or_unknown(void);
 
 #endif /* AWS_S3_UTIL_H */

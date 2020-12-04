@@ -167,7 +167,7 @@ AWS_S3_API
 void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
-void aws_s3_default_signing_config(
+void aws_s3_init_default_signing_config(
     struct aws_signing_config_aws *signing_config,
     const struct aws_byte_cursor region,
     struct aws_credentials_provider *credentials_provider);

@@ -183,7 +183,7 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
     }
 
-    aws_s3_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
+    aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
 
     return AWS_OP_SUCCESS;
 
