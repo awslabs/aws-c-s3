@@ -141,6 +141,8 @@ struct aws_s3_meta_request_vtable {
         struct aws_s3_client *client,
         struct aws_s3_request *request);
 
+    void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
+
     /* Sign the request on the given VIP Connection. */
     int (*sign_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_vip_connection *vip_connection);
 

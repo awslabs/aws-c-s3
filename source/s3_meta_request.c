@@ -30,6 +30,14 @@ static void s_s3_meta_request_process_write_body_task(
     void *arg,
     enum aws_task_status task_status);
 
+static void s_s3_meta_request_init_signing_date_time(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_date_time *date_time);
+
+static void s_s3_meta_request_init_signing_date_time_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_date_time *date_time);
+
 static int s_s3_meta_request_sign_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection);
@@ -158,6 +166,10 @@ int aws_s3_meta_request_init_base(
 
     if (vtable->sign_request == NULL) {
         vtable->sign_request = s_s3_meta_request_sign_request_default;
+    }
+
+    if (vtable->init_signing_date_time == NULL) {
+        vtable->init_signing_date_time = s_s3_meta_request_init_signing_date_time_default;
     }
 
     if (vtable->send_request_finish == NULL) {
@@ -537,6 +549,28 @@ call_finished_callback:
     }
 }
 
+static void s_s3_meta_request_init_signing_date_time(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_date_time *date_time) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    AWS_PRECONDITION(vtable);
+    AWS_PRECONDITION(vtable->init_signing_date_time);
+
+    vtable->init_signing_date_time(meta_request, date_time);
+}
+
+static void s_s3_meta_request_init_signing_date_time_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_date_time *date_time) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(date_time);
+    (void)meta_request;
+
+    aws_date_time_init_now(date_time);
+}
+
 static int s_s3_meta_request_sign_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection) {
@@ -554,6 +588,7 @@ static int s_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(meta_request)
+
     AWS_PRECONDITION(vip_connection);
     AWS_PRECONDITION(vip_connection->owning_vip);
 
@@ -580,7 +615,7 @@ static int s_s3_meta_request_sign_request_default(
         return AWS_OP_SUCCESS;
     }
 
-    aws_date_time_init_now(&signing_config.date);
+    s_s3_meta_request_init_signing_date_time(meta_request, &signing_config.date);
 
     int result = AWS_OP_ERR;
     struct aws_signable *signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
