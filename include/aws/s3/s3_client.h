@@ -16,6 +16,7 @@ struct aws_http_stream;
 struct aws_http_message;
 struct aws_http_headers;
 struct aws_tls_connection_options;
+struct aws_input_stream;
 
 struct aws_s3_client;
 struct aws_s3_request;
@@ -27,6 +28,8 @@ enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT
 };
+
+typedef int(aws_s3_meta_request_reset_stream_fn)(struct aws_input_stream *input_stream, void *user_data);
 
 typedef void(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
@@ -67,17 +70,10 @@ struct aws_s3_client_config {
     /* Size of parts the files will be downloaded or uploaded in. */
     uint64_t part_size;
 
-    /* Timeout value, in milliseconds, used for each connection. */
-    uint32_t connection_timeout_ms;
+    uint64_t max_part_size;
 
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
-
-    /* Amount of throughput in Gbps to designate to each VIP. */
-    double throughput_per_vip_gbps;
-
-    /* The number of connections that each VIP will have. */
-    uint32_t num_connections_per_vip;
 
     /* Retry strategy to use. If NULL, a default retry strategy will be used. */
     struct aws_retry_strategy *retry_strategy;
@@ -92,6 +88,10 @@ struct aws_s3_meta_request_options {
 
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
+
+    uint64_t object_size_hint;
+
+    aws_s3_meta_request_reset_stream_fn *reset_stream;
 
     /* Signing options to be used for each request created for this meta request.  If NULL, options in the client will
      * be used. If not NULL, these options will override the client options. */

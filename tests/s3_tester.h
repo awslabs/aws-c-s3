@@ -208,13 +208,7 @@ void aws_s3_client_schedule_meta_request_work_empty(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request);
 
-int aws_s3_client_get_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_s3_client_get_http_connection_callback *callback,
-    void *user_data);
-
-bool aws_s3_meta_request_has_work_empty(const struct aws_s3_meta_request *meta_request);
+int aws_s3_client_get_http_connection_empty(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
 int aws_s3_meta_request_next_request_empty(
     struct aws_s3_meta_request *meta_request,
@@ -223,7 +217,7 @@ int aws_s3_meta_request_next_request_empty(
 int aws_s3_meta_request_prepare_request_empty(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_request *request);
+    struct aws_s3_vip_connection *vip_connection);
 /****************************************/
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
