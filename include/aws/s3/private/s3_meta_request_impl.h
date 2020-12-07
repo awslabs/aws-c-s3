@@ -340,14 +340,17 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
 AWS_S3_API
 struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
 
+AWS_S3_API
 void aws_s3_meta_request_init_signing_date_time_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_date_time *date_time);
 
+AWS_S3_API
 int aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection);
 
+AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
