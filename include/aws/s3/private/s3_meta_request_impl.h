@@ -223,6 +223,8 @@ struct aws_s3_meta_request {
     } synced_data;
 };
 
+AWS_EXTERN_C_BEGIN
+
 bool aws_s3_meta_request_has_work(const struct aws_s3_meta_request *meta_request);
 
 /* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */
@@ -255,6 +257,7 @@ void aws_s3_meta_request_send_next_request(
 /* BEGIN - Meant only for use by derived types. */
 
 /* Initialize the base meta request structure. */
+AWS_S3_API
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -269,6 +272,7 @@ void aws_s3_meta_request_write_body_to_caller(
     aws_s3_meta_request_write_body_finished_callback_fn *callback);
 
 /* Create a new s3 request structure with the given options. */
+AWS_S3_API
 struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
@@ -277,13 +281,17 @@ struct aws_s3_request *aws_s3_request_new(
 
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */
+AWS_S3_API
 void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
 
 /* Clear out send_data members so that they can be repopulated before the next send. */
+AWS_S3_API
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request);
 
+AWS_S3_API
 void aws_s3_request_acquire(struct aws_s3_request *request);
 
+AWS_S3_API
 void aws_s3_request_release(struct aws_s3_request *request);
 
 /* Tells the meta request to stop, with an error code for indicating failure when necessary. */
@@ -297,8 +305,10 @@ void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_reque
 
 void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request);
 
+AWS_S3_API
 void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
 
+AWS_S3_API
 void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request);
 
 /* Call to have the meta request notify the owning client (if one exists) that there is more work to be done. */
@@ -306,13 +316,12 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
 
 /* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
  * this function, it is necessary to release that reference. */
+AWS_S3_API
 struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
 
 /* END - Meant only for use by derived types.  */
 
 /* BEGIN - Exposed only for use in tests */
-
-AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
 void aws_s3_meta_request_handle_error(
