@@ -326,7 +326,6 @@ void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_reque
 AWS_S3_API
 struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
 
-
 AWS_EXTERN_C_END
 
 /* END - Exposed only for use in tests */
