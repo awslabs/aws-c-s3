@@ -153,18 +153,6 @@ int aws_s3_meta_request_init_base(
     AWS_ASSERT(vtable->init_signing_date_time);
     AWS_ASSERT(vtable->send_request_finish);
 
-    if (vtable->sign_request == NULL) {
-        vtable->sign_request = aws_s3_meta_request_sign_request_default;
-    }
-
-    if (vtable->init_signing_date_time == NULL) {
-        vtable->init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default;
-    }
-
-    if (vtable->send_request_finish == NULL) {
-        vtable->send_request_finish = aws_s3_meta_request_send_request_finish_default;
-    }
-
     meta_request->allocator = allocator;
 
     /* Set up reference count. */
