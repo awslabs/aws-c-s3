@@ -440,7 +440,10 @@ static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_req
 static struct aws_s3_meta_request_vtable s_s3_empty_meta_request_vtable = {
     .has_work = aws_s3_meta_request_has_work_empty,
     .next_request = aws_s3_meta_request_next_request_empty,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = aws_s3_meta_request_prepare_request_empty,
+    .init_signing_date_time = aws_s3_meta_request_sign_request_default,
+    .sign_request = aws_s3_meta_request_sign_request_default,
     .incoming_headers = NULL,
     .incoming_headers_block_done = NULL,
     .incoming_body = NULL,

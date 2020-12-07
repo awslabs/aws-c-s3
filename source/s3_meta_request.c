@@ -33,15 +33,7 @@ static void s_s3_meta_request_init_signing_date_time(
     struct aws_s3_meta_request *meta_request,
     struct aws_date_time *date_time);
 
-static void s_s3_meta_request_init_signing_date_time_default(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_date_time *date_time);
-
 static int s_s3_meta_request_sign_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
-
-static int s_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection);
 
@@ -75,11 +67,6 @@ static int s_s3_meta_request_incoming_headers(
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
 
 static void s_s3_meta_request_send_request_finish(
-    struct aws_s3_vip_connection *vip_connection,
-    struct aws_http_stream *stream,
-    int error_code);
-
-static void s_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code);
@@ -162,17 +149,20 @@ int aws_s3_meta_request_init_base(
     AWS_ASSERT(vtable->next_request);
     AWS_ASSERT(vtable->prepare_request);
     AWS_ASSERT(vtable->destroy);
+    AWS_ASSERT(vtable->sign_request);
+    AWS_ASSERT(vtable->init_signing_date_time);
+    AWS_ASSERT(vtable->send_request_finish);
 
     if (vtable->sign_request == NULL) {
-        vtable->sign_request = s_s3_meta_request_sign_request_default;
+        vtable->sign_request = aws_s3_meta_request_sign_request_default;
     }
 
     if (vtable->init_signing_date_time == NULL) {
-        vtable->init_signing_date_time = s_s3_meta_request_init_signing_date_time_default;
+        vtable->init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default;
     }
 
     if (vtable->send_request_finish == NULL) {
-        vtable->send_request_finish = s_s3_meta_request_send_request_finish_default;
+        vtable->send_request_finish = aws_s3_meta_request_send_request_finish_default;
     }
 
     meta_request->allocator = allocator;
@@ -563,7 +553,7 @@ static void s_s3_meta_request_init_signing_date_time(
     vtable->init_signing_date_time(meta_request, date_time);
 }
 
-static void s_s3_meta_request_init_signing_date_time_default(
+void aws_s3_meta_request_init_signing_date_time_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_date_time *date_time) {
     AWS_PRECONDITION(meta_request);
@@ -586,7 +576,7 @@ static int s_s3_meta_request_sign_request(
 }
 
 /* Handles signing a message for the caller. */
-static int s_s3_meta_request_sign_request_default(
+int aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(meta_request)
@@ -948,7 +938,7 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(vip_connection, stream, error_code);
 }
 
-static void s_s3_meta_request_send_request_finish_default(
+void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code) {
