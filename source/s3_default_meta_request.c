@@ -60,7 +60,10 @@ static void s_s3_meta_request_default_write_body_callback(
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .has_work = s_s3_meta_request_default_has_work,
     .next_request = s_s3_meta_request_default_next_request,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_meta_request_default_prepare_request,
+    .init_signing_date_time = aws_s3_meta_request_sign_request_default,
+    .sign_request = aws_s3_meta_request_sign_request_default,
     .incoming_headers = NULL,
     .incoming_headers_block_done = s_s3_meta_request_default_header_block_done,
     .incoming_body = s_s3_meta_request_default_incoming_body,
