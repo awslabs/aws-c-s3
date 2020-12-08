@@ -430,7 +430,7 @@ void s_s3_request_destroy(void *user_data) {
     }
 
     aws_byte_buf_clean_up(&request->request_body);
-    aws_retry_strategy_release_retry_token(request->retry_token);
+    aws_retry_token_release(request->retry_token);
     aws_s3_request_clean_up_send_data(request);
     aws_mem_release(request->allocator, request);
 }
