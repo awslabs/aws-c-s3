@@ -661,6 +661,7 @@ static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct 
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
     AWS_PRECONDITION(vip_connection->http_connection);
+    (void)client;
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
