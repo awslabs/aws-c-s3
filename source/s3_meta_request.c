@@ -360,6 +360,9 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
 
     s_s3_request_clean_up_send_data_message(request);
 
+    aws_signable_destroy(request->send_data.signable);
+    request->send_data.signable = NULL;
+
     aws_http_headers_release(request->send_data.response_headers);
     request->send_data.response_headers = NULL;
 
@@ -598,21 +601,29 @@ int aws_s3_meta_request_sign_request_default(
     s_s3_meta_request_init_signing_date_time(meta_request, &signing_config.date);
 
     int result = AWS_OP_ERR;
-    struct aws_signable *signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
+    request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
 
-    if (signable == NULL) {
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Created signable %p for request %p with message %p",
+        (void *)meta_request,
+        (void *)request->send_data.signable,
+        (void *)request,
+        (void *)request->send_data.message);
+
+    if (request->send_data.signable == NULL) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Could not allocate signable for request %p",
             (void *)meta_request,
             (void *)request);
 
-        goto clean_up;
+        goto done;
     }
 
     if (aws_sign_request_aws(
             meta_request->allocator,
-            signable,
+            request->send_data.signable,
             (struct aws_signing_config_base *)&signing_config,
             s_s3_meta_request_request_on_signed,
             vip_connection)) {
@@ -620,15 +631,12 @@ int aws_s3_meta_request_sign_request_default(
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p: Could not sign request %p", (void *)meta_request, (void *)request);
 
-        goto clean_up;
+        goto done;
     }
 
     result = AWS_OP_SUCCESS;
 
-clean_up:
-
-    aws_signable_destroy(signable);
-
+done:
     return result;
 }
 
