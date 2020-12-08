@@ -837,7 +837,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     while (!aws_linked_list_empty(&client->synced_data.pending_meta_requests)) {
         struct aws_linked_list_node *node = aws_linked_list_pop_back(&client->synced_data.pending_meta_requests);
         struct aws_s3_meta_request *meta_request =
-            AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_synced_data.node);
+            AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_synced_data);
         aws_linked_list_push_back(
             &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
     }
@@ -895,7 +895,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
             if (current_meta_request == NULL) {
                 struct aws_linked_list_node *begin_node = aws_linked_list_begin(&client->threaded_data.meta_requests);
                 current_meta_request =
-                    AWS_CONTAINER_OF(begin_node, struct aws_s3_meta_request, client_process_work_threaded_data.node);
+                    AWS_CONTAINER_OF(begin_node, struct aws_s3_meta_request, client_process_work_threaded_data);
             }
 
             /* Grab the next request from the meta request. */
@@ -941,7 +941,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     while (!aws_linked_list_empty(&removed_meta_requests)) {
         struct aws_linked_list_node *node = aws_linked_list_pop_back(&removed_meta_requests);
         struct aws_s3_meta_request *meta_request =
-            AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data.node);
+            AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
         meta_request->client_synced_data.scheduled = false;
 
