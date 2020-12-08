@@ -74,6 +74,7 @@ struct aws_s3_meta_request_test_results {
 
     int headers_response_status;
     struct aws_http_headers *response_headers;
+    uint64_t expected_range_start;
     uint64_t received_body_size;
     int finished_response_status;
     int finished_error_code;

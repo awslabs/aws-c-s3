@@ -60,6 +60,8 @@ struct aws_s3_request {
     /* Current retry token for the request. If it has never been retried, this will be NULL. */
     struct aws_retry_token *retry_token;
 
+    /* Request body to use when sending the request. The contents of this body will be re-used if a request is
+     * retried.*/
     struct aws_byte_buf request_body;
 
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
@@ -151,7 +153,7 @@ struct aws_s3_meta_request_vtable {
 
     int (*stream_complete)(struct aws_http_stream *stream, struct aws_s3_vip_connection *vip_connection);
 
-    void (*request_completed)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+    void (*notify_request_destroyed)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
@@ -193,14 +195,6 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 
     struct {
-
-        /* Linked list node for the meta requests linked list in the client. */
-        /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
-        struct aws_linked_list_node node;
-
-    } threaded_data;
-
-    struct {
         struct aws_mutex lock;
 
         /* Client that created this meta request which also processes this request.  After the meta request is finished,
@@ -214,9 +208,21 @@ struct aws_s3_meta_request {
          * their own specific position (which should be in close proximity of one another). */
         struct aws_input_stream *initial_body_stream;
 
+        struct aws_priority_queue pending_stream_to_caller_requests;
+
         enum aws_s3_meta_request_state state;
 
+        uint32_t next_streaming_part;
+
     } synced_data;
+
+    struct {
+
+        /* Linked list node for the meta requests linked list in the client. */
+        /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
+        struct aws_linked_list_node node;
+
+    } client_process_work_threaded_data;
 
     struct {
         struct aws_linked_list_node node;
@@ -344,6 +350,14 @@ void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_reque
 
 AWS_S3_API
 struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
+
+AWS_S3_API
+void aws_s3_meta_request_push_stream_to_caller_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request);
+
+AWS_S3_API
+struct aws_s3_request *aws_s3_meta_request_pop_stream_to_caller_synced(struct aws_s3_meta_request *meta_request);
 
 AWS_EXTERN_C_END
 

@@ -55,7 +55,7 @@ static int s_s3_auto_ranged_get_header_block_done(
     enum aws_http_header_block header_block,
     struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_auto_ranged_get_request_completed(
+static void s_s3_auto_ranged_get_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
@@ -69,7 +69,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .incoming_headers_block_done = s_s3_auto_ranged_get_header_block_done,
     .incoming_body = NULL,
     .stream_complete = NULL,
-    .request_completed = s_s3_auto_ranged_get_request_completed,
+    .notify_request_destroyed = s_s3_auto_ranged_get_notify_request_destroyed,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy};
 
 static void s_s3_auto_ranged_get_lock_synced_data(struct aws_s3_auto_ranged_get *auto_ranged_get) {
@@ -388,7 +388,7 @@ static int s_s3_auto_ranged_get_header_block_done(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_auto_ranged_get_request_completed(
+static void s_s3_auto_ranged_get_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);

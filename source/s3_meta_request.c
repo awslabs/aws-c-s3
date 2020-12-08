@@ -16,13 +16,13 @@
 #include <inttypes.h>
 
 static const uint64_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
+static const size_t s_default_stream_to_caller_priority_queue_size = 16;
 
+static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static void s_s3_request_destroy(void *user_data);
 
 static void s_s3_meta_request_start_destroy(void *user_data);
 static void s_s3_meta_request_finish_destroy(void *user_data);
-
-static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request, enum aws_s3_meta_request_state state);
 
 static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
@@ -63,7 +63,7 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_http_stream *stream,
     int error_code);
 
-static void s_s3_meta_request_request_completed(
+static void s_s3_meta_request_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
@@ -178,8 +178,16 @@ int aws_s3_meta_request_init_base(
         return AWS_OP_ERR;
     }
 
+    aws_priority_queue_init_dynamic(
+        &meta_request->synced_data.pending_stream_to_caller_requests,
+        meta_request->allocator,
+        s_default_stream_to_caller_priority_queue_size,
+        sizeof(struct aws_s3_request *),
+        s_s3_request_priority_queue_pred);
+
     aws_s3_client_acquire(client);
     meta_request->synced_data.client = client;
+    meta_request->synced_data.next_streaming_part = 1;
 
     meta_request->user_data = options->user_data;
     meta_request->headers_callback = options->headers_callback;
@@ -233,15 +241,7 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
 
-    /* Clean out the retry queue*/
-    while (!aws_linked_list_empty(&meta_request->synced_data.retry_queue)) {
-        struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&meta_request->synced_data.retry_queue);
-
-        struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
-        AWS_FATAL_ASSERT(request != NULL);
-
-        aws_s3_request_release(request);
-    }
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.retry_queue));
 
     /* Clean up our initial http message */
     if (meta_request->initial_request_message != NULL) {
@@ -255,6 +255,9 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
     aws_s3_client_release(meta_request->synced_data.client);
+
+    AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_stream_to_caller_requests) == 0);
+    aws_priority_queue_clean_up(&meta_request->synced_data.pending_stream_to_caller_requests);
 
     meta_request->vtable->destroy(meta_request);
 
@@ -394,6 +397,18 @@ void aws_s3_request_release(struct aws_s3_request *request) {
     aws_ref_count_release(&request->ref_count);
 }
 
+static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
+    const struct aws_s3_request **request_a = (const struct aws_s3_request **)a;
+    AWS_PRECONDITION(request_a);
+    AWS_PRECONDITION(*request_a);
+
+    const struct aws_s3_request **request_b = (const struct aws_s3_request **)b;
+    AWS_PRECONDITION(request_b);
+    AWS_PRECONDITION(*request_b);
+
+    return (*request_a)->part_number > (*request_b)->part_number;
+}
+
 void s_s3_request_destroy(void *user_data) {
     struct aws_s3_request *request = user_data;
 
@@ -401,9 +416,22 @@ void s_s3_request_destroy(void *user_data) {
         return;
     }
 
-    aws_retry_token_release(request->retry_token);
+    if (request->meta_request != NULL) {
+        struct aws_s3_client *client = aws_s3_meta_request_acquire_client(request->meta_request);
+
+        if (client != NULL) {
+            aws_s3_client_notify_request_destroyed(client);
+            aws_s3_client_release(client);
+            client = NULL;
+        }
+
+        s_s3_meta_request_notify_request_destroyed(request->meta_request, request);
+        aws_s3_meta_request_release(request->meta_request);
+    }
+
+    aws_byte_buf_clean_up(&request->request_body);
+    aws_retry_strategy_release_retry_token(request->retry_token);
     aws_s3_request_clean_up_send_data(request);
-    aws_s3_meta_request_release(request->meta_request);
     aws_mem_release(request->allocator, request);
 }
 
@@ -931,6 +959,31 @@ void aws_s3_meta_request_send_request_finish_default(
         if (request->retry_token != NULL) {
             aws_retry_token_record_success(request->retry_token);
         }
+
+        if (request->stream_to_caller) {
+            AWS_ASSERT(request->part_number > 0);
+
+            struct aws_linked_list stream_requests_to_caller;
+            aws_linked_list_init(&stream_requests_to_caller);
+
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            aws_s3_meta_request_push_stream_to_caller_synced(meta_request, request);
+
+            struct aws_s3_request *request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+
+            while (request != NULL) {
+                aws_linked_list_push_back(&stream_requests_to_caller, &request->node);
+                request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+            }
+
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+
+            if (!aws_linked_list_empty(&stream_requests_to_caller)) {
+                aws_s3_client_stream_to_caller(client, &stream_requests_to_caller);
+            }
+        }
+
     } else {
         aws_s3_meta_request_handle_error(meta_request, request, error_code);
     }
@@ -943,7 +996,7 @@ void aws_s3_meta_request_send_request_finish_default(
     aws_s3_client_notify_connection_finished(client, vip_connection);
 }
 
-static void s_s3_meta_request_request_completed(
+static void s_s3_meta_request_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
@@ -952,8 +1005,8 @@ static void s_s3_meta_request_request_completed(
     AWS_PRECONDITION(vtable);
     AWS_PRECONDITION(request);
 
-    if (vtable->request_completed) {
-        vtable->request_completed(meta_request, request);
+    if (vtable->notify_request_destroyed) {
+        vtable->notify_request_destroyed(meta_request, request);
     }
 }
 
@@ -1178,6 +1231,51 @@ void aws_s3_meta_request_handle_error(
     aws_s3_client_release(client);
 }
 
+void aws_s3_meta_request_push_stream_to_caller_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+
+    AWS_ASSERT(request->meta_request == meta_request);
+    request->meta_request = NULL;
+    aws_s3_meta_request_release(meta_request);
+
+    aws_s3_request_acquire(request);
+
+    aws_priority_queue_push(&meta_request->synced_data.pending_stream_to_caller_requests, &request);
+}
+
+struct aws_s3_request *aws_s3_meta_request_pop_stream_to_caller_synced(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    struct aws_s3_request **top_request = NULL;
+
+    aws_priority_queue_top(&meta_request->synced_data.pending_stream_to_caller_requests, (void **)&top_request);
+
+    if (top_request == NULL) {
+        return NULL;
+    }
+
+    AWS_FATAL_ASSERT(*top_request);
+
+    if ((*top_request)->part_number != meta_request->synced_data.next_streaming_part) {
+        return NULL;
+    }
+
+    struct aws_s3_request *request = NULL;
+    aws_priority_queue_pop(&meta_request->synced_data.pending_stream_to_caller_requests, (void **)&request);
+
+    request->meta_request = meta_request;
+    aws_s3_meta_request_acquire(meta_request);
+
+    ++meta_request->synced_data.next_streaming_part;
+
+    return request;
+}
+
 void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request->meta_request == meta_request);
@@ -1186,11 +1284,16 @@ void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_reque
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
+    if (meta_request->synced_data.client == NULL) {
+        goto unlock;
+    }
+
     aws_s3_meta_request_release(request->meta_request);
     request->meta_request = NULL;
 
     aws_linked_list_push_back(&meta_request->synced_data.retry_queue, &request->node);
 
+unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
@@ -1222,19 +1325,56 @@ void aws_s3_meta_request_finish(
     int error_code) {
     AWS_PRECONDITION(meta_request);
 
-    if (s_s3_meta_request_set_state(meta_request, AWS_S3_META_REQUEST_STATE_FINISHED)) {
-        return;
-    }
-
     /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
     AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
 
+    bool already_finished = false;
     struct aws_s3_client *client = NULL;
+    struct aws_linked_list release_request_list;
+    aws_linked_list_init(&release_request_list);
 
     aws_s3_meta_request_lock_synced_data(meta_request);
+
+    if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
+        already_finished = true;
+        goto unlock;
+    }
+
+    meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
+
+    /* Get rid of our client reference. Release it outside of the lock. */
     client = meta_request->synced_data.client;
     meta_request->synced_data.client = NULL;
+
+    /* Cleaning out the pending-stream-to-caller priority queue*/
+    struct aws_s3_request *request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+
+    while (request != NULL) {
+        aws_linked_list_push_back(&release_request_list, &request->node);
+        request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+    }
+
+    /* Clean out the retry queue*/
+    request = aws_s3_meta_request_retry_queue_pop_synced(meta_request);
+
+    while (request != NULL) {
+        aws_linked_list_push_back(&release_request_list, &request->node);
+        request = aws_s3_meta_request_retry_queue_pop_synced(meta_request);
+    }
+
+unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    if (already_finished) {
+        return;
+    }
+
+    while (!aws_linked_list_empty(&release_request_list)) {
+        struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&release_request_list);
+        struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
+        AWS_FATAL_ASSERT(request != NULL);
+        aws_s3_request_release(request);
+    }
 
     aws_s3_client_release(client);
 
@@ -1261,22 +1401,4 @@ void aws_s3_meta_request_finish(
 
         meta_request->finish_callback(meta_request, &meta_request_result, meta_request->user_data);
     }
-}
-
-static int s_s3_meta_request_set_state(struct aws_s3_meta_request *meta_request, enum aws_s3_meta_request_state state) {
-    AWS_PRECONDITION(meta_request);
-
-    int result = AWS_OP_SUCCESS;
-
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    if (meta_request->synced_data.state == state) {
-        result = AWS_OP_ERR;
-    }
-
-    meta_request->synced_data.state = state;
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    return result;
 }
