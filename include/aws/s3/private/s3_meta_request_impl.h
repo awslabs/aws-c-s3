@@ -259,6 +259,7 @@ int aws_s3_meta_request_make_request(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection);
 
+AWS_EXTERN_C_BEGIN
 /* BEGIN - Meant only for use by derived types. */
 
 /* Initialize the base meta request structure. */
