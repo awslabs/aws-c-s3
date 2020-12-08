@@ -678,7 +678,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
             part_size = client->part_size;
         }
 
-        uint32_t num_parts = object_size / part_size;
+        uint32_t num_parts = (uint32_t)(object_size / part_size);
 
         if ((object_size % part_size) > 0) {
             ++num_parts;

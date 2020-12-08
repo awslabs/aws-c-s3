@@ -982,11 +982,12 @@ void aws_s3_meta_request_send_request_finish_default(
 
             aws_s3_meta_request_push_stream_to_caller_synced(meta_request, request);
 
-            struct aws_s3_request *request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+            struct aws_s3_request *next_streaming_request =
+                aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
 
-            while (request != NULL) {
-                aws_linked_list_push_back(&stream_requests_to_caller, &request->node);
-                request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+            while (next_streaming_request != NULL) {
+                aws_linked_list_push_back(&stream_requests_to_caller, &next_streaming_request->node);
+                next_streaming_request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
             }
 
             aws_s3_meta_request_unlock_synced_data(meta_request);
