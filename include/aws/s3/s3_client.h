@@ -29,8 +29,6 @@ enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT
 };
 
-typedef int(aws_s3_meta_request_reset_stream_fn)(struct aws_input_stream *input_stream, void *user_data);
-
 typedef void(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
@@ -70,6 +68,7 @@ struct aws_s3_client_config {
     /* Size of parts the files will be downloaded or uploaded in. */
     uint64_t part_size;
 
+    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to.. */
     uint64_t max_part_size;
 
     /* Throughput target in Gbps that we are trying to reach. */
@@ -88,10 +87,6 @@ struct aws_s3_meta_request_options {
 
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
-
-    uint64_t object_size_hint;
-
-    aws_s3_meta_request_reset_stream_fn *reset_stream;
 
     /* Signing options to be used for each request created for this meta request.  If NULL, options in the client will
      * be used. If not NULL, these options will override the client options. */

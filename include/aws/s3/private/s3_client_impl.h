@@ -144,12 +144,14 @@ struct aws_s3_client {
         /* Requests that have body data that needs sent back to the caller on the stream-to-caller event loop */
         struct aws_linked_list pending_stream_to_caller_requests;
 
-        /* Task for processing the above work. */
+        /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
 
+        /* Task for streaming request bodies back to the caller. */
         struct aws_task stream_to_caller_task;
 
-        uint32_t pending_finished_request_count;
+        /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
+        uint32_t pending_request_count;
 
         /* Host listener to get new IP addresses. */
         struct aws_host_listener *host_listener;
@@ -157,6 +159,7 @@ struct aws_s3_client {
         /* Whether or not work processing is currently scheduled. */
         uint32_t process_work_task_scheduled : 1;
 
+        /* Whether or not streaming request bodies to the caller is currently scheduled. */
         uint32_t scheduled_stream_to_caller : 1;
 
         /* Whether or not the client has started cleaning up all of its resources */
@@ -171,21 +174,11 @@ struct aws_s3_client {
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
 
-        struct aws_linked_list pending_destroy_request_queue;
-
         struct aws_s3_meta_request *current_meta_request;
 
         uint32_t num_requests_in_flight;
 
     } threaded_data;
-
-    struct {
-        struct aws_linked_list requests;
-    } async_prepare_threaded_data;
-
-    struct {
-        struct aws_priority_queue requests;
-    } stream_to_caller_threaded_data;
 };
 
 void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
@@ -196,6 +189,8 @@ void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection);
 
-void aws_s3_client_stream_to_caller(struct aws_s3_client *client, struct aws_s3_request *request);
+void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client);
+
+void aws_s3_client_stream_to_caller(struct aws_s3_client *client, struct aws_linked_list *requests);
 
 #endif /* AWS_S3_CLIENT_IMPL_H */

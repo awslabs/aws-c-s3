@@ -18,6 +18,8 @@ enum aws_s3_meta_request_default_state {
 struct aws_s3_meta_request_default {
     struct aws_s3_meta_request base;
 
+    bool is_get_request;
+
     struct {
         enum aws_s3_meta_request_default_state state;
     } synced_data;
@@ -42,7 +44,7 @@ static int s_s3_meta_request_default_header_block_done(
     enum aws_http_header_block header_block,
     struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_meta_request_default_request_completed(
+static void s_s3_meta_request_default_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
@@ -56,7 +58,7 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .incoming_headers_block_done = s_s3_meta_request_default_header_block_done,
     .incoming_body = NULL,
     .stream_complete = NULL,
-    .request_completed = s_s3_meta_request_default_request_completed,
+    .notify_request_destroyed = s_s3_meta_request_default_notify_request_destroyed,
     .destroy = s_s3_meta_request_default_destroy};
 
 static void s_s3_meta_request_default_lock_synced_data(struct aws_s3_meta_request_default *meta_request_default) {
@@ -80,6 +82,16 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->message);
+
+    struct aws_byte_cursor request_method;
+    if (aws_http_message_get_request_method(options->message, &request_method)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create Default Meta request; could not get request method from message.");
+
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
 
     struct aws_s3_meta_request_default *meta_request_default =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_default));
@@ -144,12 +156,17 @@ static int s_s3_meta_request_default_next_request(
     s_s3_meta_request_default_unlock_synced_data(meta_request_default);
 
     if (create_request) {
-        request = aws_s3_request_new(
-            meta_request,
-            0,
-            0,
-            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM |
-                AWS_S3_REQUEST_DESC_STREAM_TO_CALLER);
+
+        uint32_t request_flags =
+            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM;
+
+        if (meta_request_default->is_get_request) {
+            request_flags |= AWS_S3_REQUEST_DESC_STREAM_TO_CALLER;
+        }
+
+        const uint32_t part_number = 1;
+
+        request = aws_s3_request_new(meta_request, 0, part_number, request_flags);
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
@@ -213,7 +230,7 @@ static int s_s3_meta_request_default_header_block_done(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_meta_request_default_request_completed(
+static void s_s3_meta_request_default_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
