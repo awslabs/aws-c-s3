@@ -917,7 +917,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
             /* If the next node is the end node, wrap around to the beginning node. */
             if (next_node != aws_linked_list_end(&client->threaded_data.meta_requests)) {
                 current_meta_request =
-                    AWS_CONTAINER_OF(next_node, struct aws_s3_meta_request, client_process_work_threaded_data.node);
+                    AWS_CONTAINER_OF(next_node, struct aws_s3_meta_request, client_process_work_threaded_data);
             }
         }
 
