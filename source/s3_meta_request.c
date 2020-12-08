@@ -330,7 +330,7 @@ void s_s3_request_destroy(void *user_data) {
         return;
     }
 
-    aws_retry_strategy_release_retry_token(request->retry_token);
+    aws_retry_token_release(request->retry_token);
     aws_s3_request_clean_up_send_data(request);
     aws_s3_meta_request_release(request->meta_request);
     aws_mem_release(request->allocator, request);
@@ -810,7 +810,7 @@ static void s_s3_meta_request_send_request_finish_default(
 
     if (error_code == AWS_ERROR_SUCCESS) {
         if (request->retry_token != NULL) {
-            aws_retry_strategy_token_record_success(request->retry_token);
+            aws_retry_token_record_success(request->retry_token);
         }
     } else {
         aws_s3_meta_request_handle_error(meta_request, request, error_code);
@@ -960,9 +960,24 @@ static void s_s3_meta_request_acquire_retry_token(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    struct aws_http_message *message = meta_request->initial_request_message;
+    AWS_PRECONDITION(message);
+
+    struct aws_byte_cursor host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
+
+    struct aws_http_headers *message_headers = aws_http_message_get_headers(message);
+    AWS_ASSERT(message_headers);
+
+    struct aws_byte_cursor host_header_value;
+
+    bool host_header_exists =
+        aws_http_headers_get(message_headers, host_header_name, &host_header_value) == AWS_ERROR_SUCCESS;
+    AWS_ASSERT(host_header_exists);
+    (void)host_header_exists;
+
     /* Try to acquire a token so that we can schedule a retry. */
     if (aws_retry_strategy_acquire_retry_token(
-            retry_strategy, NULL, s_s3_meta_request_queue_retry_with_token, request, 0)) {
+            retry_strategy, &host_header_value, s_s3_meta_request_queue_retry_with_token, request, 0)) {
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
