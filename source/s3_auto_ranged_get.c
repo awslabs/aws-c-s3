@@ -224,6 +224,7 @@ static int s_s3_auto_ranged_get_prepare_request(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
+    (void)client;
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
