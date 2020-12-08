@@ -87,6 +87,9 @@ struct aws_s3_request {
         /* The HTTP message to send for this request. */
         struct aws_http_message *message;
 
+        /* Signable created for the above message. */
+        struct aws_signable *signable;
+
         /* Recorded response headers for the request. Set only when the request desc has record_response_headers set to
          * true. */
         struct aws_http_headers *response_headers;
