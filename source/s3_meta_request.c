@@ -1160,15 +1160,13 @@ static void s_s3_meta_request_acquire_retry_token(
     struct aws_http_message *message = meta_request->initial_request_message;
     AWS_PRECONDITION(message);
 
-    struct aws_byte_cursor host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
-
     struct aws_http_headers *message_headers = aws_http_message_get_headers(message);
     AWS_ASSERT(message_headers);
 
     struct aws_byte_cursor host_header_value;
 
     bool host_header_exists =
-        aws_http_headers_get(message_headers, host_header_name, &host_header_value) == AWS_ERROR_SUCCESS;
+        aws_http_headers_get(message_headers, g_host_header_name, &host_header_value) == AWS_ERROR_SUCCESS;
     AWS_ASSERT(host_header_exists);
     (void)host_header_exists;
 
