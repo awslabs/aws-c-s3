@@ -185,6 +185,7 @@ static int s_s3_meta_request_default_prepare_request(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
+    (void)client;
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);

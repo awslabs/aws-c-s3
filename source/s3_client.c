@@ -1044,7 +1044,7 @@ static void s_s3_client_vip_connection_on_acquire_request_connection(
         vip_connection->request_count = 0;
     }
 
-    aws_s3_meta_request_make_request(request->meta_request, client, vip_connection);
+    aws_s3_meta_request_make_request(meta_request, client, vip_connection);
 
 clean_up:
 
@@ -1113,6 +1113,7 @@ static void s_s3_client_schedule_stream_to_caller(struct aws_s3_client *client) 
 
 static void s_s3_client_stream_to_caller_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
+    (void)task_status;
 
     struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);
