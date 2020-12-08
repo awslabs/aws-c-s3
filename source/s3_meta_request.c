@@ -63,11 +63,6 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_http_stream *stream,
     int error_code);
 
-static void s_s3_meta_request_send_request_finish_default(
-    struct aws_s3_vip_connection *vip_connection,
-    struct aws_http_stream *stream,
-    int error_code);
-
 static void s_s3_meta_request_request_completed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
@@ -321,10 +316,19 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     if (request->use_initial_body_stream) {
         aws_s3_meta_request_lock_synced_data(meta_request);
 
-        aws_http_message_set_body_stream(message, meta_request->synced_data.initial_body_stream);
-        meta_request->synced_data.initial_body_stream = NULL;
+        struct aws_input_stream *input_stream = meta_request->synced_data.initial_body_stream;
+
+        if (input_stream != NULL) {
+            aws_http_message_set_body_stream(message, input_stream);
+            meta_request->synced_data.initial_body_stream = NULL;
+        }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
+
+        /* TODO don't assume that the stream is seekable or that it started at the beginning. */
+        if (input_stream != NULL) {
+            aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
+        }
     }
 }
 
