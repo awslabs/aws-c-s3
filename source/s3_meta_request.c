@@ -16,7 +16,7 @@
 #include <inttypes.h>
 
 static const uint64_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
-static const size_t s_default_stream_to_caller_priority_queue_size = 16;
+static const size_t s_default_body_streaming_priority_queue_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static void s_s3_request_destroy(void *user_data);
@@ -179,9 +179,9 @@ int aws_s3_meta_request_init_base(
     }
 
     aws_priority_queue_init_dynamic(
-        &meta_request->synced_data.pending_stream_to_caller_requests,
+        &meta_request->synced_data.pending_body_streaming_requests,
         meta_request->allocator,
-        s_default_stream_to_caller_priority_queue_size,
+        s_default_body_streaming_priority_queue_size,
         sizeof(struct aws_s3_request *),
         s_s3_request_priority_queue_pred);
 
@@ -256,8 +256,8 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     aws_mutex_clean_up(&meta_request->synced_data.lock);
     aws_s3_client_release(meta_request->synced_data.client);
 
-    AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_stream_to_caller_requests) == 0);
-    aws_priority_queue_clean_up(&meta_request->synced_data.pending_stream_to_caller_requests);
+    AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
+    aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
 
     meta_request->vtable->destroy(meta_request);
 
@@ -298,7 +298,7 @@ struct aws_s3_request *aws_s3_request_new(
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
     request->use_initial_body_stream = (flags & AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM) != 0;
-    request->stream_to_caller = (flags & AWS_S3_REQUEST_DESC_STREAM_TO_CALLER) != 0;
+    request->stream_response_body = (flags & AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY) != 0;
     request->part_size_response_body = (flags & AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY) != 0;
 
     return request;
@@ -961,28 +961,27 @@ void aws_s3_meta_request_send_request_finish_default(
             aws_retry_token_record_success(request->retry_token);
         }
 
-        if (request->stream_to_caller) {
+        if (request->stream_response_body) {
             AWS_ASSERT(request->part_number > 0);
 
-            struct aws_linked_list stream_requests_to_caller;
-            aws_linked_list_init(&stream_requests_to_caller);
+            struct aws_linked_list streaming_requests;
+            aws_linked_list_init(&streaming_requests);
 
             aws_s3_meta_request_lock_synced_data(meta_request);
 
-            aws_s3_meta_request_push_stream_to_caller_synced(meta_request, request);
+            aws_s3_meta_request_body_streaming_push_synced(meta_request, request);
 
-            struct aws_s3_request *next_streaming_request =
-                aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+            struct aws_s3_request *next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
 
             while (next_streaming_request != NULL) {
-                aws_linked_list_push_back(&stream_requests_to_caller, &next_streaming_request->node);
-                next_streaming_request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+                aws_linked_list_push_back(&streaming_requests, &next_streaming_request->node);
+                next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
             }
 
             aws_s3_meta_request_unlock_synced_data(meta_request);
 
-            if (!aws_linked_list_empty(&stream_requests_to_caller)) {
-                aws_s3_client_stream_to_caller(client, &stream_requests_to_caller);
+            if (!aws_linked_list_empty(&streaming_requests)) {
+                aws_s3_client_stream_response_body(client, &streaming_requests);
             }
         }
 
@@ -1231,7 +1230,7 @@ void aws_s3_meta_request_handle_error(
     aws_s3_client_release(client);
 }
 
-void aws_s3_meta_request_push_stream_to_caller_synced(
+void aws_s3_meta_request_body_streaming_push_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
@@ -1244,16 +1243,16 @@ void aws_s3_meta_request_push_stream_to_caller_synced(
 
     aws_s3_request_acquire(request);
 
-    aws_priority_queue_push(&meta_request->synced_data.pending_stream_to_caller_requests, &request);
+    aws_priority_queue_push(&meta_request->synced_data.pending_body_streaming_requests, &request);
 }
 
-struct aws_s3_request *aws_s3_meta_request_pop_stream_to_caller_synced(struct aws_s3_meta_request *meta_request) {
+struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     struct aws_s3_request **top_request = NULL;
 
-    aws_priority_queue_top(&meta_request->synced_data.pending_stream_to_caller_requests, (void **)&top_request);
+    aws_priority_queue_top(&meta_request->synced_data.pending_body_streaming_requests, (void **)&top_request);
 
     if (top_request == NULL) {
         return NULL;
@@ -1266,7 +1265,7 @@ struct aws_s3_request *aws_s3_meta_request_pop_stream_to_caller_synced(struct aw
     }
 
     struct aws_s3_request *request = NULL;
-    aws_priority_queue_pop(&meta_request->synced_data.pending_stream_to_caller_requests, (void **)&request);
+    aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
 
     request->meta_request = meta_request;
     aws_s3_meta_request_acquire(meta_request);
@@ -1347,11 +1346,11 @@ void aws_s3_meta_request_finish(
     meta_request->synced_data.client = NULL;
 
     /* Cleaning out the pending-stream-to-caller priority queue*/
-    struct aws_s3_request *request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+    struct aws_s3_request *request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
 
     while (request != NULL) {
         aws_linked_list_push_back(&release_request_list, &request->node);
-        request = aws_s3_meta_request_pop_stream_to_caller_synced(meta_request);
+        request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
     }
 
     /* Clean out the retry queue*/

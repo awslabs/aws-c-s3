@@ -78,8 +78,8 @@ static void s_s3_client_schedule_meta_request_work(
 static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
 static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-static void s_s3_client_schedule_stream_to_caller(struct aws_s3_client *client);
-static void s_s3_client_stream_to_caller_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+static void s_s3_client_schedule_body_streaming(struct aws_s3_client *client);
+static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
 static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 /* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
@@ -149,7 +149,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_event_loop_group_acquire(event_loop_group);
 
     client->event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
-    client->stream_to_caller_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
+    client->body_streaming_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
 
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
@@ -199,7 +199,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_linked_list_init(&client->synced_data.vips);
     aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
     aws_linked_list_init(&client->synced_data.pending_meta_requests);
-    aws_linked_list_init(&client->synced_data.pending_stream_to_caller_requests);
+    aws_linked_list_init(&client->synced_data.pending_body_streaming_requests);
 
     aws_linked_list_init(&client->threaded_data.idle_vip_connections);
     aws_linked_list_init(&client->threaded_data.meta_requests);
@@ -1078,39 +1078,39 @@ void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client) {
     s_s3_client_unlock_synced_data(client);
 }
 
-void aws_s3_client_stream_to_caller(struct aws_s3_client *client, struct aws_linked_list *requests) {
+void aws_s3_client_stream_response_body(struct aws_s3_client *client, struct aws_linked_list *requests) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(requests);
 
     s_s3_client_lock_synced_data(client);
 
-    aws_linked_list_move_all_back(&client->synced_data.pending_stream_to_caller_requests, requests);
+    aws_linked_list_move_all_back(&client->synced_data.pending_body_streaming_requests, requests);
 
-    s_s3_client_schedule_stream_to_caller(client);
+    s_s3_client_schedule_body_streaming(client);
 
     s_s3_client_unlock_synced_data(client);
 }
 
-static void s_s3_client_schedule_stream_to_caller(struct aws_s3_client *client) {
+static void s_s3_client_schedule_body_streaming(struct aws_s3_client *client) {
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
-    if (client->synced_data.scheduled_stream_to_caller) {
+    if (client->synced_data.scheduled_body_streaming) {
         return;
     }
 
     s_s3_client_internal_acquire(client);
 
     aws_task_init(
-        &client->synced_data.stream_to_caller_task,
-        s_s3_client_stream_to_caller_task,
+        &client->synced_data.body_streaming_task,
+        s_s3_client_body_streaming_task,
         client,
-        "s3_client_stream_to_caller_task");
+        "s3_client_body_streaming_task");
 
-    aws_event_loop_schedule_task_now(client->stream_to_caller_event_loop, &client->synced_data.stream_to_caller_task);
-    client->synced_data.scheduled_stream_to_caller = true;
+    aws_event_loop_schedule_task_now(client->body_streaming_event_loop, &client->synced_data.body_streaming_task);
+    client->synced_data.scheduled_body_streaming = true;
 }
 
-static void s_s3_client_stream_to_caller_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     (void)task_status;
 
@@ -1124,8 +1124,8 @@ static void s_s3_client_stream_to_caller_task(struct aws_task *task, void *arg, 
     aws_linked_list_init(&stream_requests);
 
     s_s3_client_lock_synced_data(client);
-    client->synced_data.scheduled_stream_to_caller = false;
-    aws_linked_list_swap_contents(&client->synced_data.pending_stream_to_caller_requests, &stream_requests);
+    client->synced_data.scheduled_body_streaming = false;
+    aws_linked_list_swap_contents(&client->synced_data.pending_body_streaming_requests, &stream_requests);
     s_s3_client_unlock_synced_data(client);
 
     while (!aws_linked_list_empty(&stream_requests)) {

@@ -163,7 +163,7 @@ static int s_s3_meta_request_default_next_request(
             AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM;
 
         if (meta_request_default->is_get_request) {
-            request_flags |= AWS_S3_REQUEST_DESC_STREAM_TO_CALLER;
+            request_flags |= AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY;
         }
 
         const uint32_t part_number = 1;
