@@ -89,9 +89,6 @@ static int s_test_s3_meta_request_retry_queue_operations(struct aws_allocator *a
     /* Queue the request. */
     aws_s3_meta_request_retry_queue_push(meta_request, request);
 
-    /* Retry queue doesn't hold onto the meta request reference when its in the queue so that clean up isn't blocked. */
-    ASSERT_TRUE(request->meta_request == NULL);
-
     /* Make sure the request in the queue is equal to the request we pushed. */
     struct aws_linked_list_node *node = aws_linked_list_begin(&meta_request->synced_data.retry_queue);
     struct aws_s3_request *node_request = AWS_CONTAINER_OF(node, struct aws_s3_request, node);
@@ -150,9 +147,6 @@ static int s_test_s3_meta_request_retry_queue_clean_up(struct aws_allocator *all
     /* Queue the request. */
     aws_s3_meta_request_retry_queue_push(meta_request, request);
     aws_s3_request_release(request);
-
-    /* Retry queue doesn't hold onto the meta request reference when its in the queue so that clean up isn't blocked. */
-    ASSERT_TRUE(request->meta_request == NULL);
 
     /* Make sure the request in the queue is equal to the request we pushed. */
     struct aws_linked_list_node *node = aws_linked_list_begin(&meta_request->synced_data.retry_queue);
