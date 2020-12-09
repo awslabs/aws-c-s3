@@ -1238,8 +1238,6 @@ void aws_s3_meta_request_body_streaming_push_synced(
     AWS_PRECONDITION(request);
 
     AWS_ASSERT(request->meta_request == meta_request);
-    request->meta_request = NULL;
-    aws_s3_meta_request_release(meta_request);
 
     aws_s3_request_acquire(request);
 
@@ -1267,9 +1265,6 @@ struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_
     struct aws_s3_request *request = NULL;
     aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
 
-    request->meta_request = meta_request;
-    aws_s3_meta_request_acquire(meta_request);
-
     ++meta_request->synced_data.next_streaming_part;
 
     return request;
@@ -1286,9 +1281,6 @@ void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_reque
     if (meta_request->synced_data.client == NULL) {
         goto unlock;
     }
-
-    aws_s3_meta_request_release(request->meta_request);
-    request->meta_request = NULL;
 
     aws_linked_list_push_back(&meta_request->synced_data.retry_queue, &request->node);
 
@@ -1308,9 +1300,6 @@ struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_
 
         request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_FATAL_ASSERT(request != NULL);
-
-        request->meta_request = meta_request;
-        aws_s3_meta_request_acquire(meta_request);
     }
 
     return request;
