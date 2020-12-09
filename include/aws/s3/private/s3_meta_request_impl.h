@@ -50,6 +50,8 @@ struct aws_s3_request {
     /* Linked list node used for queuing. */
     struct aws_linked_list_node node;
 
+    /* TODO Ref count on the request is no longer needed--only one part of code should ever be holding onto a request,
+     * and we can just transfer ownership.*/
     struct aws_ref_count ref_count;
 
     struct aws_allocator *allocator;
