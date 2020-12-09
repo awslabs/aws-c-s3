@@ -819,19 +819,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
 
-    /* TODO just pass in client? */
-    struct aws_s3_meta_request_internal_options internal_options;
-    AWS_ZERO_STRUCT(internal_options);
-    internal_options.options = options;
-    internal_options.client = client;
-
     /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-        return aws_s3_meta_request_auto_ranged_get_new(client->allocator, &internal_options);
+        return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
-        return aws_s3_meta_request_auto_ranged_put_new(client->allocator, &internal_options);
+        return aws_s3_meta_request_auto_ranged_put_new(client->allocator, client, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-        return aws_s3_meta_request_default_new(client->allocator, &internal_options);
+        return aws_s3_meta_request_default_new(client->allocator, client, options);
     } else {
         AWS_FATAL_ASSERT(false);
     }

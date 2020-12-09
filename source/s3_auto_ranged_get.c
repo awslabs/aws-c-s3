@@ -95,11 +95,14 @@ static void s_s3_auto_ranged_get_unlock_synced_data(struct aws_s3_auto_ranged_ge
 /* Allocate a new auto-ranged-get meta request. */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_internal_options *options) {
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(options && options->options && options->options->message);
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+    AWS_PRECONDITION(options->message);
 
-    struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->options->message);
+    struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
 
     /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
      * this requires some additional logic.  For now just return NULL. */
@@ -107,7 +110,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "Could not create Meta Request with message %p. Ranged requests not currently supported.",
-            (void *)options->options->message);
+            (void *)options->message);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -117,7 +120,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
 
     /* Try to initialize the base type. */
     if (aws_s3_meta_request_init_base(
-            allocator, options, auto_ranged_get, &s_s3_auto_ranged_get_vtable, &auto_ranged_get->base)) {
+            allocator, client, options, auto_ranged_get, &s_s3_auto_ranged_get_vtable, &auto_ranged_get->base)) {
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
