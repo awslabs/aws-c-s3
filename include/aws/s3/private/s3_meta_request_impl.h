@@ -40,7 +40,7 @@ enum aws_s3_meta_request_state {
 enum aws_s3_request_desc_flags {
     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
     AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM = 0x00000002,
-    AWS_S3_REQUEST_DESC_STREAM_TO_CALLER = 0x00000004,
+    AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY = 0x00000004,
     AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x00000020,
 };
 
@@ -80,7 +80,7 @@ struct aws_s3_request {
      * assume ownership of the memory for the stream. */
     uint32_t use_initial_body_stream : 1;
 
-    uint32_t stream_to_caller : 1;
+    uint32_t stream_response_body : 1;
 
     uint32_t part_size_response_body : 1;
 
@@ -208,7 +208,7 @@ struct aws_s3_meta_request {
          * their own specific position (which should be in close proximity of one another). */
         struct aws_input_stream *initial_body_stream;
 
-        struct aws_priority_queue pending_stream_to_caller_requests;
+        struct aws_priority_queue pending_body_streaming_requests;
 
         enum aws_s3_meta_request_state state;
 
@@ -353,12 +353,12 @@ AWS_S3_API
 struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
-void aws_s3_meta_request_push_stream_to_caller_synced(
+void aws_s3_meta_request_body_streaming_push_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
 AWS_S3_API
-struct aws_s3_request *aws_s3_meta_request_pop_stream_to_caller_synced(struct aws_s3_meta_request *meta_request);
+struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_s3_meta_request *meta_request);
 
 AWS_EXTERN_C_END
 

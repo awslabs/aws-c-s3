@@ -92,7 +92,7 @@ struct aws_s3_client {
 
     struct aws_event_loop *async_prepare_requests_event_loop;
 
-    struct aws_event_loop *stream_to_caller_event_loop;
+    struct aws_event_loop *body_streaming_event_loop;
 
     /* Region of the S3 bucket. */
     struct aws_string *region;
@@ -142,13 +142,13 @@ struct aws_s3_client {
         struct aws_linked_list pending_meta_requests;
 
         /* Requests that have body data that needs sent back to the caller on the stream-to-caller event loop */
-        struct aws_linked_list pending_stream_to_caller_requests;
+        struct aws_linked_list pending_body_streaming_requests;
 
         /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
 
         /* Task for streaming request bodies back to the caller. */
-        struct aws_task stream_to_caller_task;
+        struct aws_task body_streaming_task;
 
         /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
         uint32_t pending_request_count;
@@ -160,7 +160,7 @@ struct aws_s3_client {
         uint32_t process_work_task_scheduled : 1;
 
         /* Whether or not streaming request bodies to the caller is currently scheduled. */
-        uint32_t scheduled_stream_to_caller : 1;
+        uint32_t scheduled_body_streaming : 1;
 
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t cleaning_up : 1;
@@ -191,6 +191,6 @@ void aws_s3_client_notify_connection_finished(
 
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client);
 
-void aws_s3_client_stream_to_caller(struct aws_s3_client *client, struct aws_linked_list *requests);
+void aws_s3_client_stream_response_body(struct aws_s3_client *client, struct aws_linked_list *requests);
 
 #endif /* AWS_S3_CLIENT_IMPL_H */

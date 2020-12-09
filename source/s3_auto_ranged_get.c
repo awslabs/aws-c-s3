@@ -159,7 +159,7 @@ static int s_s3_auto_ranged_get_next_request(
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_FIRST_PART,
                 1,
                 AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY |
-                    AWS_S3_REQUEST_DESC_STREAM_TO_CALLER);
+                    AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY);
 
             auto_ranged_get->synced_data.next_part_number = 2;
 
@@ -180,7 +180,7 @@ static int s_s3_auto_ranged_get_next_request(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                     auto_ranged_get->synced_data.next_part_number,
-                    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY | AWS_S3_REQUEST_DESC_STREAM_TO_CALLER);
+                    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY | AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY);
 
                 ++auto_ranged_get->synced_data.next_part_number;
 
