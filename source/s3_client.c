@@ -868,6 +868,7 @@ static void s_s3_client_remove_meta_request_threaded(
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(meta_request);
+    (void)client;
 
     aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
     meta_request->client_process_work_threaded_data.scheduled = false;
