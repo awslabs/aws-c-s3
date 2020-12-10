@@ -419,7 +419,7 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     manager_options.socket_options = &socket_options;
     manager_options.proxy_options = NULL;
     manager_options.host = aws_byte_cursor_from_string(vip->host_address);
-    manager_options.max_connections = s_num_connections_per_vip ;
+    manager_options.max_connections = s_num_connections_per_vip;
     manager_options.shutdown_complete_callback = s_s3_client_vip_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
     manager_options.tls_connection_options = client->tls_connection_options;
@@ -1054,7 +1054,8 @@ static int s_s3_client_get_http_connection_default(
             *http_connection = NULL;
             *connection_request_count = 0;
 
-            AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p VIP Connection %s hit request limit.", (void *)client, (void*)vip_connection);
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT, "id=%p VIP Connection %p hit request limit.", (void *)client, (void *)vip_connection);
 
         } else if (!aws_http_connection_is_open(*http_connection)) {
             /* If our connection is closed for some reason, also get rid of it.*/
