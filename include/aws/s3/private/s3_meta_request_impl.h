@@ -224,13 +224,9 @@ struct aws_s3_meta_request {
         /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
         struct aws_linked_list_node node;
 
+        bool scheduled;
+
     } client_process_work_threaded_data;
-
-    struct {
-        struct aws_linked_list_node node;
-
-        uint32_t scheduled : 1;
-    } client_synced_data;
 };
 
 /* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */
@@ -315,7 +311,7 @@ AWS_S3_API
 void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request);
 
 /* Call to have the meta request notify the owning client (if one exists) that there is more work to be done. */
-void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request);
+void aws_s3_meta_request_push_to_client(struct aws_s3_meta_request *meta_request);
 
 /* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
  * this function, it is necessary to release that reference. */

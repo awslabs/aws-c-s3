@@ -383,7 +383,7 @@ static int s_s3_auto_ranged_get_header_block_done(
     }
 
     if (num_parts > 1) {
-        aws_s3_meta_request_schedule_work(meta_request);
+        aws_s3_meta_request_push_to_client(meta_request);
     }
 
     return AWS_OP_SUCCESS;

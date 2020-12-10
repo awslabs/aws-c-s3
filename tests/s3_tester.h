@@ -205,9 +205,9 @@ int aws_s3_tester_validate_put_object_results(struct aws_s3_meta_request_test_re
 
 /*****************************************/
 /* Used for mocking functions in vtables */
-void aws_s3_client_schedule_meta_request_work_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request);
+void aws_s3_client_push_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+
+void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
 int aws_s3_client_get_http_connection_empty(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
