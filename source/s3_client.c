@@ -420,7 +420,7 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     manager_options.socket_options = &socket_options;
     manager_options.proxy_options = NULL;
     manager_options.host = aws_byte_cursor_from_string(vip->host_address);
-    manager_options.max_connections = s_num_connections_per_vip * 2;
+    manager_options.max_connections = s_num_connections_per_vip ;
     manager_options.shutdown_complete_callback = s_s3_client_vip_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
     manager_options.tls_connection_options = client->tls_connection_options;
@@ -762,12 +762,6 @@ static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_a
             continue;
         }
 
-        AWS_LOGF_INFO(
-            AWS_LS_S3_CLIENT,
-            "id=%p Initiating creation of VIP with address '%s'",
-            (void *)client,
-            (const char *)host_address_byte_cursor.ptr);
-
         /* Allocate the new VIP. */
         vip = s_s3_client_vip_new(client, &host_address_byte_cursor);
 
@@ -778,6 +772,13 @@ static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_a
 
         aws_linked_list_push_back(&client->synced_data.vips, &vip->node);
         ++client->synced_data.vip_count;
+
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p Initiating creation of VIP with address '%s', total vip count %d",
+            (void *)client,
+            (const char *)host_address_byte_cursor.ptr,
+            client->synced_data.vip_count);
 
         /* Setup all of our vip connections. */
         for (size_t conn_index = 0; conn_index < s_num_connections_per_vip; ++conn_index) {
@@ -1053,6 +1054,9 @@ static int s_s3_client_get_http_connection_default(
 
             *http_connection = NULL;
             *connection_request_count = 0;
+
+            AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p VIP Connection %s hit request limit.", (void *)client, (void*)vip_connection);
+
         } else if (!aws_http_connection_is_open(*http_connection)) {
             /* If our connection is closed for some reason, also get rid of it.*/
             aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
@@ -1114,6 +1118,8 @@ static void s_s3_client_vip_connection_on_acquire_request_connection(
 
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
+    } else {
+        ++vip_connection->request_count;
     }
 
     aws_s3_meta_request_make_request(meta_request, client, vip_connection);
