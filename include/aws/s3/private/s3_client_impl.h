@@ -14,7 +14,6 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
-#include <aws/io/message_pool.h>
 
 struct aws_http_connection;
 struct aws_http_connection_manager;
@@ -67,7 +66,9 @@ struct aws_s3_client_vtable {
     struct aws_s3_meta_request *(
         *meta_request_factory)(struct aws_s3_client *client, const struct aws_s3_meta_request_options *options);
 
-    void (*schedule_meta_request_work)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+    void (*push_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+
+    void (*remove_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
     int (*get_http_connection)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 };
@@ -75,6 +76,9 @@ struct aws_s3_client_vtable {
 /* Represents the state of the S3 client. */
 struct aws_s3_client {
     struct aws_allocator *allocator;
+
+    /* Small block allocator for our small allocations. */
+    struct aws_allocator *sba_allocator;
 
     struct aws_s3_client_vtable *vtable;
 
@@ -139,9 +143,9 @@ struct aws_s3_client {
         struct aws_linked_list pending_vip_connection_updates;
 
         /* Meta requests that need added in the work event loop. */
-        struct aws_linked_list pending_meta_requests;
+        struct aws_linked_list pending_meta_request_work;
 
-        /* Requests that have body data that needs sent back to the caller on the stream-to-caller event loop */
+        /* Requests that have body data that needs sent back to the caller on the body-streaming event loop */
         struct aws_linked_list pending_body_streaming_requests;
 
         /* Task for processing requests from meta requests on vip connections. */
@@ -174,14 +178,16 @@ struct aws_s3_client {
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
 
-        struct aws_s3_meta_request *current_meta_request;
+        struct aws_s3_meta_request *next_meta_request;
 
         uint32_t num_requests_in_flight;
 
     } threaded_data;
 };
 
-void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+void aws_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+
+void aws_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
 int aws_s3_client_make_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
