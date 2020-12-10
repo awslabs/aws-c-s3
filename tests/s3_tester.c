@@ -146,7 +146,11 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
     tester->el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
     ASSERT_TRUE(tester->el_group != NULL);
 
-    tester->host_resolver = aws_host_resolver_new_default(allocator, 10, tester->el_group, NULL);
+    struct aws_host_resolver_default_options resolver_options = {
+        .max_entries = 10,
+        .el_group = tester->el_group,
+    };
+    tester->host_resolver = aws_host_resolver_new_default(allocator, &resolver_options);
     ASSERT_TRUE(tester->host_resolver != NULL);
 
     /* Setup the client boot strap. */
