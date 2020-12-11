@@ -169,6 +169,15 @@ struct aws_s3_client *aws_s3_client_new(
     aws_event_loop_group_acquire(event_loop_group);
 
     client->event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
+
+    size_t num_event_loops = aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+    size_t num_streaming_threads = num_event_loops / 2;
+
+    if(num_streaming_threads < 1) {
+        num_streaming_threads = 1;
+    }
+
+    client->body_streaming_elg = aws_event_loop_group_new_default(client->allocator, num_streaming_threads, NULL);
     client->body_streaming_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
 
     /* Make a copy of the region string. */
@@ -363,6 +372,7 @@ static void s_s3_client_finish_destroy(void *user_data) {
 
     aws_retry_strategy_release(client->retry_strategy);
 
+    aws_event_loop_group_release(client->body_streaming_elg);
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
 
     aws_client_bootstrap_release(client->client_bootstrap);
