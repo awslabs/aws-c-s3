@@ -90,7 +90,7 @@ struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_requ
     client = meta_request->synced_data.client;
 
     if (client != NULL) {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p Meta request trying to get reference to client, but client is null.",
             (void *)meta_request);
@@ -115,7 +115,7 @@ void aws_s3_meta_request_push_to_client(struct aws_s3_meta_request *meta_request
     if (client != NULL) {
         aws_s3_client_push_meta_request(client, meta_request);
     } else {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p Meta request trying to schedule work but client is null.",
             (void *)meta_request);
@@ -594,7 +594,7 @@ int aws_s3_meta_request_sign_request_default(
     } else if (client->cached_signing_config != NULL) {
         signing_config = client->cached_signing_config->config;
     } else {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: No signing config present. Not signing request %p.",
             (void *)meta_request,
@@ -609,7 +609,7 @@ int aws_s3_meta_request_sign_request_default(
     int result = AWS_OP_ERR;
     request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Created signable %p for request %p with message %p",
         (void *)meta_request,
