@@ -94,7 +94,7 @@ struct aws_s3_client {
 
     struct aws_event_loop *event_loop;
 
-    struct aws_event_loop *async_prepare_requests_event_loop;
+    struct aws_event_loop_group *body_streaming_elg;
 
     struct aws_event_loop *body_streaming_event_loop;
 
