@@ -115,7 +115,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         goto error_clean_up;
     }
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
     return &auto_ranged_get->base;
@@ -200,7 +200,7 @@ static int s_s3_auto_ranged_get_next_request(
     }
 
     if (request != NULL) {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Returning request %p for part %d of %d",
             (void *)meta_request,
@@ -260,7 +260,7 @@ static int s_s3_auto_ranged_get_prepare_request(
 
     aws_http_message_release(message);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Created request %p for part %d",
         (void *)meta_request,
@@ -344,7 +344,7 @@ static int s_s3_auto_ranged_get_header_block_done(
         ++num_parts;
     }
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Object being requested is %" PRIu64 " bytes which will have %d parts based off of a %" PRIu64
         " part size.",

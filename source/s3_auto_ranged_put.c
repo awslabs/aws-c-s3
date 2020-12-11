@@ -138,7 +138,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->synced_data.total_num_parts = num_parts;
     auto_ranged_put->synced_data.next_part_number = 1;
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
 
     return &auto_ranged_put->base;
@@ -252,7 +252,7 @@ static int s_s3_auto_ranged_put_next_request(
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
     if (request != NULL) {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Returning request %p for part %d of %d",
             (void *)meta_request,
@@ -397,7 +397,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
     aws_http_message_release(message);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Prepared request %p for part %d",
         (void *)meta_request,

@@ -89,13 +89,13 @@ struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_requ
     client = meta_request->synced_data.client;
 
     if (client != NULL) {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p Meta request trying to get reference to client, but client is null.",
             (void *)meta_request);
         aws_s3_client_acquire(client);
     } else {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p Meta request trying to get reference to client but client is null.",
             (void *)meta_request);
@@ -114,7 +114,7 @@ void aws_s3_meta_request_push_to_client(struct aws_s3_meta_request *meta_request
     if (client != NULL) {
         aws_s3_client_push_meta_request(client, meta_request);
     } else {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p Meta request trying to schedule work but client is null.",
             (void *)meta_request);
@@ -131,7 +131,7 @@ void aws_s3_meta_request_remove_from_client(struct aws_s3_meta_request *meta_req
     if (client != NULL) {
         aws_s3_client_remove_meta_request(client, meta_request);
     } else {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p Meta request trying to schedule work but client is null.",
             (void *)meta_request);
@@ -583,7 +583,7 @@ int aws_s3_meta_request_sign_request_default(
     } else if (client->cached_signing_config != NULL) {
         signing_config = client->cached_signing_config->config;
     } else {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: No signing config present. Not signing request %p.",
             (void *)meta_request,
@@ -598,7 +598,7 @@ int aws_s3_meta_request_sign_request_default(
     int result = AWS_OP_ERR;
     request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Created signable %p for request %p with message %p",
         (void *)meta_request,
@@ -662,7 +662,7 @@ static void s_s3_meta_request_request_on_signed(
         goto error_finish;
     }
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Getting HTTP connection for request %p", (void *)meta_request, (void *)request);
 
     s_s3_meta_request_send_request(client, vip_connection);
@@ -707,7 +707,7 @@ static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct 
         goto error_finish;
     }
 
-    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
+    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
 
     if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
         aws_http_stream_release(stream);
@@ -762,7 +762,7 @@ static int s_s3_meta_request_incoming_headers(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Incoming headers for request %p. VIP connection: %p.",
         (void *)meta_request,
@@ -819,7 +819,7 @@ static int s_s3_meta_request_headers_block_done(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request && meta_request->vtable);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Header block done for request %p. Response status: %d. VIP connection: %p.",
         (void *)meta_request,
@@ -856,7 +856,7 @@ static int s_s3_meta_request_incoming_body(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Incoming body for request %p. Response status: %d. Data Size: %" PRIu64 ". VIP connection: %p.",
         (void *)meta_request,
@@ -965,7 +965,7 @@ void aws_s3_meta_request_send_request_finish_default(
         }
     }
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Request %p finished with error code %d and response status %d",
         (void *)meta_request,

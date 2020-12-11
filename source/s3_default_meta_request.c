@@ -115,7 +115,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
 
     meta_request_default->is_get_request = aws_byte_cursor_eq_ignore_case(&request_method, &aws_http_method_get);
 
-    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
+    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
 
     return &meta_request_default->base;
 
@@ -170,7 +170,7 @@ static int s_s3_meta_request_default_next_request(
 
         request = aws_s3_request_new(meta_request, 0, part_number, request_flags);
 
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
     }
 
@@ -199,7 +199,7 @@ static int s_s3_meta_request_default_prepare_request(
 
     aws_http_message_release(message);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p: Meta Request prepared request %p", (void *)meta_request, (void *)request);
 
     return AWS_OP_SUCCESS;
