@@ -187,6 +187,8 @@ struct aws_s3_meta_request {
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
+    struct aws_event_loop *body_streaming_event_loop;
+
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
 

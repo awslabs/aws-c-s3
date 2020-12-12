@@ -1009,7 +1009,7 @@ void aws_s3_meta_request_send_request_finish_default(
             aws_s3_meta_request_unlock_synced_data(meta_request);
 
             if (!aws_linked_list_empty(&streaming_requests)) {
-                aws_s3_client_stream_response_body(client, &streaming_requests);
+                aws_s3_client_stream_response_body(client, meta_request, &streaming_requests);
             }
         }
 
@@ -1406,7 +1406,7 @@ unlock:
 
     aws_s3_client_release(client);
 
-    AWS_LOGF_INFO(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Meta request finished with error code %d (%s)",
         (void *)meta_request,

@@ -145,14 +145,8 @@ struct aws_s3_client {
         /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_request_work;
 
-        /* Requests that have body data that needs sent back to the caller on the body-streaming event loop */
-        struct aws_linked_list pending_body_streaming_requests;
-
         /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
-
-        /* Task for streaming request bodies back to the caller. */
-        struct aws_task body_streaming_task;
 
         /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
         uint32_t pending_request_count;
@@ -162,9 +156,6 @@ struct aws_s3_client {
 
         /* Whether or not work processing is currently scheduled. */
         uint32_t process_work_task_scheduled : 1;
-
-        /* Whether or not streaming request bodies to the caller is currently scheduled. */
-        uint32_t scheduled_body_streaming : 1;
 
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t cleaning_up : 1;
@@ -197,6 +188,9 @@ void aws_s3_client_notify_connection_finished(
 
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client);
 
-void aws_s3_client_stream_response_body(struct aws_s3_client *client, struct aws_linked_list *requests);
+void aws_s3_client_stream_response_body(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_linked_list *requests);
 
 #endif /* AWS_S3_CLIENT_IMPL_H */
