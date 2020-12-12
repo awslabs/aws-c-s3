@@ -57,7 +57,7 @@ static void s_s3_test_meta_request_body_callback(
     AWS_ASSERT(meta_request_test_results->expected_range_start == range_start);
     meta_request_test_results->expected_range_start += body->len;
 
-    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_start + body->len - 1);
+    AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_start + body->len - 1);
 }
 
 static void s_s3_test_meta_request_finish(
