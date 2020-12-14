@@ -645,7 +645,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    meta_request->client_data.body_streaming_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+    meta_request->client_data.body_streaming_event_loop =
+        aws_event_loop_group_get_next_loop(client->body_streaming_elg);
 
     aws_s3_client_push_meta_request(client, meta_request);
 

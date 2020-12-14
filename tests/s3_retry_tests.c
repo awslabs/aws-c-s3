@@ -609,7 +609,8 @@ static int s_s3_meta_request_prepare_request_fail_first(
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    int result = original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare);
+    int result =
+        original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare);
 
     if (result != AWS_OP_SUCCESS) {
         return result;
