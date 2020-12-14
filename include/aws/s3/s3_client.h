@@ -6,7 +6,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 
 struct aws_allocator;
