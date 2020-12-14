@@ -90,10 +90,13 @@ struct aws_s3_client {
      * internal ref count are both 0). */
     struct aws_ref_count internal_ref_count;
 
+    /* Client bootstrap for setting up connection managers. */
     struct aws_client_bootstrap *client_bootstrap;
 
+    /* Event loop on the client bootstrap ELG for processing work/dispatching requests. */
     struct aws_event_loop *process_work_event_loop;
 
+    /* Event loop group for streaming request bodies back to the user. */
     struct aws_event_loop_group *body_streaming_elg;
 
     /* Region of the S3 bucket. */
