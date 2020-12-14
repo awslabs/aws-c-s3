@@ -170,8 +170,9 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->process_work_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
 
-    size_t num_event_loops = aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
-    size_t num_streaming_threads = num_event_loops / 2;
+    uint16_t num_event_loops =
+        (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+    uint16_t num_streaming_threads = num_event_loops / 2;
 
     if (num_streaming_threads < 1) {
         num_streaming_threads = 1;
