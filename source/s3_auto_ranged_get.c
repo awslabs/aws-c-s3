@@ -48,7 +48,8 @@ static int s_s3_auto_ranged_get_next_request(
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare);
 
 static int s_s3_auto_ranged_get_header_block_done(
     struct aws_http_stream *stream,
@@ -220,11 +221,13 @@ static int s_s3_auto_ranged_get_next_request(
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
     (void)client;
+    (void)is_initial_prepare;
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);

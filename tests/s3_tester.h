@@ -218,7 +218,8 @@ int aws_s3_meta_request_next_request_empty(
 int aws_s3_meta_request_prepare_request_empty(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare);
 /****************************************/
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;

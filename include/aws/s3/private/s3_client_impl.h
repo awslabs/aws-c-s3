@@ -92,11 +92,9 @@ struct aws_s3_client {
 
     struct aws_client_bootstrap *client_bootstrap;
 
-    struct aws_event_loop *event_loop;
+    struct aws_event_loop *process_work_event_loop;
 
     struct aws_event_loop_group *body_streaming_elg;
-
-    struct aws_event_loop *body_streaming_event_loop;
 
     /* Region of the S3 bucket. */
     struct aws_string *region;
