@@ -324,9 +324,6 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(message);
 
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
     aws_s3_request_clean_up_send_data(request);
 
     request->send_data.message = message;
