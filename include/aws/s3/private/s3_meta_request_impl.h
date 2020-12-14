@@ -207,24 +207,33 @@ struct aws_s3_meta_request {
          * their own specific position (which should be in close proximity of one another). */
         struct aws_input_stream *initial_body_stream;
 
+        /* Priority queue for pending streaming requests.  We use a priority queue to keep parts in order so that we
+         * can stream them to the caller in order. */
         struct aws_priority_queue pending_body_streaming_requests;
 
+        /* Current state of the meta request. */
         enum aws_s3_meta_request_state state;
 
+        /* The next expected streaming part number needed to continue streaming part bodies.  (For example, this will
+         * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. */
         uint32_t next_streaming_part;
 
     } synced_data;
 
+    /* Anything in this structure should only ever be accessed by the client. */
     struct {
+        /* Event loop to be used for streaming the response bodies for this meta request.*/
         struct aws_event_loop *body_streaming_event_loop;
     } client_data;
 
+    /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */
     struct {
 
         /* Linked list node for the meta requests linked list in the client. */
         /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
         struct aws_linked_list_node node;
 
+        /* True if this meta request is currently in the client's list. */
         bool scheduled;
 
     } client_process_work_threaded_data;
