@@ -302,7 +302,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 request->part_number = auto_ranged_put->synced_data.next_part_number;
                 ++auto_ranged_put->synced_data.next_part_number;
 
-                if(aws_s3_meta_request_read_body_synced(meta_request, &request->request_body)) {
+                if (aws_s3_meta_request_read_body_synced(meta_request, &request->request_body)) {
                     error_occurred = true;
                 }
 
