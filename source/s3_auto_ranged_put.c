@@ -63,7 +63,8 @@ static int s_s3_auto_ranged_put_next_request(
 static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare);
 
 static int s_s3_auto_ranged_put_header_block_done(
     struct aws_http_stream *stream,
@@ -267,10 +268,12 @@ static int s_s3_auto_ranged_put_next_request(
 static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(client);
     (void)client;
+    (void)is_initial_prepare;
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
@@ -286,32 +289,20 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             bool error_occurred = false;
 
-            if (request->request_body.capacity == 0) {
+            if (is_initial_prepare) {
+
+                AWS_ASSERT(request->request_body.capacity == 0);
 
                 aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
-
                 s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-
-                struct aws_input_stream *initial_body_stream = meta_request->synced_data.initial_body_stream;
-                AWS_FATAL_ASSERT(initial_body_stream);
 
                 request->part_number = auto_ranged_put->synced_data.next_part_number;
                 ++auto_ranged_put->synced_data.next_part_number;
 
-                /* Copy it into our buffer. */
-                if (aws_input_stream_read(initial_body_stream, &request->request_body)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Could not read from initial body stream for request with tag %d for auto-ranged-put "
-                        "meta "
-                        "request.",
-                        (void *)meta_request,
-                        request->request_tag);
+                if(aws_s3_meta_request_read_body_synced(meta_request, &request->request_body)) {
                     error_occurred = true;
-                    goto unlock;
                 }
 
-            unlock:
                 s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
             }
 

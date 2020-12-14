@@ -14,11 +14,6 @@
 #include <aws/s3/s3.h>
 #include <inttypes.h>
 
-static struct aws_input_stream *s_s3_message_util_assign_body(
-    struct aws_allocator *allocator,
-    struct aws_byte_buf *byte_buf,
-    struct aws_http_message *out_message);
-
 static int s_s3_message_util_set_multipart_request_path(
     struct aws_allocator *allocator,
     const struct aws_string *upload_id,
@@ -90,7 +85,7 @@ struct aws_http_message *aws_s3_put_object_message_new(
         }
 
         if (buffer != NULL) {
-            if (s_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
+            if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
                 goto error_clean_up;
             }
         }
@@ -256,7 +251,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        s_s3_message_util_assign_body(allocator, body_buffer, message);
+        aws_s3_message_util_assign_body(allocator, body_buffer, message);
     }
 
     return message;
@@ -318,7 +313,7 @@ error_clean_request_path_buf:
 }
 
 /* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
-static struct aws_input_stream *s_s3_message_util_assign_body(
+struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message) {

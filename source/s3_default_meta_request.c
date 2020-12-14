@@ -19,6 +19,7 @@ struct aws_s3_meta_request_default {
     struct aws_s3_meta_request base;
 
     bool is_get_request;
+    uint64_t content_length;
 
     struct {
         enum aws_s3_meta_request_default_state state;
@@ -37,7 +38,8 @@ static int s_s3_meta_request_default_next_request(
 static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare);
 
 static int s_s3_meta_request_default_header_block_done(
     struct aws_http_stream *stream,
@@ -77,6 +79,7 @@ static void s_s3_meta_request_default_unlock_synced_data(struct aws_s3_meta_requ
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
+    uint64_t content_length,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
@@ -156,9 +159,7 @@ static int s_s3_meta_request_default_next_request(
     s_s3_meta_request_default_unlock_synced_data(meta_request_default);
 
     if (create_request) {
-
-        uint32_t request_flags =
-            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM;
+        uint32_t request_flags = AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS;
 
         if (meta_request_default->is_get_request) {
             request_flags |= AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY;
@@ -181,7 +182,8 @@ static int s_s3_meta_request_default_next_request(
 static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
@@ -190,8 +192,17 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
 
+    struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
+    AWS_PRECONDITION(meta_request_default);
+
     struct aws_http_message *message =
         aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message);
+
+    if (is_initial_prepare && meta_request_default->content_length > 0) {
+        aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
+        aws_s3_meta_request_read_body(meta_request, &request->request_body);
+        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
+    }
 
     aws_s3_request_setup_send_data(request, message);
 

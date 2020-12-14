@@ -167,7 +167,7 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_event_loop_group *event_loop_group = client_config->client_bootstrap->event_loop_group;
     aws_event_loop_group_acquire(event_loop_group);
 
-    client->event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
+    client->process_work_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
 
     size_t num_event_loops = aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
     size_t num_streaming_threads = num_event_loops / 2;
@@ -645,7 +645,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    meta_request->body_streaming_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+    meta_request->client_data.body_streaming_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
 
     aws_s3_client_push_meta_request(client, meta_request);
 
@@ -663,10 +663,44 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
     struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
     AWS_ASSERT(initial_message_headers);
 
+    uint64_t content_length = 0;
+    struct aws_byte_cursor content_length_cursor;
+    bool content_length_header_found = false;
+
+    if (!aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor)) {
+        struct aws_string *content_length_str = aws_string_new_from_cursor(client->allocator, &content_length_cursor);
+        char *content_length_str_end = NULL;
+
+        content_length = strtoull((const char *)content_length_str->bytes, &content_length_str_end, 10);
+        aws_string_destroy(content_length_str);
+
+        content_length_str = NULL;
+        content_length_header_found = true;
+    }
+
     /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+
+        /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
+         * this requires some additional logic.  For now just a default meta request. */
+        if (aws_http_headers_has(initial_message_headers, g_range_header_name)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create auto-ranged-get meta request; handling of ranged header is currently unsupported.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+
+        if (!content_length_header_found) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
 
         struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
 
@@ -677,58 +711,36 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
             return NULL;
         }
 
-        uint64_t object_size = 0;
-        struct aws_byte_cursor content_length_cursor;
-
-        if (aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
+        if (content_length < client->part_size) {
+            return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
         }
 
-        {
-            struct aws_string *content_length_str =
-                aws_string_new_from_cursor(client->allocator, &content_length_cursor);
-            char *content_length_str_end = NULL;
-
-            object_size = strtoull((const char *)content_length_str->bytes, &content_length_str_end, 10);
-            aws_string_destroy(content_length_str);
-
-            content_length_str = NULL;
-        }
-
-        if (object_size < client->part_size) {
-            return aws_s3_meta_request_default_new(client->allocator, client, options);
-        }
-
-        uint64_t part_size = object_size / g_max_num_upload_parts;
+        uint64_t part_size = content_length / g_max_num_upload_parts;
 
         if (part_size > client->max_part_size) {
-            return aws_s3_meta_request_default_new(client->allocator, client, options);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
+                ", but current maximum part size is %" PRIu64,
+                part_size,
+                client->max_part_size);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
         }
 
         if (part_size < client->part_size) {
             part_size = client->part_size;
         }
 
-        uint32_t num_parts = (uint32_t)(object_size / part_size);
+        uint32_t num_parts = (uint32_t)(content_length / part_size);
 
-        if ((object_size % part_size) > 0) {
+        if ((content_length % part_size) > 0) {
             ++num_parts;
         }
 
         return aws_s3_meta_request_auto_ranged_put_new(client->allocator, client, part_size, num_parts, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-
-        /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
-         * this requires some additional logic.  For now just a default meta request. */
-        if (aws_http_headers_has(initial_message_headers, g_range_header_name)) {
-            return aws_s3_meta_request_default_new(client->allocator, client, options);
-        }
-
-        return aws_s3_meta_request_default_new(client->allocator, client, options);
+        return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
     } else {
         AWS_FATAL_ASSERT(false);
     }
@@ -847,7 +859,7 @@ static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *
     aws_task_init(
         &client->synced_data.process_work_task, s_s3_client_process_work_task, client, "s3_client_process_work_task");
 
-    aws_event_loop_schedule_task_now(client->event_loop, &client->synced_data.process_work_task);
+    aws_event_loop_schedule_task_now(client->process_work_event_loop, &client->synced_data.process_work_task);
 
     client->synced_data.process_work_task_scheduled = true;
 }
@@ -1233,7 +1245,7 @@ void aws_s3_client_stream_response_body(
     aws_linked_list_move_all_back(&payload->requests, requests);
 
     aws_task_init(&payload->task, s_s3_client_body_streaming_task, payload, "s3_client_body_streaming_task");
-    aws_event_loop_schedule_task_now(meta_request->body_streaming_event_loop, &payload->task);
+    aws_event_loop_schedule_task_now(meta_request->client_data.body_streaming_event_loop, &payload->task);
 }
 
 static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -1246,7 +1258,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
     struct aws_s3_client *client = payload->client;
     AWS_PRECONDITION(client);
 
-    /* Client keeps a reference to the event loop group; a 'canceled' status should not happen.*/
+    /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
     while (!aws_linked_list_empty(&payload->requests)) {

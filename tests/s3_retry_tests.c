@@ -438,7 +438,8 @@ static int s_test_s3_meta_request_fail_next_request(struct aws_allocator *alloca
 static int s_s3_fail_first_prepare_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare) {
 
     AWS_ASSERT(client != NULL);
 
@@ -453,7 +454,7 @@ static int s_s3_fail_first_prepare_request(
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    return original_meta_request_vtable->prepare_request(meta_request, client, vip_connection);
+    return original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare);
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_prepare_request(
@@ -593,7 +594,8 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
 static int s_s3_meta_request_prepare_request_fail_first(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare) {
     AWS_ASSERT(meta_request);
     AWS_ASSERT(client);
     AWS_ASSERT(vip_connection);
@@ -607,7 +609,7 @@ static int s_s3_meta_request_prepare_request_fail_first(
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    int result = original_meta_request_vtable->prepare_request(meta_request, client, vip_connection);
+    int result = original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare);
 
     if (result != AWS_OP_SUCCESS) {
         return result;

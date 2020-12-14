@@ -23,6 +23,7 @@ struct aws_s3_request_options;
 struct aws_http_headers;
 struct aws_http_make_request_options;
 struct aws_retry_strategy;
+struct aws_byte_buffer;
 
 typedef void(aws_s3_meta_request_work_available_fn)(struct aws_s3_meta_request *meta_request, void *user_data);
 
@@ -39,9 +40,8 @@ enum aws_s3_meta_request_state {
 
 enum aws_s3_request_desc_flags {
     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM = 0x00000002,
-    AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY = 0x00000004,
-    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x00000020,
+    AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY = 0x00000002,
+    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x0000004,
 };
 
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
@@ -77,10 +77,6 @@ struct aws_s3_request {
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
     uint32_t record_response_headers : 1;
-
-    /* When true, this request is using the original body stream from the original request, and will not
-     * assume ownership of the memory for the stream. */
-    uint32_t use_initial_body_stream : 1;
 
     uint32_t stream_response_body : 1;
 
@@ -128,7 +124,8 @@ struct aws_s3_meta_request_vtable {
     int (*prepare_request)(
         struct aws_s3_meta_request *meta_request,
         struct aws_s3_client *client,
-        struct aws_s3_vip_connection *vip_connection);
+        struct aws_s3_vip_connection *vip_connection,
+        bool is_initial_prepare);
 
     void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
 
@@ -187,8 +184,6 @@ struct aws_s3_meta_request {
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
-    struct aws_event_loop *body_streaming_event_loop;
-
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
 
@@ -221,6 +216,10 @@ struct aws_s3_meta_request {
     } synced_data;
 
     struct {
+        struct aws_event_loop *body_streaming_event_loop;
+    } client_data;
+
+    struct {
 
         /* Linked list node for the meta requests linked list in the client. */
         /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
@@ -250,6 +249,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
+    uint64_t content_length,
     const struct aws_s3_meta_request_options *options);
 
 struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_request *meta_request);
@@ -260,7 +260,10 @@ int aws_s3_meta_request_make_request(
     struct aws_s3_vip_connection *vip_connection);
 
 AWS_EXTERN_C_BEGIN
+
+/* ******************************************** */
 /* BEGIN - Meant only for use by derived types. */
+/* ******************************************** */
 
 /* Initialize the base meta request structure. */
 AWS_S3_API
@@ -336,10 +339,16 @@ void aws_s3_meta_request_send_request_finish_default(
     struct aws_http_stream *stream,
     int error_code);
 
+int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
+
+int aws_s3_meta_request_read_body_synced(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
+/* ******************************************** */
 /* END - Meant only for use by derived types.  */
+/* ******************************************** */
 
+/* ******************************************** */
 /* BEGIN - Exposed only for use in tests */
-
+/* ******************************************** */
 AWS_S3_API
 void aws_s3_meta_request_handle_error(
     struct aws_s3_meta_request *meta_request,
@@ -361,7 +370,8 @@ AWS_S3_API
 struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_s3_meta_request *meta_request);
 
 AWS_EXTERN_C_END
-
+/* ******************************************** */
 /* END - Exposed only for use in tests */
+/* ******************************************** */
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */

@@ -315,7 +315,6 @@ struct aws_s3_request *aws_s3_request_new(
     request->request_tag = request_tag;
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
-    request->use_initial_body_stream = (flags & AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM) != 0;
     request->stream_response_body = (flags & AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY) != 0;
     request->part_size_response_body = (flags & AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY) != 0;
 
@@ -333,24 +332,6 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 
     request->send_data.message = message;
     aws_http_message_acquire(message);
-
-    if (request->use_initial_body_stream) {
-        aws_s3_meta_request_lock_synced_data(meta_request);
-
-        struct aws_input_stream *input_stream = meta_request->synced_data.initial_body_stream;
-
-        if (input_stream != NULL) {
-            aws_http_message_set_body_stream(message, input_stream);
-            meta_request->synced_data.initial_body_stream = NULL;
-        }
-
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-
-        /* TODO don't assume that the stream is seekable or that it started at the beginning. */
-        if (input_stream != NULL) {
-            aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
-        }
-    }
 }
 
 void s_s3_request_clean_up_send_data_message(struct aws_s3_request *request) {
@@ -365,21 +346,8 @@ void s_s3_request_clean_up_send_data_message(struct aws_s3_request *request) {
     request->send_data.message = NULL;
 
     struct aws_input_stream *input_stream = aws_http_message_get_body_stream(message);
-
-    if (input_stream != NULL) {
-        if (request->use_initial_body_stream) {
-            struct aws_s3_meta_request *meta_request = request->meta_request;
-            AWS_ASSERT(meta_request);
-
-            aws_s3_meta_request_lock_synced_data(meta_request);
-            meta_request->synced_data.initial_body_stream = input_stream;
-            aws_s3_meta_request_unlock_synced_data(meta_request);
-        } else {
-            aws_input_stream_destroy(input_stream);
-        }
-
-        input_stream = NULL;
-    }
+    aws_input_stream_destroy(input_stream);
+    input_stream = NULL;
 
     aws_http_message_set_body_stream(message, NULL);
     aws_http_message_release(message);
@@ -504,7 +472,7 @@ int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
-    if (vtable->prepare_request(meta_request, client, vip_connection)) {
+    if (vtable->prepare_request(meta_request, client, vip_connection, request->retry_token == NULL)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not prepare request %p", (void *)meta_request, (void *)request);
 
@@ -1429,4 +1397,34 @@ unlock:
 
         meta_request->finish_callback(meta_request, &meta_request_result, meta_request->user_data);
     }
+}
+
+int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(buffer);
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    int result = aws_s3_meta_request_read_body_synced(meta_request, buffer);
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    return result;
+}
+
+int aws_s3_meta_request_read_body_synced(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(buffer);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    struct aws_input_stream *initial_body_stream = meta_request->synced_data.initial_body_stream;
+    AWS_FATAL_ASSERT(initial_body_stream);
+
+    /* Copy it into our buffer. */
+    if (aws_input_stream_read(initial_body_stream, buffer)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not read from body stream.", (void *)meta_request);
+        return AWS_OP_ERR;
+    }
+
+    return AWS_OP_SUCCESS;
 }
