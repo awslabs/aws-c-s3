@@ -67,6 +67,8 @@ struct aws_s3_request {
     struct aws_byte_buf request_body;
 
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
+     * However, must currently be a valid part number (ie: greater than 0) if the response body is to be streamed to the
+     * caller.
      */
     uint32_t part_number;
 
@@ -78,8 +80,10 @@ struct aws_s3_request {
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
     uint32_t record_response_headers : 1;
 
+    /* When true, the response body will be streamed back to the caller. */
     uint32_t stream_response_body : 1;
 
+    /* When true, the response body buffer will be allocated in the size of a part. */
     uint32_t part_size_response_body : 1;
 
     /* Members of this structure will be repopulated each time the request is sent.  For example, If the request fails,
@@ -97,6 +101,7 @@ struct aws_s3_request {
          * true or when this response indicates an error. */
         struct aws_http_headers *response_headers;
 
+        /* Recorded response body of the request. */
         struct aws_byte_buf response_body;
 
         /* Returned response status of this request. */
@@ -152,6 +157,7 @@ struct aws_s3_meta_request_vtable {
 
     int (*stream_complete)(struct aws_http_stream *stream, struct aws_s3_vip_connection *vip_connection);
 
+    /* Called when an aws_s3_request created by this meta request has been destroyed. */
     void (*notify_request_destroyed)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
     /* Handle de-allocation of the meta request. */
@@ -295,6 +301,7 @@ struct aws_s3_request *aws_s3_request_new(
 
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */
+AWS_S3_API
 void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
 
 /* Clear out send_data members so that they can be repopulated before the next send. */

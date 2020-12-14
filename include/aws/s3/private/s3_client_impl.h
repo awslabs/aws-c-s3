@@ -29,6 +29,8 @@ typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 struct aws_s3_vip {
     struct aws_linked_list_node node;
 
+    /* True if this VIP is currently being cleaned up.  The work event loop will check for this flag and clean up
+     * related VIP connections. */
     struct aws_atomic_var cleaning_up;
 
     struct aws_ref_count internal_ref_count;
