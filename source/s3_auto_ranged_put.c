@@ -353,7 +353,8 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             AWS_FATAL_ASSERT(auto_ranged_put->synced_data.upload_id);
 
-            if (request->request_body.capacity == 0) {
+            if (is_initial_prepare) {
+                AWS_ASSERT(request->request_body.capacity == 0)
                 aws_byte_buf_init(
                     &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
             } else {
