@@ -201,8 +201,9 @@ static int s_s3_meta_request_default_prepare_request(
     if (is_initial_prepare && meta_request_default->content_length > 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
         aws_s3_meta_request_read_body(meta_request, &request->request_body);
-        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
     }
+
+    aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
 
     aws_s3_request_setup_send_data(request, message);
 
