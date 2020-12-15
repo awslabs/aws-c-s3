@@ -31,7 +31,7 @@ struct aws_s3_vip {
 
     /* True if this VIP is currently being cleaned up.  The work event loop will check for this flag and clean up
      * related VIP connections. */
-    struct aws_atomic_var cleaning_up;
+    struct aws_atomic_var active;
 
     struct aws_ref_count internal_ref_count;
 
@@ -161,7 +161,7 @@ struct aws_s3_client {
         uint32_t process_work_task_scheduled : 1;
 
         /* Whether or not the client has started cleaning up all of its resources */
-        uint32_t cleaning_up : 1;
+        uint32_t active : 1;
 
     } synced_data;
 
