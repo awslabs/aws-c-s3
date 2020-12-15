@@ -75,6 +75,7 @@ struct aws_s3_request {
     /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
      * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
      * be more contextual, like "first part" instead of just "part".) */
+    /* TODO we could potentially combine these with the bitfields below. */
     int request_tag;
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
