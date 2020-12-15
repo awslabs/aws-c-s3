@@ -72,9 +72,9 @@ struct aws_s3_request {
      */
     uint32_t part_number;
 
-    /* Tag that defines what the built request will actually consist of.  Request tags are different per meta
-     * request type, and do not necessarily map 1:1 with actual S3 API requests.  For example, they can be more
-     * contextual, like "first part" instead of just "part".) */
+    /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
+     * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
+     * be more contextual, like "first part" instead of just "part".) */
     int request_tag;
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */

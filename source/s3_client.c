@@ -47,6 +47,7 @@ static const uint32_t s_num_connections_per_vip = 10;
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
+/* TODO Provide more information on these values. */
 static const uint64_t s_default_part_size = 5 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 20 * 1024 * 1024;
 static const size_t s_default_dns_host_address_ttl_seconds = 2 * 60;
@@ -233,6 +234,8 @@ struct aws_s3_client *aws_s3_client_new(
     aws_linked_list_init(&client->threaded_data.idle_vip_connections);
     aws_linked_list_init(&client->threaded_data.meta_requests);
 
+    client->synced_data.active = true;
+
     if (client_config->retry_strategy != NULL) {
         aws_retry_strategy_acquire(client_config->retry_strategy);
         client->retry_strategy = client_config->retry_strategy;
@@ -304,7 +307,7 @@ static void s_s3_client_start_destroy(void *user_data) {
 
     s_s3_client_lock_synced_data(client);
 
-    client->synced_data.cleaning_up = true;
+    client->synced_data.active = false;
 
     if (client->synced_data.host_listener != NULL) {
         aws_host_resolver_remove_host_listener(
@@ -448,7 +451,7 @@ static struct aws_s3_vip *s_s3_client_vip_new(
         goto error_clean_up;
     }
 
-    aws_atomic_init_int(&vip->cleaning_up, 0);
+    aws_atomic_init_int(&vip->active, 1);
 
     /* Acquire internal reference for the HTTP Connection Manager. */
     s_s3_client_internal_acquire(client);
@@ -469,7 +472,7 @@ error_clean_up:
 static void s_s3_client_vip_destroy(struct aws_s3_vip *vip) {
     AWS_PRECONDITION(vip);
 
-    aws_atomic_store_int(&vip->cleaning_up, 1);
+    aws_atomic_store_int(&vip->active, 0);
 
     struct aws_s3_client *client = vip->owning_client;
     s_s3_client_lock_synced_data(client);
@@ -719,7 +722,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
             return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
         }
 
-        uint64_t part_size = content_length / g_max_num_upload_parts;
+        uint64_t part_size = content_length / g_s3_max_num_upload_parts;
 
         if (part_size > client->max_part_size) {
             AWS_LOGF_ERROR(
@@ -761,7 +764,7 @@ static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_a
 
     s_s3_client_lock_synced_data(client);
 
-    if (client->synced_data.cleaning_up) {
+    if (!client->synced_data.active) {
         goto unlock;
     }
 
@@ -995,10 +998,10 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections_updates);
         struct aws_s3_vip_connection *vip_connection = AWS_CONTAINER_OF(node, struct aws_s3_vip_connection, node);
 
-        size_t cleaning_up = aws_atomic_load_int(&vip_connection->owning_vip->cleaning_up);
+        size_t active = aws_atomic_load_int(&vip_connection->owning_vip->active);
 
         /* If this VIP connection is pending destruction, go ahead and clean it up now. */
-        if (cleaning_up) {
+        if (!active) {
             s_s3_vip_connection_destroy(client, vip_connection);
             continue;
         }
@@ -1032,7 +1035,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
             /* Grab the next request from the meta request. */
             request = aws_s3_meta_request_next_request(current_meta_request);
 
-            /* If the meta request is null, then this meta request is currently out requests, so remove it. */
+            /* If the request is null, then this meta request is currently out of requests, so remove it. */
             if (request == NULL) {
                 s_s3_client_remove_meta_request_threaded(client, current_meta_request);
                 current_meta_request = NULL;
