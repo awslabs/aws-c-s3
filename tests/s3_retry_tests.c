@@ -280,7 +280,8 @@ static int s_test_s3_meta_request_handle_error_exceed_retries(struct aws_allocat
         }
     }
 
-    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "ERROR IS %d (%s)", aws_last_error_or_unknown(), aws_error_str(aws_last_error_or_unknown()));
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT, "ERROR IS %d (%s)", aws_last_error_or_unknown(), aws_error_str(aws_last_error_or_unknown()));
 
     ASSERT_TRUE(request->retry_token != NULL);
 
