@@ -906,7 +906,7 @@ void aws_s3_meta_request_send_request_finish_default(
     int error_code) {
     AWS_PRECONDITION(vip_connection);
     AWS_PRECONDITION(vip_connection->owning_vip);
-  
+
     struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
     AWS_PRECONDITION(client);
 
