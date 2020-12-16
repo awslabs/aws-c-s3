@@ -57,4 +57,9 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *message);
 
+struct aws_input_stream *aws_s3_message_util_assign_body(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *byte_buf,
+    struct aws_http_message *out_message);
+
 #endif /* AWS_S3_REQUEST_H */

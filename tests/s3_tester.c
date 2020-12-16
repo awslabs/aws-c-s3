@@ -54,7 +54,10 @@ static void s_s3_test_meta_request_body_callback(
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     meta_request_test_results->received_body_size += body->len;
 
-    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_start + body->len - 1);
+    AWS_ASSERT(meta_request_test_results->expected_range_start == range_start);
+    meta_request_test_results->expected_range_start += body->len;
+
+    AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "Received range %" PRIu64 "-%" PRIu64, range_start, range_start + body->len - 1);
 }
 
 static void s_s3_test_meta_request_finish(
@@ -397,7 +400,8 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 }
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
-    .schedule_meta_request_work = aws_s3_client_schedule_meta_request_work_empty,
+    .push_meta_request = aws_s3_client_push_meta_request_empty,
+    .remove_meta_request = aws_s3_client_remove_meta_request_empty,
     .get_http_connection = aws_s3_client_get_http_connection_empty,
 };
 
@@ -437,7 +441,6 @@ static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_req
 }
 
 static struct aws_s3_meta_request_vtable s_s3_empty_meta_request_vtable = {
-    .has_work = aws_s3_meta_request_has_work_empty,
     .next_request = aws_s3_meta_request_next_request_empty,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = aws_s3_meta_request_prepare_request_empty,
@@ -488,6 +491,7 @@ struct aws_s3_meta_request *aws_s3_tester_meta_request_new(
     aws_s3_meta_request_init_base(
         tester->allocator,
         client,
+        0,
         &options,
         empty_meta_request,
         &s_s3_empty_meta_request_vtable,
@@ -921,28 +925,22 @@ int aws_s3_tester_validate_put_object_results(struct aws_s3_meta_request_test_re
     return AWS_OP_SUCCESS;
 }
 
-void aws_s3_client_schedule_meta_request_work_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request) {
+void aws_s3_client_push_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
+    (void)client;
+    (void)meta_request;
+}
+
+void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
     (void)client;
     (void)meta_request;
 }
 
 int aws_s3_client_get_http_connection_empty(
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_s3_client_get_http_connection_callback *callback,
-    void *user_data) {
+    struct aws_s3_vip_connection *vip_connection) {
     (void)client;
     (void)vip_connection;
-    (void)callback;
-    (void)user_data;
     return AWS_OP_SUCCESS;
-}
-
-bool aws_s3_meta_request_has_work_empty(const struct aws_s3_meta_request *meta_request) {
-    (void)meta_request;
-    return false;
 }
 
 int aws_s3_meta_request_next_request_empty(
@@ -956,9 +954,11 @@ int aws_s3_meta_request_next_request_empty(
 int aws_s3_meta_request_prepare_request_empty(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_request *request) {
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare) {
     (void)meta_request;
     (void)client;
-    (void)request;
+    (void)vip_connection;
+    (void)is_initial_prepare;
     return AWS_OP_ERR;
 }

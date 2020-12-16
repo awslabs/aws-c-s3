@@ -14,11 +14,6 @@
 #include <aws/s3/s3.h>
 #include <inttypes.h>
 
-static struct aws_input_stream *s_s3_message_util_assign_body(
-    struct aws_allocator *allocator,
-    struct aws_byte_buf *byte_buf,
-    struct aws_http_message *out_message);
-
 static int s_s3_message_util_set_multipart_request_path(
     struct aws_allocator *allocator,
     const struct aws_string *upload_id,
@@ -66,7 +61,7 @@ error_clean_up:
     return NULL;
 }
 
-/* Create a new put object request from an existing put object request.  Currently just optionall adds part information
+/* Create a new put object request from an existing put object request.  Currently just optionally adds part information
  * for a multipart upload. */
 struct aws_http_message *aws_s3_put_object_message_new(
     struct aws_allocator *allocator,
@@ -90,7 +85,7 @@ struct aws_http_message *aws_s3_put_object_message_new(
         }
 
         if (buffer != NULL) {
-            if (s_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
+            if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
                 goto error_clean_up;
             }
         }
@@ -212,7 +207,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     {
         aws_byte_buf_reset(body_buffer, false);
 
-        if (aws_byte_buf_append(body_buffer, &s_complete_payload_begin)) {
+        if (aws_byte_buf_append_dynamic(body_buffer, &s_complete_payload_begin)) {
             goto error_clean_up;
         }
 
@@ -223,17 +218,17 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
             AWS_FATAL_ASSERT(etag != NULL);
 
-            if (aws_byte_buf_append(body_buffer, &s_part_section_string_0)) {
+            if (aws_byte_buf_append_dynamic(body_buffer, &s_part_section_string_0)) {
                 goto error_clean_up;
             }
 
             struct aws_byte_cursor etag_byte_cursor = aws_byte_cursor_from_string(etag);
 
-            if (aws_byte_buf_append(body_buffer, &etag_byte_cursor)) {
+            if (aws_byte_buf_append_dynamic(body_buffer, &etag_byte_cursor)) {
                 goto error_clean_up;
             }
 
-            if (aws_byte_buf_append(body_buffer, &s_part_section_string_1)) {
+            if (aws_byte_buf_append_dynamic(body_buffer, &s_part_section_string_1)) {
                 goto error_clean_up;
             }
 
@@ -243,20 +238,20 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             struct aws_byte_cursor part_number_byte_cursor =
                 aws_byte_cursor_from_array(part_number_buffer, part_number_num_char);
 
-            if (aws_byte_buf_append(body_buffer, &part_number_byte_cursor)) {
+            if (aws_byte_buf_append_dynamic(body_buffer, &part_number_byte_cursor)) {
                 goto error_clean_up;
             }
 
-            if (aws_byte_buf_append(body_buffer, &s_part_section_string_2)) {
+            if (aws_byte_buf_append_dynamic(body_buffer, &s_part_section_string_2)) {
                 goto error_clean_up;
             }
         }
 
-        if (aws_byte_buf_append(body_buffer, &s_complete_payload_end)) {
+        if (aws_byte_buf_append_dynamic(body_buffer, &s_complete_payload_end)) {
             goto error_clean_up;
         }
 
-        s_s3_message_util_assign_body(allocator, body_buffer, message);
+        aws_s3_message_util_assign_body(allocator, body_buffer, message);
     }
 
     return message;
@@ -318,7 +313,7 @@ error_clean_request_path_buf:
 }
 
 /* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
-static struct aws_input_stream *s_s3_message_util_assign_body(
+struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message) {
@@ -326,21 +321,21 @@ static struct aws_input_stream *s_s3_message_util_assign_body(
     AWS_PRECONDITION(out_message);
     AWS_PRECONDITION(byte_buf);
 
-    struct aws_byte_cursor part_buffer_byte_cursor = aws_byte_cursor_from_buf(byte_buf);
+    struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(byte_buf);
     struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
 
     if (headers == NULL) {
         return NULL;
     }
 
-    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &part_buffer_byte_cursor);
+    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &buffer_byte_cursor);
 
     if (input_stream == NULL) {
         goto error_clean_up;
     }
 
     char content_length_buffer[64] = "";
-    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)part_buffer_byte_cursor.len);
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)buffer_byte_cursor.len);
     struct aws_byte_cursor content_length_cursor =
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
 

@@ -17,6 +17,7 @@ struct aws_http_stream;
 struct aws_http_message;
 struct aws_http_headers;
 struct aws_tls_connection_options;
+struct aws_input_stream;
 
 struct aws_s3_client;
 struct aws_s3_request;
@@ -68,17 +69,11 @@ struct aws_s3_client_config {
     /* Size of parts the files will be downloaded or uploaded in. */
     uint64_t part_size;
 
-    /* Timeout value, in milliseconds, used for each connection. */
-    uint32_t connection_timeout_ms;
+    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to.. */
+    uint64_t max_part_size;
 
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
-
-    /* Amount of throughput in Gbps to designate to each VIP. */
-    double throughput_per_vip_gbps;
-
-    /* The number of connections that each VIP will have. */
-    uint32_t num_connections_per_vip;
 
     /* Retry strategy to use. If NULL, a default retry strategy will be used. */
     struct aws_retry_strategy *retry_strategy;

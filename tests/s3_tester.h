@@ -74,6 +74,7 @@ struct aws_s3_meta_request_test_results {
 
     int headers_response_status;
     struct aws_http_headers *response_headers;
+    uint64_t expected_range_start;
     uint64_t received_body_size;
     int finished_response_status;
     int finished_error_code;
@@ -204,17 +205,11 @@ int aws_s3_tester_validate_put_object_results(struct aws_s3_meta_request_test_re
 
 /*****************************************/
 /* Used for mocking functions in vtables */
-void aws_s3_client_schedule_meta_request_work_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request);
+void aws_s3_client_push_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-int aws_s3_client_get_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_s3_client_get_http_connection_callback *callback,
-    void *user_data);
+void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-bool aws_s3_meta_request_has_work_empty(const struct aws_s3_meta_request *meta_request);
+int aws_s3_client_get_http_connection_empty(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
 int aws_s3_meta_request_next_request_empty(
     struct aws_s3_meta_request *meta_request,
@@ -223,7 +218,8 @@ int aws_s3_meta_request_next_request_empty(
 int aws_s3_meta_request_prepare_request_empty(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
-    struct aws_s3_request *request);
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare);
 /****************************************/
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
