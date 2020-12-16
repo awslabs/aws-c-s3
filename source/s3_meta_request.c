@@ -12,6 +12,7 @@
 #include <aws/auth/signing_result.h>
 #include <aws/common/string.h>
 #include <aws/io/event_loop.h>
+#include <aws/io/retry_strategy.h>
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
@@ -430,12 +431,9 @@ struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_reque
     /* If the meta request has been finished, don't initiate any additional work. */
     if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
         meta_request_already_finished = true;
-        goto unlock;
+    } else {
+        request = aws_s3_meta_request_retry_queue_pop_synced(meta_request);
     }
-
-    request = aws_s3_meta_request_retry_queue_pop_synced(meta_request);
-
-unlock:
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
@@ -478,6 +476,7 @@ int aws_s3_meta_request_make_request(
         goto call_finished_callback;
     }
 
+    /* Sign the newly created message. */
     if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
 
         goto call_finished_callback;
@@ -487,7 +486,7 @@ int aws_s3_meta_request_make_request(
 
 call_finished_callback:
 
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
+    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
 
     return AWS_OP_ERR;
 }
@@ -688,7 +687,7 @@ static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct 
 
 error_finish:
 
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
+    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
 }
 
 static int s_s3_meta_request_error_code_from_response_status(int response_status) {
@@ -857,8 +856,8 @@ static int s_s3_meta_request_incoming_body(
             "id=%p: Request %p could not append to response body due to error %d (%s)",
             (void *)meta_request,
             (void *)request,
-            aws_last_error(),
-            aws_error_str(aws_last_error()));
+            aws_last_error_or_unknown(),
+            aws_error_str(aws_last_error_or_unknown()));
 
         return AWS_OP_ERR;
     }
@@ -907,7 +906,7 @@ void aws_s3_meta_request_send_request_finish_default(
     int error_code) {
     AWS_PRECONDITION(vip_connection);
     AWS_PRECONDITION(vip_connection->owning_vip);
-
+  
     struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
     AWS_PRECONDITION(client);
 
@@ -1073,12 +1072,18 @@ static void s_s3_meta_request_queue_retry_with_token(
 
     enum aws_retry_error_type error_type = AWS_RETRY_ERROR_TYPE_TRANSIENT;
 
-    if (error_code == AWS_ERROR_S3_INTERNAL_ERROR) {
-        error_type = AWS_RETRY_ERROR_TYPE_SERVER_ERROR;
-    } else if (error_code == AWS_ERROR_S3_SLOW_DOWN) {
-        error_type = AWS_RETRY_ERROR_TYPE_THROTTLING;
-    } else {
-        error_type = AWS_RETRY_ERROR_TYPE_TRANSIENT;
+    switch (request->send_data.error_code) {
+        case AWS_ERROR_S3_INTERNAL_ERROR:
+            error_type = AWS_RETRY_ERROR_TYPE_SERVER_ERROR;
+            break;
+
+        case AWS_ERROR_S3_SLOW_DOWN:
+            error_type = AWS_RETRY_ERROR_TYPE_THROTTLING;
+            break;
+
+        default:
+            error_type = AWS_RETRY_ERROR_TYPE_TRANSIENT;
+            break;
     }
 
     request->retry_token = token;
@@ -1111,8 +1116,7 @@ static void s_s3_meta_request_queue_retry_with_token(
 error_ref_clean_up:
 
     aws_s3_request_release(request);
-
-    aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
+    aws_s3_meta_request_finish(meta_request, NULL, 0, error_code);
 }
 
 static void s_s3_meta_request_acquire_retry_token(
