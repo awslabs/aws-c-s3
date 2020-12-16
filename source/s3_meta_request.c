@@ -693,14 +693,21 @@ error_finish:
 static int s_s3_meta_request_error_code_from_response_status(int response_status) {
     int error_code = AWS_ERROR_UNKNOWN;
 
-    if (response_status == AWS_S3_RESPONSE_STATUS_SUCCESS || response_status == AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS) {
-        error_code = AWS_ERROR_SUCCESS;
-    } else if (response_status == AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR) {
-        error_code = AWS_ERROR_S3_INTERNAL_ERROR;
-    } else if (response_status == AWS_S3_RESPONSE_STATUS_SLOW_DOWN) {
-        error_code = AWS_ERROR_S3_SLOW_DOWN;
-    } else {
-        error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
+    switch (response_status) {
+        case AWS_S3_RESPONSE_STATUS_SUCCESS:
+        case AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS:
+        case AWS_S3_RESPONSE_STATUS_NO_CONTENT_SUCCESS:
+            error_code = AWS_ERROR_SUCCESS;
+            break;
+        case AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR:
+            error_code = AWS_ERROR_S3_INTERNAL_ERROR;
+            break;
+        case AWS_S3_RESPONSE_STATUS_SLOW_DOWN:
+            error_code = AWS_ERROR_S3_SLOW_DOWN;
+            break;
+        default:
+            error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
+            break;
     }
 
     return error_code;
