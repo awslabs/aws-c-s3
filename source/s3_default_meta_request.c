@@ -210,8 +210,6 @@ static int s_s3_meta_request_default_prepare_request(
 
     aws_http_message_release(message);
 
-    aws_http_message_release(message);
-
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p: Meta Request prepared request %p", (void *)meta_request, (void *)request);
 
