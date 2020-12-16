@@ -201,12 +201,31 @@ struct aws_s3_client *aws_s3_client_new(
         *((uint64_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
-    if (client_config->tls_connection_options != NULL) {
-
+    if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+        if (client->tls_connection_options == NULL) {
+            goto on_error;
+        }
 
-        aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
+        if (client_config->tls_connection_options != NULL) {
+            aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
+        } else {
+            struct aws_tls_ctx_options default_tls_ctx_options;
+            AWS_ZERO_STRUCT(default_tls_ctx_options);
+
+            aws_tls_ctx_options_init_default_client(&default_tls_ctx_options, allocator);
+
+            struct aws_tls_ctx *default_tls_ctx = aws_tls_client_ctx_new(allocator, &default_tls_ctx_options);
+            if (default_tls_ctx == NULL) {
+                goto on_error;
+            }
+
+            aws_tls_connection_options_init_from_ctx(client->tls_connection_options, default_tls_ctx);
+
+            aws_tls_ctx_release(default_tls_ctx);
+            aws_tls_ctx_options_clean_up(&default_tls_ctx_options);
+        }
     }
 
     if (client_config->throughput_target_gbps != 0.0) {
@@ -257,6 +276,12 @@ struct aws_s3_client *aws_s3_client_new(
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
 
     return client;
+
+on_error:
+
+    aws_s3_client_release(client);
+
+    return NULL;
 }
 
 void aws_s3_client_acquire(struct aws_s3_client *client) {
