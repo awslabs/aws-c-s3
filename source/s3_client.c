@@ -8,10 +8,6 @@
 #include "aws/s3/private/s3_util.h"
 
 #include <aws/auth/credentials.h>
-#include <aws/auth/signable.h>
-#include <aws/auth/signing.h>
-#include <aws/auth/signing_config.h>
-#include <aws/auth/signing_result.h>
 #include <aws/common/assert.h>
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
@@ -24,6 +20,7 @@
 #include <aws/io/host_resolver.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/io/socket.h>
+#include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 
 #include <inttypes.h>
@@ -123,18 +120,6 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 /* Callback for when a single request (not an entire meta request) has finished on a VIP connection. */
 static void s_s3_client_vip_connection_request_finished(void *user_data);
 
-/* Handles signing a message for the caller. */
-static int s_s3_client_sign_message(
-    struct aws_s3_client *client,
-    struct aws_http_message *message,
-    aws_s3_client_sign_callback *callback,
-    void *user_data);
-
-static void s_s3_vip_connection_request_signing_complete(
-    struct aws_signing_result *result,
-    int error_code,
-    void *user_data);
-
 /* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
 static int s_s3_client_get_http_connection(
     struct aws_s3_client *client,
@@ -160,7 +145,6 @@ static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory,
     .schedule_meta_request_work = s_s3_client_schedule_meta_request_work,
-    .sign_message = s_s3_client_sign_message,
     .get_http_connection = s_s3_client_get_http_connection,
 };
 
@@ -175,14 +159,6 @@ struct aws_s3_client *aws_s3_client_new(
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; client_bootstrap provided in options is invalid.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
-    }
-
-    if (client_config->credentials_provider == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "Cannot create client from client_config; credentials_provider provided in options is invalid.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -220,10 +196,6 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_event_loop_group_acquire(client_config->client_bootstrap->event_loop_group);
     client->event_loop = aws_event_loop_group_get_next_loop(client_config->client_bootstrap->event_loop_group);
-
-    /* Store credentials provider and grab a reference. */
-    client->credentials_provider = client_config->credentials_provider;
-    aws_credentials_provider_acquire(client->credentials_provider);
 
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
@@ -270,6 +242,10 @@ struct aws_s3_client *aws_s3_client_new(
     {
         double ideal_vip_count_double = client->throughput_target_gbps / client->throughput_per_vip_gbps;
         *((uint32_t *)&client->ideal_vip_count) = (uint32_t)ceil(ideal_vip_count_double);
+    }
+
+    if (client_config->signing_config) {
+        client->cached_signing_config = aws_cached_signing_config_new(client->allocator, client_config->signing_config);
     }
 
     aws_mutex_init(&client->synced_data.lock);
@@ -327,19 +303,6 @@ void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, stru
     AWS_PRECONDITION(client->vtable->schedule_meta_request_work);
 
     client->vtable->schedule_meta_request_work(client, meta_request);
-}
-
-int aws_s3_client_sign_message(
-    struct aws_s3_client *client,
-    struct aws_http_message *message,
-    aws_s3_client_sign_callback *callback,
-    void *user_data) {
-
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(client->vtable);
-    AWS_PRECONDITION(client->vtable->sign_message);
-
-    return client->vtable->sign_message(client, message, callback, user_data);
 }
 
 int aws_s3_client_get_http_connection(
@@ -410,9 +373,6 @@ static void s_s3_client_finish_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    aws_credentials_provider_release(client->credentials_provider);
-    client->credentials_provider = NULL;
-
     aws_string_destroy(client->region);
     client->region = NULL;
 
@@ -441,7 +401,7 @@ static void s_s3_client_finish_destroy(void *user_data) {
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
 
     aws_client_bootstrap_release(client->client_bootstrap);
-    client->client_bootstrap = NULL;
+    aws_cached_signing_config_destroy(client->cached_signing_config);
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
@@ -1191,113 +1151,6 @@ static void s_s3_client_vip_connection_request_finished(void *user_data) {
     s_s3_client_unlock_synced_data(client);
 
     s_s3_client_internal_release(client);
-}
-
-struct s3_client_siging_payload {
-    struct aws_s3_client *client;
-    struct aws_s3_vip_connection *vip_connection;
-    struct aws_signable *signable;
-    struct aws_http_message *message;
-    aws_s3_client_sign_callback *callback;
-    void *user_data;
-};
-
-/* Handles signing a message for the caller. */
-static int s_s3_client_sign_message(
-    struct aws_s3_client *client,
-    struct aws_http_message *message,
-    aws_s3_client_sign_callback *callback,
-    void *user_data) {
-    AWS_PRECONDITION(client)
-    AWS_PRECONDITION(message);
-
-    struct s3_client_siging_payload *payload =
-        aws_mem_acquire(client->allocator, sizeof(struct s3_client_siging_payload));
-
-    payload->client = client;
-    aws_s3_client_acquire(client);
-    payload->message = message;
-    payload->callback = callback;
-    payload->user_data = user_data;
-    payload->signable = aws_signable_new_http_request(client->allocator, message);
-
-    if (payload->signable == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not allocate signable for http request", (void *)client);
-        goto error_clean_up;
-    }
-
-    struct aws_date_time now;
-    aws_date_time_init_now(&now);
-
-    struct aws_byte_cursor service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
-
-    struct aws_signing_config_aws signing_config;
-    AWS_ZERO_STRUCT(signing_config);
-    signing_config.config_type = AWS_SIGNING_CONFIG_AWS;
-    signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4;
-    signing_config.credentials_provider = client->credentials_provider;
-    signing_config.region = aws_byte_cursor_from_array(client->region->bytes, client->region->len);
-    signing_config.service = service_name;
-    signing_config.date = now;
-    signing_config.signed_body_value = g_aws_signed_body_value_unsigned_payload;
-    signing_config.signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
-
-    if (aws_sign_request_aws(
-            client->allocator,
-            payload->signable,
-            (struct aws_signing_config_base *)&signing_config,
-            s_s3_vip_connection_request_signing_complete,
-            payload)) {
-
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not sign request", (void *)client);
-        goto error_clean_up;
-    }
-
-    return AWS_OP_SUCCESS;
-
-error_clean_up:
-
-    aws_s3_client_release(payload->client);
-    aws_mem_release(client->allocator, payload);
-
-    return AWS_OP_ERR;
-}
-
-static void s_s3_vip_connection_request_signing_complete(
-    struct aws_signing_result *signing_result,
-    int error_code,
-    void *user_data) {
-
-    struct s3_client_siging_payload *payload = user_data;
-    AWS_PRECONDITION(payload);
-
-    struct aws_s3_client *client = payload->client;
-    AWS_PRECONDITION(client);
-
-    struct aws_http_message *message = payload->message;
-    AWS_PRECONDITION(message);
-
-    if (error_code == AWS_ERROR_SUCCESS) {
-        if (signing_result == NULL) {
-            aws_raise_error(AWS_ERROR_UNKNOWN);
-            error_code = AWS_ERROR_UNKNOWN;
-
-        } else if (aws_apply_signing_result_to_http_request(message, client->allocator, signing_result)) {
-            error_code = aws_last_error();
-        }
-    }
-
-    /* Pass back the signed message. */
-    if (payload->callback != NULL) {
-        payload->callback(error_code, payload->user_data);
-    }
-
-    aws_signable_destroy(payload->signable);
-    payload->signable = NULL;
-
-    aws_s3_client_release(payload->client);
-    payload->client = NULL;
-    aws_mem_release(client->allocator, payload);
 }
 
 struct s3_client_get_http_connection_payload {

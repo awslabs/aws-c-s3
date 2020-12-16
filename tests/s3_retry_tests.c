@@ -240,7 +240,6 @@ static int s_test_s3_meta_request_handle_error_exceed_retries(struct aws_allocat
 
     struct aws_s3_client_config client_config = {
         .region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_region"),
-        .credentials_provider = tester.credentials_provider,
         .client_bootstrap = tester.client_bootstrap,
     };
 
@@ -417,15 +416,18 @@ static int s_test_s3_meta_request_fail_next_request(struct aws_allocator *alloca
     s_s3_retry_test_data_init(&retry_test_data);
     tester.user_data = &retry_test_data;
 
-    struct aws_s3_client_config client_config = {.region = g_test_s3_region, .part_size = 64 * 1024};
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, false));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -491,15 +493,19 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     s_s3_retry_test_data_init(&retry_test_data);
     tester.user_data = &retry_test_data;
 
-    struct aws_s3_client_config client_config = {.region = g_test_s3_region, .part_size = 64 * 1024};
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_prepare_request;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, true));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -511,14 +517,15 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     return 0;
 }
 
-static int s_s3_client_sign_message_fail_first(
-    struct aws_s3_client *client,
-    struct aws_http_message *message,
-    aws_s3_client_sign_callback *callback,
-    void *user_data) {
-    AWS_ASSERT(client != NULL);
+static int s_s3_meta_request_sign_request_fail_first(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection) {
+    AWS_ASSERT(meta_request != NULL);
 
-    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
+    AWS_ASSERT(results != NULL);
+
+    struct aws_s3_tester *tester = results->tester;
     AWS_ASSERT(tester != NULL);
 
     if (s_s3_retry_test_data_inc_counter1(tester->user_data) == 0) {
@@ -526,15 +533,34 @@ static int s_s3_client_sign_message_fail_first(
         return AWS_OP_ERR;
     }
 
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+
+    return original_meta_request_vtable->sign_request(meta_request, vip_connection);
+}
+
+static struct aws_s3_meta_request *s_s3_meta_request_factory_sign_request(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
 
-    return original_client_vtable->sign_message(client, message, callback, user_data);
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->sign_request = s_s3_meta_request_sign_request_fail_first;
+
+    return meta_request;
 }
 
-/* Test recovery when sign message fails. */
-AWS_TEST_CASE(test_s3_client_sign_message_fail, s_test_s3_client_sign_message_fail)
-static int s_test_s3_client_sign_message_fail(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_meta_request_sign_request_fail, s_test_s3_meta_request_sign_request_fail)
+static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -544,15 +570,19 @@ static int s_test_s3_client_sign_message_fail(struct aws_allocator *allocator, v
     s_s3_retry_test_data_init(&retry_test_data);
     tester.user_data = &retry_test_data;
 
-    struct aws_s3_client_config client_config = {.region = g_test_s3_region, .part_size = 64 * 1024};
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->sign_message = s_s3_client_sign_message_fail_first;
+    patched_client_vtable->meta_request_factory = s_s3_meta_request_factory_sign_request;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, true));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -653,15 +683,19 @@ static int s_test_s3_meta_request_send_request_finish_fail(struct aws_allocator 
     s_s3_retry_test_data_init(&retry_test_data);
     tester.user_data = &retry_test_data;
 
-    struct aws_s3_client_config client_config = {.region = g_test_s3_region, .part_size = 64 * 1024};
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_send_request_finish;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, true));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -730,9 +764,12 @@ static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allo
     s_s3_retry_test_data_init(&retry_test_data);
     tester.user_data = &retry_test_data;
 
-    struct aws_s3_client_config client_config = {.region = g_test_s3_region, .part_size = 5 * 1024 * 1024};
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
@@ -740,7 +777,8 @@ static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allo
 
     ASSERT_TRUE(client != NULL);
 
-    aws_s3_tester_send_put_object_meta_request(&tester, client, true);
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
 
     aws_s3_client_release(client);
     client = NULL;

@@ -32,9 +32,15 @@ typedef void(aws_s3_meta_request_write_body_finished_callback_fn)(
 
 typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
 
-enum aws_s3_meta_request_state { AWS_S3_META_REQUEST_STATE_ACTIVE, AWS_S3_META_REQUEST_STATE_FINISHED };
+enum aws_s3_meta_request_state {
+    AWS_S3_META_REQUEST_STATE_ACTIVE,
+    AWS_S3_META_REQUEST_STATE_FINISHED,
+};
 
-enum aws_s3_request_desc_flags { AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001 };
+enum aws_s3_request_desc_flags {
+    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
+    AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM = 0x00000002,
+};
 
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
 struct aws_s3_request {
@@ -67,6 +73,10 @@ struct aws_s3_request {
         /* When true, response headers from the request will be stored in the request's response_headers variable. */
         uint32_t record_response_headers : 1;
 
+        /* When true, this request is using the original body stream from the original request, and will not
+         * assume ownership of the memory for the stream. */
+        uint32_t use_initial_body_stream : 1;
+
     } desc_data;
 
     /* Members of this structure will be repopulated each time the request is sent.  For example, If the request fails,
@@ -76,6 +86,9 @@ struct aws_s3_request {
 
         /* The HTTP message to send for this request. */
         struct aws_http_message *message;
+
+        /* Signable created for the above message. */
+        struct aws_signable *signable;
 
         /* Recorded response headers for the request. Set only when the request desc has record_response_headers set to
          * true. */
@@ -131,6 +144,11 @@ struct aws_s3_meta_request_vtable {
         struct aws_s3_client *client,
         struct aws_s3_request *request);
 
+    void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
+
+    /* Sign the request on the given VIP Connection. */
+    int (*sign_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_vip_connection *vip_connection);
+
     /* Callbacks for all HTTP messages being processed by this meta request. */
     int (*incoming_headers)(
         struct aws_http_stream *stream,
@@ -170,6 +188,7 @@ struct aws_s3_meta_request {
     struct aws_ref_count internal_ref_count;
 
     void *impl;
+
     struct aws_s3_meta_request_vtable *vtable;
 
     /* Initial HTTP Message that this meta request is based on. */
@@ -177,6 +196,8 @@ struct aws_s3_meta_request {
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const uint64_t part_size;
+
+    struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Event loop used for scheduling.  Passed down by the creating client. */
     struct aws_event_loop *event_loop;
@@ -282,7 +303,10 @@ struct aws_s3_request *aws_s3_request_new(
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */
 AWS_S3_API
-void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
+void aws_s3_request_setup_send_data(
+    struct aws_s3_request *request,
+    struct aws_http_message *message,
+    struct aws_s3_part_buffer *part_buffer);
 
 /* Clear out send_data members so that they can be repopulated before the next send. */
 AWS_S3_API
@@ -318,6 +342,22 @@ void aws_s3_meta_request_schedule_work(struct aws_s3_meta_request *meta_request)
  * this function, it is necessary to release that reference. */
 AWS_S3_API
 struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
+
+AWS_S3_API
+void aws_s3_meta_request_init_signing_date_time_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_date_time *date_time);
+
+AWS_S3_API
+int aws_s3_meta_request_sign_request_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection);
+
+AWS_S3_API
+void aws_s3_meta_request_send_request_finish_default(
+    struct aws_s3_vip_connection *vip_connection,
+    struct aws_http_stream *stream,
+    int error_code);
 
 /* END - Meant only for use by derived types.  */
 

@@ -95,12 +95,6 @@ struct aws_s3_client_vtable {
 
     void (*schedule_meta_request_work)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-    int (*sign_message)(
-        struct aws_s3_client *client,
-        struct aws_http_message *message,
-        aws_s3_client_sign_callback *callback,
-        void *user_data);
-
     int (*get_http_connection)(
         struct aws_s3_client *client,
         struct aws_s3_vip_connection *vip_connection,
@@ -126,8 +120,6 @@ struct aws_s3_client {
 
     struct aws_event_loop *event_loop;
 
-    struct aws_credentials_provider *credentials_provider;
-
     /* Region of the S3 bucket. */
     struct aws_string *region;
 
@@ -135,8 +127,11 @@ struct aws_s3_client {
      * to meta requests for use. */
     const uint64_t part_size;
 
-    /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
+    /* TLS Options to be used for each connection. */
     struct aws_tls_connection_options *tls_connection_options;
+
+    /* Cached signing config. Can be NULL if no signing config was specified. */
+    struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Timeout value, in milliseconds, used for each connection. */
     const uint32_t connection_timeout_ms;
@@ -207,12 +202,6 @@ struct aws_s3_client {
 };
 
 void aws_s3_client_schedule_meta_request_work(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
-int aws_s3_client_sign_message(
-    struct aws_s3_client *client,
-    struct aws_http_message *message,
-    aws_s3_client_sign_callback *callback,
-    void *user_data);
 
 int aws_s3_client_get_http_connection(
     struct aws_s3_client *client,

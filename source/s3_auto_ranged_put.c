@@ -86,7 +86,10 @@ static int s_s3_auto_ranged_put_stream_complete(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .has_work = s_s3_auto_ranged_put_has_work,
     .next_request = s_s3_auto_ranged_put_next_request,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
+    .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
+    .sign_request = aws_s3_meta_request_sign_request_default,
     .incoming_headers = NULL,
     .incoming_headers_block_done = s_s3_auto_ranged_put_header_block_done,
     .incoming_body = s_s3_auto_ranged_put_incoming_body,
@@ -240,7 +243,7 @@ static int s_s3_auto_ranged_put_next_request(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT,
                     0,
-                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_USE_INITIAL_BODY_STREAM);
 
                 /* Wait for this request to be processed before quitting. */
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST;
@@ -361,9 +364,8 @@ static int s_s3_auto_ranged_put_prepare_request(
 
         /* If we're grabbing the whole object, just use the original message. */
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ENTIRE_OBJECT: {
-            message = meta_request->initial_request_message;
-
-            aws_http_message_acquire(message);
+            message =
+                aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message);
 
             AWS_FATAL_ASSERT(message);
             break;
@@ -480,7 +482,7 @@ static int s_s3_auto_ranged_put_prepare_request(
         }
     }
 
-    aws_s3_request_setup_send_data(request, message);
+    aws_s3_request_setup_send_data(request, message, part_buffer);
 
     aws_http_message_release(message);
 
@@ -490,8 +492,6 @@ static int s_s3_auto_ranged_put_prepare_request(
         (void *)meta_request,
         (void *)request,
         request->desc_data.part_number);
-
-    request->send_data.part_buffer = part_buffer;
 
     return AWS_OP_SUCCESS;
 

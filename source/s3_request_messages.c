@@ -355,11 +355,7 @@ static struct aws_input_stream *s_s3_message_util_assign_body(
 
 error_clean_up:
 
-    if (input_stream != NULL) {
-        aws_input_stream_destroy(input_stream);
-        input_stream = NULL;
-    }
-
+    aws_input_stream_destroy(input_stream);
     return NULL;
 }
 
