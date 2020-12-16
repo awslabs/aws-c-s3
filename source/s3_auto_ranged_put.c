@@ -140,7 +140,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         goto error_clean_up;
     }
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
 
     return &auto_ranged_put->base;
@@ -311,7 +311,7 @@ unlock:
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
     if (request != NULL) {
-        AWS_LOGF_TRACE(
+        AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Returning request %p for part %d of %d",
             (void *)meta_request,
@@ -484,7 +484,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
     aws_http_message_release(message);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Prepared request %p for part %d",
         (void *)meta_request,
@@ -673,7 +673,6 @@ static int s_s3_auto_ranged_put_stream_complete(
                 (void *)meta_request);
 
             aws_raise_error(AWS_ERROR_S3_MISSING_UPLOAD_ID);
-            aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_MISSING_UPLOAD_ID);
             return AWS_OP_ERR;
         }
 
@@ -686,7 +685,7 @@ static int s_s3_auto_ranged_put_stream_complete(
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         /* Create Multipart Upload finished successfully, so now we should have parts to send. */
-        aws_s3_meta_request_schedule_work(&auto_ranged_put->base);
+        aws_s3_meta_request_schedule_work(meta_request);
 
     } else if (request->desc_data.request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 

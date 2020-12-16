@@ -77,6 +77,9 @@ struct aws_s3_client_config {
     /* The number of connections that each VIP will have. */
     uint32_t num_connections_per_vip;
 
+    /* Retry strategy to use. If NULL, a default retry strategy will be used. */
+    struct aws_retry_strategy *retry_strategy;
+
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;

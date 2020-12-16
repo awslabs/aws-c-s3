@@ -587,7 +587,7 @@ struct aws_s3_meta_request_vtable *aws_s3_tester_patch_meta_request_vtable(
     memcpy(
         &patch_array_ptr->patched_vtable, patch_array_ptr->original_vtable, sizeof(struct aws_s3_meta_request_vtable));
 
-    /* Point the meta reqeust at the new vtable. */
+    /* Point the meta request at the new vtable. */
     meta_request->vtable = &patch_array_ptr->patched_vtable;
 
     if (out_index) {
@@ -759,7 +759,7 @@ int aws_s3_tester_validate_get_object_results(struct aws_s3_meta_request_test_re
 
     aws_string_destroy(content_length_str);
 
-    AWS_LOGF_TRACE(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
         "Content length in header is %" PRIu64 " and received body size is %" PRIu64,
         content_length,

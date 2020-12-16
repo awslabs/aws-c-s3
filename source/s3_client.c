@@ -22,6 +22,7 @@
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
+#include <aws/io/retry_strategy.h>
 #include <aws/io/socket.h>
 #include <aws/io/tls_channel_handler.h>
 
@@ -39,6 +40,7 @@ static const uint32_t s_default_connection_timeout_ms = 3000;
 static const double s_default_throughput_target_gbps = 5.0;
 static const double s_default_throughput_per_vip_gbps = 6.25; // TODO provide analysis on how we reached this constant.
 static const uint32_t s_default_num_connections_per_vip = 10;
+static const uint32_t s_default_max_retries = 5;
 
 struct aws_s3_client_work {
     struct aws_linked_list_node node;
@@ -282,6 +284,22 @@ struct aws_s3_client *aws_s3_client_new(
 
     s_s3_part_buffer_pool_init(&client->synced_data.part_buffer_pool);
 
+    if (client_config->retry_strategy != NULL) {
+        aws_retry_strategy_acquire(client_config->retry_strategy);
+        client->retry_strategy = client_config->retry_strategy;
+    } else {
+        struct aws_exponential_backoff_retry_options backoff_retry_options = {
+            .el_group = client_config->client_bootstrap->event_loop_group,
+            .max_retries = s_default_max_retries,
+        };
+
+        struct aws_standard_retry_options retry_options = {
+            .backoff_retry_options = backoff_retry_options,
+        };
+
+        client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
+    }
+
     /* Initialize shutdown options and tracking. */
     client->shutdown_callback = client_config->shutdown_callback;
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
@@ -417,6 +435,8 @@ static void s_s3_client_finish_destroy(void *user_data) {
     AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));
 
     s_s3_client_destroy_part_buffer_pool(client);
+
+    aws_retry_strategy_release(client->retry_strategy);
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
 
@@ -771,10 +791,9 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    struct aws_byte_cursor host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
     struct aws_byte_cursor host_header_value;
 
-    if (aws_http_headers_get(message_headers, host_header_name, &host_header_value)) {
+    if (aws_http_headers_get(message_headers, g_host_header_name, &host_header_value)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
