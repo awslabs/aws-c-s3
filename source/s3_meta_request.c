@@ -476,29 +476,17 @@ int aws_s3_meta_request_make_request(
         goto call_finished_callback;
     }
 
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_META_REQUEST, "id=%p Initiating work for request %p", (void *)meta_request, (void *)request);
-
-    request->send_data.finished_callback = finished_callback;
-    request->send_data.user_data = user_data;
-
-    aws_s3_request_acquire(request);
-    vip_connection->work_data.request = request;
-
-    /* Release initial reference of request to give complete ownership to the work_data. */
-    aws_s3_request_release(vip_connection->work_data.request);
-
-    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Signing request %p", (void *)meta_request, (void *)request);
-
     /* Sign the newly created message. */
     if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
 
         goto call_finished_callback;
     }
 
+    return AWS_OP_SUCCESS;
+
 call_finished_callback:
 
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
+    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
 
     return AWS_OP_ERR;
 }
@@ -699,7 +687,7 @@ static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct 
 
 error_finish:
 
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error());
+    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
 }
 
 static int s_s3_meta_request_error_code_from_response_status(int response_status) {
@@ -861,8 +849,8 @@ static int s_s3_meta_request_incoming_body(
             "id=%p: Request %p could not append to response body due to error %d (%s)",
             (void *)meta_request,
             (void *)request,
-            aws_last_error(),
-            aws_error_str(aws_last_error()));
+            aws_last_error_or_unknown(),
+            aws_error_str(aws_last_error_or_unknown()));
 
         return AWS_OP_ERR;
     }
@@ -1035,10 +1023,6 @@ static void s_s3_meta_request_retry_ready(struct aws_retry_token *token, int err
         (void *)request,
         (void *)request->retry_token);
 
-    /* TODO make it so that the meta request reference isn't released on the retry queue push, making this
-     * reference add unnecessary. */
-    aws_s3_meta_request_acquire(meta_request);
-
     /* Push the request into the retry queue so that it can actually be retried. */
     aws_s3_meta_request_retry_queue_push(meta_request, request);
 
@@ -1047,7 +1031,6 @@ static void s_s3_meta_request_retry_ready(struct aws_retry_token *token, int err
 
 clean_up:
 
-    aws_s3_meta_request_release(meta_request);
     aws_s3_request_release(request);
 }
 
@@ -1091,8 +1074,6 @@ static void s_s3_meta_request_queue_retry_with_token(
             error_type = AWS_RETRY_ERROR_TYPE_THROTTLING;
             break;
 
-        case AWS_ERROR_S3_NO_PART_BUFFER:
-            /* FALL THROUGH INTENTIONAL */
         default:
             error_type = AWS_RETRY_ERROR_TYPE_TRANSIENT;
             break;

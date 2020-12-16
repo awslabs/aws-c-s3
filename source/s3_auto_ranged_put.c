@@ -136,6 +136,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         goto error_clean_up;
     }
 
+    auto_ranged_put->synced_data.total_num_parts = num_parts;
+    auto_ranged_put->synced_data.next_part_number = 1;
+
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
 
