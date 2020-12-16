@@ -985,14 +985,6 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     const uint32_t max_requests_in_flight =
         client->ideal_vip_count * s_num_connections_per_vip * max_requests_multiplier;
 
-    uint32_t num_meta_requests = 0;
-
-    for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
-         node != aws_linked_list_end(&client->threaded_data.meta_requests);
-         node = aws_linked_list_next(node)) {
-        ++num_meta_requests;
-    }
-
     while (!aws_linked_list_empty(&vip_connections_updates)) {
 
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections_updates);
@@ -1058,22 +1050,6 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
             s_s3_client_get_http_connection(client, vip_connection);
         }
     }
-
-    uint32_t num_idle_vip_conns = 0;
-
-    for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.idle_vip_connections);
-         node != aws_linked_list_end(&client->threaded_data.idle_vip_connections);
-         node = aws_linked_list_next(node)) {
-        ++num_idle_vip_conns;
-    }
-
-    AWS_LOGF_INFO(
-        AWS_LS_S3_CLIENT,
-        "id=%p Number of meta requests %d, requests in flight %d, idle conns %d",
-        (void *)client,
-        num_meta_requests,
-        client->threaded_data.num_requests_in_flight,
-        num_idle_vip_conns);
 
     s_s3_client_internal_release(client);
 }
