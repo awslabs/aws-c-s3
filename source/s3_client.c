@@ -102,11 +102,11 @@ static void s_s3_client_remove_meta_request_default(
     struct aws_s3_meta_request *meta_request);
 
 /* Default remove-meta-request function to be used in the client vtable. */
-static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+static void s_s3_client_get_http_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
 /* Handles getting an HTTP connection for the caller, given the vip_connection reference.  (Calls the corresponding
  * virtual function to do so.) */
-static int s_s3_client_get_http_connection_default(
+static void s_s3_client_get_http_connection_default(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
@@ -301,7 +301,9 @@ void aws_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_
     client->vtable->remove_meta_request(client, meta_request);
 }
 
-static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+static void s_s3_client_get_http_connection(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection) {
 
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->vtable);
@@ -311,7 +313,7 @@ static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct 
      * made. */
     s_s3_client_internal_acquire(client);
 
-    return client->vtable->get_http_connection(client, vip_connection, s_s3_client_on_acquire_http_connection);
+    client->vtable->get_http_connection(client, vip_connection, s_s3_client_on_acquire_http_connection);
 }
 
 static void s_s3_client_start_destroy(void *user_data) {
@@ -1075,7 +1077,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 }
 
 /* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
-static int s_s3_client_get_http_connection_default(
+static void s_s3_client_get_http_connection_default(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback) {
@@ -1126,8 +1128,6 @@ static int s_s3_client_get_http_connection_default(
         aws_http_connection_manager_acquire_connection(
             http_connection_manager, on_connection_acquired_callback, vip_connection);
     }
-
-    return AWS_OP_SUCCESS;
 }
 
 static void s_s3_client_on_acquire_http_connection(

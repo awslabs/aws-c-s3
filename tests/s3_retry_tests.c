@@ -359,12 +359,11 @@ static int s_test_s3_meta_request_handle_error_fail(struct aws_allocator *alloca
     return 0;
 }
 
-static int s_s3_client_get_http_connection_fail(
+static void s_s3_client_get_http_connection_fail(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn callback) {
     callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
-    return AWS_OP_ERR;
 }
 
 AWS_TEST_CASE(test_s3_meta_request_get_connection_fail, s_test_s3_meta_request_get_connection_fail)

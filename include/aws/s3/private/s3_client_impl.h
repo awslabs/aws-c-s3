@@ -73,7 +73,7 @@ struct aws_s3_client_vtable {
 
     void (*remove_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-    int (*get_http_connection)(
+    void (*get_http_connection)(
         struct aws_s3_client *client,
         struct aws_s3_vip_connection *vip_connection,
         aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
