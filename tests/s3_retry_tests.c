@@ -362,7 +362,10 @@ static int s_test_s3_meta_request_handle_error_fail(struct aws_allocator *alloca
 static void s_s3_client_get_http_connection_fail(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn callback) {
+    aws_http_connection_manager_on_connection_setup_fn *callback) {
+    AWS_ASSERT(callback);
+    (void)client;
+    (void)vip_connection;
     callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
 }
 
