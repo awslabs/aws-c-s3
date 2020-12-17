@@ -91,31 +91,37 @@ static void s_s3_client_schedule_meta_request_work(
     struct aws_s3_meta_request *meta_request,
     enum aws_s3_meta_request_work_op op);
 
+/* Default push-meta-request function to be used in the client vtable. */
 static void s_s3_client_push_meta_request_default(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request);
 
+/* Default remove-meta-request function to be used in the client vtable. */
 static void s_s3_client_remove_meta_request_default(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request);
 
-static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
-static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
-
-static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
-
+/* Default remove-meta-request function to be used in the client vtable. */
 static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
-/* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
+/* Handles getting an HTTP connection for the caller, given the vip_connection reference.  (Calls the corresponding
+ * virtual function to do so.) */
 static int s_s3_client_get_http_connection_default(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
 
+/* Callback which handles the HTTP connection retrived by get_http_connection. */
 static void s_s3_client_on_acquire_http_connection(
     struct aws_http_connection *http_connection,
     int error_code,
     void *user_data);
+
+static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
+
+static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
+static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
 static int s_s3_client_start_resolving_addresses_synced(struct aws_s3_client *client);
 
@@ -301,6 +307,8 @@ static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct 
     AWS_PRECONDITION(client->vtable);
     AWS_PRECONDITION(client->vtable->get_http_connection);
 
+    /* Acquire internal ref to keep client from cleaning up until the s_s3_client_on_acquire_http_connection callback is
+     * made. */
     s_s3_client_internal_acquire(client);
 
     return client->vtable->get_http_connection(client, vip_connection, s_s3_client_on_acquire_http_connection);
