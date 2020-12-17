@@ -209,7 +209,7 @@ void aws_s3_client_push_meta_request_empty(struct aws_s3_client *client, struct 
 
 void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-int aws_s3_client_get_http_connection_empty(
+void aws_s3_client_get_http_connection_empty(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *callback);
