@@ -80,7 +80,7 @@ static struct aws_s3_vip *s_s3_find_vip(
     const struct aws_linked_list *vip_list,
     const struct aws_byte_cursor *host_address);
 
-static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
+static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
 
@@ -91,9 +91,13 @@ static void s_s3_client_schedule_meta_request_work(
     struct aws_s3_meta_request *meta_request,
     enum aws_s3_meta_request_work_op op);
 
-static void s_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+static void s_s3_client_push_meta_request_default(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request);
 
-static void s_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
+static void s_s3_client_remove_meta_request_default(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request);
 
 static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
 static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
@@ -101,12 +105,14 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
 static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+
 /* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
 static int s_s3_client_get_http_connection_default(
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_vip_connection *vip_connection,
+    aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
 
-static void s_s3_client_vip_connection_on_acquire_request_connection(
+static void s_s3_client_on_acquire_http_connection(
     struct aws_http_connection *http_connection,
     int error_code,
     void *user_data);
@@ -122,9 +128,9 @@ static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
 }
 
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
-    .meta_request_factory = s_s3_client_meta_request_factory,
-    .push_meta_request = s_s3_client_push_meta_request,
-    .remove_meta_request = s_s3_client_remove_meta_request,
+    .meta_request_factory = s_s3_client_meta_request_factory_default,
+    .push_meta_request = s_s3_client_push_meta_request_default,
+    .remove_meta_request = s_s3_client_remove_meta_request_default,
     .get_http_connection = s_s3_client_get_http_connection_default,
 };
 
@@ -295,7 +301,9 @@ static int s_s3_client_get_http_connection(struct aws_s3_client *client, struct 
     AWS_PRECONDITION(client->vtable);
     AWS_PRECONDITION(client->vtable->get_http_connection);
 
-    return client->vtable->get_http_connection(client, vip_connection);
+    s_s3_client_internal_acquire(client);
+
+    return client->vtable->get_http_connection(client, vip_connection, s_s3_client_on_acquire_http_connection);
 }
 
 static void s_s3_client_start_destroy(void *user_data) {
@@ -661,7 +669,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     return meta_request;
 }
 
-static struct aws_s3_meta_request *s_s3_client_meta_request_factory(
+static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(client);
@@ -846,11 +854,15 @@ static void s_s3_client_schedule_meta_request_work(
     s_s3_client_unlock_synced_data(client);
 }
 
-static void s_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
+static void s_s3_client_push_meta_request_default(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request) {
     s_s3_client_schedule_meta_request_work(client, meta_request, AWS_S3_META_REQUEST_WORK_OP_PUSH);
 }
 
-static void s_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
+static void s_s3_client_remove_meta_request_default(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request) {
     s_s3_client_schedule_meta_request_work(client, meta_request, AWS_S3_META_REQUEST_WORK_OP_REMOVE);
 }
 
@@ -1057,11 +1069,10 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 /* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
 static int s_s3_client_get_http_connection_default(
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_vip_connection *vip_connection,
+    aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
-
-    s_s3_client_internal_acquire(client);
 
     struct aws_http_connection **http_connection = &vip_connection->http_connection;
     uint32_t *connection_request_count = &vip_connection->request_count;
@@ -1102,16 +1113,16 @@ static int s_s3_client_get_http_connection_default(
     }
 
     if (*http_connection != NULL) {
-        s_s3_client_vip_connection_on_acquire_request_connection(*http_connection, AWS_ERROR_SUCCESS, vip_connection);
+        on_connection_acquired_callback(*http_connection, AWS_ERROR_SUCCESS, vip_connection);
     } else {
         aws_http_connection_manager_acquire_connection(
-            http_connection_manager, s_s3_client_vip_connection_on_acquire_request_connection, vip_connection);
+            http_connection_manager, on_connection_acquired_callback, vip_connection);
     }
 
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_client_vip_connection_on_acquire_request_connection(
+static void s_s3_client_on_acquire_http_connection(
     struct aws_http_connection *incoming_http_connection,
     int error_code,
     void *user_data) {
