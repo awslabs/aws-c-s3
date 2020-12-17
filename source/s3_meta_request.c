@@ -1033,9 +1033,6 @@ static void s_s3_meta_request_retry_ready(struct aws_retry_token *token, int err
     /* Push the request into the retry queue so that it can actually be retried. */
     aws_s3_meta_request_retry_queue_push(meta_request, request);
 
-    /* Tell the client we have additional work that can be done. */
-    aws_s3_meta_request_push_to_client(meta_request);
-
 clean_up:
 
     aws_s3_request_release(request);
@@ -1279,6 +1276,9 @@ void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_reque
 
 unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    /* Tell the client we have additional work that can be done. */
+    aws_s3_meta_request_push_to_client(meta_request);
 }
 
 struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request) {

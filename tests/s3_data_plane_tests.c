@@ -13,6 +13,7 @@
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
+#include <aws/io/tls_channel_handler.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
@@ -109,7 +110,55 @@ static int s_test_s3_get_object(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, true));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_get_object_tls, s_test_s3_get_object_tls)
+static int s_test_s3_get_object_tls(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_tls_ctx_options tls_context_options;
+    aws_tls_ctx_options_init_default_client(&tls_context_options, allocator);
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
+
+    struct aws_tls_connection_options tls_connection_options;
+    aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+
+    struct aws_string *endpoint =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
+
+    tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .tls_connection_options = &tls_connection_options,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+
+    aws_string_destroy(endpoint);
+    aws_tls_ctx_release(context);
+    aws_tls_connection_options_clean_up(&tls_connection_options);
+    aws_tls_ctx_options_clean_up(&tls_context_options);
 
     aws_s3_client_release(client);
     client = NULL;
@@ -244,7 +293,8 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, true));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -354,6 +404,53 @@ static int s_test_s3_put_object(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
         &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_tls, s_test_s3_put_object_tls)
+static int s_test_s3_put_object_tls(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_tls_ctx_options tls_context_options;
+    aws_tls_ctx_options_init_default_client(&tls_context_options, allocator);
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
+
+    struct aws_tls_connection_options tls_connection_options;
+    aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+
+    struct aws_string *endpoint =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
+
+    tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+        .tls_connection_options = &tls_connection_options,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+
+    aws_string_destroy(endpoint);
+    aws_tls_ctx_release(context);
+    aws_tls_connection_options_clean_up(&tls_connection_options);
+    aws_tls_ctx_options_clean_up(&tls_context_options);
 
     aws_s3_client_release(client);
     client = NULL;

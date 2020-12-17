@@ -14,6 +14,7 @@
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
+#include <aws/io/tls_channel_handler.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
@@ -352,6 +353,54 @@ static int s_test_s3_meta_request_handle_error_fail(struct aws_allocator *alloca
         aws_http_message_release(request_message);
         aws_s3_meta_request_release(meta_request);
     }
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_meta_request_get_connection_fail, s_test_s3_meta_request_get_connection_fail)
+static int s_test_s3_meta_request_get_connection_fail(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_tls_ctx_options tls_context_options;
+    aws_tls_ctx_options_init_default_client(&tls_context_options, allocator);
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
+
+    struct aws_tls_connection_options tls_connection_options;
+    aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+
+    /* Intentionally don't set up the endpoint in the tls options to cause a negotiation failure.*/
+    /*struct aws_string *endpoint =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);*/
+    struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_c_str("wrong_endpoint");
+
+    tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .tls_connection_options = &tls_connection_options,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    /* Don't specify EXPECT SUCCESS flag for  aws_s3_tester_send_get_object_meta_request to expect a failure. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0));
+
+    // aws_string_destroy(endpoint);
+    aws_tls_ctx_release(context);
+    aws_tls_connection_options_clean_up(&tls_connection_options);
+    aws_tls_ctx_options_clean_up(&tls_context_options);
+
+    aws_s3_client_release(client);
+    client = NULL;
 
     aws_s3_tester_clean_up(&tester);
 

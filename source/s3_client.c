@@ -990,10 +990,10 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections_updates);
         struct aws_s3_vip_connection *vip_connection = AWS_CONTAINER_OF(node, struct aws_s3_vip_connection, node);
 
-        size_t active = aws_atomic_load_int(&vip_connection->owning_vip->active);
+        size_t owning_vip_active = aws_atomic_load_int(&vip_connection->owning_vip->active);
 
         /* If this VIP connection is pending destruction, go ahead and clean it up now. */
-        if (!active) {
+        if (owning_vip_active == 0) {
             s_s3_vip_connection_destroy(client, vip_connection);
             continue;
         }
@@ -1137,7 +1137,7 @@ static void s_s3_client_vip_connection_on_acquire_request_connection(
             error_code,
             aws_error_str(error_code));
 
-        goto clean_up;
+        goto error_clean_up;
     }
 
     struct aws_http_connection_manager *http_connection_manager = vip_connection->owning_vip->http_connection_manager;
@@ -1172,12 +1172,31 @@ static void s_s3_client_vip_connection_on_acquire_request_connection(
 
     aws_s3_meta_request_make_request(meta_request, client, vip_connection);
 
-clean_up:
+    /* Get rid of our internal reference that we acquired for the lifetime of this async operation. */
+    s_s3_client_internal_release(client);
 
+    return;
+
+error_clean_up:
+
+    /* Tell the meta request it can retry its request. */
+    aws_s3_meta_request_handle_error(meta_request, vip_connection->request, error_code);
+
+    /* Detach the request from the vip connection structure.*/
+    aws_s3_request_release(vip_connection->request);
+    vip_connection->request = NULL;
+
+    /* Throw the vip connection structure back. */
+    s_s3_client_lock_synced_data(client);
+    aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
+    s_s3_client_schedule_process_work_task_synced(client);
+    s_s3_client_unlock_synced_data(client);
+
+    /* Get rid of our internal reference that we acquired for the lifetime of this async operation. */
     s_s3_client_internal_release(client);
 }
 
-/* Called by the meta request when it has finished using this VIP connection for a single request. */
+/* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection) {
@@ -1198,6 +1217,7 @@ void aws_s3_client_notify_connection_finished(
     s_s3_client_unlock_synced_data(client);
 }
 
+/* Called by aws_s3_request when it has finished being destroyed */
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client) {
     s_s3_client_lock_synced_data(client);
     ++client->synced_data.pending_request_count;
