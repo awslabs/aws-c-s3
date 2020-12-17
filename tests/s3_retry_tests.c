@@ -420,7 +420,7 @@ static int s_test_s3_meta_request_get_connection_fail(struct aws_allocator *allo
     /* Don't specify EXPECT SUCCESS flag for  aws_s3_tester_send_get_object_meta_request to expect a failure. */
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0));
 
-    //aws_string_destroy(endpoint);
+    // aws_string_destroy(endpoint);
     aws_tls_ctx_release(context);
     aws_tls_connection_options_clean_up(&tls_connection_options);
     aws_tls_ctx_options_clean_up(&tls_context_options);
