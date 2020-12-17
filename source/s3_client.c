@@ -1182,11 +1182,11 @@ error_clean_up:
     /* Tell the meta request it can retry its request. */
     aws_s3_meta_request_handle_error(meta_request, vip_connection->request, error_code);
 
-    /* Detach the request from the vip connection.*/
+    /* Detach the request from the vip connection structure.*/
     aws_s3_request_release(vip_connection->request);
     vip_connection->request = NULL;
 
-    /* Throw the VIP connection back. */
+    /* Throw the vip connection structure back. */
     s_s3_client_lock_synced_data(client);
     aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
     s_s3_client_schedule_process_work_task_synced(client);

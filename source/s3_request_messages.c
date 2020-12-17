@@ -195,13 +195,9 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_erase(headers, g_content_length_header_name)) {
-        goto error_clean_up;
-    }
+    aws_http_headers_erase(headers, g_content_length_header_name);
 
-    if (aws_http_headers_erase(headers, g_content_type_header_name)) {
-        goto error_clean_up;
-    }
+    aws_http_headers_erase(headers, g_content_type_header_name);
 
     /* Create XML payload with all of the etags of finished parts */
     {
