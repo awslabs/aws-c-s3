@@ -89,7 +89,7 @@ static void s_s3_auto_ranged_get_unlock_synced_data(struct aws_s3_auto_ranged_ge
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
-    uint64_t part_size,
+    size_t part_size,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);

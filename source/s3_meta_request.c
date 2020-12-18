@@ -16,7 +16,7 @@
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
-static const uint64_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
+static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
@@ -140,7 +140,7 @@ void aws_s3_meta_request_remove_from_client(struct aws_s3_meta_request *meta_req
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
-    uint64_t part_size,
+    size_t part_size,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -836,7 +836,7 @@ static int s_s3_meta_request_incoming_body(
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
 
     if (request->send_data.response_body.capacity == 0) {
-        uint64_t buffer_size = s_dynamic_body_initial_buf_size;
+        size_t buffer_size = s_dynamic_body_initial_buf_size;
 
         if (request->part_size_response_body) {
             buffer_size = meta_request->part_size;
