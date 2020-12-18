@@ -51,6 +51,11 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
+enum aws_s3_meta_request_tls_mode {
+    AWS_MR_TLS_ENABLED,
+    AWS_MR_TLS_DISABLED,
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
 
@@ -60,7 +65,16 @@ struct aws_s3_client_config {
     /* Client bootstrap used for common staples such as event loop group, host resolver, etc.. s*/
     struct aws_client_bootstrap *client_bootstrap;
 
-    /* TLS Options to be used for each connection.  Specify NULL to not use TLS. */
+    /* How tls should be used while performing the request
+     * If this is ENABLED:
+     *     If tls_connection_options is not-null, then those tls options will be used
+     *     If tls_connection_options is NULL, then default tls options will be used
+     * If this is DISABLED:
+     *     No tls options will be used, regardless of tls_connection_options value.
+     */
+    enum aws_s3_meta_request_tls_mode tls_mode;
+
+    /* TLS Options to be used for each connection, if tls_mode is ENABLED */
     struct aws_tls_connection_options *tls_connection_options;
 
     /* Signing options to be used for each request. Specify NULL to not sign requests. */

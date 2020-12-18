@@ -213,12 +213,31 @@ struct aws_s3_client *aws_s3_client_new(
         *((uint64_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
-    if (client_config->tls_connection_options != NULL) {
-
+    if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+        if (client->tls_connection_options == NULL) {
+            goto on_error;
+        }
 
-        aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
+        if (client_config->tls_connection_options != NULL) {
+            aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
+        } else {
+            struct aws_tls_ctx_options default_tls_ctx_options;
+            AWS_ZERO_STRUCT(default_tls_ctx_options);
+
+            aws_tls_ctx_options_init_default_client(&default_tls_ctx_options, allocator);
+
+            struct aws_tls_ctx *default_tls_ctx = aws_tls_client_ctx_new(allocator, &default_tls_ctx_options);
+            if (default_tls_ctx == NULL) {
+                goto on_error;
+            }
+
+            aws_tls_connection_options_init_from_ctx(client->tls_connection_options, default_tls_ctx);
+
+            aws_tls_ctx_release(default_tls_ctx);
+            aws_tls_ctx_options_clean_up(&default_tls_ctx_options);
+        }
     }
 
     if (client_config->throughput_target_gbps != 0.0) {
@@ -269,6 +288,12 @@ struct aws_s3_client *aws_s3_client_new(
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
 
     return client;
+
+on_error:
+
+    aws_s3_client_release(client);
+
+    return NULL;
 }
 
 void aws_s3_client_acquire(struct aws_s3_client *client) {
@@ -421,6 +446,15 @@ static void s_s3_client_vip_http_connection_manager_shutdown_callback(void *user
     s_s3_client_internal_release(client);
 }
 
+static void s_destroy_tls_connection_options(
+    struct aws_tls_connection_options *options,
+    struct aws_allocator *allocator) {
+    if (options != NULL) {
+        aws_tls_connection_options_clean_up(options);
+        aws_mem_release(allocator, options);
+    }
+}
+
 /* Initialize a new VIP structure for the client to use, given an address. Assumes lock is held. */
 static struct aws_s3_vip *s_s3_client_vip_new(
     struct aws_s3_client *client,
@@ -454,7 +488,27 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     manager_options.max_connections = s_num_connections_per_vip;
     manager_options.shutdown_complete_callback = s_s3_client_vip_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
-    manager_options.tls_connection_options = client->tls_connection_options;
+
+    struct aws_tls_connection_options *manager_tls_options = NULL;
+    if (client->tls_connection_options != NULL) {
+        manager_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+        if (manager_tls_options == NULL) {
+            goto error_clean_up;
+        }
+
+        aws_tls_connection_options_copy(manager_tls_options, client->tls_connection_options);
+
+        /*
+         * TODO: this should come via function parameter as part of the callback once multiple endpoints are
+         * supported
+         *
+         * synced data lock currently held by the only caller of this
+         */
+        struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
+        aws_tls_connection_options_set_server_name(manager_tls_options, client->allocator, &server_name);
+
+        manager_options.tls_connection_options = manager_tls_options;
+    }
 
     if (manager_options.tls_connection_options != NULL) {
         manager_options.port = s_https_port;
@@ -474,6 +528,8 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     /* Acquire internal reference for the HTTP Connection Manager. */
     s_s3_client_internal_acquire(client);
 
+    s_destroy_tls_connection_options(manager_tls_options, client->allocator);
+
     return vip;
 
 error_clean_up:
@@ -482,6 +538,8 @@ error_clean_up:
         s_s3_client_vip_destroy(vip);
         vip = NULL;
     }
+
+    s_destroy_tls_connection_options(manager_tls_options, client->allocator);
 
     return NULL;
 }
