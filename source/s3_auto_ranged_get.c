@@ -354,7 +354,7 @@ static int s_s3_auto_ranged_get_header_block_done(
         (void *)meta_request,
         total_object_size,
         num_parts,
-        meta_request->part_size);
+        (uint64_t)meta_request->part_size);
 
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
 

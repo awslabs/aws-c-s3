@@ -99,7 +99,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     if (content_length > SIZE_MAX) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create Default Meta request; content length of %" PRIu64 " bytes is too large for platform.");
+            "Could not create Default Meta request; content length of %" PRIu64 " bytes is too large for platform.",
+            content_length);
 
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;

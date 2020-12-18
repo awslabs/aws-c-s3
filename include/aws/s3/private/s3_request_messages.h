@@ -7,6 +7,7 @@
  */
 
 #include <inttypes.h>
+#include <stddef.h>
 
 struct aws_allocator;
 struct aws_http_message;

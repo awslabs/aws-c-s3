@@ -875,7 +875,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "Could not create auto-ranged-put meta request; required part size of %" PRIu64
-                " bytes is too large for platform.");
+                " bytes is too large for platform.",
+                part_size_uint64);
 
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
@@ -888,8 +889,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 AWS_LS_S3_META_REQUEST,
                 "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
                 ", but current maximum part size is %" PRIu64,
-                part_size,
-                client->max_part_size);
+                (uint64_t)part_size,
+                (uint64_t)client->max_part_size);
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
         }
