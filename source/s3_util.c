@@ -9,6 +9,7 @@
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
 #include <aws/s3/s3.h>
+#include <aws/s3/s3_client.h>
 
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
 const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
