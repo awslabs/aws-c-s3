@@ -557,6 +557,12 @@ static struct aws_s3_vip *s_s3_client_vip_new(
             manager_tls_options->server_name = NULL;
         }
 
+        /*
+         * TODO: this should come via function parameter as part of the callback once multiple endpoints are
+         * supported
+         *
+         * synced data lock currently held by the only caller of this
+         */
         struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
         aws_tls_connection_options_set_server_name(manager_tls_options, client->allocator, &server_name);
 
