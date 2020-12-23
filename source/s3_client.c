@@ -625,6 +625,8 @@ static struct aws_s3_vip *s_s3_client_vip_new(
         proxy_options = NULL;
     }
 
+    aws_uri_clean_up(&proxy_uri);
+
     if (vip->http_connection_manager == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_VIP, "id=%p: Could not allocate aws_s3_vip connection manager.", (void *)vip);
         goto error_clean_up;
