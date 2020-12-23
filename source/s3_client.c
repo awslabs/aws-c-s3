@@ -57,7 +57,6 @@ static const double s_default_throughput_target_gbps = 5.0;
 static const uint32_t s_default_max_retries = 5;
 
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
-AWS_STATIC_STRING_FROM_LITERAL(s_https_proxy_env_var, "HTTPS_PROXY");
 
 static void s_s3_client_lock_synced_data(struct aws_s3_client *client);
 static void s_s3_client_unlock_synced_data(struct aws_s3_client *client);
@@ -460,7 +459,7 @@ static void s_destroy_tls_connection_options(
     }
 }
 
-static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_uri *proxy_uri, bool *setup_tls) {
+static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_uri *proxy_uri) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->allocator);
 
@@ -470,15 +469,9 @@ static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_ur
     int result = AWS_OP_ERR;
     const struct aws_string *env_variable_name = NULL;
 
-    if (aws_get_environment_value(allocator, s_https_proxy_env_var, &proxy_uri_string) == AWS_OP_SUCCESS &&
-        proxy_uri_string != NULL) {
-        env_variable_name = s_https_proxy_env_var;
-        *setup_tls = true;
-    } else if (
-        aws_get_environment_value(allocator, s_http_proxy_env_var, &proxy_uri_string) == AWS_OP_SUCCESS &&
+    if (aws_get_environment_value(allocator, s_http_proxy_env_var, &proxy_uri_string) == AWS_OP_SUCCESS &&
         proxy_uri_string != NULL) {
         env_variable_name = s_http_proxy_env_var;
-        *setup_tls = false;
     } else {
         aws_raise_error(AWS_ERROR_S3_PROXY_ENV_NOT_FOUND);
         goto clean_up;
@@ -500,9 +493,7 @@ static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_ur
     }
 
     if (aws_byte_cursor_eq_ignore_case(&proxy_uri->scheme, &aws_http_scheme_http)) {
-        *setup_tls = false;
-    } else if (aws_byte_cursor_eq_ignore_case(&proxy_uri->scheme, &aws_http_scheme_https)) {
-        *setup_tls = true;
+        /* Nothing to do. */
     } else if (proxy_uri->scheme.len > 0) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Proxy URI contains unsupported scheme.", (void *)client);
 
@@ -553,35 +544,14 @@ static struct aws_s3_vip *s_s3_client_vip_new(
 
     struct aws_uri proxy_uri;
     AWS_ZERO_STRUCT(proxy_uri);
-    bool setup_tls = false;
     struct aws_http_proxy_options *proxy_options = NULL;
     struct aws_tls_connection_options *proxy_tls_options = NULL;
 
-    if (s_s3_client_get_proxy_uri(client, &proxy_uri, &setup_tls) == AWS_OP_SUCCESS) {
+    if (s_s3_client_get_proxy_uri(client, &proxy_uri) == AWS_OP_SUCCESS) {
         proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
         proxy_options->host = proxy_uri.host_name;
         proxy_options->port = proxy_uri.port;
-
-        if (setup_tls) {
-            AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Setting up TLS for proxy options.", (void *)client);
-
-            struct aws_tls_ctx_options tls_context_options;
-            aws_tls_ctx_options_init_default_client(&tls_context_options, client->allocator);
-
-            struct aws_tls_ctx *context = aws_tls_client_ctx_new(client->allocator, &tls_context_options);
-
-            proxy_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
-            aws_tls_connection_options_init_from_ctx(proxy_tls_options, context);
-
-            struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
-            aws_tls_connection_options_set_server_name(proxy_tls_options, client->allocator, &server_name);
-
-            proxy_options->tls_options = proxy_tls_options;
-
-            aws_tls_ctx_release(context);
-            aws_tls_ctx_options_clean_up(&tls_context_options);
-        }
-
+        
         manager_options.host = aws_byte_cursor_from_string(client->synced_data.endpoint);
         manager_options.proxy_options = proxy_options;
     }
