@@ -545,7 +545,7 @@ static struct aws_s3_vip *s_s3_client_vip_new(
         proxy_options->port = proxy_uri.port;
 
         if (client->tls_connection_options == NULL) {
-            proxy_options->host = aws_byte_cursor_from_string(client->synced_data.endpoint);
+            manager_options.host = aws_byte_cursor_from_string(client->synced_data.endpoint);
         }
 
         manager_options.proxy_options = proxy_options;
