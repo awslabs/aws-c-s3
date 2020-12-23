@@ -450,15 +450,6 @@ static void s_s3_client_vip_http_connection_manager_shutdown_callback(void *user
     s_s3_client_internal_release(client);
 }
 
-static void s_destroy_tls_connection_options(
-    struct aws_tls_connection_options *options,
-    struct aws_allocator *allocator) {
-    if (options != NULL) {
-        aws_tls_connection_options_clean_up(options);
-        aws_mem_release(allocator, options);
-    }
-}
-
 static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_uri *proxy_uri) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->allocator);
@@ -546,24 +537,12 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     AWS_ZERO_STRUCT(proxy_uri);
     struct aws_http_proxy_options *proxy_options = NULL;
     struct aws_tls_connection_options *proxy_tls_options = NULL;
+    struct aws_tls_connection_options *manager_tls_options = NULL;
 
     if (s_s3_client_get_proxy_uri(client, &proxy_uri) == AWS_OP_SUCCESS) {
         proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
         proxy_options->host = proxy_uri.host_name;
         proxy_options->port = proxy_uri.port;
-        
-        manager_options.host = aws_byte_cursor_from_string(client->synced_data.endpoint);
-        manager_options.proxy_options = proxy_options;
-    }
-
-    struct aws_tls_connection_options *manager_tls_options = NULL;
-    if (client->tls_connection_options != NULL) {
-        manager_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
-        if (manager_tls_options == NULL) {
-            goto error_clean_up;
-        }
-
-        aws_tls_connection_options_copy(manager_tls_options, client->tls_connection_options);
 
         /*
          * TODO: this should come via function parameter as part of the callback once multiple endpoints are
@@ -571,13 +550,24 @@ static struct aws_s3_vip *s_s3_client_vip_new(
          *
          * synced data lock currently held by the only caller of this
          */
+        manager_options.host = aws_byte_cursor_from_string(client->synced_data.endpoint);
+        manager_options.proxy_options = proxy_options;
+    }
+
+    if (client->tls_connection_options != NULL) {
+        manager_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+        aws_tls_connection_options_copy(manager_tls_options, client->tls_connection_options);
+
+        /* TODO fix this in the actual aws_tls_connection_options_set_server_name function. */
+        if (manager_tls_options->server_name != NULL) {
+            aws_string_destroy(manager_tls_options->server_name);
+            manager_tls_options->server_name = NULL;
+        }
+
         struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
         aws_tls_connection_options_set_server_name(manager_tls_options, client->allocator, &server_name);
 
         manager_options.tls_connection_options = manager_tls_options;
-    }
-
-    if (manager_options.tls_connection_options != NULL) {
         manager_options.port = s_https_port;
     } else {
         manager_options.port = s_http_port;
@@ -585,8 +575,16 @@ static struct aws_s3_vip *s_s3_client_vip_new(
 
     vip->http_connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
 
+    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cleaning up after creating http connection manager.");
+
+    if (manager_tls_options != NULL) {
+        aws_tls_connection_options_clean_up(manager_tls_options);
+        aws_mem_release(client->allocator, manager_tls_options);
+        manager_tls_options = NULL;
+    }
+
     if (proxy_tls_options != NULL) {
-        aws_tls_connection_options_clean_up((struct aws_tls_connection_options *)proxy_options->tls_options);
+        aws_tls_connection_options_clean_up(proxy_tls_options);
         aws_mem_release(client->allocator, proxy_tls_options);
         proxy_tls_options = NULL;
     }
@@ -608,8 +606,6 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     /* Acquire internal reference for the HTTP Connection Manager. */
     s_s3_client_internal_acquire(client);
 
-    s_destroy_tls_connection_options(manager_tls_options, client->allocator);
-
     return vip;
 
 error_clean_up:
@@ -618,8 +614,6 @@ error_clean_up:
         s_s3_client_vip_destroy(vip);
         vip = NULL;
     }
-
-    s_destroy_tls_connection_options(manager_tls_options, client->allocator);
 
     return NULL;
 }
