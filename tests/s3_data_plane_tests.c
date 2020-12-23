@@ -182,20 +182,6 @@ static int s_test_s3_get_object_tls_default(struct aws_allocator *allocator, voi
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_proxy_options, s_test_s3_proxy_options)
-static int s_test_s3_proxy_options(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    AWS_STATIC_STRING_FROM_LITERAL(http_proxy, "HTTP_PROXY");
-    AWS_STATIC_STRING_FROM_LITERAL(proxy_uri, "");
-
-    aws_set_environment_value(http_proxy, proxy_uri);
-
-    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED));
-
-    return 0;
-}
-
 AWS_TEST_CASE(test_s3_no_signing, s_test_s3_no_signing)
 static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
