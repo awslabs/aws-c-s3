@@ -574,8 +574,6 @@ static struct aws_s3_vip *s_s3_client_vip_new(
 
     vip->http_connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
 
-    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cleaning up after creating http connection manager.");
-
     if (manager_tls_options != NULL) {
         aws_tls_connection_options_clean_up(manager_tls_options);
         aws_mem_release(client->allocator, manager_tls_options);
