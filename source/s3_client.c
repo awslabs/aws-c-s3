@@ -573,7 +573,8 @@ static struct aws_s3_vip *s_s3_client_vip_new(
             proxy_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
             aws_tls_connection_options_init_from_ctx(proxy_tls_options, context);
 
-            //aws_tls_connection_options_set_server_name(proxy_tls_options, client->allocator, &proxy_uri.host_name);
+            struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
+            aws_tls_connection_options_set_server_name(proxy_tls_options, client->allocator, &server_name);
 
             proxy_options->tls_options = proxy_tls_options;
 
