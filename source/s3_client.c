@@ -11,6 +11,7 @@
 #include <aws/common/assert.h>
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
+#include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
@@ -22,6 +23,7 @@
 #include <aws/io/socket.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
+#include <aws/io/uri.h>
 
 #include <inttypes.h>
 #include <math.h>
@@ -53,6 +55,9 @@ static const uint64_t s_default_max_part_size = 20 * 1024 * 1024;
 static const size_t s_default_dns_host_address_ttl_seconds = 2 * 60;
 static const double s_default_throughput_target_gbps = 5.0;
 static const uint32_t s_default_max_retries = 5;
+
+AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
+AWS_STATIC_STRING_FROM_LITERAL(s_https_proxy_env_var, "HTTPS_PROXY");
 
 static void s_s3_client_lock_synced_data(struct aws_s3_client *client);
 static void s_s3_client_unlock_synced_data(struct aws_s3_client *client);
@@ -455,6 +460,64 @@ static void s_destroy_tls_connection_options(
     }
 }
 
+static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_uri *proxy_uri, bool *setup_tls) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->allocator);
+
+    struct aws_allocator *allocator = client->allocator;
+    struct aws_string *proxy_uri_string = NULL;
+
+    int result = AWS_OP_ERR;
+    const struct aws_string *env_variable_name = NULL;
+
+    if (aws_get_environment_value(allocator, s_https_proxy_env_var, &proxy_uri_string) == AWS_OP_SUCCESS &&
+        proxy_uri_string != NULL) {
+        env_variable_name = s_https_proxy_env_var;
+        *setup_tls = true;
+    } else if (
+        aws_get_environment_value(allocator, s_http_proxy_env_var, &proxy_uri_string) == AWS_OP_SUCCESS &&
+        proxy_uri_string != NULL) {
+        env_variable_name = s_http_proxy_env_var;
+        *setup_tls = false;
+    } else {
+        aws_raise_error(AWS_ERROR_S3_PROXY_ENV_NOT_FOUND);
+        goto clean_up;
+    }
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT,
+        "id=%p Found proxy URI %s in environment variable %s",
+        (void *)client,
+        (const char *)proxy_uri_string->bytes,
+        (const char *)env_variable_name->bytes);
+
+    struct aws_byte_cursor proxy_uri_cursor = aws_byte_cursor_from_string(proxy_uri_string);
+
+    if (aws_uri_init_parse(proxy_uri, allocator, &proxy_uri_cursor)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not parse found proxy URI.", (void *)client);
+        aws_raise_error(AWS_ERROR_S3_PROXY_PARSE_FAILED);
+        goto clean_up;
+    }
+
+    if (aws_byte_cursor_eq_ignore_case(&proxy_uri->scheme, &aws_http_scheme_http)) {
+        *setup_tls = false;
+    } else if (aws_byte_cursor_eq_ignore_case(&proxy_uri->scheme, &aws_http_scheme_https)) {
+        *setup_tls = true;
+    } else if (proxy_uri->scheme.len > 0) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Proxy URI contains unsupported scheme.", (void *)client);
+
+        aws_raise_error(AWS_ERROR_S3_UNSUPPORTED_PROXY_SCHEME);
+        goto clean_up;
+    }
+
+    result = AWS_OP_SUCCESS;
+
+clean_up:
+
+    aws_string_destroy(proxy_uri_string);
+    return result;
+}
+
 /* Initialize a new VIP structure for the client to use, given an address. Assumes lock is held. */
 static struct aws_s3_vip *s_s3_client_vip_new(
     struct aws_s3_client *client,
@@ -483,7 +546,6 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     manager_options.bootstrap = client->client_bootstrap;
     manager_options.initial_window_size = SIZE_MAX;
     manager_options.socket_options = &socket_options;
-    manager_options.proxy_options = NULL;
     manager_options.host = aws_byte_cursor_from_string(vip->host_address);
     manager_options.max_connections = s_num_connections_per_vip;
     manager_options.shutdown_complete_callback = s_s3_client_vip_http_connection_manager_shutdown_callback;
@@ -516,7 +578,51 @@ static struct aws_s3_vip *s_s3_client_vip_new(
         manager_options.port = s_http_port;
     }
 
+    struct aws_uri proxy_uri;
+    AWS_ZERO_STRUCT(proxy_uri);
+    bool setup_tls = false;
+    struct aws_http_proxy_options *proxy_options = NULL;
+    struct aws_tls_connection_options *proxy_tls_options = NULL;
+
+    if (s_s3_client_get_proxy_uri(client, &proxy_uri, &setup_tls) == AWS_OP_SUCCESS) {
+        proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
+        proxy_options->host = proxy_uri.host_name;
+        proxy_options->port = proxy_uri.port;
+
+        if (setup_tls) {
+            AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Setting up TLS for proxy options.", (void *)client);
+
+            struct aws_tls_ctx_options tls_context_options;
+            aws_tls_ctx_options_init_default_client(&tls_context_options, client->allocator);
+
+            struct aws_tls_ctx *context = aws_tls_client_ctx_new(client->allocator, &tls_context_options);
+
+            proxy_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+            aws_tls_connection_options_init_from_ctx(proxy_tls_options, context);
+
+            aws_tls_connection_options_set_server_name(proxy_tls_options, client->allocator, &proxy_uri.host_name);
+
+            proxy_options->tls_options = proxy_tls_options;
+
+            aws_tls_ctx_release(context);
+            aws_tls_ctx_options_clean_up(&tls_context_options);
+        }
+
+        manager_options.proxy_options = proxy_options;
+    }
+
     vip->http_connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
+
+    if (proxy_tls_options != NULL) {
+        aws_tls_connection_options_clean_up((struct aws_tls_connection_options *)proxy_options->tls_options);
+        aws_mem_release(client->allocator, proxy_tls_options);
+        proxy_tls_options = NULL;
+    }
+
+    if (proxy_options != NULL) {
+        aws_mem_release(client->allocator, proxy_options);
+        proxy_options = NULL;
+    }
 
     if (vip->http_connection_manager == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_VIP, "id=%p: Could not allocate aws_s3_vip connection manager.", (void *)vip);

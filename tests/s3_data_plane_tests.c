@@ -10,6 +10,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
+#include <aws/common/environment.h>
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
@@ -175,6 +176,20 @@ static int s_test_s3_get_object_tls_enabled(struct aws_allocator *allocator, voi
 AWS_TEST_CASE(test_s3_get_object_tls_default, s_test_s3_get_object_tls_default)
 static int s_test_s3_get_object_tls_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_proxy_options, s_test_s3_proxy_options)
+static int s_test_s3_proxy_options(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    AWS_STATIC_STRING_FROM_LITERAL(http_proxy, "HTTP_PROXY");
+    AWS_STATIC_STRING_FROM_LITERAL(proxy_uri, "");
+
+    aws_set_environment_value(http_proxy, proxy_uri);
 
     ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED));
 
