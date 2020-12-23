@@ -551,33 +551,6 @@ static struct aws_s3_vip *s_s3_client_vip_new(
     manager_options.shutdown_complete_callback = s_s3_client_vip_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
 
-    struct aws_tls_connection_options *manager_tls_options = NULL;
-    if (client->tls_connection_options != NULL) {
-        manager_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
-        if (manager_tls_options == NULL) {
-            goto error_clean_up;
-        }
-
-        aws_tls_connection_options_copy(manager_tls_options, client->tls_connection_options);
-
-        /*
-         * TODO: this should come via function parameter as part of the callback once multiple endpoints are
-         * supported
-         *
-         * synced data lock currently held by the only caller of this
-         */
-        struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
-        aws_tls_connection_options_set_server_name(manager_tls_options, client->allocator, &server_name);
-
-        manager_options.tls_connection_options = manager_tls_options;
-    }
-
-    if (manager_options.tls_connection_options != NULL) {
-        manager_options.port = s_https_port;
-    } else {
-        manager_options.port = s_http_port;
-    }
-
     struct aws_uri proxy_uri;
     AWS_ZERO_STRUCT(proxy_uri);
     bool setup_tls = false;
@@ -608,7 +581,35 @@ static struct aws_s3_vip *s_s3_client_vip_new(
             aws_tls_ctx_options_clean_up(&tls_context_options);
         }
 
+        manager_options.host = aws_byte_cursor_from_string(client->synced_data.endpoint);
         manager_options.proxy_options = proxy_options;
+    }
+
+    struct aws_tls_connection_options *manager_tls_options = NULL;
+    if (client->tls_connection_options != NULL) {
+        manager_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+        if (manager_tls_options == NULL) {
+            goto error_clean_up;
+        }
+
+        aws_tls_connection_options_copy(manager_tls_options, client->tls_connection_options);
+
+        /*
+         * TODO: this should come via function parameter as part of the callback once multiple endpoints are
+         * supported
+         *
+         * synced data lock currently held by the only caller of this
+         */
+        struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
+        aws_tls_connection_options_set_server_name(manager_tls_options, client->allocator, &server_name);
+
+        manager_options.tls_connection_options = manager_tls_options;
+    }
+
+    if (manager_options.tls_connection_options != NULL) {
+        manager_options.port = s_https_port;
+    } else {
+        manager_options.port = s_http_port;
     }
 
     vip->http_connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
