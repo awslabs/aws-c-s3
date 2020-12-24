@@ -393,6 +393,15 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
         if (aws_http_message_add_header(message, header)) {
             goto error_clean_up;
         }
+
+        /* For SSE upload, the sse related headers should only be shown in the create_multipart_upload. which means it
+         * should only be copied once.
+         * TODO: should be all the headers begin with x-amz-server-side-encryption-* ? */
+        if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption")) {
+            if (aws_http_message_erase_header(base_message, header_index)) {
+                goto error_clean_up;
+            }
+        }
     }
 
     return message;

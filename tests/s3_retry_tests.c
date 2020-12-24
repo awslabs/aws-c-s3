@@ -818,7 +818,7 @@ static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allo
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_client_release(client);
     client = NULL;
