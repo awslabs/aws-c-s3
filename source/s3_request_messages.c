@@ -394,8 +394,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
             goto error_clean_up;
         }
 
-        /* For SSE upload, the sse related headers should only be shown in the create_multipart_upload.
-         * TODO: should be all the headers begin with x-amz-server-side-encryption-* ? */
+        /* For SSE upload, the sse related headers should only be shown in the create_multipart_upload.*/
         if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption") && !sse) {
             continue;
         }
