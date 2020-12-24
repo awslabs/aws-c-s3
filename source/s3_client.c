@@ -468,7 +468,7 @@ static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_ur
         goto clean_up;
     }
 
-    AWS_LOGF_DEBUG(
+    AWS_LOGF_INFO(
         AWS_LS_S3_CLIENT,
         "id=%p Found proxy URI %s in environment variable %s",
         (void *)client,
