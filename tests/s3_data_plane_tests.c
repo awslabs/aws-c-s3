@@ -10,6 +10,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
+#include <aws/common/environment.h>
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
@@ -125,10 +126,10 @@ static int s_test_s3_get_object_helper(struct aws_allocator *allocator, enum aws
         case AWS_S3_TLS_ENABLED:
             client_config.tls_mode = AWS_MR_TLS_ENABLED;
             client_config.tls_connection_options = &tls_connection_options;
-
+            break;
         case AWS_S3_TLS_DISABLED:
             client_config.tls_mode = AWS_MR_TLS_DISABLED;
-
+            break;
         default:
             break;
     }
