@@ -401,6 +401,8 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
             if (aws_http_message_erase_header(base_message, header_index)) {
                 goto error_clean_up;
             }
+            header_index--;
+            num_headers--;
         }
     }
 
