@@ -707,7 +707,9 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRId64 "", body_stream_length);
 
     struct aws_http_header content_length_header = {
-        .name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_buffer)};
+        .name = g_content_length_header_name,
+        .value = aws_byte_cursor_from_c_str(content_length_buffer),
+    };
 
     struct aws_http_header sse_kms_header = {.name = g_s3_sse_header, .value = aws_byte_cursor_from_c_str("aws:kms")};
     struct aws_http_header sse_aes256_header = {.name = g_s3_sse_header, .value = aws_byte_cursor_from_c_str("AES256")};
