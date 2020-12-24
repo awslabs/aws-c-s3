@@ -90,10 +90,6 @@ struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_requ
     client = meta_request->synced_data.client;
 
     if (client != NULL) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request trying to get reference to client, but client is null.",
-            (void *)meta_request);
         aws_s3_client_acquire(client);
     } else {
         AWS_LOGF_DEBUG(
