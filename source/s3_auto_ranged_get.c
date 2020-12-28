@@ -89,7 +89,7 @@ static void s_s3_auto_ranged_get_unlock_synced_data(struct aws_s3_auto_ranged_ge
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
-    uint64_t part_size,
+    size_t part_size,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
@@ -354,7 +354,7 @@ static int s_s3_auto_ranged_get_header_block_done(
         (void *)meta_request,
         total_object_size,
         num_parts,
-        meta_request->part_size);
+        (uint64_t)meta_request->part_size);
 
     s_s3_auto_ranged_get_lock_synced_data(auto_ranged_get);
 

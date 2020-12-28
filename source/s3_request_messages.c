@@ -33,7 +33,7 @@ struct aws_http_message *aws_s3_get_object_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     uint32_t part_number,
-    uint64_t part_size) {
+    size_t part_size) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
