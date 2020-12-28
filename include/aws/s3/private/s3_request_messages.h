@@ -7,6 +7,7 @@
  */
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 struct aws_allocator;
