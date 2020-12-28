@@ -22,6 +22,8 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_PROXY_ENV_NOT_FOUND, "Could not find proxy URI in environment variables."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_PROXY_PARSE_FAILED, "Could not parse proxy URI"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_UNSUPPORTED_PROXY_SCHEME, "Given Proxy URI has an unsupported scheme"),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_LOCK_MEM_FAILED, "Could not lock memory"),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_UNLOCK_MEM_FAILED, "Could not unlock memory")
 };
 /* clang-format on */
 
@@ -42,7 +44,12 @@ static struct aws_log_subject_info s_s3_log_subject_infos[] = {
     DEFINE_LOG_SUBJECT_INFO(
         AWS_LS_S3_VIP_CONNECTION,
         "S3VIPConnection",
-        "Subject for aws-c-s3 logging from an aws_s3_vip_connection.")};
+        "Subject for aws-c-s3 logging from an aws_s3_vip_connection."),
+    DEFINE_LOG_SUBJECT_INFO(
+        AWS_LS_S3_PL_ALLOCATOR,
+        "S3PLAllocator",
+        "Subject for aws-c-s3 logging from an aws_s3_pl_allocator"),
+};
 
 static struct aws_log_subject_info_list s_s3_log_subject_list = {
     .subject_list = s_s3_log_subject_infos,
