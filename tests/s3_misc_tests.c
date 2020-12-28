@@ -5,8 +5,8 @@
 
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
-#include "aws/s3/private/s3_util.h"
 #include "aws/s3/private/s3_pl_allocator.h"
+#include "aws/s3/private/s3_util.h"
 #include "s3_tester.h"
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
