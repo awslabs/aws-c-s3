@@ -299,6 +299,14 @@ void aws_s3_tester_notify_meta_request_finished(
     aws_s3_tester_lock_synced_data(tester);
     ++tester->synced_data.meta_request_finish_count;
 
+    struct aws_http_headers *error_response_headers = result->error_response_headers;
+    struct aws_http_header out_header;
+
+    size_t num_headers = aws_http_headers_count(error_response_headers);
+    for (size_t i = 0; i < num_headers; i++) {
+        aws_http_headers_get_index(error_response_headers, i, &out_header);
+    }
+
     int error_code = AWS_ERROR_SUCCESS;
 
     if (result != NULL) {
