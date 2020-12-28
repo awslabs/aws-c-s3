@@ -962,11 +962,11 @@ void aws_s3_meta_request_send_request_finish_default(
                 next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
             }
 
-            aws_s3_meta_request_unlock_synced_data(meta_request);
-
             if (!aws_linked_list_empty(&streaming_requests)) {
                 aws_s3_client_stream_response_body(client, meta_request, &streaming_requests);
             }
+
+            aws_s3_meta_request_unlock_synced_data(meta_request);
         }
 
     } else {
