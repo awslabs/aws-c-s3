@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-/* Allocator that locks the pages of the memory allocated so to keep sensitive memory from being saved to a swap file.*/
+/* Allocator that locks the pages of the memory allocated to keep sensitive memory from being saved to a swap file.*/
 
 AWS_EXTERN_C_BEGIN
 
