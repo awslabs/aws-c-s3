@@ -127,7 +127,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-static int s_s3_client_start_resolving_addresses_synced(struct aws_s3_client *client);
+static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client);
 
 static void s_s3_client_lock_synced_data(struct aws_s3_client *client) {
     aws_mutex_lock(&client->synced_data.lock);
@@ -781,15 +781,14 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     if (client->synced_data.endpoint == NULL) {
         client->synced_data.endpoint =
             aws_string_new_from_array(client->allocator, host_header_value.ptr, host_header_value.len);
-
-        if (s_s3_client_start_resolving_addresses_synced(client)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT, "id=%p: Could not start resolving endpoint for meta request.", (void *)client);
-            return NULL;
-        }
     }
 
     s_s3_client_unlock_synced_data(client);
+
+    if (s_s3_client_start_resolving_addresses(client)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not start resolving endpoint for meta request.", (void *)client);
+        return NULL;
+    }
 
     struct aws_s3_meta_request *meta_request = client->vtable->meta_request_factory(client, options);
 
@@ -1486,8 +1485,7 @@ static void s_s3_client_host_listener_shutdown_callback(void *user_data) {
     s_s3_client_internal_release(client);
 }
 
-static int s_s3_client_start_resolving_addresses_synced(struct aws_s3_client *client) {
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->client_bootstrap);
     AWS_PRECONDITION(client->client_bootstrap->host_resolver);
@@ -1501,23 +1499,43 @@ static int s_s3_client_start_resolving_addresses_synced(struct aws_s3_client *cl
                                                 .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
                                                 .user_data = client};
 
+    bool listener_already_exists = false;
+    bool error_occurred = false;
+
+    s_s3_client_lock_synced_data(client);
+
+    if (client->synced_data.host_listener != NULL) {
+        listener_already_exists = true;
+        goto unlock;
+    }
+
     host_listener = aws_host_resolver_add_host_listener(host_resolver, &options);
 
     if (host_listener == NULL) {
-
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p: Error trying to add listener for endpoint %s",
             (void *)client,
             (const char *)client->synced_data.endpoint->bytes);
-
-        return AWS_OP_ERR;
+        error_occurred = true;
+        goto unlock;
     }
 
     /* Acquire internal ref for host listener so that we don't clean up until the listener shutdown callback is
      * called.*/
     s_s3_client_internal_acquire(client);
     client->synced_data.host_listener = host_listener;
+
+unlock:
+    s_s3_client_unlock_synced_data(client);
+
+    if (listener_already_exists) {
+        return AWS_OP_SUCCESS;
+    }
+
+    if (error_occurred) {
+        return AWS_OP_ERR;
+    }
 
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);
