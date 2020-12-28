@@ -198,7 +198,8 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
-    uint32_t flags);
+    uint32_t flags,
+    enum AWS_S3_TESTER_SSE_TYPE sse_type);
 
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
