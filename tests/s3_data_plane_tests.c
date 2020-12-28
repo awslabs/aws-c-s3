@@ -878,7 +878,7 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
         &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
-    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
