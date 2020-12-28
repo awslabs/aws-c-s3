@@ -33,6 +33,7 @@ extern const struct aws_byte_cursor g_range_header_name;
 extern const struct aws_byte_cursor g_content_range_header_name;
 extern const struct aws_byte_cursor g_content_type_header_name;
 extern const struct aws_byte_cursor g_content_length_header_name;
+extern const struct aws_byte_cursor g_content_md5_header_name;
 extern const struct aws_byte_cursor g_accept_ranges_header_name;
 extern const struct aws_byte_cursor g_etag_header_name;
 extern const struct aws_byte_cursor g_post_method;
