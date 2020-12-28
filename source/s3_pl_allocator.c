@@ -99,7 +99,12 @@ struct aws_allocator *aws_s3_pl_allocator_new(struct aws_allocator *allocator) {
     struct aws_s3_pl_allocator *s3_pl_allocator = NULL;
 
     aws_mem_acquire_many(
-        allocator, 2, &base_allocator, sizeof(struct aws_allocator), &s3_pl_allocator, sizeof(struct aws_s3_pl_allocator));
+        allocator,
+        2,
+        &base_allocator,
+        sizeof(struct aws_allocator),
+        &s3_pl_allocator,
+        sizeof(struct aws_s3_pl_allocator));
 
     AWS_ZERO_STRUCT(*base_allocator);
     AWS_ZERO_STRUCT(*s3_pl_allocator);
