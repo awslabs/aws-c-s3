@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_allocator.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
+
 #include <aws/auth/signable.h>
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
@@ -166,6 +168,9 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
 
+    meta_request->s3_pl_allocator = client->s3_pl_allocator;
+    aws_s3_pl_allocator_acquire(client->s3_pl_allocator);
+
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_start_destroy);
     aws_ref_count_init(&meta_request->internal_ref_count, meta_request, s_s3_meta_request_finish_destroy);
@@ -273,6 +278,8 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
 
+    aws_s3_pl_allocator_release(meta_request->s3_pl_allocator);
+
     meta_request->vtable->destroy(meta_request);
 
     if (shutdown_callback != NULL) {
@@ -304,7 +311,6 @@ struct aws_s3_request *aws_s3_request_new(
 
     aws_ref_count_init(&request->ref_count, request, (aws_simple_completion_callback *)s_s3_request_destroy);
 
-    request->allocator = meta_request->allocator;
     request->meta_request = meta_request;
     aws_s3_meta_request_acquire(meta_request);
 
@@ -408,10 +414,14 @@ void s_s3_request_destroy(void *user_data) {
     }
 
     aws_s3_request_clean_up_send_data(request);
-    aws_s3_meta_request_release(request->meta_request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
     aws_byte_buf_clean_up(&request->request_body);
     aws_retry_token_release(request->retry_token);
-    aws_mem_release(request->allocator, request);
+    aws_mem_release(meta_request->allocator, request);
+
+    aws_s3_meta_request_release(meta_request);
 }
 
 struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_request *meta_request) {
@@ -842,7 +852,7 @@ static int s_s3_meta_request_incoming_body(
             buffer_size = meta_request->part_size;
         }
 
-        aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
+        aws_byte_buf_init(&request->send_data.response_body, meta_request->s3_pl_allocator, buffer_size);
     }
 
     if (aws_byte_buf_append_dynamic(&request->send_data.response_body, data)) {
@@ -962,11 +972,11 @@ void aws_s3_meta_request_send_request_finish_default(
                 next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
             }
 
-            aws_s3_meta_request_unlock_synced_data(meta_request);
-
             if (!aws_linked_list_empty(&streaming_requests)) {
                 aws_s3_client_stream_response_body(client, meta_request, &streaming_requests);
             }
+
+            aws_s3_meta_request_unlock_synced_data(meta_request);
         }
 
     } else {

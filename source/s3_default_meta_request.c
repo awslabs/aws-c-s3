@@ -5,11 +5,6 @@
 #include <aws/common/string.h>
 #include <inttypes.h>
 
-#ifdef _MSC_VER
-/* sscanf warning (not currently scanning for strings) */
-#    pragma warning(disable : 4996)
-#endif
-
 enum aws_s3_meta_request_default_state {
     AWS_S3_META_REQUEST_DEFAULT_STATE_START,
     AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST,
@@ -202,7 +197,7 @@ static int s_s3_meta_request_default_prepare_request(
         aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message);
 
     if (is_initial_prepare && meta_request_default->content_length > 0) {
-        aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
+        aws_byte_buf_init(&request->request_body, meta_request->s3_pl_allocator, meta_request_default->content_length);
         aws_s3_meta_request_read_body(meta_request, &request->request_body);
     }
 

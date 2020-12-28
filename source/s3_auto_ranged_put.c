@@ -296,7 +296,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
                 AWS_ASSERT(request->request_body.capacity == 0);
 
-                aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
+                aws_byte_buf_init(&request->request_body, meta_request->s3_pl_allocator, meta_request->part_size);
                 s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
 
                 request->part_number = auto_ranged_put->synced_data.next_part_number;
@@ -356,7 +356,9 @@ static int s_s3_auto_ranged_put_prepare_request(
             if (is_initial_prepare) {
                 AWS_ASSERT(request->request_body.capacity == 0)
                 aws_byte_buf_init(
-                    &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
+                    &request->request_body,
+                    meta_request->s3_pl_allocator,
+                    s_complete_multipart_upload_init_body_size_bytes);
             } else {
                 aws_byte_buf_reset(&request->request_body, false);
             }

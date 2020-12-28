@@ -54,8 +54,6 @@ struct aws_s3_request {
      * and we can just transfer ownership.*/
     struct aws_ref_count ref_count;
 
-    struct aws_allocator *allocator;
-
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
 
@@ -170,6 +168,8 @@ struct aws_s3_meta_request_vtable {
  */
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
+
+    struct aws_allocator *s3_pl_allocator;
 
     struct aws_ref_count ref_count;
 

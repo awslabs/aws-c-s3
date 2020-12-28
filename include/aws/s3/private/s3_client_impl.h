@@ -86,6 +86,9 @@ struct aws_s3_client {
     /* Small block allocator for our small allocations. */
     struct aws_allocator *sba_allocator;
 
+    /* Page locking allocator for sensitive allocations. */
+    struct aws_allocator *s3_pl_allocator;
+
     struct aws_s3_client_vtable *vtable;
 
     struct aws_ref_count ref_count;

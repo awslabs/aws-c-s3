@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_allocator.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
@@ -172,6 +173,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->allocator = allocator;
     client->sba_allocator = aws_small_block_allocator_new(allocator, true);
+    client->s3_pl_allocator = aws_s3_pl_allocator_new(allocator);
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -429,6 +431,7 @@ static void s_s3_client_finish_destroy(void *user_data) {
     aws_cached_signing_config_destroy(client->cached_signing_config);
 
     aws_small_block_allocator_destroy(client->sba_allocator);
+    aws_s3_pl_allocator_release(client->s3_pl_allocator);
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
