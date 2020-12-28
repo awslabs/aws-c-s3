@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_allocator.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_pl_allocator.h"
@@ -285,9 +284,9 @@ struct aws_s3_request *aws_s3_request_new(
     uint32_t part_number,
     uint32_t flags) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->s3_allocator);
+    AWS_PRECONDITION(meta_request->allocator);
 
-    struct aws_s3_request *request = aws_mem_calloc(meta_request->s3_allocator, 1, sizeof(struct aws_s3_request));
+    struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
 
     aws_ref_count_init(&request->ref_count, request, (aws_simple_completion_callback *)s_s3_request_destroy);
 

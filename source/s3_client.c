@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_allocator.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_pl_allocator.h"
@@ -1097,7 +1096,7 @@ static void s_s3_client_schedule_meta_request_work(
     s_s3_client_lock_synced_data(client);
 
     struct aws_s3_meta_request_work *meta_request_work =
-        aws_mem_calloc(client->s3_allocator, 1, sizeof(struct aws_s3_meta_request_work));
+        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_meta_request_work));
     meta_request_work->meta_request = meta_request;
     meta_request_work->op = op;
 
@@ -1241,7 +1240,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
             }
         }
 
-        aws_mem_release(client->s3_allocator, meta_request_work);
+        aws_mem_release(client->sba_allocator, meta_request_work);
     }
 
     /*******************/
