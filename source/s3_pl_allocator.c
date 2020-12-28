@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_allocator.h"
+#include "aws/s3/private/s3_pl_allocator.h"
 #include <aws/common/ref_count.h>
 #include <aws/s3/s3.h>
 
