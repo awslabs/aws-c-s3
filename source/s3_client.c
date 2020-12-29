@@ -1140,6 +1140,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     }
 
     /* If we have an invalid endpoint, then finish up all of the meta requests. */
+    /* TODO once we have multiple bucket support, this will should only stop meta requests attached to bad endpoints. */
     if (invalid_endpoint) {
         while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
             struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
