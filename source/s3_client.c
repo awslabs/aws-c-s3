@@ -1101,7 +1101,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
 
-    invalid_endpoint = client->synced_data.invalid_endpoint;
+    invalid_endpoint = client->synced_data.invalid_endpoint != 0;
     s_s3_client_unlock_synced_data(client);
 
     /*******************/
