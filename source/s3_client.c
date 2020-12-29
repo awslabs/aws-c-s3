@@ -43,15 +43,15 @@ static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 6.25;
-static const uint32_t s_num_connections_per_vip = 10;
+static const double s_throughput_per_vip_gbps = 4.0;
+static const uint32_t s_num_connections_per_vip = 32;
 
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
 /* TODO Provide more information on these values. */
-static const uint64_t s_default_part_size = 5 * 1024 * 1024;
-static const uint64_t s_default_max_part_size = 20 * 1024 * 1024;
+static const uint64_t s_default_part_size = 8 * 1024 * 1024;
+static const uint64_t s_default_max_part_size = 128 * 1024 * 1024;
 static const size_t s_default_dns_host_address_ttl_seconds = 2 * 60;
 static const double s_default_throughput_target_gbps = 5.0;
 static const uint32_t s_default_max_retries = 5;
@@ -1506,11 +1506,13 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
     struct aws_host_resolver *host_resolver = client->client_bootstrap->host_resolver;
 
     struct aws_host_listener *host_listener = NULL;
-    struct aws_host_listener_options options = {.host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
-                                                .resolved_address_callback =
-                                                    s_s3_client_host_listener_resolved_address_callback,
-                                                .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
-                                                .user_data = client};
+    struct aws_host_listener_options options = {
+        .host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
+        .resolved_address_callback = s_s3_client_host_listener_resolved_address_callback,
+        .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
+        .user_data = client,
+        .pin_host_entry = true,
+    };
 
     bool listener_already_exists = false;
     bool error_occurred = false;
