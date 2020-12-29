@@ -22,8 +22,7 @@ static const size_t s_default_body_streaming_priority_queue_size = 16;
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static void s_s3_request_destroy(void *user_data);
 
-static void s_s3_meta_request_start_destroy(void *user_data);
-static void s_s3_meta_request_finish_destroy(void *user_data);
+static void s_s3_meta_request_destroy(void *user_data);
 
 static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
@@ -167,8 +166,7 @@ int aws_s3_meta_request_init_base(
     meta_request->allocator = allocator;
 
     /* Set up reference count. */
-    aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_start_destroy);
-    aws_ref_count_init(&meta_request->internal_ref_count, meta_request, s_s3_meta_request_finish_destroy);
+    aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
     *((uint64_t *)&meta_request->part_size) = part_size;
 
@@ -244,14 +242,7 @@ void aws_s3_default_signing_config(
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
 }
 
-static void s_s3_meta_request_start_destroy(void *user_data) {
-    struct aws_s3_meta_request *meta_request = user_data;
-    AWS_PRECONDITION(meta_request);
-
-    aws_s3_meta_request_internal_release(meta_request);
-}
-
-static void s_s3_meta_request_finish_destroy(void *user_data) {
+static void s_s3_meta_request_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
 
@@ -278,18 +269,6 @@ static void s_s3_meta_request_finish_destroy(void *user_data) {
     if (shutdown_callback != NULL) {
         shutdown_callback(meta_request_user_data);
     }
-}
-
-void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    aws_ref_count_acquire(&meta_request->internal_ref_count);
-}
-
-void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    aws_ref_count_release(&meta_request->internal_ref_count);
 }
 
 struct aws_s3_request *aws_s3_request_new(
