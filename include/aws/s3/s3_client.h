@@ -81,10 +81,10 @@ struct aws_s3_client_config {
     struct aws_signing_config_aws *signing_config;
 
     /* Size of parts the files will be downloaded or uploaded in. */
-    uint64_t part_size;
+    size_t part_size;
 
     /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to.. */
-    uint64_t max_part_size;
+    size_t max_part_size;
 
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
