@@ -771,6 +771,13 @@ static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
     --vip->synced_data.num_vip_connections;
 }
 
+static void s_s3_client_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
+    AWS_PRECONDITION(vip);
+    AWS_PRECONDITION(vip->owning_client);
+    ASSERT_SYNCED_DATA_LOCK_HELD(vip->owning_client);
+    --vip->synced_data.num_vip_connections;
+}
+
 /* Destroy a VIP Connection structure. */
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
 
@@ -876,12 +883,14 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     s_s3_client_lock_synced_data(client);
 
+    bool error_occurred = false;
+
     /* TODO This is temporary until we add multiple bucket support. */
     if (client->synced_data.endpoint == NULL) {
         client->synced_data.endpoint =
             aws_string_new_from_array(client->allocator, host_header_value.ptr, host_header_value.len);
     }
-
+unlock:
     s_s3_client_unlock_synced_data(client);
 
     if (s_s3_client_start_resolving_addresses(client)) {
@@ -1812,7 +1821,7 @@ void aws_s3_client_stream_response_body(
         (void *)meta_request);
 
     struct s3_streaming_body_payload *payload =
-        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_streaming_body_payload));
+        aws_mem_calloc(client->allocator, 1, sizeof(struct s3_streaming_body_payload));
 
     aws_s3_client_acquire(client);
     payload->client = client;
