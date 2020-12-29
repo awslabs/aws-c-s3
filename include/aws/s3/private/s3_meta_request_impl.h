@@ -173,12 +173,6 @@ struct aws_s3_meta_request {
 
     struct aws_ref_count ref_count;
 
-    /* Internal reference count.  This does not keep the meta request alive, but does delay the finish callback from
-     * taking place. Like a normal reference count, this should be incremented from a place that already owns an
-     * internal ref count.
-     */
-    struct aws_ref_count internal_ref_count;
-
     void *impl;
 
     struct aws_s3_meta_request_vtable *vtable;
@@ -321,10 +315,6 @@ void aws_s3_meta_request_finish(
     struct aws_s3_request *failed_request,
     int response_status,
     int error_code);
-
-void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
-
-void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
 void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
