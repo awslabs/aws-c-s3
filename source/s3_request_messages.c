@@ -99,8 +99,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
             struct aws_http_headers *base_message_headers = aws_http_message_get_headers(base_message);
             AWS_ASSERT(base_message_headers);
 
-            if (aws_http_headers_has(base_message_headers, g_content_md5_header_name))
-            {
+            if (aws_http_headers_has(base_message_headers, g_content_md5_header_name)) {
                 if (s_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
                     goto error_clean_up;
                 }
@@ -108,7 +107,6 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         }
 
         // TODO: What if buffer == NULL ?
-
     }
 
     return message;
@@ -150,8 +148,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_has(headers, g_content_md5_header_name))
-    {
+    if (aws_http_headers_has(headers, g_content_md5_header_name)) {
         if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
             goto error_clean_up;
         }
@@ -226,8 +223,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     aws_http_headers_erase(headers, g_content_type_header_name);
 
-    if (aws_http_headers_has(headers, g_content_md5_header_name))
-    {
+    if (aws_http_headers_has(headers, g_content_md5_header_name)) {
         aws_http_headers_erase(headers, g_content_md5_header_name);
     }
 
@@ -495,8 +491,7 @@ static int s_s3_message_util_add_content_md5_header(
     }
     memset(allocation.buffer, 0xdd, allocation.capacity);
     struct aws_byte_buf base64_output_buf = aws_byte_buf_from_empty_array(allocation.buffer + 1, base64_output_size);
-    if (aws_base64_encode(&base64_input, &base64_output_buf))
-    {
+    if (aws_base64_encode(&base64_input, &base64_output_buf)) {
         goto error_clean_up;
     }
 

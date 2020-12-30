@@ -529,8 +529,10 @@ static int s_test_s3_put_object_with_content_md5(struct aws_allocator *allocator
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS |
-        AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5));
+        &tester,
+        client,
+        10,
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -548,7 +550,7 @@ static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *
 
     struct aws_byte_buf test_buffer;
     aws_s3_create_test_buffer(allocator, 19 /* size of "This is an S3 test." */, &test_buffer);
-     /* base64 encoded md5 of "This is an S3 test." */
+    /* base64 encoded md5 of "This is an S3 test." */
     struct aws_byte_cursor expected_content_md5 = aws_byte_cursor_from_c_str("+y3U+EY5uFXhVVmRoiJWyA==");
 
     struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
@@ -562,16 +564,15 @@ static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
         allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
 
-    struct aws_http_header content_md5_header = {
-        .name = g_content_md5_header_name,
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
-    };
+    struct aws_http_header content_md5_header = {.name = g_content_md5_header_name,
+                                                 .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
     ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
 
     uint32_t part_number = 1;
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
 
-    struct aws_http_message *new_message = aws_s3_upload_part_message_new(allocator, base_message, &test_buffer, part_number, upload_id);
+    struct aws_http_message *new_message =
+        aws_s3_upload_part_message_new(allocator, base_message, &test_buffer, part_number, upload_id);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     ASSERT_TRUE(aws_http_headers_has(new_headers, g_content_md5_header_name));
@@ -604,7 +605,9 @@ static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_create_multipart_upload_message_with_content_md5, s_test_s3_create_multipart_upload_message_with_content_md5)
+AWS_TEST_CASE(
+    test_s3_create_multipart_upload_message_with_content_md5,
+    s_test_s3_create_multipart_upload_message_with_content_md5)
 static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
@@ -622,10 +625,8 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
         allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
 
-    struct aws_http_header content_md5_header = {
-        .name = g_content_md5_header_name,
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
-    };
+    struct aws_http_header content_md5_header = {.name = g_content_md5_header_name,
+                                                 .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
     ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
 
     struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
@@ -650,7 +651,9 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_complete_multipart_message_with_content_md5, s_test_s3_complete_multipart_message_with_content_md5)
+AWS_TEST_CASE(
+    test_s3_complete_multipart_message_with_content_md5,
+    s_test_s3_complete_multipart_message_with_content_md5)
 static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
@@ -668,10 +671,8 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
         allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
 
-    struct aws_http_header content_md5_header = {
-        .name = g_content_md5_header_name,
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
-    };
+    struct aws_http_header content_md5_header = {.name = g_content_md5_header_name,
+                                                 .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
     ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
 
     struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
@@ -685,7 +686,8 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
     struct aws_array_list etags;
     ASSERT_SUCCESS(aws_array_list_init_dynamic(&etags, allocator, 0, sizeof(struct aws_string)));
 
-    struct aws_http_message *new_message = aws_s3_complete_multipart_message_new(allocator, base_message, &body_buffer, upload_id, &etags);
+    struct aws_http_message *new_message =
+        aws_s3_complete_multipart_message_new(allocator, base_message, &body_buffer, upload_id, &etags);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));

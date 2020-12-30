@@ -880,9 +880,7 @@ int aws_s3_tester_send_put_object_meta_request(
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5) {
         struct aws_http_header content_md5_header = {
-            .name = g_content_md5_header_name,
-            .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
-        };
+            .name = g_content_md5_header_name, .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
         ASSERT_SUCCESS(aws_http_message_add_header(message, content_md5_header));
     }
 
