@@ -26,7 +26,6 @@ typedef void(aws_s3_client_get_http_connection_callback)(
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
-
 typedef void(aws_s3_vip_shutdown_callback_fn)(void *user_data);
 
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
@@ -45,12 +44,15 @@ struct aws_s3_vip {
     /* Address this VIP represents. */
     struct aws_string *host_address;
 
+    /* Callback used when this vip has completely shutdown, which happens when all associated connections and the
+     * connection manager are shutdown. */
     aws_s3_vip_shutdown_callback_fn *shutdown_callback;
 
+    /* User data for the shutdown callback. */
     void *shutdown_user_data;
 
     struct {
-        /* How many vip connections are allocated */
+        /* How many vip connections are allocated for this vip. */
         uint32_t num_vip_connections;
 
         /* Whether or not the connection manager is allocated. If the connection manager is NULL, but this is true, the
@@ -201,8 +203,10 @@ struct aws_s3_client {
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
 
+        /* Next meta request that the work_task will start with on its next update. */
         struct aws_s3_meta_request *next_meta_request;
 
+        /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
 
     } threaded_data;
