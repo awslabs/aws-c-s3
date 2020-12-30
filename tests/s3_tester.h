@@ -178,6 +178,7 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
 enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
     AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
+    AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5 = 0x00000004,
 };
 
 int aws_s3_tester_send_meta_request(

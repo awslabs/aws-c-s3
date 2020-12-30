@@ -5,6 +5,7 @@
 
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include "s3_tester.h"
 #include <aws/common/byte_buf.h>
@@ -505,6 +506,211 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     client = NULL;
 
     aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_with_content_md5, s_test_s3_put_object_with_content_md5)
+static int s_test_s3_put_object_with_content_md5(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS |
+        AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_upload_part_message_with_content_md5, s_test_s3_upload_part_message_with_content_md5)
+static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    aws_s3_library_init(allocator);
+
+    struct aws_byte_buf test_buffer;
+    aws_s3_create_test_buffer(allocator, 19 /* size of "This is an S3 test." */, &test_buffer);
+     /* base64 encoded md5 of "This is an S3 test." */
+    struct aws_byte_cursor expected_content_md5 = aws_byte_cursor_from_c_str("+y3U+EY5uFXhVVmRoiJWyA==");
+
+    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
+    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+
+    struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str("dummy_key");
+
+    /* Put together a simple S3 Put Object request. */
+    struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
+        allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
+
+    struct aws_http_header content_md5_header = {
+        .name = g_content_md5_header_name,
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
+
+    uint32_t part_number = 1;
+    struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
+
+    struct aws_http_message *new_message = aws_s3_upload_part_message_new(allocator, base_message, &test_buffer, part_number, upload_id);
+
+    struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
+    ASSERT_TRUE(aws_http_headers_has(new_headers, g_content_md5_header_name));
+
+    struct aws_byte_cursor content_md5;
+    aws_http_headers_get(new_headers, g_content_md5_header_name, &content_md5);
+
+    ASSERT_BIN_ARRAYS_EQUALS(expected_content_md5.ptr, expected_content_md5.len, content_md5.ptr, content_md5.len);
+
+    struct aws_input_stream *new_body_stream = aws_http_message_get_body_stream(new_message);
+    aws_input_stream_destroy(new_body_stream);
+    new_body_stream = NULL;
+
+    aws_http_message_release(new_message);
+    new_message = NULL;
+
+    aws_http_message_release(base_message);
+    base_message = NULL;
+
+    aws_string_destroy(upload_id);
+    upload_id = NULL;
+
+    aws_input_stream_destroy(input_stream);
+    input_stream = NULL;
+
+    aws_byte_buf_clean_up(&test_buffer);
+
+    aws_s3_library_clean_up();
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_create_multipart_upload_message_with_content_md5, s_test_s3_create_multipart_upload_message_with_content_md5)
+static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_buf test_buffer;
+    aws_s3_create_test_buffer(allocator, 19 /* size of "This is an S3 test." */, &test_buffer);
+
+    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
+    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+
+    struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str("dummy_key");
+
+    /* Put together a simple S3 Put Object request. */
+    struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
+        allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
+
+    struct aws_http_header content_md5_header = {
+        .name = g_content_md5_header_name,
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
+
+    struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
+    ASSERT_TRUE(aws_http_headers_has(base_headers, g_content_md5_header_name));
+
+    struct aws_http_message *new_message = aws_s3_create_multipart_upload_message_new(allocator, base_message);
+
+    struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
+    ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));
+
+    aws_http_message_release(new_message);
+    new_message = NULL;
+
+    aws_http_message_release(base_message);
+    base_message = NULL;
+
+    aws_input_stream_destroy(input_stream);
+    input_stream = NULL;
+
+    aws_byte_buf_clean_up(&test_buffer);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_complete_multipart_message_with_content_md5, s_test_s3_complete_multipart_message_with_content_md5)
+static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_buf test_buffer;
+    aws_s3_create_test_buffer(allocator, 19 /* size of "This is an S3 test." */, &test_buffer);
+
+    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
+    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+
+    struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str("dummy_key");
+
+    /* Put together a simple S3 Put Object request. */
+    struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
+        allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
+
+    struct aws_http_header content_md5_header = {
+        .name = g_content_md5_header_name,
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
+
+    struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
+    ASSERT_TRUE(aws_http_headers_has(base_headers, g_content_md5_header_name));
+
+    struct aws_byte_buf body_buffer;
+    aws_byte_buf_init(&body_buffer, allocator, 512);
+
+    struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
+
+    struct aws_array_list etags;
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&etags, allocator, 0, sizeof(struct aws_string)));
+
+    struct aws_http_message *new_message = aws_s3_complete_multipart_message_new(allocator, base_message, &body_buffer, upload_id, &etags);
+
+    struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
+    ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));
+
+    struct aws_input_stream *new_body_stream = aws_http_message_get_body_stream(new_message);
+    aws_input_stream_destroy(new_body_stream);
+    new_body_stream = NULL;
+
+    aws_http_message_release(new_message);
+    new_message = NULL;
+
+    aws_http_message_release(base_message);
+    base_message = NULL;
+
+    aws_array_list_clean_up(&etags);
+
+    aws_string_destroy(upload_id);
+    upload_id = NULL;
+
+    aws_byte_buf_clean_up(&body_buffer);
+
+    aws_input_stream_destroy(input_stream);
+    input_stream = NULL;
+
+    aws_byte_buf_clean_up(&test_buffer);
 
     return 0;
 }

@@ -70,7 +70,7 @@ error_clean_up:
 
 /* Create a new put object request from an existing put object request.  Currently just optionally adds part information
  * for a multipart upload. */
-struct aws_http_message *aws_s3_put_object_message_new(
+struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,

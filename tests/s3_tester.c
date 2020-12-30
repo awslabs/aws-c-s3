@@ -878,6 +878,14 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, aws_byte_cursor_from_string(host_name), test_object_path, g_test_body_content_type, input_stream);
 
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5) {
+        struct aws_http_header content_md5_header = {
+            .name = g_content_md5_header_name,
+            .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")
+        };
+        ASSERT_SUCCESS(aws_http_message_add_header(message, content_md5_header));
+    }
+
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
     options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;

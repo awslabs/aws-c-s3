@@ -26,7 +26,7 @@ struct aws_http_message *aws_s3_get_object_message_new(
 /* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns a
  * body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and NULL,
  * respectively. */
-struct aws_http_message *aws_s3_put_object_message_new(
+struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
