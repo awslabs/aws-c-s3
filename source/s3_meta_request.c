@@ -146,7 +146,6 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_meta_request *meta_request) {
 
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->message);
     AWS_PRECONDITION(impl);
@@ -197,8 +196,11 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_request *),
         s_s3_request_priority_queue_pred);
 
-    aws_s3_client_acquire(client);
-    meta_request->synced_data.client = client;
+    if (client != NULL) {
+        aws_s3_client_acquire(client);
+        meta_request->synced_data.client = client;
+    }
+
     meta_request->synced_data.next_streaming_part = 1;
 
     meta_request->user_data = options->user_data;
@@ -367,7 +369,7 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     return (*request_a)->part_number > (*request_b)->part_number;
 }
 
-void s_s3_request_destroy(void *user_data) {
+static void s_s3_request_destroy(void *user_data) {
     struct aws_s3_request *request = user_data;
 
     if (request == NULL) {
@@ -896,15 +898,18 @@ void aws_s3_meta_request_send_request_finish_default(
 
     int response_status = request->send_data.response_status;
 
+    /* If our error code is currently success, then we have some other calls to make that could still indicate a
+     * failure. */
     if (error_code == AWS_ERROR_SUCCESS) {
+
+        /* Check if the response code indicates an error occurred. */
         error_code = s_s3_meta_request_error_code_from_response_status(response_status);
 
         if (error_code == AWS_ERROR_SUCCESS) {
-            if (vtable->stream_complete) {
-                /* Call the derived type, having it handle what to do with the current success. */
-                if (vtable->stream_complete(stream, vip_connection)) {
-                    error_code = aws_last_error_or_unknown();
-                }
+            /* Call the derived type, having it handle what to do with the current success. */
+            if (vtable->stream_complete && vtable->stream_complete(stream, vip_connection)) {
+
+                error_code = aws_last_error_or_unknown();
             }
         } else {
             aws_raise_error(error_code);

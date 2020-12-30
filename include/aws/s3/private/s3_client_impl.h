@@ -26,6 +26,9 @@ typedef void(aws_s3_client_get_http_connection_callback)(
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
+
+typedef void(aws_s3_vip_shutdown_callback_fn)(void *user_data);
+
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
 struct aws_s3_vip {
     struct aws_linked_list_node node;
@@ -41,6 +44,10 @@ struct aws_s3_vip {
 
     /* Address this VIP represents. */
     struct aws_string *host_address;
+
+    aws_s3_vip_shutdown_callback_fn *shutdown_callback;
+
+    void *shutdown_user_data;
 
     struct {
         /* How many vip connections are allocated */
@@ -217,5 +224,28 @@ void aws_s3_client_stream_response_body(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
     struct aws_linked_list *requests);
+
+AWS_EXTERN_C_BEGIN
+
+AWS_S3_API
+struct aws_s3_vip *aws_s3_vip_new(
+    struct aws_s3_client *client,
+    const struct aws_byte_cursor *host_address,
+    const struct aws_byte_cursor *server_name,
+    uint32_t num_vip_connections,
+    struct aws_linked_list *out_vip_connections_list,
+    aws_s3_vip_shutdown_callback_fn *shutdown_callback,
+    void *shutdown_user_data);
+
+AWS_S3_API
+void aws_s3_vip_start_destroy(struct aws_s3_vip *vip);
+
+AWS_S3_API
+struct aws_s3_vip *aws_s3_find_vip(const struct aws_linked_list *vip_list, const struct aws_byte_cursor *host_address);
+
+AWS_S3_API
+void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+
+AWS_EXTERN_C_END
 
 #endif /* AWS_S3_CLIENT_IMPL_H */
