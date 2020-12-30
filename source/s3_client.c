@@ -685,15 +685,23 @@ error_clean_up:
     return NULL;
 }
 
+static void s_s3_client_vip_set_reset_active(struct aws_s3_vip* vip) {
+    AWS_PRECONDITION(vip);
+
+    aws_atomic_store_int(&vip->active, 0);
+}
+
 /* Releases the memory for a vip structure. */
 static void s_s3_client_vip_destroy(struct aws_s3_vip *vip) {
     AWS_PRECONDITION(vip);
 
     aws_atomic_store_int(&vip->active, 0);
 
-    struct aws_s3_client *client = vip->owning_client;
-    s_s3_client_lock_synced_data(client);
+    s_s3_client_vip_check_for_shutdown(vip, s_s3_client_vip_set_reset_active);
 
+    struct aws_s3_client *client = vip->owning_client;
+
+    s_s3_client_lock_synced_data(client);
     /* This vip is no longer being used, so subtract from active count so that another one can take its place. */
     --client->synced_data.active_vip_count;
     s_s3_client_schedule_process_work_task_synced(client);
