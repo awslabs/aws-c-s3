@@ -43,7 +43,7 @@ static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 4.0;
+static const double s_throughput_per_vip_gbps = 3.0;
 static const uint32_t s_num_connections_per_vip = 32;
 
 static const uint16_t s_http_port = 80;
