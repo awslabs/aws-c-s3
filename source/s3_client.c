@@ -685,7 +685,7 @@ static void s_s3_vip_check_for_shutdown(struct aws_s3_vip *vip, s3_client_vip_up
         goto unlock;
     }
 
-    /* If the connection manager is active, then we can try initating a clean up of it now. */
+    /* If the connection manager is active, then we can try initiating a clean up of it now. */
     if (vip->synced_data.http_connection_manager_active) {
 
         /* If the connection manager is not NULL, take the pointer from the synced data so that it we can clean it up
