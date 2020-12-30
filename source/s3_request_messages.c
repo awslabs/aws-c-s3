@@ -150,10 +150,8 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_has(headers, g_content_md5_header_name)) {
-        if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
-            goto error_clean_up;
-        }
+    if (aws_http_headers_has(headers, g_content_md5_header_name) && aws_http_headers_erase(headers, g_content_md5_header_name)) {
+        goto error_clean_up;
     }
 
     aws_http_message_set_request_method(message, g_post_method);
@@ -222,12 +220,16 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         goto error_clean_up;
     }
 
-    aws_http_headers_erase(headers, g_content_length_header_name);
+    if (aws_http_headers_has(headers, g_content_length_header_name) && aws_http_headers_erase(headers, g_content_length_header_name)) {
+        goto error_clean_up;
+    }
 
-    aws_http_headers_erase(headers, g_content_type_header_name);
+    if (aws_http_headers_has(headers, g_content_type_header_name) && aws_http_headers_erase(headers, g_content_type_header_name)) {
+        goto error_clean_up;
+    }
 
-    if (aws_http_headers_has(headers, g_content_md5_header_name)) {
-        aws_http_headers_erase(headers, g_content_md5_header_name);
+    if (aws_http_headers_has(headers, g_content_md5_header_name) && aws_http_headers_erase(headers, g_content_md5_header_name)) {
+        goto error_clean_up;
     }
 
     /* Create XML payload with all of the etags of finished parts */

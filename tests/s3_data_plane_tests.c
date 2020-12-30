@@ -687,7 +687,8 @@ static int s_test_s3_put_object_with_content_md5(struct aws_allocator *allocator
         &tester,
         client,
         10,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5));
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5,
+        AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -717,7 +718,7 @@ static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
+        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {.name = g_content_md5_header_name,
                                                  .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
@@ -778,7 +779,7 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
+        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {.name = g_content_md5_header_name,
                                                  .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
@@ -824,7 +825,7 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream);
+        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {.name = g_content_md5_header_name,
                                                  .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
