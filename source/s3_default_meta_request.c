@@ -19,7 +19,7 @@ struct aws_s3_meta_request_default {
     struct aws_s3_meta_request base;
 
     bool is_get_request;
-    uint64_t content_length;
+    size_t content_length;
 
     struct {
         enum aws_s3_meta_request_default_state state;
@@ -96,6 +96,16 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
         return NULL;
     }
 
+    if (content_length > SIZE_MAX) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create Default Meta request; content length of %" PRIu64 " bytes is too large for platform.",
+            content_length);
+
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     struct aws_s3_meta_request_default *meta_request_default =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_default));
 
@@ -116,7 +126,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
         goto error_clean_up;
     }
 
-    meta_request_default->content_length = content_length;
+    meta_request_default->content_length = (size_t)content_length;
     meta_request_default->is_get_request = aws_byte_cursor_eq_ignore_case(&request_method, &aws_http_method_get);
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
@@ -198,8 +208,8 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+        meta_request->allocator, meta_request->initial_request_message, true /*sse*/);
 
     if (is_initial_prepare && meta_request_default->content_length > 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
