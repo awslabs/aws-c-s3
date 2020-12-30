@@ -7,11 +7,11 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
-#include <aws/common/byte_buf.h>
-#include <aws/common/string.h>
-#include <aws/common/encoding.h>
-#include <aws/http/request_response.h>
 #include <aws/cal/hash.h>
+#include <aws/common/byte_buf.h>
+#include <aws/common/encoding.h>
+#include <aws/common/string.h>
+#include <aws/http/request_response.h>
 #include <aws/io/stream.h>
 #include <aws/s3/s3.h>
 #include <inttypes.h>
