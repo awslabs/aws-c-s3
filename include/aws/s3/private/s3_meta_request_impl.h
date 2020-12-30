@@ -59,9 +59,6 @@ struct aws_s3_request {
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
 
-    /* Current retry token for the request. If it has never been retried, this will be NULL. */
-    struct aws_retry_token *retry_token;
-
     /* Request body to use when sending the request. The contents of this body will be re-used if a request is
      * retried.*/
     struct aws_byte_buf request_body;
@@ -200,9 +197,6 @@ struct aws_s3_meta_request {
         /* Client that created this meta request which also processes this request.  After the meta request is finished,
          * this reference is removed. */
         struct aws_s3_client *client;
-
-        /* Queue of aws_s3_request structures that will be retried. */
-        struct aws_linked_list retry_queue;
 
         /* Body of stream of the initial_request_message.  We store this here so that parts can take turns seeking to
          * their own specific position (which should be in close proximity of one another). */
@@ -356,18 +350,6 @@ int aws_s3_meta_request_read_body_synced(struct aws_s3_meta_request *meta_reques
 /* ******************************************** */
 /* BEGIN - Exposed only for use in tests */
 /* ******************************************** */
-AWS_S3_API
-void aws_s3_meta_request_handle_error(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request,
-    int error_code);
-
-AWS_S3_API
-void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
-
-AWS_S3_API
-struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
-
 AWS_S3_API
 void aws_s3_meta_request_body_streaming_push_synced(
     struct aws_s3_meta_request *meta_request,

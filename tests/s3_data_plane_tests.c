@@ -57,7 +57,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_meta_request *meta_request = aws_s3_tester_meta_request_new(&tester, NULL, NULL);
+    struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     ASSERT_TRUE(meta_request != NULL);
 
     struct aws_http_message *request_message = aws_s3_tester_dummy_http_request_new(&tester);
@@ -142,7 +142,7 @@ static int s_test_s3_get_object_helper(struct aws_allocator *allocator, enum aws
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_string_destroy(endpoint);
     aws_tls_ctx_release(context);
@@ -310,7 +310,7 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -440,7 +440,7 @@ static int s_test_s3_put_object_helper(struct aws_allocator *allocator, enum aws
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_string_destroy(endpoint);
     aws_tls_ctx_release(context);
@@ -501,7 +501,7 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -670,7 +670,7 @@ static void s_test_s3_existing_host_entry_address_resolved_callback(
 
     struct aws_s3_tester *tester = user_data;
     AWS_ASSERT(tester);
-    aws_condition_variable_notify_one(&tester->signal);
+    aws_s3_tester_notify_signal(tester);
 }
 
 AWS_TEST_CASE(test_s3_existing_host_entry, s_test_s3_existing_host_entry)
@@ -706,9 +706,7 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
             &host_resolver_config,
             &tester));
 
-        aws_s3_tester_lock_synced_data(&tester);
-        aws_condition_variable_wait(&tester.signal, &tester.synced_data.lock);
-        aws_s3_tester_unlock_synced_data(&tester);
+        aws_s3_tester_wait_for_signal(&tester);
     }
 
     /* Put together a simple S3 Get Object request. */
