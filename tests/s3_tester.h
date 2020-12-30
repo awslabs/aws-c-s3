@@ -89,7 +89,7 @@ enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
     AWS_S3_TESTER_BIND_CLIENT_SIGNING = 0x00000002,
 };
 
-enum AWS_S3_TESTER_SSE_TYPE {
+enum aws_s3_tester_sse_type {
     AWS_S3_TESTER_SSE_NONE,
     AWS_S3_TESTER_SSE_KMS,
     AWS_S3_TESTER_SSE_AES256,
@@ -158,7 +158,7 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_byte_cursor content_type,
     struct aws_byte_cursor key,
     struct aws_input_stream *body_stream,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type);
+    enum aws_s3_tester_sse_type sse_type);
 
 /* Will copy the client's vtable into a new vtable that can be mutated. Returns the vtable that can be mutated. */
 struct aws_s3_client_vtable *aws_s3_tester_patch_client_vtable(
@@ -199,22 +199,22 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
     uint32_t flags,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type);
+    enum aws_s3_tester_sse_type sse_type);
 
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
     uint32_t object_size_mb,
     uint32_t flags,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type);
+    enum aws_s3_tester_sse_type sse_type);
 
 int aws_s3_tester_validate_get_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type);
+    enum aws_s3_tester_sse_type sse_type);
 
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type);
+    enum aws_s3_tester_sse_type sse_type);
 
 /*****************************************/
 /* Used for mocking functions in vtables */

@@ -105,8 +105,8 @@ enum aws_s3_client_tls_usage {
 static int s_test_s3_get_object_helper(
     struct aws_allocator *allocator,
     enum aws_s3_client_tls_usage tls_usage,
-    struct aws_byte_cursor s3_path,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type) {
+    enum aws_s3_tester_sse_type sse_type,
+    struct aws_byte_cursor s3_path) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -166,7 +166,7 @@ static int s_test_s3_get_object_tls_disabled(struct aws_allocator *allocator, vo
     (void)ctx;
 
     ASSERT_SUCCESS(s_test_s3_get_object_helper(
-        allocator, AWS_S3_TLS_DISABLED, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SSE_NONE));
+        allocator, AWS_S3_TLS_DISABLED, AWS_S3_TESTER_SSE_NONE, g_s3_path_get_object_test_1MB));
 
     return 0;
 }
@@ -176,7 +176,7 @@ static int s_test_s3_get_object_tls_enabled(struct aws_allocator *allocator, voi
     (void)ctx;
 
     ASSERT_SUCCESS(s_test_s3_get_object_helper(
-        allocator, AWS_S3_TLS_ENABLED, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SSE_NONE));
+        allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SSE_NONE, g_s3_path_get_object_test_1MB));
 
     return 0;
 }
@@ -186,7 +186,7 @@ static int s_test_s3_get_object_tls_default(struct aws_allocator *allocator, voi
     (void)ctx;
 
     ASSERT_SUCCESS(s_test_s3_get_object_helper(
-        allocator, AWS_S3_TLS_ENABLED, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SSE_NONE));
+        allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SSE_NONE, g_s3_path_get_object_test_1MB));
 
     return 0;
 }
@@ -421,8 +421,8 @@ static int s_test_s3_get_object_sse_kms(struct aws_allocator *allocator, void *c
     return s_test_s3_get_object_helper(
         allocator,
         AWS_S3_TLS_ENABLED,
-        aws_byte_cursor_from_c_str("/get_object_test_kms_10MB.txt"),
-        AWS_S3_TESTER_SSE_KMS);
+        AWS_S3_TESTER_SSE_KMS,
+        aws_byte_cursor_from_c_str("/get_object_test_kms_10MB.txt"));
 }
 
 AWS_TEST_CASE(test_s3_get_object_sse_aes256, s_test_s3_get_object_sse_aes256)
@@ -433,8 +433,8 @@ static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void
     return s_test_s3_get_object_helper(
         allocator,
         AWS_S3_TLS_ENABLED,
-        aws_byte_cursor_from_c_str("/get_object_test_aes256_10MB.txt"),
-        AWS_S3_TESTER_SSE_AES256);
+        AWS_S3_TESTER_SSE_AES256,
+        aws_byte_cursor_from_c_str("/get_object_test_aes256_10MB.txt"));
 }
 
 static int s_test_s3_put_object_helper(struct aws_allocator *allocator, enum aws_s3_client_tls_usage tls_usage) {

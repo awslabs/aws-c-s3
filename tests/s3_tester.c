@@ -688,7 +688,7 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_byte_cursor key,
     struct aws_byte_cursor content_type,
     struct aws_input_stream *body_stream,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type) {
+    enum aws_s3_tester_sse_type sse_type) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(body_stream);
@@ -806,7 +806,7 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
     uint32_t flags,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type) {
+    enum aws_s3_tester_sse_type sse_type) {
 
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -839,7 +839,7 @@ int aws_s3_tester_send_get_object_meta_request(
 
 int aws_s3_tester_validate_get_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type) {
+    enum aws_s3_tester_sse_type sse_type) {
     AWS_PRECONDITION(meta_request_test_results);
     AWS_PRECONDITION(meta_request_test_results->tester);
 
@@ -902,7 +902,7 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_client *client,
     uint32_t file_size_mb,
     uint32_t flags,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type) {
+    enum aws_s3_tester_sse_type sse_type) {
     ASSERT_TRUE(tester != NULL);
     ASSERT_TRUE(client != NULL);
 
@@ -974,7 +974,7 @@ int aws_s3_tester_send_put_object_meta_request(
 
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
-    enum AWS_S3_TESTER_SSE_TYPE sse_type) {
+    enum aws_s3_tester_sse_type sse_type) {
     ASSERT_TRUE(meta_request_test_results->finished_response_status == 200);
     ASSERT_TRUE(
         meta_request_test_results->finished_response_status == meta_request_test_results->headers_response_status);
