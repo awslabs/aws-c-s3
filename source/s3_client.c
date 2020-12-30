@@ -58,38 +58,34 @@ static const uint32_t s_default_max_retries = 5;
 
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 
-static void s_s3_client_lock_synced_data(struct aws_s3_client *client);
-static void s_s3_client_unlock_synced_data(struct aws_s3_client *client);
-
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
 typedef void(s3_client_update_synced_data_state_fn)(struct aws_s3_client *client);
 
-/* Used to atomically update client state during clean-up and check for finishing destruction. */
+/* Used to atomically update client state during clean-up and check for finishing shutdown. */
 static void s_s3_client_check_for_shutdown(
     struct aws_s3_client *client,
     s3_client_update_synced_data_state_fn *update_fn);
 
-/* Called when the body streaming elg shutdown has completed. */
+/* Called by s_s3_client_check_for_shutdown when all shutdown criteria has been met. */
 static void s_s3_client_finish_destroy(void *user_data);
 
+/* Called when the body streaming elg shutdown has completed. */
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
-
-static void s_s3_vip_finish_destroy(void *user_data);
-
-static void s_s3_vip_http_connection_manager_shutdown_callback(void *user_data);
 
 typedef void(s3_client_vip_update_synced_data_state_fn)(struct aws_s3_vip *vip);
 
+/* Used to atomically update vip state during clean-up and check for finishing shutdown. */
 static void s_s3_vip_check_for_shutdown(struct aws_s3_vip *vip, s3_client_vip_update_synced_data_state_fn *update_fn);
 
-static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
-    struct aws_s3_client *client,
-    const struct aws_s3_meta_request_options *options);
+/* Called by s_s3_vip_check_for_shutdown when all shutdown criteria for the vip has been met. */
+static void s_s3_vip_finish_destroy(void *user_data);
 
-static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+/* Callback for when the vip's connection manager has shut down. */
+static void s_s3_vip_http_connection_manager_shutdown_callback(void *user_data);
 
+/* Used to schedule a "work" for a meta request, be it processing of requests or removal from the processing list. */
 static void s_s3_client_schedule_meta_request_work(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
@@ -105,21 +101,25 @@ static void s_s3_client_on_acquire_http_connection(
     int error_code,
     void *user_data);
 
+/* Schedule task for processing work. */
 static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
 
+/* Actual task function that processes work. */
 static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
+/* Task function for streaming body chunks back to the caller. */
 static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
+/* Sets up vips for each of the given host addresses as long as they are not already in use by other vip structures. */
+static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+/* Ask the host resolver to start resolving addresses. */
 static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client);
 
-static void s_s3_client_lock_synced_data(struct aws_s3_client *client) {
-    aws_mutex_lock(&client->synced_data.lock);
-}
-
-static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
-    aws_mutex_unlock(&client->synced_data.lock);
-}
+/* Default factory function for creating a meta request. */
+static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options);
 
 /* Default push-meta-request function to be used in the client vtable. */
 static void s_s3_client_push_meta_request_default(
@@ -143,6 +143,14 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .remove_meta_request = s_s3_client_remove_meta_request_default,
     .get_http_connection = s_s3_client_get_http_connection_default,
 };
+
+static void s_s3_client_lock_synced_data(struct aws_s3_client *client) {
+    aws_mutex_lock(&client->synced_data.lock);
+}
+
+static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
+    aws_mutex_unlock(&client->synced_data.lock);
+}
 
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
@@ -389,7 +397,7 @@ static void s_s3_client_check_for_shutdown(
         update_fn(client);
     }
 
-    /* We shouldn't ever trip this twice. If we did, that means we potentially would have a double free.*/
+    /* This flag should never be set twice. If it was, that means a double-free could occur.*/
     AWS_ASSERT(!client->synced_data.finish_destroy);
 
     finish_destroy = client->synced_data.active == false && client->synced_data.allocated_vip_count == 0 &&
@@ -640,6 +648,7 @@ struct aws_s3_vip *aws_s3_vip_new(
 error_clean_up:
 
     if (vip != NULL) {
+        aws_string_destroy(vip->host_address);
         aws_mem_release(client->allocator, vip);
         vip = NULL;
     }
@@ -649,7 +658,6 @@ error_clean_up:
 
 static void s_s3_vip_set_reset_active(struct aws_s3_vip *vip) {
     AWS_PRECONDITION(vip);
-
     aws_atomic_store_int(&vip->active, 0);
 }
 
