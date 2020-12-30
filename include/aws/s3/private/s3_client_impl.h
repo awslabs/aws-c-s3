@@ -26,6 +26,11 @@ typedef void(aws_s3_client_get_http_connection_callback)(
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
+enum aws_s3_vip_connection_finish_flags {
+    AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS = 0x00000001,
+    AWS_S3_VIP_CONNECTION_FINISH_FLAG_RETRY = 0x00000002,
+};
+
 typedef void(aws_s3_vip_shutdown_callback_fn)(void *user_data);
 
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
@@ -77,6 +82,9 @@ struct aws_s3_vip_connection {
 
     /* Request currently being processed on the VIP connection. */
     struct aws_s3_request *request;
+
+    /* Current retry token for the request. If it has never been retried, this will be NULL. */
+    struct aws_retry_token *retry_token;
 };
 
 struct aws_s3_client_vtable {
@@ -220,7 +228,8 @@ int aws_s3_client_make_request(struct aws_s3_client *client, struct aws_s3_vip_c
 
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_vip_connection *vip_connection,
+    uint32_t flags);
 
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client);
 

@@ -785,6 +785,9 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
         }
     }
 
+    aws_retry_token_release(vip_connection->retry_token);
+    vip_connection->retry_token = NULL;
+
     aws_mem_release(client->allocator, vip_connection);
 
     s_s3_vip_check_for_shutdown(owning_vip, s_s3_vip_sub_num_vip_connections_synced);
@@ -1443,6 +1446,7 @@ static void s_s3_client_on_acquire_http_connection(
             error_code,
             aws_error_str(error_code));
 
+        request->send_data.error_code = error_code;
         goto error_clean_up;
     }
 
@@ -1482,39 +1486,234 @@ static void s_s3_client_on_acquire_http_connection(
 
 error_clean_up:
 
-    /* Tell the meta request it can retry its request. */
-    aws_s3_meta_request_handle_error(meta_request, vip_connection->request, error_code);
+    aws_s3_client_notify_connection_finished(client, vip_connection, AWS_S3_VIP_CONNECTION_FINISH_FLAG_RETRY);
+}
 
-    /* Detach the request from the vip connection structure.*/
+static void s_s3_client_retry_with_token(
+    struct aws_retry_strategy *retry_strategy,
+    int error_code,
+    struct aws_retry_token *token,
+    void *user_data);
+
+static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_code, void *user_data);
+
+/* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
+void aws_s3_client_notify_connection_finished(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    uint32_t flags) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_request *request = vip_connection->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->initial_request_message);
+
+    /* If we're trying to setup a retry... */
+    if ((flags & AWS_S3_VIP_CONNECTION_FINISH_FLAG_RETRY) != 0) {
+
+        struct aws_byte_cursor host_header_value;
+        AWS_ZERO_STRUCT(host_header_value);
+
+        struct aws_http_headers *message_headers = aws_http_message_get_headers(meta_request->initial_request_message);
+        AWS_ASSERT(message_headers);
+
+        int get_header_result = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
+        AWS_ASSERT(get_header_result == AWS_OP_SUCCESS);
+        (void)get_header_result;
+
+        /* If we already have a retry token, immediately schedule the retry.*/
+        if (vip_connection->retry_token != NULL) {
+            s_s3_client_retry_with_token(
+                client->retry_strategy, AWS_ERROR_SUCCESS, vip_connection->retry_token, vip_connection);
+
+            /* If we don't have a token, try to acquire a token so that we can schedule a retry. */
+        } else if (aws_retry_strategy_acquire_retry_token(
+                       client->retry_strategy, &host_header_value, s_s3_client_retry_with_token, vip_connection, 0)) {
+
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Meta request could not acquire retry token for request %p due to error %d (%s)",
+                (void *)request->meta_request,
+                (void *)request,
+                aws_last_error_or_unknown(),
+                aws_error_str(aws_last_error_or_unknown()));
+
+            goto reset_vip_connection;
+        }
+
+        return;
+    }
+
+reset_vip_connection:
+
+    if (vip_connection->retry_token != NULL) {
+
+        /* If we have a retry token and successfully finished, record that success. */
+        if ((flags & AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS) != 0) {
+            aws_retry_token_record_success(vip_connection->retry_token);
+        }
+
+        aws_retry_token_release(vip_connection->retry_token);
+        vip_connection->retry_token = NULL;
+    }
+
+    /* If we weren't successful, and we're here, that means this failure is not eligible for a retry. So finish the
+     * meta request, and close our HTTP connection. */
+    if ((flags & AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS) == 0) {
+        aws_s3_meta_request_finish(meta_request, NULL, 0, request->send_data.error_code);
+
+        if (vip_connection->http_connection != NULL) {
+            aws_http_connection_close(vip_connection->http_connection);
+        }
+    }
+
+    /* Get rid of the attached request. */
     aws_s3_request_release(vip_connection->request);
     vip_connection->request = NULL;
 
-    /* Throw the vip connection structure back. */
+    /* Throw this VIP Connection structure back into the update list. */
     s_s3_client_lock_synced_data(client);
     aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
     s_s3_client_schedule_process_work_task_synced(client);
     s_s3_client_unlock_synced_data(client);
 }
 
-/* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
-void aws_s3_client_notify_connection_finished(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(vip_connection);
+static void s_s3_client_retry_with_token(
+    struct aws_retry_strategy *retry_strategy,
+    int error_code,
+    struct aws_retry_token *token,
+    void *user_data) {
 
-    /* If this VIP connection has a meta request, then it's a finished request, so clear it out. */
-    if (vip_connection->request != NULL) {
-        aws_s3_request_release(vip_connection->request);
-        vip_connection->request = NULL;
+    AWS_PRECONDITION(retry_strategy);
+    (void)retry_strategy;
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+    AWS_PRECONDITION(vip_connection->owning_vip);
+
+    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
+    AWS_PRECONDITION(client);
+
+    struct aws_s3_request *request = vip_connection->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    if (error_code != AWS_ERROR_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Meta request could not get retry token for request %p due to error %d (%s)",
+            (void *)meta_request,
+            (void *)request,
+            error_code,
+            aws_error_str(error_code));
+
+        goto error_clean_up;
     }
 
-    s_s3_client_lock_synced_data(client);
+    AWS_ASSERT(token);
 
-    aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
-    s_s3_client_schedule_process_work_task_synced(client);
+    enum aws_retry_error_type error_type = AWS_RETRY_ERROR_TYPE_TRANSIENT;
 
-    s_s3_client_unlock_synced_data(client);
+    switch (request->send_data.error_code) {
+        case AWS_ERROR_S3_INTERNAL_ERROR:
+            error_type = AWS_RETRY_ERROR_TYPE_SERVER_ERROR;
+            break;
+
+        case AWS_ERROR_S3_SLOW_DOWN:
+            error_type = AWS_RETRY_ERROR_TYPE_THROTTLING;
+            break;
+    }
+
+    vip_connection->retry_token = token;
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT,
+        "id=%p Client scheduling retry of request %p for meta request %p with token %p.",
+        (void *)client,
+        (void *)request,
+        (void *)meta_request,
+        (void *)token);
+
+    /* Ask the retry strategy to schedule a retry of the request. */
+    if (aws_retry_strategy_schedule_retry(
+            vip_connection->retry_token, error_type, s_s3_client_retry_ready, vip_connection)) {
+        error_code = aws_last_error_or_unknown();
+
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client could not retry request %p for meta request %p with token %p due to error %d (%s)",
+            (void *)client,
+            (void *)request,
+            (void *)meta_request,
+            (void *)token,
+            error_code,
+            aws_error_str(error_code));
+
+        goto error_clean_up;
+    }
+
+    return;
+
+error_clean_up:
+
+    request->send_data.error_code = error_code;
+    aws_s3_client_notify_connection_finished(client, vip_connection, 0);
+}
+
+static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_code, void *user_data) {
+    AWS_PRECONDITION(token);
+    (void)token;
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+    AWS_PRECONDITION(vip_connection->owning_vip);
+
+    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
+    AWS_PRECONDITION(client);
+
+    struct aws_s3_request *request = vip_connection->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    /* If we couldn't retry this request, then bail on the entire meta request. */
+    if (error_code != AWS_ERROR_SUCCESS) {
+
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client could not retry request %p for meta request %p due to error %d (%s)",
+            (void *)client,
+            (void *)meta_request,
+            (void *)request,
+            error_code,
+            aws_error_str(error_code));
+
+        goto error_clean_up;
+    }
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Client retrying request %p for meta request %p on connection %p with retry token %p",
+        (void *)client,
+        (void *)request,
+        (void *)meta_request,
+        (void *)vip_connection,
+        (void *)vip_connection->retry_token);
+
+    s_s3_client_get_http_connection(client, vip_connection);
+
+    return;
+
+error_clean_up:
+
+    aws_s3_client_notify_connection_finished(client, vip_connection, 0);
 }
 
 /* Called by aws_s3_request when it has finished being destroyed */
