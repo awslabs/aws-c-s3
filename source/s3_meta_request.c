@@ -196,6 +196,7 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_request *),
         s_s3_request_priority_queue_pred);
 
+    /* Client is currently optional to allow spining up a meta_request without a client in a test. */
     if (client != NULL) {
         aws_s3_client_acquire(client);
         meta_request->synced_data.client = client;
