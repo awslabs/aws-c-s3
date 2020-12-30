@@ -1564,6 +1564,7 @@ reset_vip_connection:
     /* If we weren't successful, and we're here, that means this failure is not eligible for a retry. So finish the
      * meta request, and close our HTTP connection. */
     if ((flags & AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS) == 0) {
+        /* CANCELTODO: make this an aws_s3_meta_request_cancel */
         aws_s3_meta_request_finish(meta_request, NULL, 0, request->send_data.error_code);
 
         if (vip_connection->http_connection != NULL) {

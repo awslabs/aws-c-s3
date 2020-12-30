@@ -6,6 +6,7 @@
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
 
+/* CANCELTODO: Add new states for being in cancel, and for waiting for the cancel message to complete. */
 enum aws_s3_auto_ranged_put_state {
     AWS_S3_AUTO_RANGED_PUT_STATE_START,
     AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE,
@@ -16,6 +17,7 @@ enum aws_s3_auto_ranged_put_state {
     AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST
 };
 
+/* CANCELTODO: Add new tag for CANCEL message. */
 enum aws_s3_auto_ranged_put_request_tag {
     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
@@ -245,6 +247,14 @@ static int s_s3_auto_ranged_put_next_request(
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST: {
             break;
         }
+        /*  CANCELTODO:
+            case AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL:
+                Create an abort message with the request tag AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CANCEL
+                Set state to AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL
+            break;
+            case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL:
+            break;
+        */
         default:
             AWS_FATAL_ASSERT(false);
             break;
@@ -619,6 +629,62 @@ static int s_s3_auto_ranged_put_stream_complete(
     } else {
         AWS_FATAL_ASSERT(false);
     }
+    /* CANCELTODO:
+        add an else if for AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CANCEL which doesn't do anything (this acknowledges that
+       it's a valid tag and will prevent from hitting the fatal assert)
+    */
 
     return AWS_OP_SUCCESS;
 }
+
+/*
+CANCELTODO:
+
+Overview:
+* Need a new function that can create a multipart abort message.
+
+* Need a new public aws_s3_meta_request_cancel function that just takes the meta request as an argument. Internally,
+we'll need a virtual cancel function on the meta request that takes the meta request and a failed request (maybe called
+aws_s3_meta_request_cancel_with_request?).  The public one can just call the latter with a NULL request.
+
+Default implementation should just call aws_s3_meta_request_finish. Auto-ranged get will rely on this.  Auto-ranged-put will
+cache the failed request in its own synced_data and then try to send one last request to abort.
+
+* Need to add two new states and a request tag to auto_ranged_put.  (One state for needing to send the cancel
+message, one state for waiting for the cancel message, and one request tag for the cancel request itself.)
+
+* Add the functions below as virtual functions.  One is for the cancel, the other is for finishing the meta request
+when the cancel request is destroyed.
+
+static void s_s3_auto_ranged_put_cancel(struct aws_s3_meta_request *meta_request, struct aws_s3_request* failed_request)
+{
+    //Lock synced data
+
+    if(state != AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL && state != AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL) {
+        // set state to AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL
+        // synced_data.failed_request = failed_request
+    }
+
+    // Unlock synced data
+}
+
+static void s_s3_auto_ranged_put_notify_request_destroyed(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request) {
+
+    if(request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CANCEL) {
+        aws_s3_meta_request_cancel_default(meta_request, synced_data.failed_request);
+    }
+}
+
+void aws_s3_meta_request_cancel_default(struct aws_s3_meta_request* meta_request, struct aws_s3_request* failed_request)
+{
+    if(synced_data.failed_request != NULL) {
+        aws_s3_meta_request_finish(meta_request, synced_data.failed_request, synced_data.failed_request->response_status, synced_data.failed_request->send_data.error_code);
+    } else {
+        aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_S3_ERROR_CANCELED_SUCCESS);
+    }
+    
+}
+
+*/

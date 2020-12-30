@@ -54,6 +54,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     const struct aws_string *upload_id,
     const struct aws_array_list *etags);
 
+/* CANELTODO: Add new aws_s3_create_multipart_upload_abort function */
+
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *message);

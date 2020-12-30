@@ -963,6 +963,7 @@ void aws_s3_meta_request_send_request_finish_default(
                 (void *)request,
                 response_status);
 
+            /* CANCELTODO: replace with aws_s3_meta_request_cancel */
             aws_s3_meta_request_finish(meta_request, request, response_status, error_code);
 
         } else {
@@ -1042,6 +1043,7 @@ void aws_s3_meta_request_finish(
     AWS_PRECONDITION(meta_request);
 
     /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
+    /* CANCELTODO: get rid of this assert. */
     AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
 
     bool already_finished = false;
