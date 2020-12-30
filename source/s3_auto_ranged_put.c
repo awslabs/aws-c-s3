@@ -641,11 +641,12 @@ static int s_s3_auto_ranged_put_stream_complete(
 CANCELTODO:
 
 Overview:
-* Need a new function that can create a multipart abort message.
+* Need a new function that can create a multipart abort message. (s3_request_messages.h)
 
-* Need a new public aws_s3_meta_request_cancel function that just takes the meta request as an argument. Internally,
-we'll need a virtual cancel function on the meta request that takes the meta request and a failed request (maybe called
-aws_s3_meta_request_cancel_with_request?).  The public one can just call the latter with a NULL request.
+* Need a new public aws_s3_meta_request_cancel function that just takes the meta request as an argument. (s3_client.h)
+
+* Internally, we'll need a virtual cancel function on the meta request that takes the meta request and a failed request (maybe called
+aws_s3_meta_request_cancel_with_request?).  The public one can just call the latter with a NULL request. (s3_meta_request_impl.h)
 
 Default implementation should just call aws_s3_meta_request_finish. Auto-ranged get will rely on this.  Auto-ranged-put will
 cache the failed request in its own synced_data and then try to send one last request to abort.
@@ -684,7 +685,7 @@ void aws_s3_meta_request_cancel_default(struct aws_s3_meta_request* meta_request
     } else {
         aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_S3_ERROR_CANCELED_SUCCESS);
     }
-    
+
 }
 
 */
