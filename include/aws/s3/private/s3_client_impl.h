@@ -116,6 +116,9 @@ struct aws_s3_client {
      * to meta requests for use. */
     const size_t max_part_size;
 
+    /* TODO: max requests in flight */
+    uint32_t max_requests_in_flight;
+
     /* TLS Options to be used for each connection. */
     struct aws_tls_connection_options *tls_connection_options;
 

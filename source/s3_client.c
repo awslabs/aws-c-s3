@@ -217,6 +217,8 @@ struct aws_s3_client *aws_s3_client_new(
         *((uint64_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
+    client->max_requests_in_flight = client_config->max_requests_in_flight;
+
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
@@ -1145,8 +1147,11 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     /* Step 4: Go through all VIP connections, cleaning up old ones, and assigning requests where possible. */
     /*******************/
     const uint32_t max_requests_multiplier = 4;
-    const uint32_t max_requests_in_flight =
+    uint32_t max_requests_in_flight =
         client->ideal_vip_count * s_num_connections_per_vip * max_requests_multiplier;
+    if (client->max_requests_in_flight != 0 && max_requests_in_flight > client->max_requests_in_flight) {
+        max_requests_in_flight = client->max_requests_in_flight;
+    }
 
     while (!aws_linked_list_empty(&vip_connections_updates)) {
 

@@ -86,6 +86,9 @@ struct aws_s3_client_config {
     /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to.. */
     size_t max_part_size;
 
+    /* TODO: max requests in flight */
+    size_t max_requests_in_flight;
+
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
 
