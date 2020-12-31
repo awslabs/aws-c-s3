@@ -71,7 +71,9 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .incoming_body = NULL,
     .stream_complete = NULL,
     .notify_request_destroyed = s_s3_auto_ranged_get_notify_request_destroyed,
-    .destroy = s_s3_meta_request_auto_ranged_get_destroy};
+    .destroy = s_s3_meta_request_auto_ranged_get_destroy,
+    .cancel = aws_s3_meta_request_cancel_default,
+};
 
 static void s_s3_auto_ranged_get_lock_synced_data(struct aws_s3_auto_ranged_get *auto_ranged_get) {
     AWS_PRECONDITION(auto_ranged_get);

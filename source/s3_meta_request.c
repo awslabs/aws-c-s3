@@ -211,6 +211,13 @@ int aws_s3_meta_request_init_base(
     return AWS_OP_SUCCESS;
 }
 
+void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable->cancel);
+
+    meta_request->vtable->cancel(meta_request, NULL);
+}
+
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
@@ -867,6 +874,20 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(vip_connection, stream, error_code);
 }
 
+void aws_s3_meta_request_cancel_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *failed_request) {
+    if (failed_request != NULL) {
+        aws_s3_meta_request_finish(
+            meta_request,
+            failed_request,
+            failed_request->send_data.response_status,
+            failed_request->send_data.error_code);
+    } else {
+        aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_CANCELED_SUCCESS);
+    }
+}
+
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
@@ -963,9 +984,8 @@ void aws_s3_meta_request_send_request_finish_default(
                 (void *)request,
                 response_status);
 
-            /* CANCELTODO: replace with aws_s3_meta_request_cancel */
-            aws_s3_meta_request_finish(meta_request, request, response_status, error_code);
-
+            request->send_data.error_code = error_code;
+            aws_s3_meta_request_cancel_default(meta_request, request);
         } else {
             /* Otherwise, set this up for a retry. */
             request->send_data.error_code = error_code;
@@ -1041,10 +1061,6 @@ void aws_s3_meta_request_finish(
     int response_status,
     int error_code) {
     AWS_PRECONDITION(meta_request);
-
-    /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
-    /* CANCELTODO: get rid of this assert. */
-    AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
 
     bool already_finished = false;
     struct aws_s3_client *client = NULL;

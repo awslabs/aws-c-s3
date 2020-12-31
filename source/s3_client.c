@@ -1564,8 +1564,7 @@ reset_vip_connection:
     /* If we weren't successful, and we're here, that means this failure is not eligible for a retry. So finish the
      * meta request, and close our HTTP connection. */
     if ((flags & AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS) == 0) {
-        /* CANCELTODO: make this an aws_s3_meta_request_cancel */
-        aws_s3_meta_request_finish(meta_request, NULL, 0, request->send_data.error_code);
+        aws_s3_meta_request_cancel_default(meta_request, request);
 
         if (vip_connection->http_connection != NULL) {
             aws_http_connection_close(vip_connection->http_connection);
@@ -1861,11 +1860,11 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
     struct aws_host_resolver *host_resolver = client->client_bootstrap->host_resolver;
 
     struct aws_host_listener *host_listener = NULL;
-    struct aws_host_listener_options options = {.host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
-                                                .resolved_address_callback =
-                                                    s_s3_client_host_listener_resolved_address_callback,
-                                                .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
-                                                .user_data = client};
+    struct aws_host_listener_options options = {
+        .host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
+        .resolved_address_callback = s_s3_client_host_listener_resolved_address_callback,
+        .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
+        .user_data = client};
 
     bool listener_already_exists = false;
     bool error_occurred = false;

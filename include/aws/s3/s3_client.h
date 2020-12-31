@@ -170,6 +170,9 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     const struct aws_s3_meta_request_options *options);
 
 AWS_S3_API
+void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
+
+AWS_S3_API
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
