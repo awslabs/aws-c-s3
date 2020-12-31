@@ -208,8 +208,8 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+        meta_request->allocator, meta_request->initial_request_message, true /*sse*/);
 
     if (is_initial_prepare && meta_request_default->content_length > 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
