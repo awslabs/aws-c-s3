@@ -1864,7 +1864,8 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
         .host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
         .resolved_address_callback = s_s3_client_host_listener_resolved_address_callback,
         .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
-        .user_data = client};
+        .user_data = client,
+    };
 
     bool listener_already_exists = false;
     bool error_occurred = false;
