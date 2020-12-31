@@ -838,7 +838,7 @@ int aws_s3_tester_send_get_object_meta_request(
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
+        ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, sse_type));
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -849,7 +849,9 @@ int aws_s3_tester_send_get_object_meta_request(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_tester_validate_get_object_results(struct aws_s3_meta_request_test_results *meta_request_test_results) {
+int aws_s3_tester_validate_get_object_results(
+    struct aws_s3_meta_request_test_results *meta_request_test_results,
+    enum aws_s3_tester_sse_type sse_type) {
     AWS_PRECONDITION(meta_request_test_results);
     AWS_PRECONDITION(meta_request_test_results->tester);
 
@@ -872,6 +874,22 @@ int aws_s3_tester_validate_get_object_results(struct aws_s3_meta_request_test_re
         meta_request_test_results->response_headers,
         aws_byte_cursor_from_c_str("Content-Length"),
         &content_length_cursor));
+    struct aws_byte_cursor sse_byte_cursor;
+    switch (sse_type) {
+        case AWS_S3_TESTER_SSE_KMS:
+            ASSERT_SUCCESS(
+                aws_http_headers_get(meta_request_test_results->response_headers, g_s3_sse_header, &sse_byte_cursor));
+            ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "aws:kms"));
+            break;
+        case AWS_S3_TESTER_SSE_AES256:
+            ASSERT_SUCCESS(
+                aws_http_headers_get(meta_request_test_results->response_headers, g_s3_sse_header, &sse_byte_cursor));
+            ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "AES256"));
+            break;
+
+        default:
+            break;
+    }
 
     struct aws_string *content_length_str = aws_string_new_from_cursor(tester->allocator, &content_length_cursor);
 

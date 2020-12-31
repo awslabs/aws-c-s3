@@ -146,12 +146,7 @@ static int s_test_s3_get_object_helper(
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        g_s3_path_get_object_test_1MB,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
-        NULL,
-        sse_type));
+        &tester, client, s3_path, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL, sse_type));
 
     aws_string_destroy(endpoint);
     aws_tls_ctx_release(context);
@@ -228,7 +223,7 @@ static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
         &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
-    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -273,7 +268,9 @@ static int s_test_s3_signing_override(struct aws_allocator *allocator, void *ctx
         struct aws_s3_meta_request_test_results meta_request_test_results;
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
-        ASSERT_TRUE(aws_s3_tester_validate_get_object_results(&meta_request_test_results) != AWS_OP_SUCCESS);
+        ASSERT_TRUE(
+            aws_s3_tester_validate_get_object_results(&meta_request_test_results, AWS_S3_TESTER_SSE_NONE) !=
+            AWS_OP_SUCCESS);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     }
@@ -291,7 +288,7 @@ static int s_test_s3_signing_override(struct aws_allocator *allocator, void *ctx
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
             &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
-        ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
+        ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, AWS_S3_TESTER_SSE_NONE));
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     }
@@ -399,7 +396,7 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
-        aws_s3_tester_validate_get_object_results(&meta_request_test_resultss[i]);
+        aws_s3_tester_validate_get_object_results(&meta_request_test_resultss[i], AWS_S3_TESTER_SSE_NONE);
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_resultss[i]);
     }
 
@@ -717,7 +714,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     aws_s3_tester_unlock_synced_data(&tester);
 
-    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_meta_request_release(meta_request);
     meta_request = NULL;
@@ -880,7 +877,7 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
         &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
-    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

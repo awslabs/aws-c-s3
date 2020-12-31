@@ -220,7 +220,9 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_meta_request_test_results *out_results,
     enum aws_s3_tester_sse_type sse_type);
 
-int aws_s3_tester_validate_get_object_results(struct aws_s3_meta_request_test_results *meta_request_test_results);
+int aws_s3_tester_validate_get_object_results(
+    struct aws_s3_meta_request_test_results *meta_request_test_results,
+    enum aws_s3_tester_sse_type sse_type);
 
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
