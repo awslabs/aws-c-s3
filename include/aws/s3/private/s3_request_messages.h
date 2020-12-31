@@ -7,6 +7,7 @@
  */
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 struct aws_allocator;
@@ -59,9 +60,11 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_http_message *base_message,
     const struct aws_string *upload_id);
 
+/* TODO: use a flag instead of bool to make it more clear and better for other options in the future */
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
-    struct aws_http_message *message);
+    struct aws_http_message *message,
+    bool sse);
 
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,

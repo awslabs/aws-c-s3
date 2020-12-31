@@ -102,7 +102,11 @@ enum aws_s3_client_tls_usage {
     AWS_S3_TLS_DISABLED,
 };
 
-static int s_test_s3_get_object_helper(struct aws_allocator *allocator, enum aws_s3_client_tls_usage tls_usage) {
+static int s_test_s3_get_object_helper(
+    struct aws_allocator *allocator,
+    enum aws_s3_client_tls_usage tls_usage,
+    enum aws_s3_tester_sse_type sse_type,
+    struct aws_byte_cursor s3_path) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -142,7 +146,12 @@ static int s_test_s3_get_object_helper(struct aws_allocator *allocator, enum aws
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester,
+        client,
+        g_s3_path_get_object_test_1MB,
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
+        NULL,
+        sse_type));
 
     aws_string_destroy(endpoint);
     aws_tls_ctx_release(context);
@@ -161,7 +170,8 @@ AWS_TEST_CASE(test_s3_get_object_tls_disabled, s_test_s3_get_object_tls_disabled
 static int s_test_s3_get_object_tls_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_DISABLED));
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(
+        allocator, AWS_S3_TLS_DISABLED, AWS_S3_TESTER_SSE_NONE, g_s3_path_get_object_test_1MB));
 
     return 0;
 }
@@ -170,7 +180,8 @@ AWS_TEST_CASE(test_s3_get_object_tls_enabled, s_test_s3_get_object_tls_enabled)
 static int s_test_s3_get_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED));
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(
+        allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SSE_NONE, g_s3_path_get_object_test_1MB));
 
     return 0;
 }
@@ -179,7 +190,8 @@ AWS_TEST_CASE(test_s3_get_object_tls_default, s_test_s3_get_object_tls_default)
 static int s_test_s3_get_object_tls_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED));
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(
+        allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SSE_NONE, g_s3_path_get_object_test_1MB));
 
     return 0;
 }
@@ -310,7 +322,12 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester,
+        client,
+        g_s3_path_get_object_test_1MB,
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
+        NULL,
+        AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -400,6 +417,30 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_sse_kms, s_test_s3_get_object_sse_kms)
+static int s_test_s3_get_object_sse_kms(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Keep TLS enabled for SSE related download, or it will fail. */
+    return s_test_s3_get_object_helper(
+        allocator,
+        AWS_S3_TLS_ENABLED,
+        AWS_S3_TESTER_SSE_KMS,
+        aws_byte_cursor_from_c_str("/get_object_test_kms_10MB.txt"));
+}
+
+AWS_TEST_CASE(test_s3_get_object_sse_aes256, s_test_s3_get_object_sse_aes256)
+static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Keep TLS enabled for SSE related download, or it will fail. */
+    return s_test_s3_get_object_helper(
+        allocator,
+        AWS_S3_TLS_ENABLED,
+        AWS_S3_TESTER_SSE_AES256,
+        aws_byte_cursor_from_c_str("/get_object_test_aes256_10MB.txt"));
+}
+
 static int s_test_s3_put_object_helper(struct aws_allocator *allocator, enum aws_s3_client_tls_usage tls_usage) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -440,7 +481,7 @@ static int s_test_s3_put_object_helper(struct aws_allocator *allocator, enum aws
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL, AWS_S3_TESTER_SSE_NONE));
 
     aws_string_destroy(endpoint);
     aws_tls_ctx_release(context);
@@ -501,7 +542,123 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL, AWS_S3_TESTER_SSE_NONE));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_sse_kms, s_test_s3_put_object_sse_kms)
+static int s_test_s3_put_object_sse_kms(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 20 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL, AWS_S3_TESTER_SSE_KMS));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_sse_kms_multipart, s_test_s3_put_object_sse_kms_multipart)
+static int s_test_s3_put_object_sse_kms_multipart(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL, AWS_S3_TESTER_SSE_KMS));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_sse_aes256, s_test_s3_put_object_sse_aes256)
+static int s_test_s3_put_object_sse_aes256(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 20 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL, AWS_S3_TESTER_SSE_AES256));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_sse_aes256_multipart, s_test_s3_put_object_sse_aes256_multipart)
+static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL, AWS_S3_TESTER_SSE_AES256));
 
     aws_s3_client_release(client);
     client = NULL;
