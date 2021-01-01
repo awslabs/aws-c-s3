@@ -64,7 +64,7 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_http_message *base_message,
     const struct aws_string *upload_id);
 
-/* TODO: use a flag instead of bool to make it more clear and better for other options in the future */
+/* TODO: maybe set a list of the headers we want??? */
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *message,

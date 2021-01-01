@@ -785,6 +785,10 @@ int aws_s3_tester_send_meta_request(
 
     ASSERT_TRUE(meta_request != NULL);
 
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
+        aws_s3_meta_request_cancel(meta_request);
+    }
+
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(tester);
 

@@ -37,6 +37,8 @@ add_test_case(test_s3_put_object_sse_aes256_multipart)
 add_test_case(test_s3_meta_request_default)
 add_test_case(test_s3_error_response)
 add_test_case(test_s3_existing_host_entry)
+add_test_case(test_s3_cancel_multipart_upload_during_parts_upload)
+add_test_case(test_s3_cancel_multipart_upload_random)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

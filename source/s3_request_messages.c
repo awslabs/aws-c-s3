@@ -279,6 +279,8 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     }
     aws_http_message_set_request_method(message, aws_byte_cursor_from_c_str("DELETE"));
 
+    return message;
+
 error_clean_up:
 
     AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Could not create abort multipart upload message");

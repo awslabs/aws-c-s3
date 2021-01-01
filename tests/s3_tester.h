@@ -17,6 +17,62 @@
 #include <aws/common/mutex.h>
 #include <aws/common/string.h>
 
+/**
+ * Copy/Paste of the implementation to make it visable for testing
+ */
+
+enum aws_s3_auto_ranged_put_state {
+    AWS_S3_AUTO_RANGED_PUT_STATE_START,
+    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE,
+    AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS,
+    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS,
+    AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL,
+    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL_COMPLETE,
+    AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE,
+    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE,
+    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST
+};
+
+enum aws_s3_auto_ranged_put_request_tag {
+    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
+    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
+    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
+    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD
+};
+
+static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
+static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
+
+static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+};
+
+struct aws_s3_auto_ranged_put {
+    struct aws_s3_meta_request base;
+
+    struct {
+        enum aws_s3_auto_ranged_put_state state;
+        struct aws_array_list etag_list;
+
+        uint32_t total_num_parts;
+        uint32_t next_part_number;
+        uint32_t num_parts_sent;
+        uint32_t num_parts_completed;
+
+        struct aws_string *upload_id;
+        struct aws_http_headers *needed_response_headers;
+
+        struct aws_s3_request *failed_request;
+
+    } synced_data;
+};
+
+/**
+ * End of Copy/paste
+ */
+
 struct aws_client_bootstrap;
 struct aws_credentials_provider;
 struct aws_event_loop_group;
@@ -195,6 +251,7 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
 enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
     AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
+    AWS_S3_TESTER_SEND_META_REQUEST_CANCEL = 0x00000004,
 };
 
 int aws_s3_tester_send_meta_request(

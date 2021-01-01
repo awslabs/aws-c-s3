@@ -209,11 +209,13 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    bool cancel = false;
     s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD) {
+    cancel = request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD;
+    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+    if (cancel) {
         aws_s3_meta_request_cancel_default(meta_request, auto_ranged_put->synced_data.failed_request);
     }
-    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 }
 
 static int s_s3_auto_ranged_put_next_request(
@@ -375,30 +377,12 @@ static int s_s3_auto_ranged_put_prepare_request(
                 request->part_number,
                 auto_ranged_put->synced_data.upload_id);
 
-            if (message == NULL) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
-                    (void *)meta_request,
-                    request->request_tag);
-                goto message_create_failed;
-            }
-
         } break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
 
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
                 meta_request->allocator, meta_request->initial_request_message);
-
-            if (message == NULL) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
-                    (void *)meta_request,
-                    request->request_tag);
-                goto message_create_failed;
-            }
 
             break;
         }
@@ -426,19 +410,20 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
-            if (message == NULL) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
-                    (void *)meta_request,
-                    request->request_tag);
-                goto message_create_failed;
-            }
-
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+
+            if (!auto_ranged_put->synced_data.upload_id) {
+                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST, "id=%p request cancelled before any parts get sent.", (void *)meta_request);
+                /* which mean the response of the create multipart upload have not arrived yet, and none of the put has
+                 * been sent, we can just finish the request without abort message */
+
+                return aws_raise_error(AWS_ERROR_S3_CANCELED_SUCCESS);
+            }
 
             AWS_FATAL_ASSERT(auto_ranged_put->synced_data.upload_id);
 
@@ -449,17 +434,17 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
-            if (message == NULL) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
-                    (void *)meta_request,
-                    request->request_tag);
-                goto message_create_failed;
-            }
-
             break;
         }
+    }
+
+    if (message == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not allocate message for request with tag %d for auto-ranged-put meta request.",
+            (void *)meta_request,
+            request->request_tag);
+        goto message_create_failed;
     }
 
     aws_s3_request_setup_send_data(request, message);
@@ -700,8 +685,12 @@ static int s_s3_auto_ranged_put_stream_complete(
             aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
             break;
         }
-        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
+            int error_code =
+                request->send_data.error_code ? request->send_data.error_code : AWS_ERROR_S3_CANCELED_SUCCESS;
+            aws_s3_meta_request_finish(meta_request, NULL, request->send_data.response_status, error_code);
             break;
+        }
         default:
             AWS_FATAL_ASSERT(false);
     }
