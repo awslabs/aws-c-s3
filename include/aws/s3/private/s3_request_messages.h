@@ -18,7 +18,8 @@ struct aws_array_list;
 
 enum aws_s3_copy_http_message_flags {
     AWS_S3_COPY_MESSAGE_INCLUDE_SSE = 0x00000001,
-    AWS_S3_COPY_MESSAGE_HOST_ONLY = 0x00000002,
+    /* For multipart upload complete and abort, only host and two payer related headers are needed */
+    AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS = 0x00000002,
 };
 
 /* Create an HTTP request for an S3 Get Object Request, using the original request as a basis. If multipart is not
@@ -64,7 +65,7 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_http_message *base_message,
     const struct aws_string *upload_id);
 
-/* TODO: maybe set a list of the headers we want??? */
+/* TODO: maybe set a list of the headers we want */
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *message,

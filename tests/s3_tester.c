@@ -15,6 +15,8 @@
 #include <aws/io/stream.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
+#include <stdlib.h>
+#include <time.h>
 
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
@@ -786,6 +788,9 @@ int aws_s3_tester_send_meta_request(
     ASSERT_TRUE(meta_request != NULL);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
+        /* take a random sleep from 0-1 ms. */
+        srand(time(NULL));
+        aws_thread_current_sleep(rand() % 1000000);
         aws_s3_meta_request_cancel(meta_request);
     }
 
@@ -796,6 +801,10 @@ int aws_s3_tester_send_meta_request(
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
         ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
+        ASSERT_TRUE(
+            tester->synced_data.finish_error_code == AWS_ERROR_S3_CANCELED_SUCCESS ||
+            tester->synced_data.finish_error_code == AWS_IO_MAX_RETRIES_EXCEEDED);
     } else {
         ASSERT_FALSE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     }
