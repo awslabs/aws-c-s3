@@ -789,7 +789,7 @@ int aws_s3_tester_send_meta_request(
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
         /* take a random sleep from 0-1 ms. */
-        srand(time(NULL));
+        srand((uint32_t)time(NULL));
         aws_thread_current_sleep(rand() % 1000000);
         aws_s3_meta_request_cancel(meta_request);
     }
