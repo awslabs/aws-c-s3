@@ -686,9 +686,6 @@ static int s_s3_auto_ranged_put_stream_complete(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
-            int error_code =
-                request->send_data.error_code ? request->send_data.error_code : AWS_ERROR_S3_CANCELED_SUCCESS;
-            aws_s3_meta_request_finish(meta_request, NULL, request->send_data.response_status, error_code);
             break;
         }
         default:
