@@ -129,7 +129,8 @@ struct aws_s3_client {
     const uint32_t ideal_vip_count;
 
     /**
-     * DEFAULT: compute content-md5 header for multi-part upload if content-md5 header is specified in the original request. keep content-md5 header unchanged for single-part upload if exists.
+     * DEFAULT: compute content-md5 header for multi-part upload if content-md5 header is specified in the original
+     * request. keep content-md5 header unchanged for single-part upload if exists.
      * ENABLED: always compute content-md5 header for both single-part upload and multi-part upload.
      * DISABLED: always remove content-md5 header for both single-part upload and multi-part upload if exists.
      */

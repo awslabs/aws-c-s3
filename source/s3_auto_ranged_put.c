@@ -314,10 +314,11 @@ static int s_s3_auto_ranged_put_prepare_request(
             }
 
             bool should_compute_content_md5 = false;
-            struct aws_http_headers *initial_request_headers = aws_http_message_get_headers(meta_request->initial_request_message);
+            struct aws_http_headers *initial_request_headers =
+                aws_http_message_get_headers(meta_request->initial_request_message);
             if (client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
                 (client->compute_content_md5 == AWS_MR_CONTENT_MD5_DEFAULT &&
-                aws_http_headers_has(initial_request_headers, g_content_md5_header_name))) {
+                 aws_http_headers_has(initial_request_headers, g_content_md5_header_name))) {
                 should_compute_content_md5 = true;
             }
 

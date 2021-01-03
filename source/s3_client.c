@@ -250,7 +250,8 @@ struct aws_s3_client *aws_s3_client_new(
         *((double *)&client->throughput_target_gbps) = s_default_throughput_target_gbps;
     }
 
-    *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) = client_config->compute_content_md5;
+    *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
+        client_config->compute_content_md5;
 
     /* Determine how many vips are ideal by dividing target-throughput by throughput-per-vip. */
     {

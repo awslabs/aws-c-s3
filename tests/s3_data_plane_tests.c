@@ -665,7 +665,11 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
     return 0;
 }
 
-static int s_test_s3_put_object_content_md5_helper(struct aws_allocator *allocator, bool multipart_upload, enum aws_s3_meta_request_compute_content_md5 compute_content_md5, bool expect_succeed) {
+static int s_test_s3_put_object_content_md5_helper(
+    struct aws_allocator *allocator,
+    bool multipart_upload,
+    enum aws_s3_meta_request_compute_content_md5 compute_content_md5,
+    bool expect_succeed) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
@@ -716,12 +720,7 @@ static int s_test_s3_put_object_content_md5_helper(struct aws_allocator *allocat
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester,
-        client,
-        10,
-        flags,
-        AWS_S3_TESTER_SSE_NONE));
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 10, flags, AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -809,8 +808,8 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
     uint32_t part_number = 1;
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
 
-    struct aws_http_message *new_message =
-        aws_s3_upload_part_message_new(allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5);
+    struct aws_http_message *new_message = aws_s3_upload_part_message_new(
+        allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     if (should_compute_content_md5) {
