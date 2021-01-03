@@ -27,11 +27,6 @@ static int s_s3_message_util_add_content_range_header(
     uint64_t part_size,
     struct aws_http_message *out_message);
 
-static int s_s3_message_util_add_content_md5_header(
-    struct aws_allocator *allocator,
-    struct aws_byte_buf *byte_buf,
-    struct aws_http_message *message);
-
 static int s_s3_create_multipart_set_up_request_path(struct aws_allocator *allocator, struct aws_http_message *message);
 
 /* Create a new get object request from an existing get object request. Currently just adds an optional ranged header.
@@ -75,7 +70,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
     uint32_t part_number,
-    const struct aws_string *upload_id) {
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
@@ -97,17 +93,21 @@ struct aws_http_message *aws_s3_upload_part_message_new(
                 goto error_clean_up;
             }
 
-            struct aws_http_headers *base_message_headers = aws_http_message_get_headers(base_message);
-            AWS_ASSERT(base_message_headers);
-
-            if (aws_http_headers_has(base_message_headers, g_content_md5_header_name)) {
-                if (s_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
+            if (should_compute_content_md5) {
+                if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
                     goto error_clean_up;
                 }
+            } else {
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
+                    if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+                        goto error_clean_up;
+                    }
+                }
             }
+        } else {
+            goto error_clean_up;
         }
-
-        // TODO: What if buffer == NULL ?
     }
 
     return message;
@@ -150,9 +150,10 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_has(headers, g_content_md5_header_name) &&
-        aws_http_headers_erase(headers, g_content_md5_header_name)) {
-        goto error_clean_up;
+    if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
+        if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+            goto error_clean_up;
+        }
     }
 
     aws_http_message_set_request_method(message, g_post_method);
@@ -221,19 +222,22 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         goto error_clean_up;
     }
 
-    if (aws_http_headers_has(headers, g_content_length_header_name) &&
-        aws_http_headers_erase(headers, g_content_length_header_name)) {
-        goto error_clean_up;
+    if (aws_http_headers_erase(headers, g_content_length_header_name)) {
+        if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+            goto error_clean_up;
+        }
     }
 
-    if (aws_http_headers_has(headers, g_content_type_header_name) &&
-        aws_http_headers_erase(headers, g_content_type_header_name)) {
-        goto error_clean_up;
+    if (aws_http_headers_erase(headers, g_content_type_header_name)) {
+        if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+            goto error_clean_up;
+        }
     }
 
-    if (aws_http_headers_has(headers, g_content_md5_header_name) &&
-        aws_http_headers_erase(headers, g_content_md5_header_name)) {
-        goto error_clean_up;
+    if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
+        if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+            goto error_clean_up;
+        }
     }
 
     /* Create XML payload with all of the etags of finished parts */
@@ -387,6 +391,78 @@ error_clean_up:
     return NULL;
 }
 
+/* Add a content-range header.*/
+static int s_s3_message_util_add_content_range_header(
+    uint64_t part_index,
+    uint64_t part_size,
+    struct aws_http_message *out_message) {
+    AWS_PRECONDITION(out_message);
+
+    uint64_t range_start = part_index * part_size;
+    uint64_t range_end = range_start + part_size - 1;
+
+    /* TODO this is more than enough space, but maybe there's a better way to do this?
+     * ((2^64)-1 = 20 characters;  2*20 + length-of("bytes=-") < 128) */
+    char range_value_buffer[128] = "";
+    snprintf(range_value_buffer, sizeof(range_value_buffer), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end);
+
+    struct aws_http_header range_header;
+    AWS_ZERO_STRUCT(range_header);
+    range_header.name = g_range_header_name;
+    range_header.value = aws_byte_cursor_from_c_str(range_value_buffer);
+
+    if (aws_http_message_add_header(out_message, range_header)) {
+        return AWS_OP_ERR;
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Add a content-md5 header. */
+int aws_s3_message_util_add_content_md5_header(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *byte_buf,
+    struct aws_http_message *out_message) {
+
+    AWS_PRECONDITION(out_message);
+
+    /* Compute MD5 */
+    struct aws_byte_cursor md5_input = aws_byte_cursor_from_buf(byte_buf);
+    uint8_t md5_output[AWS_MD5_LEN];
+    struct aws_byte_buf md5_output_buf = aws_byte_buf_from_empty_array(md5_output, sizeof(md5_output));
+    if (aws_md5_compute(allocator, &md5_input, &md5_output_buf, 0)) {
+        return AWS_OP_ERR;
+    }
+
+    /* Compute Base64 encoding of MD5 */
+    struct aws_byte_cursor base64_input = aws_byte_cursor_from_buf(&md5_output_buf);
+    size_t base64_output_size = 0;
+    if (aws_base64_compute_encoded_len(md5_output_buf.len, &base64_output_size)) {
+        return AWS_OP_ERR;
+    }
+    struct aws_byte_buf allocation;
+    if (aws_byte_buf_init(&allocation, allocator, base64_output_size + 2)) {
+        return AWS_OP_ERR;
+    }
+    struct aws_byte_buf base64_output_buf = aws_byte_buf_from_empty_array(allocation.buffer + 1, base64_output_size);
+    if (aws_base64_encode(&base64_input, &base64_output_buf)) {
+        goto error_clean_up;
+    }
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
+    if (aws_http_headers_set(headers, g_content_md5_header_name, aws_byte_cursor_from_buf(&base64_output_buf))) {
+        goto error_clean_up;
+    }
+
+    aws_byte_buf_clean_up(&allocation);
+    return AWS_OP_SUCCESS;
+
+error_clean_up:
+
+    aws_byte_buf_clean_up(&allocation);
+    return AWS_OP_ERR;
+}
+
 /* Copy an existing HTTP message's headers and body. */
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
@@ -448,80 +524,6 @@ error_clean_up:
     }
 
     return NULL;
-}
-
-/* Add a content-range header.*/
-static int s_s3_message_util_add_content_range_header(
-    uint64_t part_index,
-    uint64_t part_size,
-    struct aws_http_message *out_message) {
-    AWS_PRECONDITION(out_message);
-
-    uint64_t range_start = part_index * part_size;
-    uint64_t range_end = range_start + part_size - 1;
-
-    /* TODO this is more than enough space, but maybe there's a better way to do this?
-     * ((2^64)-1 = 20 characters;  2*20 + length-of("bytes=-") < 128) */
-    char range_value_buffer[128] = "";
-    snprintf(range_value_buffer, sizeof(range_value_buffer), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end);
-
-    struct aws_http_header range_header;
-    AWS_ZERO_STRUCT(range_header);
-    range_header.name = g_range_header_name;
-    range_header.value = aws_byte_cursor_from_c_str(range_value_buffer);
-
-    if (aws_http_message_add_header(out_message, range_header)) {
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
-}
-
-/* Add a content-md5 header. */
-static int s_s3_message_util_add_content_md5_header(
-    struct aws_allocator *allocator,
-    struct aws_byte_buf *byte_buf,
-    struct aws_http_message *out_message) {
-
-    AWS_PRECONDITION(out_message);
-
-    // Compute MD5
-    struct aws_byte_cursor md5_input = aws_byte_cursor_from_buf(byte_buf);
-    uint8_t md5_output[AWS_MD5_LEN] = {0};
-    struct aws_byte_buf md5_output_buf = aws_byte_buf_from_array(md5_output, sizeof(md5_output));
-    md5_output_buf.len = 0;
-    if (aws_md5_compute(allocator, &md5_input, &md5_output_buf, 0)) {
-        return AWS_OP_ERR;
-    }
-
-    // Compute Base64 encoding of MD5
-    struct aws_byte_cursor base64_input = aws_byte_cursor_from_buf(&md5_output_buf);
-    size_t base64_output_size = 0;
-    if (aws_base64_compute_encoded_len(md5_output_buf.len, &base64_output_size)) {
-        return AWS_OP_ERR;
-    }
-    struct aws_byte_buf allocation;
-    if (aws_byte_buf_init(&allocation, allocator, base64_output_size + 2)) {
-        return AWS_OP_ERR;
-    }
-    memset(allocation.buffer, 0xdd, allocation.capacity);
-    struct aws_byte_buf base64_output_buf = aws_byte_buf_from_empty_array(allocation.buffer + 1, base64_output_size);
-    if (aws_base64_encode(&base64_input, &base64_output_buf)) {
-        goto error_clean_up;
-    }
-
-    struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
-    if (aws_http_headers_set(headers, g_content_md5_header_name, aws_byte_cursor_from_buf(&base64_output_buf))) {
-        goto error_clean_up;
-    }
-
-    aws_byte_buf_clean_up(&allocation);
-    return AWS_OP_SUCCESS;
-
-error_clean_up:
-
-    aws_byte_buf_clean_up(&allocation);
-    return AWS_OP_ERR;
 }
 
 /* Handle setting up the multipart request path for a message. */

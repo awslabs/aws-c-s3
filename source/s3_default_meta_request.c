@@ -216,6 +216,13 @@ static int s_s3_meta_request_default_prepare_request(
         aws_s3_meta_request_read_body(meta_request, &request->request_body);
     }
 
+    if (client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED) {
+        aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
+    } else if (client->compute_content_md5 == AWS_MR_CONTENT_MD5_DISABLED) {
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        aws_http_headers_erase(headers, g_content_md5_header_name);
+    }
+
     aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
 
     aws_s3_request_setup_send_data(request, message);

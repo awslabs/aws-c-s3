@@ -313,13 +313,22 @@ static int s_s3_auto_ranged_put_prepare_request(
                 goto message_create_failed;
             }
 
+            bool should_compute_content_md5 = false;
+            struct aws_http_headers *initial_request_headers = aws_http_message_get_headers(meta_request->initial_request_message);
+            if (client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
+                (client->compute_content_md5 == AWS_MR_CONTENT_MD5_DEFAULT &&
+                aws_http_headers_has(initial_request_headers, g_content_md5_header_name))) {
+                should_compute_content_md5 = true;
+            }
+
             /* Create a new put-object message to upload a part. */
             message = aws_s3_upload_part_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,
                 request->part_number,
-                auto_ranged_put->synced_data.upload_id);
+                auto_ranged_put->synced_data.upload_id,
+                should_compute_content_md5);
 
             if (message == NULL) {
                 AWS_LOGF_ERROR(

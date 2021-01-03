@@ -128,6 +128,13 @@ struct aws_s3_client {
     /* The calculated ideal number of VIP's based on throughput target and throughput per vip. */
     const uint32_t ideal_vip_count;
 
+    /**
+     * DEFAULT: compute content-md5 header for multi-part upload if content-md5 header is specified in the original request. keep content-md5 header unchanged for single-part upload if exists.
+     * ENABLED: always compute content-md5 header for both single-part upload and multi-part upload.
+     * DISABLED: always remove content-md5 header for both single-part upload and multi-part upload if exists.
+     */
+    const enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
+
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
 

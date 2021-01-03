@@ -665,16 +665,49 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_with_content_md5, s_test_s3_put_object_with_content_md5)
-static int s_test_s3_put_object_with_content_md5(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
+static int s_test_s3_put_object_content_md5_helper(struct aws_allocator *allocator, bool multipart_upload, enum aws_s3_meta_request_compute_content_md5 compute_content_md5, bool expect_succeed) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
+    size_t part_size = 5 * 1024 * 1024;
+    if (!multipart_upload) {
+        /* content_length < part_size */
+        part_size = 15 * 1024 * 1024;
+    }
+
+    /**
+     * flags metrics for successful scenarios:
+     *              | default   | enabled   | disabled
+     *   singlepart | correct   | incorrect | incorrect
+     *   multipart  | incorrect | incorrect | correct
+     *
+     * flags metric for failed scenarios:
+     *              | default   | enabled   | disabled
+     *   singlepart | incorrect | N/A       | N/A
+     *   multipart  | N/A       | N/A       | N/A
+     */
+    uint32_t flags = 0;
+    if (expect_succeed) {
+        flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+        if ((!multipart_upload && compute_content_md5 == AWS_MR_CONTENT_MD5_DEFAULT) ||
+            (multipart_upload && compute_content_md5 == AWS_MR_CONTENT_MD5_DISABLED)) {
+            flags = flags | AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5;
+        } else {
+            flags = flags | AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5;
+        }
+    } else {
+        if (!multipart_upload && compute_content_md5 == AWS_MR_CONTENT_MD5_DEFAULT) {
+            flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5;
+        } else {
+            flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+        }
+    }
+
     struct aws_s3_client_config client_config = {
-        .part_size = 5 * 1024 * 1024,
+        .part_size = part_size,
     };
+
+    client_config.compute_content_md5 = compute_content_md5;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
@@ -687,7 +720,7 @@ static int s_test_s3_put_object_with_content_md5(struct aws_allocator *allocator
         &tester,
         client,
         10,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_WITH_CONTENT_MD5,
+        flags,
         AWS_S3_TESTER_SSE_NONE));
 
     aws_s3_client_release(client);
@@ -698,9 +731,62 @@ static int s_test_s3_put_object_with_content_md5(struct aws_allocator *allocator
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_upload_part_message_with_content_md5, s_test_s3_upload_part_message_with_content_md5)
-static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_default, s_test_s3_put_object_singlepart_content_md5_default)
+static int s_test_s3_put_object_singlepart_content_md5_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DEFAULT, true));
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DEFAULT, false));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_enabled, s_test_s3_put_object_singlepart_content_md5_enabled)
+static int s_test_s3_put_object_singlepart_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_ENABLED, true));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_disabled, s_test_s3_put_object_singlepart_content_md5_disabled)
+static int s_test_s3_put_object_singlepart_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DISABLED, true));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_content_md5_default, s_test_s3_put_object_multipart_content_md5_default)
+static int s_test_s3_put_object_multipart_content_md5_default(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, AWS_MR_CONTENT_MD5_DEFAULT, true));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_content_md5_enabled, s_test_s3_put_object_multipart_content_md5_enabled)
+static int s_test_s3_put_object_multipart_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, AWS_MR_CONTENT_MD5_ENABLED, true));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_content_md5_disabled, s_test_s3_put_object_multipart_content_md5_disabled)
+static int s_test_s3_put_object_multipart_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, AWS_MR_CONTENT_MD5_DISABLED, true));
+
+    return 0;
+}
+
+static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator, bool should_compute_content_md5) {
 
     aws_s3_library_init(allocator);
 
@@ -720,23 +806,21 @@ static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
         allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
-    struct aws_http_header content_md5_header = {.name = g_content_md5_header_name,
-                                                 .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
-    ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
-
     uint32_t part_number = 1;
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
 
     struct aws_http_message *new_message =
-        aws_s3_upload_part_message_new(allocator, base_message, &test_buffer, part_number, upload_id);
+        aws_s3_upload_part_message_new(allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
-    ASSERT_TRUE(aws_http_headers_has(new_headers, g_content_md5_header_name));
-
-    struct aws_byte_cursor content_md5;
-    aws_http_headers_get(new_headers, g_content_md5_header_name, &content_md5);
-
-    ASSERT_BIN_ARRAYS_EQUALS(expected_content_md5.ptr, expected_content_md5.len, content_md5.ptr, content_md5.len);
+    if (should_compute_content_md5) {
+        ASSERT_TRUE(aws_http_headers_has(new_headers, g_content_md5_header_name));
+        struct aws_byte_cursor content_md5;
+        aws_http_headers_get(new_headers, g_content_md5_header_name, &content_md5);
+        ASSERT_BIN_ARRAYS_EQUALS(expected_content_md5.ptr, expected_content_md5.len, content_md5.ptr, content_md5.len);
+    } else {
+        ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));
+    }
 
     struct aws_input_stream *new_body_stream = aws_http_message_get_body_stream(new_message);
     aws_input_stream_destroy(new_body_stream);
@@ -757,6 +841,24 @@ static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *
     aws_byte_buf_clean_up(&test_buffer);
 
     aws_s3_library_clean_up();
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_upload_part_message_with_content_md5, s_test_s3_upload_part_message_with_content_md5)
+static int s_test_s3_upload_part_message_with_content_md5(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_upload_part_message_helper(allocator, true));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_upload_part_message_without_content_md5, s_test_s3_upload_part_message_without_content_md5)
+static int s_test_s3_upload_part_message_without_content_md5(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_upload_part_message_helper(allocator, false));
 
     return 0;
 }
