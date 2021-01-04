@@ -122,8 +122,10 @@ struct aws_s3_client {
     /* Event loop on the client bootstrap ELG for processing work/dispatching requests. */
     struct aws_event_loop *process_work_event_loop;
 
-    /* Event loop group for streaming request bodies back to the user. */
-    struct aws_event_loop_group *body_streaming_elg;
+    struct aws_atomic_var next_body_streaming_ts;
+
+    /* Thread schedulers for streaming request bodies back to the user. */
+    struct aws_array_list body_streaming_ts_list;
 
     /* Region of the S3 bucket. */
     struct aws_string *region;
@@ -193,10 +195,6 @@ struct aws_s3_client {
 
         /* Whether or not work process is currently in progress. */
         uint32_t process_work_task_in_progress : 1;
-
-        /* Whether or not the body streaming ELG is allocated. If the body streaming ELG is NULL, but this is true, the
-         * shutdown callback has not yet been called.*/
-        uint32_t body_streaming_elg_allocated : 1;
 
         /* Whether or not the host listener is allocated. If the host listener is NULL, but this is true, the shutdown
          * callback for the listener has not yet been called. */

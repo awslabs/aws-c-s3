@@ -218,7 +218,7 @@ struct aws_s3_meta_request {
     /* Anything in this structure should only ever be accessed by the client. */
     struct {
         /* Event loop to be used for streaming the response bodies for this meta request.*/
-        struct aws_event_loop *body_streaming_event_loop;
+        struct aws_thread_scheduler *body_streaming_ts;
     } client_data;
 
     /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */

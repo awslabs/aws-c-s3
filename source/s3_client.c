@@ -14,6 +14,7 @@
 #include <aws/common/device_random.h>
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
+#include <aws/common/thread_scheduler.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
 #include <aws/http/request_response.h>
@@ -71,9 +72,6 @@ static void s_s3_client_check_for_shutdown(
 
 /* Called by s_s3_client_check_for_shutdown when all shutdown criteria has been met. */
 static void s_s3_client_finish_destroy(void *user_data);
-
-/* Called when the body streaming elg shutdown has completed. */
-static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
 
 typedef void(s3_client_vip_update_synced_data_state_fn)(struct aws_s3_vip *vip);
 
@@ -197,22 +195,26 @@ struct aws_s3_client *aws_s3_client_new(
 
     /* Set up body streaming ELG */
     {
-        uint16_t num_event_loops =
-            (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
-        uint16_t num_streaming_threads = num_event_loops / 2;
+        uint32_t num_event_loops = aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+        uint32_t num_streaming_threads = num_event_loops / 2;
 
         if (num_streaming_threads < 1) {
             num_streaming_threads = 1;
         }
 
-        struct aws_shutdown_callback_options body_streaming_elg_shutdown_options = {
-            .shutdown_callback_fn = s_s3_client_body_streaming_elg_shutdown,
-            .shutdown_callback_user_data = client,
-        };
+        aws_atomic_init_int(&client->next_body_streaming_ts, 0);
 
-        client->body_streaming_elg = aws_event_loop_group_new_default(
-            client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
-        client->synced_data.body_streaming_elg_allocated = true;
+        aws_array_list_init_dynamic(
+            &client->body_streaming_ts_list,
+            client->allocator,
+            num_streaming_threads,
+            sizeof(struct aws_thread_scheduler *));
+
+        for (uint32_t i = 0; i < num_streaming_threads; ++i) {
+            struct aws_thread_scheduler *thread_scheduler = aws_thread_scheduler_new(client->allocator, NULL);
+
+            aws_array_list_push_back(&client->body_streaming_ts_list, (void **)&thread_scheduler);
+        }
     }
 
     /* Make a copy of the region string. */
@@ -379,8 +381,14 @@ static void s_s3_client_start_destroy(void *user_data) {
         s_s3_client_unlock_synced_data(client);
     }
 
-    aws_event_loop_group_release(client->body_streaming_elg);
-    client->body_streaming_elg = NULL;
+    for (size_t i = 0; i < aws_array_list_length(&client->body_streaming_ts_list); ++i) {
+        struct aws_thread_scheduler *scheduler = NULL;
+        aws_array_list_get_at(&client->body_streaming_ts_list, (void *)&scheduler, i);
+        AWS_ASSERT(scheduler);
+        aws_thread_scheduler_release(scheduler);
+    }
+
+    aws_array_list_clean_up(&client->body_streaming_ts_list);
 
     s_s3_client_check_for_shutdown(client, s_s3_client_reset_active_synced);
 }
@@ -403,7 +411,6 @@ static void s_s3_client_check_for_shutdown(
 
     finish_destroy = client->synced_data.active == false && client->synced_data.allocated_vip_count == 0 &&
                      client->synced_data.host_listener_allocated == false &&
-                     client->synced_data.body_streaming_elg_allocated == false &&
                      client->synced_data.process_work_task_scheduled == false &&
                      client->synced_data.process_work_task_in_progress == false;
 
@@ -458,22 +465,6 @@ static void s_s3_client_finish_destroy(void *user_data) {
     if (shutdown_callback != NULL) {
         shutdown_callback(shutdown_user_data);
     }
-}
-
-static void s_s3_client_set_body_streaming_elg_shutdown_synced(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
-
-    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client body streaming ELG shutdown.", (void *)client);
-
-    client->synced_data.body_streaming_elg_allocated = false;
-}
-
-static void s_s3_client_body_streaming_elg_shutdown(void *user_data) {
-    struct aws_s3_client *client = user_data;
-    AWS_PRECONDITION(client);
-
-    s_s3_client_check_for_shutdown(client, s_s3_client_set_body_streaming_elg_shutdown_synced);
 }
 
 static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_uri *proxy_uri) {
@@ -893,8 +884,10 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    meta_request->client_data.body_streaming_event_loop =
-        aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+    size_t next_ts_index = aws_atomic_fetch_add(&client->next_body_streaming_ts, 1) %
+                           aws_array_list_length(&client->body_streaming_ts_list);
+    aws_array_list_get_at(
+        &client->body_streaming_ts_list, (void *)&meta_request->client_data.body_streaming_ts, next_ts_index);
 
     aws_s3_client_push_meta_request(client, meta_request);
 
@@ -1767,7 +1760,7 @@ void aws_s3_client_stream_response_body(
     aws_linked_list_move_all_back(&payload->requests, requests);
 
     aws_task_init(&payload->task, s_s3_client_body_streaming_task, payload, "s3_client_body_streaming_task");
-    aws_event_loop_schedule_task_now(meta_request->client_data.body_streaming_event_loop, &payload->task);
+    aws_thread_scheduler_schedule_now(meta_request->client_data.body_streaming_ts, &payload->task);
 }
 
 static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
