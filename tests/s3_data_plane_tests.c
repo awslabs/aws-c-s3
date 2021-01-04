@@ -1036,7 +1036,7 @@ static int s_test_s3_cancel_multipart_upload_during_parts_upload(struct aws_allo
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 100, 0, NULL, AWS_S3_TESTER_SSE_NONE));
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 100, 0, AWS_S3_TESTER_SSE_NONE, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -1064,7 +1064,7 @@ static int s_test_s3_cancel_multipart_upload_random(struct aws_allocator *alloca
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, NULL, AWS_S3_TESTER_SSE_NONE));
+        &tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, AWS_S3_TESTER_SSE_NONE, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -1092,7 +1092,7 @@ static int s_test_s3_cancel_singlepart_upload_random(struct aws_allocator *alloc
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, NULL, AWS_S3_TESTER_SSE_NONE));
+        &tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, AWS_S3_TESTER_SSE_NONE, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -1122,8 +1122,8 @@ static int s_test_s3_cancel_multipart_download_random(struct aws_allocator *allo
         client,
         aws_byte_cursor_from_c_str("/get_object_test_10MB.txt"),
         AWS_S3_TESTER_SEND_META_REQUEST_CANCEL,
-        NULL,
-        AWS_S3_TESTER_SSE_NONE));
+        AWS_S3_TESTER_SSE_NONE,
+        NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -1154,8 +1154,8 @@ static int s_test_s3_cancel_singlepart_download_random(struct aws_allocator *all
         client,
         aws_byte_cursor_from_c_str("/get_object_test_10MB.txt"),
         AWS_S3_TESTER_SEND_META_REQUEST_CANCEL,
-        NULL,
-        AWS_S3_TESTER_SSE_NONE));
+        AWS_S3_TESTER_SSE_NONE,
+        NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
