@@ -194,10 +194,10 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->process_work_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
 
-    /* Set up body streaming ELG */
+    /* Set up body streaming thread schedulers. */
     {
-        uint32_t num_event_loops = aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
-        uint32_t num_streaming_threads = num_event_loops / 2;
+        size_t num_event_loops = aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+        size_t num_streaming_threads = num_event_loops / 2;
 
         if (num_streaming_threads < 1) {
             num_streaming_threads = 1;
@@ -211,7 +211,7 @@ struct aws_s3_client *aws_s3_client_new(
             num_streaming_threads,
             sizeof(struct aws_thread_scheduler *));
 
-        for (uint32_t i = 0; i < num_streaming_threads; ++i) {
+        for (size_t i = 0; i < num_streaming_threads; ++i) {
             struct aws_thread_scheduler *thread_scheduler = aws_thread_scheduler_new(client->allocator, NULL);
 
             aws_array_list_push_back(&client->body_streaming_ts_list, (void **)&thread_scheduler);
