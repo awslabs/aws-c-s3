@@ -209,7 +209,7 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
     uint32_t flags,
-    enum aws_s3_tester_sse_type sse_type);
+    enum aws_s3_tester_sse_type sse_type,
     struct aws_s3_meta_request_test_results *out_results);
 
 int aws_s3_tester_send_put_object_meta_request(
@@ -217,7 +217,7 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_client *client,
     uint32_t object_size_mb,
     uint32_t flags,
-    enum aws_s3_tester_sse_type sse_type);
+    enum aws_s3_tester_sse_type sse_type,
     struct aws_s3_meta_request_test_results *out_results);
 
 int aws_s3_tester_validate_get_object_results(
