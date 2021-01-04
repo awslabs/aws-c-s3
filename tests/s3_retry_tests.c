@@ -53,7 +53,7 @@ static int s_test_s3_meta_request_exceed_retries(struct aws_allocator *allocator
 
     /* Don't specify EXPECT SUCCESS flag for aws_s3_tester_send_get_object_meta_request to expect a failure. */
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, 0, &meta_request_test_results));
+        &tester, client, g_s3_path_get_object_test_1MB, 0, AWS_S3_TESTER_SSE_NONE, &meta_request_test_results));
 
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_MAX_RETRIES_EXCEEDED);
 
@@ -103,7 +103,7 @@ static int s_test_s3_meta_request_get_connection_fail(struct aws_allocator *allo
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->get_http_connection = s_s3_client_get_http_connection_fail;
+    patched_client_vtable->get_http_connection = s_s3_client_get_http_connection_fail_first;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
         &tester,

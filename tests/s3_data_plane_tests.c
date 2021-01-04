@@ -538,7 +538,7 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_NONE));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_NONE, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -567,7 +567,7 @@ static int s_test_s3_put_object_sse_kms(struct aws_allocator *allocator, void *c
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_KMS));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_KMS, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -596,7 +596,7 @@ static int s_test_s3_put_object_sse_kms_multipart(struct aws_allocator *allocato
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_KMS));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_KMS, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -625,7 +625,7 @@ static int s_test_s3_put_object_sse_aes256(struct aws_allocator *allocator, void
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_AES256));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_AES256, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -654,7 +654,7 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_AES256));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_AES256, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
