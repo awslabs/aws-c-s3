@@ -973,7 +973,7 @@ void aws_s3_meta_request_send_request_finish_default(
     } else {
         /* If the request failed due to an invalid, ie, unrecoverable, response status, then finish the meta request
          * with that request as the failing request. */
-        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
+        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_CANCELED_SUCCESS) {
 
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
