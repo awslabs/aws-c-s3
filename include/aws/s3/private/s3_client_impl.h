@@ -26,24 +26,40 @@ typedef void(aws_s3_client_get_http_connection_callback)(
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
+typedef void(aws_s3_vip_shutdown_callback_fn)(void *user_data);
+
 /* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
 struct aws_s3_vip {
     struct aws_linked_list_node node;
 
-    /* True if this VIP is currently being cleaned up.  The work event loop will check for this flag and clean up
-     * related VIP connections. */
+    /* True if this VIP is in use. */
     struct aws_atomic_var active;
-
-    struct aws_ref_count internal_ref_count;
 
     /* S3 Client that owns this vip. */
     struct aws_s3_client *owning_client;
 
+    /* Connection manager shared by all VIP connections. */
+    struct aws_http_connection_manager *http_connection_manager;
+
     /* Address this VIP represents. */
     struct aws_string *host_address;
 
-    /* Connection manager shared by all VIP connections. */
-    struct aws_http_connection_manager *http_connection_manager;
+    /* Callback used when this vip has completely shutdown, which happens when all associated connections and the
+     * connection manager are shutdown. */
+    aws_s3_vip_shutdown_callback_fn *shutdown_callback;
+
+    /* User data for the shutdown callback. */
+    void *shutdown_user_data;
+
+    struct {
+        /* How many aws_s3_vip_connection structures are allocated for this vip. This structure will not finish cleaning
+         * up until this counter is 0.*/
+        uint32_t num_vip_connections;
+
+        /* Whether or not the connection manager is allocated. If the connection manager is NULL, but this is true, the
+         * shutdown callback for the connection manager has not yet been called. */
+        uint32_t http_connection_manager_active;
+    } synced_data;
 };
 
 /* Represents one connection on a particular VIP. */
@@ -90,12 +106,6 @@ struct aws_s3_client {
 
     struct aws_ref_count ref_count;
 
-    /* Internal ref count is used for tracking the lifetime of resources owned by the client that have asynchronous
-     * clean up.  In those cases, we don't want to prevent clean up from being initiated (which is what would happen
-     * with a normal reference), but we do want to know when we can completely clean up (ie: regular ref count and
-     * internal ref count are both 0). */
-    struct aws_ref_count internal_ref_count;
-
     /* Client bootstrap for setting up connection managers. */
     struct aws_client_bootstrap *client_bootstrap;
 
@@ -141,7 +151,11 @@ struct aws_s3_client {
         /* Endpoint to use for the bucket. */
         struct aws_string *endpoint;
 
-        uint32_t vip_count;
+        /* How many vips are being actively used. */
+        uint32_t active_vip_count;
+
+        /* How many vips are allocated. (This number includes vips that are in the process of cleaning up) */
+        uint32_t allocated_vip_count;
 
         /* Linked list of active VIP's. */
         struct aws_linked_list vips;
@@ -161,11 +175,25 @@ struct aws_s3_client {
         /* Host listener to get new IP addresses. */
         struct aws_host_listener *host_listener;
 
+        /* Whether or not the client has started cleaning up all of its resources */
+        uint32_t active : 1;
+
         /* Whether or not work processing is currently scheduled. */
         uint32_t process_work_task_scheduled : 1;
 
-        /* Whether or not the client has started cleaning up all of its resources */
-        uint32_t active : 1;
+        /* Whether or not work process is currently in progress. */
+        uint32_t process_work_task_in_progress : 1;
+
+        /* Whether or not the body streaming ELG is allocated. If the body streaming ELG is NULL, but this is true, the
+         * shutdown callback has not yet been called.*/
+        uint32_t body_streaming_elg_allocated : 1;
+
+        /* Whether or not the host listener is allocated. If the host listener is NULL, but this is true, the shutdown
+         * callback for the listener has not yet been called. */
+        uint32_t host_listener_allocated : 1;
+
+        /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
+        uint32_t finish_destroy : 1;
 
         /* True if the host resolver couldn't find the endpoint.*/
         uint32_t invalid_endpoint : 1;
@@ -179,8 +207,10 @@ struct aws_s3_client {
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
 
+        /* Next meta request that the work_task will start with on its next update. */
         struct aws_s3_meta_request *next_meta_request;
 
+        /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
 
     } threaded_data;
@@ -202,5 +232,28 @@ void aws_s3_client_stream_response_body(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
     struct aws_linked_list *requests);
+
+AWS_EXTERN_C_BEGIN
+
+AWS_S3_API
+struct aws_s3_vip *aws_s3_vip_new(
+    struct aws_s3_client *client,
+    const struct aws_byte_cursor *host_address,
+    const struct aws_byte_cursor *server_name,
+    uint32_t num_vip_connections,
+    struct aws_linked_list *out_vip_connections_list,
+    aws_s3_vip_shutdown_callback_fn *shutdown_callback,
+    void *shutdown_user_data);
+
+AWS_S3_API
+void aws_s3_vip_start_destroy(struct aws_s3_vip *vip);
+
+AWS_S3_API
+struct aws_s3_vip *aws_s3_find_vip(const struct aws_linked_list *vip_list, const struct aws_byte_cursor *host_address);
+
+AWS_S3_API
+void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+
+AWS_EXTERN_C_END
 
 #endif /* AWS_S3_CLIENT_IMPL_H */
