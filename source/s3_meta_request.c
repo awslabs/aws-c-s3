@@ -380,8 +380,10 @@ static void s_s3_request_destroy(void *user_data) {
         return;
     }
 
-    if (request->meta_request != NULL) {
-        struct aws_s3_client *client = aws_s3_meta_request_acquire_client(request->meta_request);
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    if (meta_request != NULL) {
+        struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
 
         if (client != NULL) {
             aws_s3_client_notify_request_destroyed(client);
@@ -389,13 +391,13 @@ static void s_s3_request_destroy(void *user_data) {
             client = NULL;
         }
 
-        s_s3_meta_request_notify_request_destroyed(request->meta_request, request);
+        s_s3_meta_request_notify_request_destroyed(meta_request, request);
     }
 
     aws_s3_request_clean_up_send_data(request);
-    aws_s3_meta_request_release(request->meta_request);
     aws_byte_buf_clean_up(&request->request_body);
     aws_mem_release(request->allocator, request);
+    aws_s3_meta_request_release(meta_request);
 }
 
 struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_request *meta_request) {

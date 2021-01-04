@@ -5,7 +5,6 @@ file(GLOB TEST_SRC "*.c")
 file(GLOB TEST_HDRS "*.h")
 file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
-# Disabling tests for now until credentials are sorted out for CI.
 add_test_case(test_s3_client_create_destroy)
 add_test_case(test_s3_request_create_destroy)
 

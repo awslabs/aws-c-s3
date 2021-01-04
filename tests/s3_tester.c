@@ -825,8 +825,8 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
     uint32_t flags,
-    struct aws_s3_meta_request_test_results *out_results,
-    enum aws_s3_tester_sse_type sse_type) {
+    enum aws_s3_tester_sse_type sse_type,
+    struct aws_s3_meta_request_test_results *out_results) {
 
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -851,7 +851,7 @@ int aws_s3_tester_send_get_object_meta_request(
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, sse_type));
+        ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, sse_type));
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -927,8 +927,8 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_client *client,
     uint32_t file_size_mb,
     uint32_t flags,
-    struct aws_s3_meta_request_test_results *out_results,
-    enum aws_s3_tester_sse_type sse_type) {
+    enum aws_s3_tester_sse_type sse_type,
+    struct aws_s3_meta_request_test_results *out_results) {
     ASSERT_TRUE(tester != NULL);
     ASSERT_TRUE(client != NULL);
 
@@ -984,7 +984,7 @@ int aws_s3_tester_send_put_object_meta_request(
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(&meta_request_test_results, sse_type));
+        ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(out_results, sse_type));
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
