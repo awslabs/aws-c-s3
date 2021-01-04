@@ -52,7 +52,8 @@ struct aws_s3_vip {
     void *shutdown_user_data;
 
     struct {
-        /* How many vip connections are allocated for this vip. */
+        /* How many aws_s3_vip_connection structures are allocated for this vip. This structure will not finish cleaning
+         * up until this counter is 0.*/
         uint32_t num_vip_connections;
 
         /* Whether or not the connection manager is allocated. If the connection manager is NULL, but this is true, the

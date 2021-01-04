@@ -1560,7 +1560,7 @@ void aws_s3_client_stream_response_body(
         (void *)meta_request);
 
     struct s3_streaming_body_payload *payload =
-        aws_mem_calloc(client->allocator, 1, sizeof(struct s3_streaming_body_payload));
+        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_streaming_body_payload));
 
     aws_s3_client_acquire(client);
     payload->client = client;
@@ -1602,7 +1602,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         aws_s3_request_release(request);
     }
 
-    aws_mem_release(client->allocator, payload);
+    aws_mem_release(client->sba_allocator, payload);
     aws_s3_client_release(client);
 }
 
@@ -1639,8 +1639,6 @@ static void s_s3_client_on_host_resolver_address_resolved(
         AWS_ASSERT(host_addresses);
         s_s3_client_add_vips(client, host_addresses);
     }
-
-    s_s3_client_internal_release(client);
 }
 
 static void s_s3_client_host_listener_resolved_address_callback(
