@@ -767,13 +767,6 @@ static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
     --vip->synced_data.num_vip_connections;
 }
 
-static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
-    AWS_PRECONDITION(vip);
-    AWS_PRECONDITION(vip->owning_client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(vip->owning_client);
-    --vip->synced_data.num_vip_connections;
-}
-
 /* Destroy a VIP Connection structure. */
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
 
@@ -1766,7 +1759,7 @@ void aws_s3_client_stream_response_body(
         (void *)meta_request);
 
     struct s3_streaming_body_payload *payload =
-        aws_mem_calloc(client->allocator, 1, sizeof(struct s3_streaming_body_payload));
+        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_streaming_body_payload));
 
     aws_s3_client_acquire(client);
     payload->client = client;
