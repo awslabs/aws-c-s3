@@ -11,6 +11,7 @@
 #include <aws/common/assert.h>
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
+#include <aws/common/device_random.h>
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>
@@ -776,13 +777,13 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
 
     struct aws_s3_vip *owning_vip = vip_connection->owning_vip;
 
-    if (owning_vip->http_connection_manager != NULL) {
-        if (vip_connection->http_connection != NULL) {
-            aws_http_connection_manager_release_connection(
-                owning_vip->http_connection_manager, vip_connection->http_connection);
+    if (vip_connection->http_connection != NULL) {
+        AWS_ASSERT(owning_vip->http_connection_manager);
 
-            vip_connection->http_connection = NULL;
-        }
+        aws_http_connection_manager_release_connection(
+            owning_vip->http_connection_manager, vip_connection->http_connection);
+
+        vip_connection->http_connection = NULL;
     }
 
     aws_retry_token_release(vip_connection->retry_token);
@@ -1381,11 +1382,12 @@ static void s_s3_client_get_http_connection_default(
 
     /* If we have a cached connection, see if we still want to use it. */
     if (*http_connection != NULL) {
+
         /* If we're at the max request count, set us up to get a new connection.  Also close the original connection
          * so that the connection manager doesn't reuse it.*/
         /* TODO maybe find a more visible way of preventing the
          * connection from going back into the pool. */
-        if (*connection_request_count == s_s3_max_request_count_per_connection) {
+        if (*connection_request_count >= vip_connection->max_request_count) {
             aws_http_connection_close(*http_connection);
 
             /* TODO handle possible error here? */
@@ -1451,6 +1453,8 @@ static void s_s3_client_on_acquire_http_connection(
     }
 
     struct aws_http_connection_manager *http_connection_manager = vip_connection->owning_vip->http_connection_manager;
+    AWS_ASSERT(http_connection_manager);
+
     struct aws_http_connection **current_http_connection = &vip_connection->http_connection;
 
     /* If our cached connection is not equal to the one we just received, switch to the received one. */
@@ -1461,8 +1465,18 @@ static void s_s3_client_on_acquire_http_connection(
             *current_http_connection = NULL;
         }
 
+        const uint32_t random_range = 20;
+        AWS_ASSERT(s_s3_max_request_count_per_connection > random_range);
+
+        uint32_t random_value = 0;
+        if (aws_device_random_u32(&random_value)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
+        }
+
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
+        vip_connection->max_request_count = s_s3_max_request_count_per_connection - random_range;
 
         AWS_LOGF_INFO(
             AWS_LS_S3_CLIENT,
@@ -1744,7 +1758,7 @@ void aws_s3_client_stream_response_body(
         (void *)meta_request);
 
     struct s3_streaming_body_payload *payload =
-        aws_mem_calloc(client->allocator, 1, sizeof(struct s3_streaming_body_payload));
+        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_streaming_body_payload));
 
     aws_s3_client_acquire(client);
     payload->client = client;
@@ -1786,7 +1800,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         aws_s3_request_release(request);
     }
 
-    aws_mem_release(client->allocator, payload);
+    aws_mem_release(client->sba_allocator, payload);
     aws_s3_client_release(client);
 }
 
