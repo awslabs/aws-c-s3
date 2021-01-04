@@ -167,6 +167,9 @@ struct aws_s3_client {
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t active : 1;
 
+        /* True if the host resolver couldn't find the endpoint.*/
+        uint32_t invalid_endpoint : 1;
+
     } synced_data;
 
     struct {
