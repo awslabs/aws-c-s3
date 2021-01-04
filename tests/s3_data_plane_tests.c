@@ -323,7 +323,8 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
         client,
         g_s3_path_get_object_test_1MB,
         AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
-        AWS_S3_TESTER_SSE_NONE, NULL));
+        AWS_S3_TESTER_SSE_NONE,
+        NULL));
 
     aws_s3_client_release(client);
     client = NULL;
