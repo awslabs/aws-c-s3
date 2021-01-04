@@ -1467,9 +1467,11 @@ static void s_s3_client_on_acquire_http_connection(
                 AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
         }
 
+        random_value %= random_range;
+
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
-        vip_connection->max_request_count = s_s3_max_request_count_per_connection - random_range;
+        vip_connection->max_request_count = s_s3_max_request_count_per_connection - random_value;
 
         AWS_LOGF_INFO(
             AWS_LS_S3_CLIENT,
