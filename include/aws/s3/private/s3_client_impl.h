@@ -122,6 +122,7 @@ struct aws_s3_client {
     /* Event loop on the client bootstrap ELG for processing work/dispatching requests. */
     struct aws_event_loop *process_work_event_loop;
 
+    /* Next body streaming thread scheduler to use. */
     struct aws_atomic_var next_body_streaming_ts;
 
     /* Thread schedulers for streaming request bodies back to the user. */
