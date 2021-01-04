@@ -730,11 +730,19 @@ static int s_test_s3_put_object_content_md5_helper(
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_default, s_test_s3_put_object_singlepart_content_md5_default)
-static int s_test_s3_put_object_singlepart_content_md5_default(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_default_expect_succeed, s_test_s3_put_object_singlepart_content_md5_default_expect_succeed)
+static int s_test_s3_put_object_singlepart_content_md5_default_expect_succeed(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DEFAULT, true));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_default_expect_fail, s_test_s3_put_object_singlepart_content_md5_default_expect_fail)
+static int s_test_s3_put_object_singlepart_content_md5_default_expect_fail(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
     ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DEFAULT, false));
 
     return 0;
