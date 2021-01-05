@@ -218,19 +218,19 @@ struct aws_s3_client *aws_s3_client_new(
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
     if (client_config->part_size != 0) {
-        *((uint64_t *)&client->part_size) = client_config->part_size;
+        *((size_t *)&client->part_size) = client_config->part_size;
     } else {
-        *((uint64_t *)&client->part_size) = s_default_part_size;
+        *((size_t *)&client->part_size) = s_default_part_size;
     }
 
     if (client_config->max_part_size != 0) {
-        *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
+        *((size_t *)&client->max_part_size) = client_config->max_part_size;
     } else {
-        *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
+        *((size_t *)&client->max_part_size) = s_default_max_part_size;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
-        *((uint64_t *)&client_config->max_part_size) = client_config->part_size;
+        *((size_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
@@ -1679,11 +1679,12 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
     struct aws_host_resolver *host_resolver = client->client_bootstrap->host_resolver;
 
     struct aws_host_listener *host_listener = NULL;
-    struct aws_host_listener_options options = {.host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
-                                                .resolved_address_callback =
-                                                    s_s3_client_host_listener_resolved_address_callback,
-                                                .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
-                                                .user_data = client};
+    struct aws_host_listener_options options = {
+        .host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
+        .resolved_address_callback = s_s3_client_host_listener_resolved_address_callback,
+        .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
+        .user_data = client,
+    };
 
     bool listener_already_exists = false;
     bool error_occurred = false;
