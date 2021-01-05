@@ -773,13 +773,6 @@ static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
     --vip->synced_data.num_vip_connections;
 }
 
-static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
-    AWS_PRECONDITION(vip);
-    AWS_PRECONDITION(vip->owning_client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(vip->owning_client);
-    --vip->synced_data.num_vip_connections;
-}
-
 /* Destroy a VIP Connection structure. */
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
 
