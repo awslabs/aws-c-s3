@@ -44,7 +44,7 @@ static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 5.0;
+static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
@@ -56,7 +56,7 @@ static const uint16_t s_https_port = 443;
 /* TODO Provide more information on these values. */
 static const uint64_t s_default_part_size = 5 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 20 * 1024 * 1024;
-static const size_t s_default_dns_host_address_ttl_seconds = 2 * 60;
+static const size_t s_default_dns_host_address_ttl_seconds = 5 * 60;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 
@@ -192,15 +192,17 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->process_work_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
 
-    uint16_t num_event_loops =
-        (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
-    uint16_t num_streaming_threads = num_event_loops / 2;
+    {
+        uint16_t num_event_loops =
+            (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+        uint16_t num_streaming_threads = num_event_loops / 2;
+        if (num_streaming_threads < 1) {
+            num_streaming_threads = 1;
+        }
 
-    if (num_streaming_threads < 1) {
-        num_streaming_threads = 1;
+        client->body_streaming_elg = aws_event_loop_group_new_default(
+            client->allocator, num_streaming_threads, NULL);
     }
-
-    client->body_streaming_elg = aws_event_loop_group_new_default(client->allocator, num_streaming_threads, NULL);
 
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
