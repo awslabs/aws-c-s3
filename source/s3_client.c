@@ -1737,7 +1737,7 @@ void aws_s3_client_stream_response_body(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(requests);
 
-    if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELLED) {
+    if (meta_request->synced_data.cancelled) {
         /* release all the requests instead */
         while (!aws_linked_list_empty(requests)) {
             struct aws_linked_list_node *request_node = aws_linked_list_pop_front(requests);
@@ -1785,7 +1785,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
         aws_s3_meta_request_lock_synced_data(meta_request);
-        if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELLED) {
+        if (meta_request->synced_data.cancelled) {
             /* meta request has been cancelled, drop the body after that */
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,

@@ -35,7 +35,6 @@ typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
 
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
-    AWS_S3_META_REQUEST_STATE_CANCELLED,
     AWS_S3_META_REQUEST_STATE_FINISHED,
 };
 
@@ -216,6 +215,9 @@ struct aws_s3_meta_request {
         /* The next expected streaming part number needed to continue streaming part bodies.  (For example, this will
          * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. */
         uint32_t next_streaming_part;
+
+        /* Mark the meta request has been cancelled by user */
+        bool cancelled;
 
     } synced_data;
 
