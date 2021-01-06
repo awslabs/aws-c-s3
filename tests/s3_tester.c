@@ -843,33 +843,6 @@ int aws_s3_tester_send_get_object_meta_request(
         ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, sse_type));
     }
 
-        /* Put together a simple S3 Get Object request. */
-        struct aws_http_message *message =
-            aws_s3_test_get_object_request_new(tester->allocator, aws_byte_cursor_from_string(host_name), s3_path);
-
-    /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message =
-        aws_s3_test_get_object_request_new(tester->allocator, aws_byte_cursor_from_string(host_name), s3_path);
-
-    struct aws_s3_meta_request_options options;
-    AWS_ZERO_STRUCT(options);
-    options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
-    options.message = message;
-
-    /* Trigger accelerating of our Get Object request. */
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
-
-    if (out_results == NULL) {
-        out_results = &meta_request_test_results;
-    }
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
-
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, sse_type));
-    }
-
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_http_message_release(message);
@@ -897,37 +870,23 @@ int aws_s3_tester_validate_get_object_results(
 
     struct aws_s3_tester *tester = meta_request_test_results->tester;
 
-int aws_s3_tester_send_put_object_meta_request(
-    struct aws_s3_tester *tester,
-    struct aws_s3_client *client,
-    uint32_t file_size_mb,
-    uint32_t flags,
-    enum aws_s3_tester_sse_type sse_type,
-    struct aws_s3_meta_request_test_results *out_results) {
-    ASSERT_TRUE(tester != NULL);
-    ASSERT_TRUE(client != NULL);
-
-    struct aws_allocator *allocator = tester->allocator;
-
-    struct aws_byte_buf test_buffer;
-    aws_s3_create_test_buffer(allocator, file_size_mb * 1024 * 1024, &test_buffer);
-
-    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
-    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
-
-    struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
-
-    char object_path_buffer[128] = "";
+    struct aws_byte_cursor content_length_cursor;
+    AWS_ZERO_STRUCT(content_length_cursor);
+    ASSERT_SUCCESS(aws_http_headers_get(
+        meta_request_test_results->response_headers,
+        aws_byte_cursor_from_c_str("Content-Length"),
+        &content_length_cursor));
+    struct aws_byte_cursor sse_byte_cursor;
     switch (sse_type) {
-        case AWS_S3_TESTER_SSE_NONE:
-            snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_%uMB.txt", file_size_mb);
-            break;
         case AWS_S3_TESTER_SSE_KMS:
-            snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_kms_%uMB.txt", file_size_mb);
+            ASSERT_SUCCESS(
+                aws_http_headers_get(meta_request_test_results->response_headers, g_s3_sse_header, &sse_byte_cursor));
+            ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "aws:kms"));
             break;
         case AWS_S3_TESTER_SSE_AES256:
-            snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_aes256_%uMB.txt", file_size_mb);
+            ASSERT_SUCCESS(
+                aws_http_headers_get(meta_request_test_results->response_headers, g_s3_sse_header, &sse_byte_cursor));
+            ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "AES256"));
             break;
 
         default:
@@ -936,18 +895,16 @@ int aws_s3_tester_send_put_object_meta_request(
 
     struct aws_string *content_length_str = aws_string_new_from_cursor(tester->allocator, &content_length_cursor);
 
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    char *content_length_str_end = NULL;
+    uint64_t content_length = strtoull((const char *)content_length_str->bytes, &content_length_str_end, 10);
 
-    if (out_results == NULL) {
-        out_results = &meta_request_test_results;
-    }
+    aws_string_destroy(content_length_str);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
-
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(out_results, sse_type));
-    }
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_GENERAL,
+        "Content length in header is %" PRIu64 " and received body size is %" PRIu64,
+        content_length,
+        meta_request_test_results->received_body_size);
 
     ASSERT_TRUE(content_length == meta_request_test_results->received_body_size);
 
