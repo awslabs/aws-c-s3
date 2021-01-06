@@ -216,7 +216,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request->vtable->cancel);
     bool cancel_called = true;
     aws_s3_meta_request_lock_synced_data(meta_request);
-    if (meta_request->synced_data.state != AWS_S3_META_REQUEST_STATE_CANCELLED) {
+    if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE) {
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELLED;
         cancel_called = false;
     }
