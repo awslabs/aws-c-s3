@@ -1737,6 +1737,16 @@ void aws_s3_client_stream_response_body(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(requests);
 
+    if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELLED) {
+        /* release all the requests instead */
+        while (!aws_linked_list_empty(requests)) {
+            struct aws_linked_list_node *request_node = aws_linked_list_pop_front(requests);
+            struct aws_s3_request *se_request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
+            aws_s3_request_release(se_request);
+        }
+        return;
+    }
+
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT,
         "id=%p Scheduling body streaming task for meta request %p.",
@@ -1774,6 +1784,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
+        aws_s3_meta_request_lock_synced_data(meta_request);
         if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELLED) {
             /* meta request has been cancelled, drop the body after that */
             AWS_LOGF_DEBUG(
@@ -1782,8 +1793,10 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
                 (void *)client,
                 (void *)meta_request);
             aws_s3_request_release(request);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
             continue;
         }
+        aws_s3_meta_request_unlock_synced_data(meta_request);
 
         struct aws_byte_cursor body_buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
