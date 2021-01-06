@@ -1570,7 +1570,6 @@ static void s_s3_client_on_acquire_http_connection(
             error_code,
             aws_error_str(error_code));
 
-        request->send_data.error_code = error_code;
         goto error_clean_up;
     }
 
