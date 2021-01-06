@@ -424,6 +424,16 @@ struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_reque
     return request;
 }
 
+bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    bool is_finished = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    return is_finished;
+}
+
 int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
@@ -438,7 +448,7 @@ int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
-    if (vtable->prepare_request(meta_request, client, vip_connection, vip_connection->retry_token == NULL)) {
+    if (vtable->prepare_request(meta_request, client, vip_connection, !vip_connection->is_retry)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not prepare request %p", (void *)meta_request, (void *)request);
 
@@ -916,7 +926,7 @@ void aws_s3_meta_request_send_request_finish_default(
         error_code,
         response_status);
 
-    uint32_t vip_connection_finish_flags = 0;
+    enum aws_s3_vip_connection_finish_code finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED;
 
     /* If the request was entirely successful...*/
     if (error_code == AWS_ERROR_SUCCESS) {
@@ -949,7 +959,7 @@ void aws_s3_meta_request_send_request_finish_default(
             aws_s3_meta_request_unlock_synced_data(meta_request);
         }
 
-        vip_connection_finish_flags |= AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS;
+        finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_SUCCESS;
 
     } else {
         /* If the request failed due to an invalid, ie, unrecoverable, response status, then finish the meta request
@@ -969,8 +979,7 @@ void aws_s3_meta_request_send_request_finish_default(
 
         } else {
             /* Otherwise, set this up for a retry. */
-            request->send_data.error_code = error_code;
-            vip_connection_finish_flags |= AWS_S3_VIP_CONNECTION_FINISH_FLAG_RETRY;
+            finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
         }
     }
 
@@ -979,7 +988,7 @@ void aws_s3_meta_request_send_request_finish_default(
         stream = NULL;
     }
 
-    aws_s3_client_notify_connection_finished(client, vip_connection, vip_connection_finish_flags);
+    aws_s3_client_notify_connection_finished(client, vip_connection, error_code, finish_code);
 }
 
 static void s_s3_meta_request_notify_request_destroyed(
@@ -1043,9 +1052,6 @@ void aws_s3_meta_request_finish(
     int error_code) {
     AWS_PRECONDITION(meta_request);
 
-    /* Failed requests should only be specified for the AWS_ERROR_S3_INVALID_RESPONSE_STATUS error code. */
-    AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS || failed_request != NULL);
-
     bool already_finished = false;
     struct aws_s3_client *client = NULL;
     struct aws_linked_list release_request_list;
@@ -1104,7 +1110,7 @@ unlock:
             .response_status = response_status,
         };
 
-        if (failed_request != NULL) {
+        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
             meta_request_result.error_response_headers = failed_request->send_data.response_headers;
             meta_request_result.error_response_body = &failed_request->send_data.response_body;
         }

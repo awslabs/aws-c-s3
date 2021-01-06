@@ -105,9 +105,6 @@ struct aws_s3_request {
         /* Returned response status of this request. */
         int response_status;
 
-        /* Error code result for this sending of the request. */
-        int error_code;
-
     } send_data;
 };
 
@@ -257,6 +254,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     const struct aws_s3_meta_request_options *options);
 
 struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_request *meta_request);
+
+bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request);
 
 int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request *meta_request,
