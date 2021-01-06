@@ -262,8 +262,6 @@ static void s_s3_meta_request_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
 
-    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.retry_queue));
-
     /* Clean up our initial http message */
     if (meta_request->initial_request_message != NULL) {
         aws_http_message_release(meta_request->initial_request_message);
