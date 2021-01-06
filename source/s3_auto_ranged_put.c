@@ -426,6 +426,11 @@ static int s_s3_auto_ranged_put_prepare_request(
             }
 
             AWS_FATAL_ASSERT(auto_ranged_put->synced_data.upload_id);
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Abort multipart upload request for upload id %s.",
+                (void *)meta_request,
+                aws_string_c_str(auto_ranged_put->synced_data.upload_id));
 
             /* Build the message to complete our multipart upload, which includes a payload describing all of our
              * completed parts. */
@@ -686,6 +691,12 @@ static int s_s3_auto_ranged_put_stream_complete(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Finished aborting multipart upload for upload id %s.",
+                (void *)meta_request,
+                aws_string_c_str(auto_ranged_put->synced_data.upload_id));
+
             break;
         }
         default:
