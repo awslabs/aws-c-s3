@@ -29,8 +29,8 @@ static void s_s3_client_acquire_http_connection_exceed_retries(
     callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
 }
 
-AWS_TEST_CASE(test_s3_meta_request_exceed_retries, s_test_s3_meta_request_exceed_retries)
-static int s_test_s3_meta_request_exceed_retries(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_client_exceed_retries, s_test_s3_client_exceed_retries)
+static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -87,8 +87,8 @@ static void s_s3_client_acquire_http_connection_fail_first(
     original_client_vtable->acquire_http_connection(client, vip_connection, callback);
 }
 
-AWS_TEST_CASE(test_s3_meta_request_get_connection_fail, s_test_s3_meta_request_get_connection_fail)
-static int s_test_s3_meta_request_get_connection_fail(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_client_acquire_connection_fail, s_test_s3_client_acquire_connection_fail)
+static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;

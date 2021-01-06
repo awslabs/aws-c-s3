@@ -394,31 +394,20 @@ static void s_s3_request_destroy(void *user_data) {
 }
 
 struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
 
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_FATAL_ASSERT(vtable);
 
-    struct aws_s3_request *request = NULL;
-    bool meta_request_already_finished = false;
-
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    /* If the meta request has been finished, don't initiate any additional work. */
-    meta_request_already_finished = (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED);
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    if (meta_request_already_finished) {
+    if (aws_s3_meta_request_is_finished(meta_request)) {
         return NULL;
     }
 
-    /* If we didn't find something in the retry queue, call the derived request type, asking what the next request
-     * should be. */
-    if (request == NULL) {
-        if (vtable->next_request(meta_request, &request)) {
-            aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
-            return NULL;
-        }
+    struct aws_s3_request *request = NULL;
+
+    if (vtable->next_request(meta_request, &request)) {
+        aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
+        return NULL;
     }
 
     return request;

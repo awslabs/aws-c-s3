@@ -788,6 +788,8 @@ int aws_s3_tester_send_meta_request(
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(tester);
 
+    ASSERT_TRUE(aws_s3_meta_request_is_finished(meta_request));
+
     aws_s3_tester_lock_synced_data(tester);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
