@@ -59,9 +59,6 @@ struct aws_s3_request {
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
 
-    /* Current retry token for the request. If it has never been retried, this will be NULL. */
-    struct aws_retry_token *retry_token;
-
     /* Request body to use when sending the request. The contents of this body will be re-used if a request is
      * retried.*/
     struct aws_byte_buf request_body;
@@ -107,9 +104,6 @@ struct aws_s3_request {
 
         /* Returned response status of this request. */
         int response_status;
-
-        /* Error code result for this sending of the request. */
-        int error_code;
 
     } send_data;
 };
@@ -201,9 +195,6 @@ struct aws_s3_meta_request {
          * this reference is removed. */
         struct aws_s3_client *client;
 
-        /* Queue of aws_s3_request structures that will be retried. */
-        struct aws_linked_list retry_queue;
-
         /* Body of stream of the initial_request_message.  We store this here so that parts can take turns seeking to
          * their own specific position (which should be in close proximity of one another). */
         struct aws_input_stream *initial_body_stream;
@@ -269,7 +260,17 @@ int aws_s3_meta_request_make_request(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection);
 
+/* Tells the meta request to stop, with an error code for indicating failure when necessary. */
+void aws_s3_meta_request_finish(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *failed_request,
+    int response_status,
+    int error_code);
+
 AWS_EXTERN_C_BEGIN
+
+AWS_S3_API
+bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request);
 
 /* ******************************************** */
 /* BEGIN - Meant only for use by derived types. */
@@ -308,13 +309,6 @@ void aws_s3_request_acquire(struct aws_s3_request *request);
 
 AWS_S3_API
 void aws_s3_request_release(struct aws_s3_request *request);
-
-/* Tells the meta request to stop, with an error code for indicating failure when necessary. */
-void aws_s3_meta_request_finish(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int response_status,
-    int error_code);
 
 AWS_S3_API
 void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
@@ -356,18 +350,6 @@ int aws_s3_meta_request_read_body_synced(struct aws_s3_meta_request *meta_reques
 /* ******************************************** */
 /* BEGIN - Exposed only for use in tests */
 /* ******************************************** */
-AWS_S3_API
-void aws_s3_meta_request_handle_error(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request,
-    int error_code);
-
-AWS_S3_API
-void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
-
-AWS_S3_API
-struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
-
 AWS_S3_API
 void aws_s3_meta_request_body_streaming_push_synced(
     struct aws_s3_meta_request *meta_request,

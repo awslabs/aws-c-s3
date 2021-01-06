@@ -5,16 +5,11 @@ file(GLOB TEST_SRC "*.c")
 file(GLOB TEST_HDRS "*.h")
 file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
-# Disabling tests for now until credentials are sorted out for CI.
 add_test_case(test_s3_client_create_destroy)
 add_test_case(test_s3_request_create_destroy)
 
-add_test_case(test_s3_meta_request_retry_queue_operations)
-add_test_case(test_s3_meta_request_retry_queue_clean_up)
-add_test_case(test_s3_meta_request_handle_error_retry)
-add_test_case(test_s3_meta_request_handle_error_exceed_retries)
-add_test_case(test_s3_meta_request_handle_error_fail)
-add_test_case(test_s3_meta_request_get_connection_fail)
+add_test_case(test_s3_client_exceed_retries)
+add_test_case(test_s3_client_acquire_connection_fail)
 add_test_case(test_s3_meta_request_fail_next_request)
 add_test_case(test_s3_meta_request_fail_prepare_request)
 add_test_case(test_s3_meta_request_sign_request_fail)
