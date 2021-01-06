@@ -1455,9 +1455,10 @@ static void s_s3_client_acquired_retry_token(
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
-            "id=%p Client could not get retry token for vip connection %p due to error %d (%s)",
+            "id=%p Client could not get retry token for vip connection %p processing request %p due to error %d (%s)",
             (void *)client,
             (void *)vip_connection,
+            (void *)request,
             error_code,
             aws_error_str(error_code));
 
