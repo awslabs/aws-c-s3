@@ -214,12 +214,16 @@ int aws_s3_meta_request_init_base(
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable->cancel);
+    bool cancel_called = true;
     aws_s3_meta_request_lock_synced_data(meta_request);
     if (meta_request->synced_data.state != AWS_S3_META_REQUEST_STATE_CANCELLED) {
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELLED;
-        meta_request->vtable->cancel(meta_request, NULL);
+        cancel_called = false;
     }
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    if (!cancel_called) {
+        meta_request->vtable->cancel(meta_request, NULL);
+    }
 }
 
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request) {
