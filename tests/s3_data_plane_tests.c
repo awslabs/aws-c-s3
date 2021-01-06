@@ -1163,3 +1163,49 @@ static int s_test_s3_cancel_singlepart_download_random(struct aws_allocator *all
     /* TODO: we may need to test a huge file, and cancel in the middle of transition, it's might be low priority */
     return 0;
 }
+
+AWS_TEST_CASE(test_s3_bad_endpoint, s_test_s3_bad_endpoint)
+static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_byte_cursor test_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("test_key");
+
+    AWS_STATIC_STRING_FROM_LITERAL(invalid_host_name, "invalid_host_name");
+
+    /* Construct a message that points to an invalid host name. Key can be anything. */
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(invalid_host_name), test_key);
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+    options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+    options.message = message;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
+
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_ENDPOINT);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}

@@ -218,19 +218,19 @@ struct aws_s3_client *aws_s3_client_new(
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
     if (client_config->part_size != 0) {
-        *((uint64_t *)&client->part_size) = client_config->part_size;
+        *((size_t *)&client->part_size) = client_config->part_size;
     } else {
-        *((uint64_t *)&client->part_size) = s_default_part_size;
+        *((size_t *)&client->part_size) = s_default_part_size;
     }
 
     if (client_config->max_part_size != 0) {
-        *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
+        *((size_t *)&client->max_part_size) = client_config->max_part_size;
     } else {
-        *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
+        *((size_t *)&client->max_part_size) = s_default_max_part_size;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
-        *((uint64_t *)&client_config->max_part_size) = client_config->part_size;
+        *((size_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
@@ -785,9 +785,6 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
         }
     }
 
-    aws_retry_token_release(vip_connection->retry_token);
-    vip_connection->retry_token = NULL;
-
     aws_mem_release(client->allocator, vip_connection);
 
     s_s3_vip_check_for_shutdown(owning_vip, s_s3_vip_sub_num_vip_connections_synced);
@@ -1213,6 +1210,8 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);
 
+    bool invalid_endpoint = false;
+
     /* Client keeps a reference to the event loop group; a 'canceled' status should not happen.*/
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
@@ -1237,6 +1236,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
 
+    invalid_endpoint = client->synced_data.invalid_endpoint != 0;
     s_s3_client_unlock_synced_data(client);
 
     /*******************/
@@ -1274,14 +1274,26 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
         aws_mem_release(client->sba_allocator, meta_request_work);
     }
 
-    /*******************/
-    /* Step 3: Move all idle connections into our local update list. */
-    /*******************/
-    aws_linked_list_move_all_back(&vip_connections_updates, &client->threaded_data.idle_vip_connections);
+    /* If we have an invalid endpoint, then finish up all of the meta requests. */
+    /* TODO once we have multiple bucket support, this will should only stop meta requests attached to bad endpoints. */
+    if (invalid_endpoint) {
+        while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+            struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
+            struct aws_s3_meta_request *meta_request =
+                AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
+
+            aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_INVALID_ENDPOINT);
+            s_s3_client_remove_meta_request_threaded(client, meta_request);
+        }
+    }
 
     /*******************/
-    /* Step 4: Go through all VIP connections, cleaning up old ones, and assigning requests where possible. */
+    /* Step 3: Go through all VIP connections, cleaning up old ones, and assigning requests where possible. */
     /*******************/
+
+    /* Move all idle connections into our local update list. */
+    aws_linked_list_move_all_back(&vip_connections_updates, &client->threaded_data.idle_vip_connections);
+
     const uint32_t max_requests_multiplier = 4;
     const uint32_t max_requests_in_flight =
         client->ideal_vip_count * s_num_connections_per_vip * max_requests_multiplier;
@@ -1804,7 +1816,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         aws_s3_request_release(request);
     }
 
-    aws_mem_release(client->allocator, payload);
+    aws_mem_release(client->sba_allocator, payload);
     aws_s3_client_release(client);
 }
 
@@ -1820,7 +1832,6 @@ static void s_s3_client_on_host_resolver_address_resolved(
 
     AWS_PRECONDITION(resolver);
     AWS_PRECONDITION(host_name);
-    AWS_PRECONDITION(host_addresses);
     AWS_PRECONDITION(user_data);
 
     struct aws_s3_client *client = user_data;
@@ -1833,11 +1844,15 @@ static void s_s3_client_on_host_resolver_address_resolved(
             (const char *)host_name->bytes,
             err_code,
             aws_error_str(err_code));
-        return;
-    }
 
-    AWS_ASSERT(host_addresses);
-    s_s3_client_add_vips(client, host_addresses);
+        s_s3_client_lock_synced_data(client);
+        client->synced_data.invalid_endpoint = true;
+        s_s3_client_schedule_process_work_task_synced(client);
+        s_s3_client_unlock_synced_data(client);
+    } else {
+        AWS_ASSERT(host_addresses);
+        s_s3_client_add_vips(client, host_addresses);
+    }
 }
 
 static void s_s3_client_host_listener_resolved_address_callback(

@@ -167,7 +167,7 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
-    *((uint64_t *)&meta_request->part_size) = part_size;
+    *((size_t *)&meta_request->part_size) = part_size;
 
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
@@ -261,6 +261,8 @@ void aws_s3_default_signing_config(
 static void s_s3_meta_request_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
+
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.retry_queue));
 
     /* Clean up our initial http message */
     if (meta_request->initial_request_message != NULL) {
