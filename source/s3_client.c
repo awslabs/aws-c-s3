@@ -11,6 +11,7 @@
 #include <aws/common/assert.h>
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
+#include <aws/common/device_random.h>
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>
@@ -43,8 +44,11 @@ static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 6.25;
+static const double s_throughput_per_vip_gbps = 5.0;
 static const uint32_t s_num_connections_per_vip = 10;
+
+/* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
+static const uint8_t s_max_request_jitter_range = 50;
 
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
@@ -53,7 +57,7 @@ static const uint16_t s_https_port = 443;
 static const uint64_t s_default_part_size = 5 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 20 * 1024 * 1024;
 static const size_t s_default_dns_host_address_ttl_seconds = 2 * 60;
-static const double s_default_throughput_target_gbps = 5.0;
+static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
@@ -780,13 +784,13 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
 
     struct aws_s3_vip *owning_vip = vip_connection->owning_vip;
 
-    if (owning_vip->http_connection_manager != NULL) {
-        if (vip_connection->http_connection != NULL) {
-            aws_http_connection_manager_release_connection(
-                owning_vip->http_connection_manager, vip_connection->http_connection);
+    if (vip_connection->http_connection != NULL) {
+        AWS_ASSERT(owning_vip->http_connection_manager);
 
-            vip_connection->http_connection = NULL;
-        }
+        aws_http_connection_manager_release_connection(
+            owning_vip->http_connection_manager, vip_connection->http_connection);
+
+        vip_connection->http_connection = NULL;
     }
 
     aws_retry_token_release(vip_connection->retry_token);
@@ -1505,11 +1509,12 @@ static void s_s3_client_acquire_http_connection_default(
 
     /* If we have a cached connection, see if we still want to use it. */
     if (*http_connection != NULL) {
+
         /* If we're at the max request count, set us up to get a new connection.  Also close the original connection
          * so that the connection manager doesn't reuse it.*/
         /* TODO maybe find a more visible way of preventing the
          * connection from going back into the pool. */
-        if (*connection_request_count == s_s3_max_request_count_per_connection) {
+        if (*connection_request_count >= vip_connection->max_request_count) {
             aws_http_connection_close(*http_connection);
 
             /* TODO handle possible error here? */
@@ -1574,6 +1579,8 @@ static void s_s3_client_on_acquire_http_connection(
     }
 
     struct aws_http_connection_manager *http_connection_manager = vip_connection->owning_vip->http_connection_manager;
+    AWS_ASSERT(http_connection_manager);
+
     struct aws_http_connection **current_http_connection = &vip_connection->http_connection;
 
     /* If our cached connection is not equal to the one we just received, switch to the received one. */
@@ -1584,8 +1591,19 @@ static void s_s3_client_on_acquire_http_connection(
             *current_http_connection = NULL;
         }
 
+        AWS_ASSERT(s_s3_max_request_count_per_connection > s_max_request_jitter_range);
+
+        uint8_t jitter_value = 0;
+        if (aws_device_random_u8(&jitter_value)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
+        }
+
+        jitter_value %= s_max_request_jitter_range;
+
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
+        vip_connection->max_request_count = s_s3_max_request_count_per_connection - (uint32_t)jitter_value;
 
         AWS_LOGF_INFO(
             AWS_LS_S3_CLIENT,

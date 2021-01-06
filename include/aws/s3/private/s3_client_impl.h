@@ -82,6 +82,9 @@ struct aws_s3_vip_connection {
     /* Number of requests we have made on this particular connection. Important for the request service limit. */
     uint32_t request_count;
 
+    /* Maximum number of requests this connection will do before using a different connection. */
+    uint32_t max_request_count;
+
     /* Request currently being processed on the VIP connection. */
     struct aws_s3_request *request;
 
