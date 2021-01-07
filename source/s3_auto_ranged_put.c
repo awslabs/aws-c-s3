@@ -603,9 +603,16 @@ static int s_s3_auto_ranged_put_stream_complete(
                 get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
 
             if (etag_header_value != NULL) {
+                struct aws_byte_buf etag_header_value_byte_buf;
+                AWS_ZERO_STRUCT(etag_header_value_byte_buf);
+
+                replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
+
                 aws_http_headers_set(
-                    final_response_headers, g_etag_header_name, aws_byte_cursor_from_string(etag_header_value));
+                    final_response_headers, g_etag_header_name, aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
+
                 aws_string_destroy(etag_header_value);
+                aws_byte_buf_clean_up(&etag_header_value_byte_buf);
             }
 
             /* Notify the user of the headers. */
