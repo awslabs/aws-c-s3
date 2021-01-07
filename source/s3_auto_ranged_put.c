@@ -224,9 +224,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
     cancel = request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD;
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
     if (cancel) {
-        /* TODO: What's the error code here? */
-        aws_s3_meta_request_cancel_default(
-            meta_request, auto_ranged_put->synced_data.failed_request, AWS_ERROR_S3_CANCELED);
+        aws_s3_meta_request_cancel_default(meta_request, auto_ranged_put->synced_data.failed_request, aws_last_error());
     }
 }
 
