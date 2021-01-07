@@ -994,7 +994,7 @@ void aws_s3_meta_request_send_request_finish_default(
             aws_s3_meta_request_cancel_default(meta_request, request);
         } else {
             /* Otherwise, set this up for a retry. */
-            finish_code = AWS_S3_VIP_CONNECTION_FINISH_FLAG_RETRY;
+            finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
         }
     }
 

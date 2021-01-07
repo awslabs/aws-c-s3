@@ -26,11 +26,6 @@ typedef void(aws_s3_client_acquire_http_connection_callback)(
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
-enum aws_s3_vip_connection_finish_flags {
-    AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS = 0x00000001,
-    AWS_S3_VIP_CONNECTION_FINISH_FLAG_RETRY = 0x00000002,
-};
-
 enum aws_s3_vip_connection_finish_code {
     AWS_S3_VIP_CONNECTION_FINISH_CODE_SUCCESS,
     AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED,
