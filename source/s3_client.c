@@ -201,7 +201,7 @@ struct aws_s3_client *aws_s3_client_new(
         }
 
         client->body_streaming_elg = aws_event_loop_group_new_default_pinned_to_cpu_group(
-            client->allocator, num_streaming_threads, 0, &body_streaming_elg_shutdown_options);
+            client->allocator, num_streaming_threads, 0, NULL);
     }
 
     /* Make a copy of the region string. */
