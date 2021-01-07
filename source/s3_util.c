@@ -21,7 +21,8 @@ const struct aws_byte_cursor g_content_length_header_name = AWS_BYTE_CUR_INIT_FR
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
 
-const uint64_t g_s3_max_num_upload_parts = 10000;
+const uint32_t g_s3_max_num_upload_parts = 10000;
+const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
@@ -208,6 +209,33 @@ void aws_s3_init_default_signing_config(
     signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
     signing_config->flags.should_normalize_uri_path = true;
+}
+
+void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf) {
+    AWS_PRECONDITION(str);
+
+    aws_byte_buf_init(out_buf, allocator, str->len);
+
+    struct aws_byte_cursor quote_entity = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&quot;");
+    struct aws_byte_cursor quote = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"");
+
+    size_t i = 0;
+
+    while (i < str->len) {
+        size_t chars_remaining = str->len - i;
+
+        if (chars_remaining >= quote_entity.len &&
+            !strncmp((const char *)&str->bytes[i], (const char *)quote_entity.ptr, quote_entity.len)) {
+            /* Append quote */
+            aws_byte_buf_append(out_buf, &quote);
+            i += quote_entity.len;
+        } else {
+            /* Append character */
+            struct aws_byte_cursor character_cursor = aws_byte_cursor_from_array(&str->bytes[i], 1);
+            aws_byte_buf_append(out_buf, &character_cursor);
+            ++i;
+        }
+    }
 }
 
 int aws_last_error_or_unknown() {
