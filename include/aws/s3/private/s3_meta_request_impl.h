@@ -105,9 +105,6 @@ struct aws_s3_request {
         /* Returned response status of this request. */
         int response_status;
 
-        /* Error code result for this sending of the request. */
-        int error_code;
-
     } send_data;
 };
 
@@ -269,7 +266,17 @@ int aws_s3_meta_request_make_request(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection);
 
+/* Tells the meta request to stop, with an error code for indicating failure when necessary. */
+void aws_s3_meta_request_finish(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *failed_request,
+    int response_status,
+    int error_code);
+
 AWS_EXTERN_C_BEGIN
+
+AWS_S3_API
+bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request);
 
 /* ******************************************** */
 /* BEGIN - Meant only for use by derived types. */
@@ -308,13 +315,6 @@ void aws_s3_request_acquire(struct aws_s3_request *request);
 
 AWS_S3_API
 void aws_s3_request_release(struct aws_s3_request *request);
-
-/* Tells the meta request to stop, with an error code for indicating failure when necessary. */
-void aws_s3_meta_request_finish(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int response_status,
-    int error_code);
 
 AWS_S3_API
 void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);

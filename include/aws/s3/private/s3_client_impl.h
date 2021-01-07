@@ -19,7 +19,7 @@
 struct aws_http_connection;
 struct aws_http_connection_manager;
 
-typedef void(aws_s3_client_get_http_connection_callback)(
+typedef void(aws_s3_client_acquire_http_connection_callback)(
     struct aws_http_connection *http_connection,
     int error_code,
     void *user_data);
@@ -29,6 +29,12 @@ typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 enum aws_s3_vip_connection_finish_flags {
     AWS_S3_VIP_CONNECTION_FINISH_FLAG_SUCCESS = 0x00000001,
     AWS_S3_VIP_CONNECTION_FINISH_FLAG_RETRY = 0x00000002,
+};
+
+enum aws_s3_vip_connection_finish_code {
+    AWS_S3_VIP_CONNECTION_FINISH_CODE_SUCCESS,
+    AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED,
+    AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY,
 };
 
 typedef void(aws_s3_vip_shutdown_callback_fn)(void *user_data);
@@ -81,11 +87,17 @@ struct aws_s3_vip_connection {
     /* Number of requests we have made on this particular connection. Important for the request service limit. */
     uint32_t request_count;
 
+    /* Maximum number of requests this connection will do before using a different connection. */
+    uint32_t max_request_count;
+
     /* Request currently being processed on the VIP connection. */
     struct aws_s3_request *request;
 
     /* Current retry token for the request. If it has never been retried, this will be NULL. */
     struct aws_retry_token *retry_token;
+
+    /* True if the connection is currently retrying to process the request. */
+    bool is_retry;
 };
 
 struct aws_s3_client_vtable {
@@ -97,7 +109,7 @@ struct aws_s3_client_vtable {
 
     void (*remove_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-    void (*get_http_connection)(
+    void (*acquire_http_connection)(
         struct aws_s3_client *client,
         struct aws_s3_vip_connection *vip_connection,
         aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
@@ -233,7 +245,8 @@ int aws_s3_client_make_request(struct aws_s3_client *client, struct aws_s3_vip_c
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
-    uint32_t flags);
+    int error_code,
+    enum aws_s3_vip_connection_finish_code finish_code);
 
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client);
 

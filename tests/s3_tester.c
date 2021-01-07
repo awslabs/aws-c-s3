@@ -456,7 +456,7 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .push_meta_request = aws_s3_client_push_meta_request_empty,
     .remove_meta_request = aws_s3_client_remove_meta_request_empty,
-    .get_http_connection = aws_s3_client_get_http_connection_empty,
+    .acquire_http_connection = aws_s3_client_acquire_http_connection_empty,
 };
 
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester) {
@@ -797,6 +797,8 @@ int aws_s3_tester_send_meta_request(
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(tester);
 
+    ASSERT_TRUE(aws_s3_meta_request_is_finished(meta_request));
+
     aws_s3_tester_lock_synced_data(tester);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
@@ -1049,7 +1051,7 @@ void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struc
     (void)meta_request;
 }
 
-void aws_s3_client_get_http_connection_empty(
+void aws_s3_client_acquire_http_connection_empty(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *callback) {
