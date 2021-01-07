@@ -156,7 +156,7 @@ struct aws_s3_meta_request_vtable {
     void (*notify_request_destroyed)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
     /* Cancel the meta request. */
-    void (*cancel)(struct aws_s3_meta_request *, struct aws_s3_request *failed_request);
+    void (*cancel)(struct aws_s3_meta_request *, struct aws_s3_request *failed_request, int error_code);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
@@ -343,7 +343,8 @@ int aws_s3_meta_request_sign_request_default(
 AWS_S3_API
 void aws_s3_meta_request_cancel_default(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request);
+    struct aws_s3_request *failed_request,
+    int error_code);
 
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(

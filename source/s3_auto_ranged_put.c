@@ -82,7 +82,8 @@ static int s_s3_auto_ranged_put_stream_complete(
 
 static void s_s3_auto_ranged_put_cancel(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request);
+    struct aws_s3_request *failed_request,
+    int error_code);
 
 static void s_s3_auto_ranged_put_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
@@ -192,7 +193,10 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
 static void s_s3_auto_ranged_put_cancel(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request) {
+    struct aws_s3_request *failed_request,
+    int error_code) {
+    // TODO: error code needs to be propagated
+    (void)error_code;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
@@ -201,7 +205,6 @@ static void s_s3_auto_ranged_put_cancel(
         auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL;
         auto_ranged_put->synced_data.failed_request = failed_request;
     }
-
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 }
 
@@ -214,7 +217,9 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
     cancel = request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD;
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
     if (cancel) {
-        aws_s3_meta_request_cancel_default(meta_request, auto_ranged_put->synced_data.failed_request);
+        /* TODO: What's the error code here? */
+        aws_s3_meta_request_cancel_default(
+            meta_request, auto_ranged_put->synced_data.failed_request, AWS_ERROR_UNKNOWN);
     }
 }
 
