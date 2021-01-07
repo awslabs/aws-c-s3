@@ -12,7 +12,7 @@ enum aws_s3_auto_ranged_put_state {
     AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS,
     AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS,
     AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL,
-    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL_COMPLETE,
+    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL,
     AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE,
     AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE,
     AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST
@@ -201,8 +201,15 @@ static void s_s3_auto_ranged_put_cancel(
 
     s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
     if (auto_ranged_put->synced_data.state != AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL &&
-        auto_ranged_put->synced_data.state != AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL_COMPLETE) {
-        auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL;
+        auto_ranged_put->synced_data.state != AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL) {
+
+        if (auto_ranged_put->synced_data.num_parts_sent == auto_ranged_put->synced_data.num_parts_completed) {
+            /* No need to wait, no more parts will be sent. Safely abort the put */
+            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL;
+        } else {
+            /* In case there still put requests in flight, wait until they completed to switch to cancel state */
+            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+        }
         auto_ranged_put->synced_data.failed_request = failed_request;
     }
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
@@ -300,10 +307,10 @@ static int s_s3_auto_ranged_put_next_request(
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
                 0,
                 AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL_COMPLETE;
+            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
             /* Create an abort message with the request tag AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CANCEL*/
             break;
-        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL_COMPLETE:
+        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL:
             break;
 
         default:
@@ -636,6 +643,14 @@ static int s_s3_auto_ranged_put_stream_complete(
 
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
             ++auto_ranged_put->synced_data.num_parts_completed;
+
+            if (aws_atomic_load_int(&meta_request->cancelled) == 1) {
+                /* request cancelled, if all sent parts completed, we can send abort now */
+                if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
+                    auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL;
+                    notify_work_available = true;
+                }
+            }
 
             if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.total_num_parts) {
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE;

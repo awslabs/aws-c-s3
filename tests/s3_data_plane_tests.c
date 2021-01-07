@@ -962,10 +962,10 @@ static int s_s3_next_request_cancel_in_the_middle(
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
                 0,
                 AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL_COMPLETE;
+            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
             /* Create an abort message with the request tag AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CANCEL*/
             break;
-        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL_COMPLETE:
+        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL:
             break;
 
         default:

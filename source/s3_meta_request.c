@@ -887,6 +887,8 @@ void aws_s3_meta_request_cancel_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
     int error_code) {
+
+    aws_atomic_store_int(&meta_request->cancelled, 1);
     if (failed_request != NULL) {
         /* TODO: The error code is removed from send data. Needed to be replaced */
         aws_s3_meta_request_finish(meta_request, failed_request, failed_request->send_data.response_status, error_code);
