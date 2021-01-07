@@ -97,13 +97,6 @@ struct aws_http_message *aws_s3_upload_part_message_new(
                 if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
                     goto error_clean_up;
                 }
-            } else {
-                struct aws_http_headers *headers = aws_http_message_get_headers(message);
-                if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
-                    if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
-                        goto error_clean_up;
-                    }
-                }
             }
         } else {
             goto error_clean_up;

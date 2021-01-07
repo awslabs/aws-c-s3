@@ -668,8 +668,8 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
 static int s_test_s3_put_object_content_md5_helper(
     struct aws_allocator *allocator,
     bool multipart_upload,
-    enum aws_s3_meta_request_compute_content_md5 compute_content_md5,
-    bool expect_succeed) {
+    uint32_t flags,
+    enum aws_s3_meta_request_compute_content_md5 compute_content_md5) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
@@ -677,34 +677,6 @@ static int s_test_s3_put_object_content_md5_helper(
     if (!multipart_upload) {
         /* content_length < part_size */
         part_size = 15 * 1024 * 1024;
-    }
-
-    /**
-     * flags metrics for successful scenarios:
-     *              | default   | enabled   | disabled
-     *   singlepart | correct   | incorrect | incorrect
-     *   multipart  | incorrect | incorrect | correct
-     *
-     * flags metric for failed scenarios:
-     *              | default   | enabled   | disabled
-     *   singlepart | incorrect | N/A       | N/A
-     *   multipart  | N/A       | N/A       | N/A
-     */
-    uint32_t flags = 0;
-    if (expect_succeed) {
-        flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
-        if ((!multipart_upload && compute_content_md5 == AWS_MR_CONTENT_MD5_DEFAULT) ||
-            (multipart_upload && compute_content_md5 == AWS_MR_CONTENT_MD5_DISABLED)) {
-            flags = flags | AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5;
-        } else {
-            flags = flags | AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5;
-        }
-    } else {
-        if (!multipart_upload && compute_content_md5 == AWS_MR_CONTENT_MD5_DEFAULT) {
-            flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5;
-        } else {
-            flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
-        }
     }
 
     struct aws_s3_client_config client_config = {
@@ -730,71 +702,140 @@ static int s_test_s3_put_object_content_md5_helper(
     return 0;
 }
 
-AWS_TEST_CASE(
-    test_s3_put_object_singlepart_content_md5_default_expect_succeed,
-    s_test_s3_put_object_singlepart_content_md5_default_expect_succeed)
-static int s_test_s3_put_object_singlepart_content_md5_default_expect_succeed(
-    struct aws_allocator *allocator,
-    void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_no_content_md5_enabled,
+    s_test_s3_put_object_singlepart_no_content_md5_enabled)
+static int s_test_s3_put_object_singlepart_no_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DEFAULT, true));
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, flags, AWS_MR_CONTENT_MD5_ENABLED));
 
     return 0;
 }
 
-AWS_TEST_CASE(
-    test_s3_put_object_singlepart_content_md5_default_expect_fail,
-    s_test_s3_put_object_singlepart_content_md5_default_expect_fail)
-static int s_test_s3_put_object_singlepart_content_md5_default_expect_fail(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_no_content_md5_disabled,
+    s_test_s3_put_object_singlepart_no_content_md5_disabled)
+static int s_test_s3_put_object_singlepart_no_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DEFAULT, false));
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, flags, AWS_MR_CONTENT_MD5_DISABLED));
 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_enabled, s_test_s3_put_object_singlepart_content_md5_enabled)
-static int s_test_s3_put_object_singlepart_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_correct_content_md5_enabled,
+    s_test_s3_put_object_singlepart_correct_content_md5_enabled)
+static int s_test_s3_put_object_singlepart_correct_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_ENABLED, true));
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 |
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, flags, AWS_MR_CONTENT_MD5_ENABLED));
 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_singlepart_content_md5_disabled, s_test_s3_put_object_singlepart_content_md5_disabled)
-static int s_test_s3_put_object_singlepart_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_correct_content_md5_disabled,
+    s_test_s3_put_object_singlepart_correct_content_md5_disabled)
+static int s_test_s3_put_object_singlepart_correct_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, AWS_MR_CONTENT_MD5_DISABLED, true));
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 |
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, flags, AWS_MR_CONTENT_MD5_DISABLED));
 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_multipart_content_md5_default, s_test_s3_put_object_multipart_content_md5_default)
-static int s_test_s3_put_object_multipart_content_md5_default(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_incorrect_content_md5_enabled,
+    s_test_s3_put_object_singlepart_incorrect_content_md5_enabled)
+static int s_test_s3_put_object_singlepart_incorrect_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, AWS_MR_CONTENT_MD5_DEFAULT, true));
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, flags, AWS_MR_CONTENT_MD5_ENABLED));
 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_multipart_content_md5_enabled, s_test_s3_put_object_multipart_content_md5_enabled)
-static int s_test_s3_put_object_multipart_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_singlepart_incorrect_content_md5_disabled,
+    s_test_s3_put_object_singlepart_incorrect_content_md5_disabled)
+static int s_test_s3_put_object_singlepart_incorrect_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, AWS_MR_CONTENT_MD5_ENABLED, true));
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, false, flags, AWS_MR_CONTENT_MD5_DISABLED));
 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_multipart_content_md5_disabled, s_test_s3_put_object_multipart_content_md5_disabled)
-static int s_test_s3_put_object_multipart_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_multipart_no_content_md5_enabled,
+    s_test_s3_put_object_multipart_no_content_md5_enabled)
+static int s_test_s3_put_object_multipart_no_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, AWS_MR_CONTENT_MD5_DISABLED, true));
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, flags, AWS_MR_CONTENT_MD5_ENABLED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_no_content_md5_disabled,
+    s_test_s3_put_object_multipart_no_content_md5_disabled)
+static int s_test_s3_put_object_multipart_no_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, flags, AWS_MR_CONTENT_MD5_DISABLED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_correct_content_md5_enabled,
+    s_test_s3_put_object_multipart_correct_content_md5_enabled)
+static int s_test_s3_put_object_multipart_correct_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 |
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, flags, AWS_MR_CONTENT_MD5_ENABLED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_correct_content_md5_disabled,
+    s_test_s3_put_object_multipart_correct_content_md5_disabled)
+static int s_test_s3_put_object_multipart_correct_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 |
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, flags, AWS_MR_CONTENT_MD5_DISABLED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_incorrect_content_md5_enabled,
+    s_test_s3_put_object_multipart_incorrect_content_md5_enabled)
+static int s_test_s3_put_object_multipart_incorrect_content_md5_enabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5 |
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, flags, AWS_MR_CONTENT_MD5_ENABLED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multipart_incorrect_content_md5_disabled,
+    s_test_s3_put_object_multipart_incorrect_content_md5_disabled)
+static int s_test_s3_put_object_multipart_incorrect_content_md5_disabled(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t flags = AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5 |
+        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS;
+    ASSERT_SUCCESS(s_test_s3_put_object_content_md5_helper(allocator, true, flags, AWS_MR_CONTENT_MD5_DISABLED));
 
     return 0;
 }

@@ -57,7 +57,6 @@ enum aws_s3_meta_request_tls_mode {
 };
 
 enum aws_s3_meta_request_compute_content_md5 {
-    AWS_MR_CONTENT_MD5_DEFAULT,
     AWS_MR_CONTENT_MD5_ENABLED,
     AWS_MR_CONTENT_MD5_DISABLED,
 };
@@ -96,11 +95,9 @@ struct aws_s3_client_config {
     double throughput_target_gbps;
 
     /**
-     * DEFAULT: compute content-md5 header for multi-part upload if content-md5 header is specified in the original
-     * request. keep content-md5 header unchanged for single-part upload if exists.
-     * ENABLED: always compute content-md5 header for both single-part upload and multi-part upload.
-     * DISABLED: remove content-md5 header for both single-part upload and multi-part upload if exists.
-     */
+     * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
+     *     or initial request has content-md5 header.
+     * For single-part upload, keep the content-md5 in the initial request unchanged. */
     enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
     /* Retry strategy to use. If NULL, a default retry strategy will be used. */

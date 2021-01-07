@@ -129,11 +129,9 @@ struct aws_s3_client {
     const uint32_t ideal_vip_count;
 
     /**
-     * DEFAULT: compute content-md5 header for multi-part upload if content-md5 header is specified in the original
-     * request. keep content-md5 header unchanged for single-part upload if exists.
-     * ENABLED: always compute content-md5 header for both single-part upload and multi-part upload.
-     * DISABLED: always remove content-md5 header for both single-part upload and multi-part upload if exists.
-     */
+     * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
+     *     or initial request has content-md5 header.
+     * For single-part upload, keep the content-md5 in the initial request unchanged. */
     const enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
     /* Retry strategy used for scheduling request retries. */
