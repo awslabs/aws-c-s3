@@ -226,7 +226,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
     if (cancel) {
         /* TODO: What's the error code here? */
         aws_s3_meta_request_cancel_default(
-            meta_request, auto_ranged_put->synced_data.failed_request, AWS_ERROR_UNKNOWN);
+            meta_request, auto_ranged_put->synced_data.failed_request, AWS_ERROR_S3_CANCELED_SUCCESS);
     }
 }
 
