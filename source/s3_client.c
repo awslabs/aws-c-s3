@@ -1860,12 +1860,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
-        bool cancelled = false;
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        if (meta_request->synced_data.cancelled) {
-            cancelled = true;
-        }
-        aws_s3_meta_request_unlock_synced_data(meta_request);
+        bool cancelled = aws_atomic_load_int(&meta_request->cancelled) == 1;
 
         if (cancelled) {
             /* meta request has been cancelled, drop the body after that */

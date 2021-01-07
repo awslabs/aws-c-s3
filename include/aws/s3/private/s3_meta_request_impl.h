@@ -182,6 +182,9 @@ struct aws_s3_meta_request {
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
+    /* True if the meta request has been cancelled by user */
+    struct aws_atomic_var cancelled;
+
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
 
@@ -212,9 +215,6 @@ struct aws_s3_meta_request {
         /* The next expected streaming part number needed to continue streaming part bodies.  (For example, this will
          * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. */
         uint32_t next_streaming_part;
-
-        /* Mark the meta request has been cancelled by user */
-        bool cancelled;
 
     } synced_data;
 

@@ -208,6 +208,8 @@ int aws_s3_meta_request_init_base(
     meta_request->finish_callback = options->finish_callback;
     meta_request->shutdown_callback = options->shutdown_callback;
 
+    aws_atomic_init_int(&meta_request->cancelled, 0);
+
     return AWS_OP_SUCCESS;
 }
 
@@ -215,12 +217,10 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable->cancel);
     bool cancel_called = true;
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    if (!meta_request->synced_data.cancelled) {
-        meta_request->synced_data.cancelled = true;
+    if (aws_atomic_load_int(&meta_request->cancelled) == 0) {
         cancel_called = false;
+        aws_atomic_store_int(&meta_request->cancelled, 1);
     }
-    aws_s3_meta_request_unlock_synced_data(meta_request);
     if (!cancel_called) {
         meta_request->vtable->cancel(meta_request, NULL, AWS_ERROR_S3_CANCELED_SUCCESS);
     }
