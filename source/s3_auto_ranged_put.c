@@ -226,7 +226,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
     if (cancel) {
         /* TODO: What's the error code here? */
         aws_s3_meta_request_cancel_default(
-            meta_request, auto_ranged_put->synced_data.failed_request, AWS_ERROR_S3_CANCELED_SUCCESS);
+            meta_request, auto_ranged_put->synced_data.failed_request, AWS_ERROR_S3_CANCELED);
     }
 }
 
@@ -434,7 +434,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 /* which mean the response of the create multipart upload have not arrived yet, and none of the put has
                  * been sent, we can just finish the request without abort message */
 
-                return aws_raise_error(AWS_ERROR_S3_CANCELED_SUCCESS);
+                return aws_raise_error(AWS_ERROR_S3_CANCELED);
             }
 
             AWS_FATAL_ASSERT(auto_ranged_put->synced_data.upload_id);

@@ -222,7 +222,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
         aws_atomic_store_int(&meta_request->cancelled, 1);
     }
     if (!cancel_called) {
-        meta_request->vtable->cancel(meta_request, NULL, AWS_ERROR_S3_CANCELED_SUCCESS);
+        meta_request->vtable->cancel(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     }
 }
 
@@ -893,7 +893,7 @@ void aws_s3_meta_request_cancel_default(
         /* TODO: The error code is removed from send data. Needed to be replaced */
         aws_s3_meta_request_finish(meta_request, failed_request, failed_request->send_data.response_status, error_code);
     } else {
-        aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_CANCELED_SUCCESS);
+        aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_CANCELED);
     }
 }
 
@@ -982,7 +982,7 @@ void aws_s3_meta_request_send_request_finish_default(
     } else {
         /* If the request failed due to an invalid, ie, unrecoverable, response status, then finish the meta request
          * with that request as the failing request. */
-        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_CANCELED_SUCCESS) {
+        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_CANCELED) {
 
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
