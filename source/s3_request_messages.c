@@ -433,11 +433,10 @@ int aws_s3_message_util_add_content_md5_header(
     if (aws_base64_compute_encoded_len(md5_output_buf.len, &base64_output_size)) {
         return AWS_OP_ERR;
     }
-    struct aws_byte_buf allocation;
-    if (aws_byte_buf_init(&allocation, allocator, base64_output_size + 2)) {
+    struct aws_byte_buf base64_output_buf;
+    if (aws_byte_buf_init(&base64_output_buf, allocator, base64_output_size)) {
         return AWS_OP_ERR;
     }
-    struct aws_byte_buf base64_output_buf = aws_byte_buf_from_empty_array(allocation.buffer + 1, base64_output_size);
     if (aws_base64_encode(&base64_input, &base64_output_buf)) {
         goto error_clean_up;
     }
@@ -447,12 +446,12 @@ int aws_s3_message_util_add_content_md5_header(
         goto error_clean_up;
     }
 
-    aws_byte_buf_clean_up(&allocation);
+    aws_byte_buf_clean_up(&base64_output_buf);
     return AWS_OP_SUCCESS;
 
 error_clean_up:
 
-    aws_byte_buf_clean_up(&allocation);
+    aws_byte_buf_clean_up(&base64_output_buf);
     return AWS_OP_ERR;
 }
 
