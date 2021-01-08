@@ -64,9 +64,9 @@ static int s_test_s3_vip_create_destroy(struct aws_allocator *allocator, void *c
 
     uint32_t num_vip_connections_returned = 0;
 
-    /* Loop through all fo the vip connections and destroy them. During that loop we an validate the state of those
-     * structures. Note: because we are not actually adding this vip to the client, it is necessary to destroy the
-     * connections here in order for the vip destruction to finish correctly later. */
+    /* Loop through all of the VIP connections, doing some validation and destroying them. Note: because we are not
+     * actually adding this VIP to the client, it is necessary to destroy the connections here in order for the VIP
+     * destruction to finish correctly. */
     while (!aws_linked_list_empty(&vip_connections)) {
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections);
         struct aws_s3_vip_connection *vip_connection = AWS_CONTAINER_OF(node, struct aws_s3_vip_connection, node);
