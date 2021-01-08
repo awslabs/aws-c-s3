@@ -16,6 +16,10 @@ add_test_case(test_s3_meta_request_sign_request_fail)
 add_test_case(test_s3_meta_request_send_request_finish_fail)
 add_test_case(test_s3_auto_range_put_missing_upload_id)
 
+add_test_case(test_s3_vip_create_destroy)
+add_test_case(test_s3_client_add_remove_vips)
+add_test_case(test_s3_client_resolve_vips)
+
 add_test_case(test_s3_get_object_tls_disabled)
 add_test_case(test_s3_get_object_tls_enabled)
 add_test_case(test_s3_get_object_tls_default)
