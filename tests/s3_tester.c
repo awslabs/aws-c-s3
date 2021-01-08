@@ -813,6 +813,8 @@ int aws_s3_tester_send_meta_request(
 
     aws_s3_tester_unlock_synced_data(tester);
 
+    test_results->part_size = meta_request->part_size;
+
     aws_s3_meta_request_release(meta_request);
 
     if ((flags & AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN) == 0) {
@@ -1018,8 +1020,8 @@ int aws_s3_tester_validate_put_object_results(
 
     struct aws_byte_cursor etag_byte_cursor;
     AWS_ZERO_STRUCT(etag_byte_cursor);
-    ASSERT_SUCCESS(aws_http_headers_get(
-        meta_request_test_results->response_headers, aws_byte_cursor_from_c_str("ETag"), &etag_byte_cursor));
+    ASSERT_SUCCESS(
+        aws_http_headers_get(meta_request_test_results->response_headers, g_etag_header_name, &etag_byte_cursor));
     struct aws_byte_cursor sse_byte_cursor;
     switch (sse_type) {
         case AWS_S3_TESTER_SSE_KMS:
@@ -1037,6 +1039,15 @@ int aws_s3_tester_validate_put_object_results(
             break;
     }
     ASSERT_TRUE(etag_byte_cursor.len > 0);
+
+    struct aws_byte_cursor quote_entity = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&quot;");
+
+    if (etag_byte_cursor.len >= quote_entity.len) {
+        for (size_t i = 0; i < (etag_byte_cursor.len - quote_entity.len + 1); ++i) {
+            ASSERT_TRUE(
+                strncmp((const char *)&etag_byte_cursor.ptr[i], (const char *)quote_entity.ptr, quote_entity.len) != 0);
+        }
+    }
 
     return AWS_OP_SUCCESS;
 }

@@ -42,6 +42,8 @@ add_test_case(test_s3_cancel_singlepart_upload_random)
 add_test_case(test_s3_cancel_multipart_download_random)
 add_test_case(test_s3_cancel_singlepart_download_random)
 add_test_case(test_s3_bad_endpoint)
+add_test_case(test_s3_put_object_clamp_part_size)
+add_test_case(test_s3_replace_quote_entities)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

@@ -682,26 +682,38 @@ static int s_s3_auto_ranged_put_stream_complete(
                 meta_request->headers_callback(
                     meta_request, final_response_headers, request->send_data.response_status, meta_request->user_data);
 
-                aws_http_headers_release(final_response_headers);
+                if (etag_header_value != NULL) {
+                    struct aws_byte_buf etag_header_value_byte_buf;
+                    AWS_ZERO_STRUCT(etag_header_value_byte_buf);
+
+                    replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
+
+                    aws_http_headers_set(
+                        final_response_headers,
+                        g_etag_header_name,
+                        aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
+
+                    aws_string_destroy(etag_header_value);
+                    aws_byte_buf_clean_up(&etag_header_value_byte_buf);
+                }
+
+                aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
+                break;
             }
+            case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Finished aborting multipart upload for upload id %s.",
+                    (void *)meta_request,
+                    aws_string_c_str(auto_ranged_put->synced_data.upload_id));
 
-            aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
-            break;
+                aws_s3_meta_request_finish_default(
+                    meta_request, auto_ranged_put->synced_data.failed_request, auto_ranged_put->synced_data.error_code);
+                break;
+            }
+            default:
+                AWS_FATAL_ASSERT(false);
         }
-        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Finished aborting multipart upload for upload id %s.",
-                (void *)meta_request,
-                aws_string_c_str(auto_ranged_put->synced_data.upload_id));
 
-            aws_s3_meta_request_finish_default(
-                meta_request, auto_ranged_put->synced_data.failed_request, auto_ranged_put->synced_data.error_code);
-            break;
-        }
-        default:
-            AWS_FATAL_ASSERT(false);
+            return AWS_OP_SUCCESS;
     }
-
-    return AWS_OP_SUCCESS;
-}

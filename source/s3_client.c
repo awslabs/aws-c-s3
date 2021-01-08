@@ -44,7 +44,7 @@ static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 5.0;
+static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
@@ -56,7 +56,7 @@ static const uint16_t s_https_port = 443;
 /* TODO Provide more information on these values. */
 static const uint64_t s_default_part_size = 5 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 20 * 1024 * 1024;
-static const size_t s_default_dns_host_address_ttl_seconds = 2 * 60;
+static const size_t s_default_dns_host_address_ttl_seconds = 5 * 60;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 
@@ -217,8 +217,8 @@ struct aws_s3_client *aws_s3_client_new(
             .shutdown_callback_user_data = client,
         };
 
-        client->body_streaming_elg = aws_event_loop_group_new_default(
-            client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
+        client->body_streaming_elg = aws_event_loop_group_new_default_pinned_to_cpu_group(
+            client->allocator, num_streaming_threads, 0, &body_streaming_elg_shutdown_options);
         client->synced_data.body_streaming_elg_allocated = true;
     }
 
@@ -967,11 +967,36 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return NULL;
         }
 
-        if (content_length < client->part_size) {
+        size_t client_part_size = client->part_size;
+        size_t client_max_part_size = client->max_part_size;
+
+        if (client_part_size < g_s3_min_upload_part_size) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Client config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
+                ". Using to the minimum part-size for upload.",
+                (uint64_t)client_part_size,
+                (uint64_t)g_s3_min_upload_part_size);
+
+            client_part_size = g_s3_min_upload_part_size;
+        }
+
+        if (client_max_part_size < g_s3_min_upload_part_size) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Client config max part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
+                ". Clamping to the minimum part-size for upload.",
+                (uint64_t)client_max_part_size,
+                (uint64_t)g_s3_min_upload_part_size);
+
+            client_max_part_size = g_s3_min_upload_part_size;
+        }
+
+        if (content_length < client_part_size) {
             return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
         }
 
-        uint64_t part_size_uint64 = content_length / g_s3_max_num_upload_parts;
+        uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
 
         if (part_size_uint64 > SIZE_MAX) {
             AWS_LOGF_ERROR(
@@ -986,19 +1011,19 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
         size_t part_size = (size_t)part_size_uint64;
 
-        if (part_size > client->max_part_size) {
+        if (part_size > client_max_part_size) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
                 ", but current maximum part size is %" PRIu64,
                 (uint64_t)part_size,
-                (uint64_t)client->max_part_size);
+                (uint64_t)client_max_part_size);
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
         }
 
-        if (part_size < client->part_size) {
-            part_size = client->part_size;
+        if (part_size < client_part_size) {
+            part_size = client_part_size;
         }
 
         uint32_t num_parts = (uint32_t)(content_length / part_size);
