@@ -1830,7 +1830,7 @@ void aws_s3_client_stream_response_body(
         (void *)meta_request);
 
     struct s3_streaming_body_payload *payload =
-        aws_mem_calloc(client->allocator, 1, sizeof(struct s3_streaming_body_payload));
+        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_streaming_body_payload));
 
     aws_s3_client_acquire(client);
     payload->client = client;
