@@ -934,3 +934,102 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     return 0;
 }
+
+AWS_TEST_CASE(test_s3_put_object_clamp_part_size, s_test_s3_put_object_clamp_part_size)
+static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .max_part_size = 64 * 1024,
+    };
+
+    ASSERT_TRUE(client_config.part_size < g_s3_min_upload_part_size);
+    ASSERT_TRUE(client_config.max_part_size < g_s3_min_upload_part_size);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_s3_meta_request_test_results test_results;
+    AWS_ZERO_STRUCT(test_results);
+
+    /* Upload should now succeed even when specifying a smaller than allowed part size. */
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_NONE, &test_results));
+
+    ASSERT_TRUE(test_results.part_size == g_s3_min_upload_part_size);
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+struct replace_quote_entities_test_case {
+    struct aws_string *test_string;
+    struct aws_byte_cursor expected_result;
+};
+
+AWS_TEST_CASE(test_s3_replace_quote_entities, s_test_s3_replace_quote_entities)
+static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct replace_quote_entities_test_case test_cases[] = {
+        {
+            .test_string = aws_string_new_from_c_str(allocator, "&quot;testtest"),
+            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"testtest"),
+        },
+        {
+            .test_string = aws_string_new_from_c_str(allocator, "testtest&quot;"),
+            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest\""),
+        },
+        {
+            .test_string = aws_string_new_from_c_str(allocator, "&quot;&quot;"),
+            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"\""),
+        },
+        {
+            .test_string = aws_string_new_from_c_str(allocator, "testtest"),
+            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest"),
+        },
+        {
+            .test_string = aws_string_new_from_c_str(allocator, ""),
+            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(""),
+        },
+    };
+
+    for (size_t i = 0; i < (sizeof(test_cases) / sizeof(struct replace_quote_entities_test_case)); ++i) {
+        struct replace_quote_entities_test_case *test_case = &test_cases[i];
+
+        struct aws_byte_buf result_byte_buf;
+        AWS_ZERO_STRUCT(result_byte_buf);
+
+        replace_quote_entities(allocator, test_case->test_string, &result_byte_buf);
+
+        struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_buf(&result_byte_buf);
+
+        ASSERT_TRUE(aws_byte_cursor_eq(&test_case->expected_result, &result_byte_cursor));
+
+        aws_byte_buf_clean_up(&result_byte_buf);
+        aws_string_destroy(test_case->test_string);
+        test_case->test_string = NULL;
+    }
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}

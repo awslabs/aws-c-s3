@@ -77,6 +77,7 @@ struct aws_s3_meta_request_test_results {
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
+    size_t part_size;
 
     int headers_response_status;
     struct aws_http_headers *response_headers;

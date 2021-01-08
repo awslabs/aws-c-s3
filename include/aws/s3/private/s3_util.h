@@ -10,9 +10,11 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/byte_buf.h>
+#include <aws/s3/s3.h>
 
 #define ASSERT_SYNCED_DATA_LOCK_HELD(object) AWS_ASSERT(aws_mutex_try_lock(&(object)->synced_data.lock) == AWS_OP_ERR)
 #define KB_TO_BYTES(kb) ((kb)*1024)
+#define MB_TO_BYTES(mb) ((mb)*1024 * 1024)
 
 struct aws_allocator;
 struct aws_http_stream;
@@ -27,18 +29,6 @@ enum aws_s3_response_status {
     AWS_S3_RESPONSE_STATUS_SLOW_DOWN = 503,
 };
 
-extern const struct aws_byte_cursor g_s3_service_name;
-extern const struct aws_byte_cursor g_host_header_name;
-extern const struct aws_byte_cursor g_range_header_name;
-extern const struct aws_byte_cursor g_content_range_header_name;
-extern const struct aws_byte_cursor g_content_type_header_name;
-extern const struct aws_byte_cursor g_content_length_header_name;
-extern const struct aws_byte_cursor g_accept_ranges_header_name;
-extern const struct aws_byte_cursor g_etag_header_name;
-extern const struct aws_byte_cursor g_post_method;
-
-extern const uint64_t g_s3_max_num_upload_parts;
-
 struct aws_cached_signing_config_aws {
     struct aws_allocator *allocator;
     struct aws_string *service;
@@ -47,6 +37,30 @@ struct aws_cached_signing_config_aws {
 
     struct aws_signing_config_aws config;
 };
+
+AWS_EXTERN_C_BEGIN
+
+extern const struct aws_byte_cursor g_s3_service_name;
+extern const struct aws_byte_cursor g_range_header_name;
+extern const struct aws_byte_cursor g_content_range_header_name;
+extern const struct aws_byte_cursor g_accept_ranges_header_name;
+extern const struct aws_byte_cursor g_post_method;
+extern const uint32_t g_s3_max_num_upload_parts;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_host_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_content_type_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_content_length_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_etag_header_name;
+
+AWS_S3_API
+extern const size_t g_s3_min_upload_part_size;
 
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
     struct aws_allocator *allocator,
@@ -63,7 +77,12 @@ struct aws_string *get_top_level_xml_tag_value(
     const struct aws_byte_cursor *tag_name,
     struct aws_byte_cursor *xml_body);
 
+AWS_S3_API
+void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf);
+
 /* TODO could be moved to aws-c-common. */
 int aws_last_error_or_unknown(void);
+
+AWS_EXTERN_C_END
 
 #endif /* AWS_S3_UTIL_H */
