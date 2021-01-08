@@ -81,7 +81,7 @@ static int s_s3_auto_ranged_put_stream_complete(
     struct aws_http_stream *stream,
     struct aws_s3_vip_connection *vip_connection);
 
-static void s_s3_auto_ranged_put_cancel(
+static void s_s3_auto_ranged_put_finish(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
     int error_code);
@@ -97,7 +97,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .incoming_body = NULL,
     .stream_complete = s_s3_auto_ranged_put_stream_complete,
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
-    .cancel = s_s3_auto_ranged_put_cancel,
+    .finish = s_s3_auto_ranged_put_finish,
 };
 
 static void s_s3_auto_ranged_put_lock_synced_data(struct aws_s3_auto_ranged_put *auto_ranged_put) {
@@ -187,7 +187,7 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_put);
 }
 
-static void s_s3_auto_ranged_put_cancel(
+static void s_s3_auto_ranged_put_finish(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
     int error_code) {
@@ -694,7 +694,8 @@ static int s_s3_auto_ranged_put_stream_complete(
                 "id=%p Finished aborting multipart upload for upload id %s.",
                 (void *)meta_request,
                 aws_string_c_str(auto_ranged_put->synced_data.upload_id));
-            aws_s3_meta_request_cancel_default(
+
+            aws_s3_meta_request_finish_default(
                 meta_request, auto_ranged_put->synced_data.failed_request, auto_ranged_put->synced_data.error_code);
             break;
         }

@@ -215,14 +215,14 @@ int aws_s3_meta_request_init_base(
 
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable->cancel);
+    AWS_PRECONDITION(meta_request->vtable->finish);
     bool cancel_called = true;
     if (aws_atomic_load_int(&meta_request->cancelled) == 0) {
         cancel_called = false;
         aws_atomic_store_int(&meta_request->cancelled, 1);
     }
     if (!cancel_called) {
-        meta_request->vtable->cancel(meta_request, NULL, AWS_ERROR_S3_CANCELED);
+        meta_request->vtable->finish(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     }
 }
 
@@ -883,14 +883,13 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(vip_connection, stream, error_code);
 }
 
-void aws_s3_meta_request_cancel_default(
+void aws_s3_meta_request_finish_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
     int error_code) {
 
     aws_atomic_store_int(&meta_request->cancelled, 1);
     if (failed_request != NULL) {
-        /* TODO: The error code is removed from send data. Needed to be replaced */
         aws_s3_meta_request_finish(meta_request, failed_request, failed_request->send_data.response_status, error_code);
     } else {
         aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_CANCELED);
@@ -993,7 +992,7 @@ void aws_s3_meta_request_send_request_finish_default(
                 (void *)request,
                 response_status);
 
-            aws_s3_meta_request_cancel_default(meta_request, request, error_code);
+            aws_s3_meta_request_finish(meta_request, request, response_status, error_code);
         } else {
             /* Otherwise, set this up for a retry. */
             finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;

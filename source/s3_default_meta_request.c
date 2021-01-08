@@ -61,8 +61,8 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .incoming_body = NULL,
     .stream_complete = NULL,
     .notify_request_destroyed = s_s3_meta_request_default_notify_request_destroyed,
-    .cancel = aws_s3_meta_request_cancel_default,
     .destroy = s_s3_meta_request_default_destroy,
+    .finish = aws_s3_meta_request_finish_default,
 };
 
 static void s_s3_meta_request_default_lock_synced_data(struct aws_s3_meta_request_default *meta_request_default) {
