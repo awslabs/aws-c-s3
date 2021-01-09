@@ -35,6 +35,7 @@ typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
 
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
+    AWS_S3_META_REQUEST_STATE_CANCELLING,
     AWS_S3_META_REQUEST_STATE_FINISHED,
 };
 
@@ -181,9 +182,6 @@ struct aws_s3_meta_request {
     const size_t part_size;
 
     struct aws_cached_signing_config_aws *cached_signing_config;
-
-    /* True if the meta request has been cancelled by user */
-    struct aws_atomic_var cancelled;
 
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
