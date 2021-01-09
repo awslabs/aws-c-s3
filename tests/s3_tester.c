@@ -804,9 +804,7 @@ int aws_s3_tester_send_meta_request(
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
         ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
-        ASSERT_TRUE(
-            tester->synced_data.finish_error_code == AWS_ERROR_S3_CANCELED ||
-            tester->synced_data.finish_error_code == AWS_IO_MAX_RETRIES_EXCEEDED);
+        ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_S3_CANCELED);
     } else {
         ASSERT_FALSE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     }

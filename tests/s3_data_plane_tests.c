@@ -900,10 +900,24 @@ static int s_s3_next_request_cancel_in_the_middle(
 
     int result = AWS_OP_SUCCESS;
 
+    /* TODO: haven't dived into it, but assuming the finish state has been handled well */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    bool cancelling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELLING;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
     aws_mutex_lock(&auto_ranged_put->base.synced_data.lock);
 
     switch (auto_ranged_put->synced_data.state) {
         case AWS_S3_AUTO_RANGED_PUT_STATE_START: {
+
+            if (cancelling) {
+                /* Another lock will be acquired in request finish, release the lock here for simplicity */
+                aws_mutex_unlock(&auto_ranged_put->base.synced_data.lock);
+                *out_request = NULL;
+                /* meta request not active before everything gets started, just finish the meta request */
+                aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
+                return result;
+            }
 
             struct aws_input_stream *initial_request_body = meta_request->synced_data.initial_body_stream;
 
@@ -926,7 +940,8 @@ static int s_s3_next_request_cancel_in_the_middle(
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
 
             /* Keep setting up to send parts until we've sent all of them at least once. */
-            if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
+            if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts &&
+                !cancelling) {
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
@@ -944,10 +959,32 @@ static int s_s3_next_request_cancel_in_the_middle(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE: {
-            /* never completes, we call cancel instead */
-            aws_raise_error(AWS_ERROR_UNKNOWN);
-            /* trigger retry */
-            return AWS_OP_ERR;
+            if (cancelling) {
+                if (!auto_ranged_put->synced_data.upload_id) {
+                    /* which mean the response of the create multipart upload have not arrived yet, and none of the put
+                     * has been sent, we can just finish the request without abort message */
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p request cancelled before any parts get sent.",
+                        (void *)meta_request);
+                    /* TODO: which state it should be??? */
+                    auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+
+                    break;
+                }
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
+                    0,
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                /* TODO: which state it should be??? */
+                auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+            } else {
+                /* never completes, we call cancel instead */
+                aws_raise_error(AWS_ERROR_UNKNOWN);
+                /* trigger retry */
+                return AWS_OP_ERR;
+            }
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE: {
@@ -956,15 +993,6 @@ static int s_s3_next_request_cancel_in_the_middle(
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST: {
             break;
         }
-        case AWS_S3_AUTO_RANGED_PUT_STATE_CANCEL:
-            request = aws_s3_request_new(
-                meta_request,
-                AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
-                0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
-            /* Create an abort message with the request tag AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CANCEL*/
-            break;
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL:
             break;
 
@@ -972,10 +1000,13 @@ static int s_s3_next_request_cancel_in_the_middle(
             AWS_FATAL_ASSERT(false);
             break;
     }
-
-    aws_mutex_unlock(&auto_ranged_put->base.synced_data.lock);
+    bool call_cancel = false;
     if (auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS ||
         auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS) {
+        call_cancel = true;
+    }
+    aws_mutex_unlock(&auto_ranged_put->base.synced_data.lock);
+    if (call_cancel) {
         aws_s3_meta_request_cancel(meta_request);
     }
 
@@ -1041,8 +1072,8 @@ static int s_test_s3_cancel_multipart_upload_during_parts_upload(struct aws_allo
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
-    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually ensure
-     * the abort succeed */
+    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually
+     * ensure the abort succeed */
     return 0;
 }
 
@@ -1069,8 +1100,8 @@ static int s_test_s3_cancel_multipart_upload_random(struct aws_allocator *alloca
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
-    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually ensure
-     * the abort succeed */
+    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually
+     * ensure the abort succeed */
     return 0;
 }
 
