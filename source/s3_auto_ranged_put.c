@@ -657,8 +657,7 @@ static int s_s3_auto_ranged_put_stream_complete(
                 /* Copy all the response headers from this request. */
                 copy_http_headers(request->send_data.response_headers, final_response_headers);
 
-                /* Copy over any response headers that we've previously determined are needed for this final
-                 * response.
+                /* Copy over any response headers that we've previously determined are needed for this final response.
                  */
                 s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
                 copy_http_headers(
@@ -671,16 +670,6 @@ static int s_s3_auto_ranged_put_stream_complete(
                 /* Grab the ETag for the entire object, and set it as a header. */
                 struct aws_string *etag_header_value =
                     get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
-
-                if (etag_header_value != NULL) {
-                    aws_http_headers_set(
-                        final_response_headers, g_etag_header_name, aws_byte_cursor_from_string(etag_header_value));
-                    aws_string_destroy(etag_header_value);
-                }
-
-                /* Notify the user of the headers. */
-                meta_request->headers_callback(
-                    meta_request, final_response_headers, request->send_data.response_status, meta_request->user_data);
 
                 if (etag_header_value != NULL) {
                     struct aws_byte_buf etag_header_value_byte_buf;
@@ -697,23 +686,30 @@ static int s_s3_auto_ranged_put_stream_complete(
                     aws_byte_buf_clean_up(&etag_header_value_byte_buf);
                 }
 
-                aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
-                break;
-            }
-            case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
-                AWS_LOGF_DEBUG(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Finished aborting multipart upload for upload id %s.",
-                    (void *)meta_request,
-                    aws_string_c_str(auto_ranged_put->synced_data.upload_id));
+                /* Notify the user of the headers. */
+                meta_request->headers_callback(
+                    meta_request, final_response_headers, request->send_data.response_status, meta_request->user_data);
 
-                aws_s3_meta_request_finish_default(
-                    meta_request, auto_ranged_put->synced_data.failed_request, auto_ranged_put->synced_data.error_code);
-                break;
+                aws_http_headers_release(final_response_headers);
             }
-            default:
-                AWS_FATAL_ASSERT(false);
+
+            aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
+            break;
         }
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Finished aborting multipart upload for upload id %s.",
+                (void *)meta_request,
+                aws_string_c_str(auto_ranged_put->synced_data.upload_id));
 
-            return AWS_OP_SUCCESS;
+            aws_s3_meta_request_finish_default(
+                meta_request, auto_ranged_put->synced_data.failed_request, auto_ranged_put->synced_data.error_code);
+            break;
+        }
+        default:
+            AWS_FATAL_ASSERT(false);
     }
+
+    return AWS_OP_SUCCESS;
+}
