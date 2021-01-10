@@ -82,10 +82,8 @@ static void s_s3_test_meta_request_finish(
         aws_http_headers_acquire(result->error_response_headers);
     }
 
-    if (result->error_response_body != NULL) {
-        aws_byte_buf_init_copy_from_cursor(
-            &meta_request_test_results->error_response_body, tester->allocator, *result->error_response_body);
-    }
+    aws_byte_buf_init_copy_from_cursor(
+        &meta_request_test_results->error_response_body, tester->allocator, result->error_response_body);
 
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;

@@ -1091,10 +1091,12 @@ unlock:
         aws_error_str(error_code));
 
     if (meta_request->finish_callback != NULL) {
+        struct aws_byte_cursor error_body_cursor;
+        AWS_ZERO_STRUCT(error_body_cursor);
 
         struct aws_s3_meta_request_result meta_request_result = {
             .error_response_headers = NULL,
-            .error_response_body = NULL,
+            .error_response_body = error_body_cursor,
             .error_code = error_code,
             .response_status = response_status,
         };
@@ -1102,6 +1104,7 @@ unlock:
         struct aws_string *error_message = NULL;
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
             meta_request_result.error_response_headers = failed_request->send_data.response_headers;
+            error_body_cursor = aws_byte_cursor_from_buf(&failed_request->send_data.response_body);
             if (failed_request->send_data.response_headers) {
                 struct aws_byte_cursor content_type;
                 AWS_ZERO_STRUCT(content_type);
@@ -1110,23 +1113,18 @@ unlock:
                         failed_request->send_data.response_headers,
                         aws_byte_cursor_from_c_str("content-type"),
                         &content_type)) {
-                    /* Content type found */
                     if (aws_byte_cursor_eq_c_str_ignore_case(&content_type, "application/xml")) {
                         /* XML response */
-                        struct aws_byte_cursor body_cursor =
-                            aws_byte_cursor_from_buf(&failed_request->send_data.response_body);
                         struct aws_byte_cursor tag = aws_byte_cursor_from_c_str("Message");
-                        error_message = get_top_level_xml_tag_value(meta_request->allocator, &tag, &body_cursor);
+                        error_message = get_top_level_xml_tag_value(meta_request->allocator, &tag, &error_body_cursor);
                     }
                 }
             }
-            struct aws_byte_cursor error_body_cursor;
             if (error_message) {
+                /* overwrite the previous cursor with the decode message */
                 error_body_cursor = aws_byte_cursor_from_string(error_message);
-            } else {
-                error_body_cursor = aws_byte_cursor_from_buf(&failed_request->send_data.response_body);
             }
-            meta_request_result.error_response_body = &error_body_cursor;
+            meta_request_result.error_response_body = error_body_cursor;
         }
 
         meta_request->finish_callback(meta_request, &meta_request_result, meta_request->user_data);
