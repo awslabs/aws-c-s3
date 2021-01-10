@@ -142,7 +142,7 @@ struct aws_s3_meta_request_result {
     struct aws_http_headers *error_response_headers;
 
     /* Response body for the failed request that triggered finishing of the meta request.  NUll if no request failed.*/
-    struct aws_byte_buf *error_response_body;
+    struct aws_byte_cursor *error_response_body;
 
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
