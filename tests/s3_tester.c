@@ -83,7 +83,8 @@ static void s_s3_test_meta_request_finish(
     }
 
     if (result->error_response_body != NULL) {
-        meta_request_test_results->error_response_body = *result->error_response_body;
+        aws_byte_buf_init_copy_from_cursor(
+            &meta_request_test_results->error_response_body, tester->allocator, *result->error_response_body);
     }
 
     meta_request_test_results->finished_response_status = result->response_status;
@@ -268,6 +269,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
     }
 
     aws_http_headers_release(test_meta_request->error_response_headers);
+    aws_byte_buf_clean_up(&test_meta_request->error_response_body);
     aws_http_headers_release(test_meta_request->response_headers);
 
     AWS_ZERO_STRUCT(*test_meta_request);
