@@ -1100,6 +1100,8 @@ unlock:
         };
 
         struct aws_string *error_message = NULL;
+        struct aws_byte_cursor error_body_cursor;
+        AWS_ZERO_STRUCT(error_body_cursor);
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
             meta_request_result.error_response_headers = failed_request->send_data.response_headers;
             if (failed_request->send_data.response_headers) {
@@ -1120,7 +1122,6 @@ unlock:
                     }
                 }
             }
-            struct aws_byte_cursor error_body_cursor;
             if (error_message) {
                 error_body_cursor = aws_byte_cursor_from_string(error_message);
             } else {
