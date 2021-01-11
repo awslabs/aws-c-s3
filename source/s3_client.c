@@ -1895,9 +1895,10 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         if (!active) {
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,
-                "id=%p meta request %p is not active, drop the body.",
+                "id=%p meta request %p is not active, drop the body of s3 request %p.",
                 (void *)client,
-                (void *)meta_request);
+                (void *)meta_request,
+                (void *)request);
             aws_s3_request_release(request);
             continue;
         }

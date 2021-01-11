@@ -277,7 +277,7 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, message)) {
         goto error_clean_up;
     }
-    aws_http_message_set_request_method(message, aws_byte_cursor_from_c_str("DELETE"));
+    aws_http_message_set_request_method(message, g_delete_method);
 
     return message;
 
