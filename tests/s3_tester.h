@@ -170,7 +170,7 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_byte_cursor content_type,
     struct aws_byte_cursor key,
     struct aws_input_stream *body_stream,
-    enum aws_s3_tester_sse_type sse_type);
+    uint32_t flags);
 
 /* Will copy the client's vtable into a new vtable that can be mutated. Returns the vtable that can be mutated. */
 struct aws_s3_client_vtable *aws_s3_tester_patch_client_vtable(
@@ -198,6 +198,8 @@ enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
     AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
     AWS_S3_TESTER_SEND_META_REQUEST_CANCEL = 0x00000004,
+    AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS = 0x00000008,
+    AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256 = 0x00000010,
 };
 
 int aws_s3_tester_send_meta_request(
@@ -212,7 +214,6 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_client *client,
     struct aws_byte_cursor s3_path,
     uint32_t flags,
-    enum aws_s3_tester_sse_type sse_type,
     struct aws_s3_meta_request_test_results *out_results);
 
 int aws_s3_tester_send_put_object_meta_request(
@@ -220,16 +221,15 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_client *client,
     uint32_t object_size_mb,
     uint32_t flags,
-    enum aws_s3_tester_sse_type sse_type,
     struct aws_s3_meta_request_test_results *out_results);
 
 int aws_s3_tester_validate_get_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
-    enum aws_s3_tester_sse_type sse_type);
+    uint32_t flags);
 
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
-    enum aws_s3_tester_sse_type sse_type);
+    uint32_t flags);
 
 /*****************************************/
 /* Used for mocking functions in vtables */
