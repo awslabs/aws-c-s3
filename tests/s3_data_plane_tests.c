@@ -943,6 +943,10 @@ static int s_s3_test_headers_callback_raise_error(
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
+    (void)meta_request;
+    (void)headers;
+    (void)response_status;
+    (void)user_data;
     aws_raise_error(AWS_ERROR_UNKNOWN);
     return AWS_OP_ERR;
 }
