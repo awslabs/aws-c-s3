@@ -221,8 +221,8 @@ static int s_s3_auto_ranged_put_next_request(
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
 
             /* Keep setting up to send parts until we've sent all of them at least once. */
-            if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts &&
-                !cancelling) {
+            if (!cancelling &&
+                auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
