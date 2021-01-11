@@ -74,7 +74,8 @@ struct aws_http_message *aws_s3_put_object_message_new(
     AWS_PRECONDITION(base_message);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, 0);
+    uint32_t flag = part_number > 0 ? AWS_S3_COPY_MESSAGE_WITHOUT_ACL : 0;
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, flag);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -182,7 +183,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
     struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_HOST_ONLY);
+        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS);
     struct aws_http_headers *headers = NULL;
 
     if (message == NULL) {
@@ -362,7 +363,8 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
     uint32_t sse_included = (flags & AWS_S3_COPY_MESSAGE_INCLUDE_SSE) != 0;
-    uint32_t host_only = (flags & AWS_S3_COPY_MESSAGE_HOST_ONLY) != 0;
+    uint32_t multipart_upload_ops = (flags & AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS) != 0;
+    uint32_t no_acl = (flags & AWS_S3_COPY_MESSAGE_WITHOUT_ACL) != 0;
 
     if (message == NULL) {
         return NULL;
@@ -395,18 +397,23 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
             goto error_clean_up;
         }
 
-        if (host_only) {
-            if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "host")) {
+        if (multipart_upload_ops) {
+            if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "host") ||
+                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-request-payer") ||
+                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-expected-bucket-owner")) {
                 if (aws_http_message_add_header(message, header)) {
                     goto error_clean_up;
                 }
-                break;
             }
             continue;
         }
 
         /* For SSE upload, the sse related headers should only be shown in the create_multipart_upload.*/
-        if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption") && !sse_included) {
+        if (!sse_included && aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption")) {
+            continue;
+        }
+
+        if (no_acl && aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-acl")) {
             continue;
         }
 

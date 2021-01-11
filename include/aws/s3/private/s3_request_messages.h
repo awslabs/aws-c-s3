@@ -18,7 +18,10 @@ struct aws_array_list;
 
 enum aws_s3_copy_http_message_flags {
     AWS_S3_COPY_MESSAGE_INCLUDE_SSE = 0x00000001,
-    AWS_S3_COPY_MESSAGE_HOST_ONLY = 0x00000002,
+    /* For multipart upload complete and abort, only host and two payer related headers are needed */
+    AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS = 0x00000002,
+    /* For ranged put, acl should not be there */
+    AWS_S3_COPY_MESSAGE_WITHOUT_ACL = 0x00000004,
 };
 
 /* Create an HTTP request for an S3 Get Object Request, using the original request as a basis. If multipart is not
@@ -59,7 +62,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     const struct aws_string *upload_id,
     const struct aws_array_list *etags);
 
-/* TODO: use a flag instead of bool to make it more clear and better for other options in the future */
+/* TODO: maybe set a list of the headers we want */
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
