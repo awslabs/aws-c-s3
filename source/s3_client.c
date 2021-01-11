@@ -110,9 +110,10 @@ static void s_s3_client_on_acquire_http_connection(
     int error_code,
     void *user_data);
 
-/* Schedule task for processing work. */
+/* Schedule task for processing work. (Calls the corresponding vtable function.) */
 static void s_s3_client_schedule_process_work_synced(struct aws_s3_client *client);
 
+/* Default implementation for scheduling processing of work. */
 static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_client *client);
 
 /* Actual task function that processes work. */
