@@ -728,7 +728,9 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_http_header sse_kms_header = {.name = g_s3_sse_header, .value = aws_byte_cursor_from_c_str("aws:kms")};
     struct aws_http_header sse_aes256_header = {.name = g_s3_sse_header, .value = aws_byte_cursor_from_c_str("AES256")};
     struct aws_http_header acl_public_read_header = {
-        .name = g_acl_header_name, .value = aws_byte_cursor_from_c_str("bucket-owner-read")};
+        .name = g_acl_header_name,
+        .value = aws_byte_cursor_from_c_str("bucket-owner-read"),
+    };
 
     if (aws_http_message_add_header(message, host_header)) {
         goto error_clean_up_message;
