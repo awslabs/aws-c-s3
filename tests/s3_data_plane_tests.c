@@ -956,6 +956,9 @@ static int s_s3_test_body_callback_raise_error(
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     void *user_data) {
+    (void)meta_request;
+    (void)body;
+    (void)range_start;
     aws_raise_error(AWS_ERROR_UNKNOWN);
     return AWS_OP_ERR;
 }
