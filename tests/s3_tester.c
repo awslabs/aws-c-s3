@@ -864,6 +864,8 @@ int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_meta_request_test_results *out_results) {
     ASSERT_TRUE(options != NULL);
 
+    struct aws_allocator *allocator = options->allocator;
+
     struct aws_s3_tester local_tester;
     AWS_ZERO_STRUCT(local_tester);
 
@@ -871,6 +873,8 @@ int aws_s3_tester_send_meta_request_with_options(
         ASSERT_TRUE(options->allocator);
         ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester));
         tester = &local_tester;
+    } else if (allocator == NULL) {
+        allocator = tester->allocator;
     }
 
     struct aws_s3_client *client = options->client;
@@ -901,14 +905,14 @@ int aws_s3_tester_send_meta_request_with_options(
 
     if (meta_request_options.message == NULL) {
         struct aws_string *host_name =
-            aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
+            aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
         if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET)) {
 
             struct aws_http_message *message = aws_s3_test_get_object_request_new(
-                tester->allocator, aws_byte_cursor_from_string(host_name), options->get_options.object_path);
+                allocator, aws_byte_cursor_from_string(host_name), options->get_options.object_path);
 
             meta_request_options.message = message;
 
@@ -929,10 +933,10 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_TRUE(object_size_bytes > client->part_size);
             }
 
-            aws_s3_create_test_buffer(tester->allocator, object_size_bytes, &input_stream_buffer);
+            aws_s3_create_test_buffer(allocator, object_size_bytes, &input_stream_buffer);
 
             struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffer);
-            input_stream = aws_input_stream_new_from_cursor(tester->allocator, &test_body_cursor);
+            input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
 
             char object_path_buffer[128] = "";
             switch (options->sse_type) {
@@ -963,7 +967,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
             /* Put together a simple S3 Put Object request. */
             struct aws_http_message *message = aws_s3_test_put_object_request_new(
-                tester->allocator,
+                allocator,
                 aws_byte_cursor_from_string(host_name),
                 test_object_path,
                 g_test_body_content_type,
