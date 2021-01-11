@@ -1,3 +1,10 @@
+#ifndef AWS_S3_AUTO_RANGED_PUT_H
+#define AWS_S3_AUTO_RANGED_PUT_H
+
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0.
+ */
 
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
@@ -50,3 +57,5 @@ struct aws_s3_auto_ranged_put {
 
     } synced_data;
 };
+
+#endif
