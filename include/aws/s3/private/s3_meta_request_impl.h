@@ -157,13 +157,18 @@ struct aws_s3_meta_request_vtable {
     void (*notify_request_destroyed)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
     /* Finish the meta request either succeed or failed. */
-    void (*finish)(struct aws_s3_meta_request *, struct aws_s3_request *failed_request, int error_code);
+    void (*finish)(
+        struct aws_s3_meta_request *,
+        struct aws_s3_request *failed_request,
+        int response_status,
+        int error_code);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
 };
 
-/* This represents one meta request, ie, one accelerated file transfer.  One S3 meta request can represent multiple S3
+/**
+ * This represents one meta request, ie, one accelerated file transfer.  One S3 meta request can represent multiple S3
  * requests.
  */
 struct aws_s3_meta_request {
@@ -342,6 +347,7 @@ AWS_S3_API
 void aws_s3_meta_request_finish_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
+    int response_status,
     int error_code);
 
 AWS_S3_API
