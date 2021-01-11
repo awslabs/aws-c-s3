@@ -439,7 +439,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
             continue;
         }
 
-        if (no_acl && aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-acl")) {
+        if (no_acl && aws_byte_cursor_eq_ignore_case(&header.name, &g_acl_header_name)) {
             continue;
         }
 

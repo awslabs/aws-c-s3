@@ -97,12 +97,6 @@ enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
     AWS_S3_TESTER_BIND_CLIENT_SIGNING = 0x00000002,
 };
 
-enum aws_s3_tester_sse_type {
-    AWS_S3_TESTER_SSE_NONE,
-    AWS_S3_TESTER_SSE_KMS,
-    AWS_S3_TESTER_SSE_AES256,
-};
-
 /* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
  * client to clean up. */
 int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client_config *config, uint32_t flags);
@@ -200,6 +194,8 @@ enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_CANCEL = 0x00000004,
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS = 0x00000008,
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256 = 0x00000010,
+    /* Testing put object with x-amz-acl: bucket-owner-read */
+    AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL = 0x00000020,
 };
 
 int aws_s3_tester_send_meta_request(
