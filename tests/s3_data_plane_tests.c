@@ -959,6 +959,7 @@ static int s_s3_test_body_callback_raise_error(
     (void)meta_request;
     (void)body;
     (void)range_start;
+    (void)user_data;
     aws_raise_error(AWS_ERROR_UNKNOWN);
     return AWS_OP_ERR;
 }

@@ -927,7 +927,7 @@ int aws_s3_tester_send_meta_request_with_options(
             if (options->put_options.ensure_multipart) {
                 if (object_size_bytes == 0) {
                     object_size_bytes = client->part_size * 2;
-                    object_size_mb = object_size_bytes / 1024 / 1024;
+                    object_size_mb = (uint32_t)(object_size_bytes / 1024 / 1024);
                 }
 
                 ASSERT_TRUE(object_size_bytes > client->part_size);
