@@ -1866,6 +1866,11 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
 
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
+        if (aws_s3_meta_request_is_finished(meta_request)) {
+            aws_s3_request_release(request);
+            continue;
+        }
+
         uint64_t range_start = (request->part_number - 1) * meta_request->part_size;
         if (meta_request->body_callback != NULL) {
             if (meta_request->body_callback(
