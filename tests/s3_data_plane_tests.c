@@ -96,12 +96,6 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     return 0;
 }
 
-enum aws_s3_client_tls_usage {
-    AWS_S3_TLS_DEFAULT,
-    AWS_S3_TLS_ENABLED,
-    AWS_S3_TLS_DISABLED,
-};
-
 static int s_test_s3_get_object_helper(
     struct aws_allocator *allocator,
     enum aws_s3_client_tls_usage tls_usage,
@@ -931,6 +925,185 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
     client = NULL;
 
     aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+static int s_s3_test_headers_callback_raise_error(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+    aws_raise_error(AWS_ERROR_UNKNOWN);
+    return AWS_OP_ERR;
+}
+
+static int s_s3_test_body_callback_raise_error(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+    aws_raise_error(AWS_ERROR_UNKNOWN);
+    return AWS_OP_ERR;
+}
+
+AWS_TEST_CASE(test_s3_put_object_fail_headers_callback, s_test_s3_put_object_fail_headers_callback)
+static int s_test_s3_put_object_fail_headers_callback(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .headers_callback = s_s3_test_headers_callback_raise_error,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .ensure_multipart = true,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_fail_body_callback, s_test_s3_put_object_fail_body_callback)
+static int s_test_s3_put_object_fail_body_callback(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .body_callback = s_s3_test_body_callback_raise_error,
+
+        /* Put object currently never invokes the body callback, which means it should not fail. */
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+
+        .put_options =
+            {
+                .ensure_multipart = true,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_get_object_fail_headers_callback, s_test_s3_get_object_fail_headers_callback)
+static int s_test_s3_get_object_fail_headers_callback(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .headers_callback = s_s3_test_headers_callback_raise_error,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_get_object_fail_body_callback, s_test_s3_get_object_fail_body_callback)
+static int s_test_s3_get_object_fail_body_callback(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .body_callback = s_s3_test_body_callback_raise_error,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_default_fail_headers_callback, s_test_s3_default_fail_headers_callback)
+static int s_test_s3_default_fail_headers_callback(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .headers_callback = s_s3_test_headers_callback_raise_error,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_default_fail_body_callback, s_test_s3_default_fail_body_callback)
+static int s_test_s3_default_fail_body_callback(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .body_callback = s_s3_test_body_callback_raise_error,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     return 0;
 }

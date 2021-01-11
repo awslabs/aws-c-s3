@@ -23,6 +23,38 @@ struct aws_event_loop_group;
 struct aws_host_resolver;
 struct aws_input_stream;
 
+enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
+    AWS_S3_TESTER_BIND_CLIENT_REGION = 0x00000001,
+    AWS_S3_TESTER_BIND_CLIENT_SIGNING = 0x00000002,
+};
+
+enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
+    AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
+    AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
+};
+
+enum aws_s3_tester_sse_type {
+    AWS_S3_TESTER_SSE_NONE,
+    AWS_S3_TESTER_SSE_KMS,
+    AWS_S3_TESTER_SSE_AES256,
+};
+
+enum aws_s3_client_tls_usage {
+    AWS_S3_TLS_DEFAULT,
+    AWS_S3_TLS_ENABLED,
+    AWS_S3_TLS_DISABLED,
+};
+
+enum aws_s3_tester_validate_type {
+    AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+};
+
+enum aws_s3_tester_default_type_mode {
+    AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+    AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT,
+};
+
 struct aws_s3_client_vtable_patch {
     struct aws_s3_client_vtable *original_vtable;
     struct aws_s3_client_vtable patched_vtable;
@@ -72,8 +104,50 @@ struct aws_s3_tester {
     } synced_data;
 };
 
+struct aws_s3_tester_client_options {
+    enum aws_s3_client_tls_usage tls_usage;
+    size_t part_size;
+    size_t max_part_size;
+    uint32_t setup_region : 1;
+};
+
+struct aws_s3_tester_meta_request_options {
+    struct aws_allocator *allocator;
+    enum aws_s3_meta_request_type meta_request_type;
+    struct aws_http_message *message;
+
+    union {
+        struct aws_s3_tester_client_options *client_options;
+        struct aws_s3_client *client;
+    };
+
+    aws_s3_meta_request_headers_callback_fn *headers_callback;
+    aws_s3_meta_request_receive_body_callback_fn *body_callback;
+
+    struct {
+        struct aws_byte_cursor object_path;
+    } get_options;
+
+    struct {
+        uint32_t object_size_mb;
+        bool ensure_multipart;
+    } put_options;
+
+    struct {
+        enum aws_s3_tester_default_type_mode mode;
+    } default_type_options;
+
+    enum aws_s3_tester_sse_type sse_type;
+    enum aws_s3_tester_validate_type validate_type;
+
+    uint32_t dont_wait_for_shutdown : 1;
+};
+
 struct aws_s3_meta_request_test_results {
     struct aws_s3_tester *tester;
+
+    aws_s3_meta_request_headers_callback_fn *headers_callback;
+    aws_s3_meta_request_receive_body_callback_fn *body_callback;
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
@@ -90,17 +164,6 @@ struct aws_s3_meta_request_test_results {
 struct aws_s3_client_config;
 
 int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
-
-enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
-    AWS_S3_TESTER_BIND_CLIENT_REGION = 0x00000001,
-    AWS_S3_TESTER_BIND_CLIENT_SIGNING = 0x00000002,
-};
-
-enum aws_s3_tester_sse_type {
-    AWS_S3_TESTER_SSE_NONE,
-    AWS_S3_TESTER_SSE_KMS,
-    AWS_S3_TESTER_SSE_AES256,
-};
 
 /* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
  * client to clean up. */
@@ -154,7 +217,6 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf);
 
 void aws_s3_tester_lock_synced_data(struct aws_s3_tester *tester);
-
 void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester);
 
 struct aws_string *aws_s3_tester_build_endpoint_string(
@@ -174,6 +236,16 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_byte_cursor key,
     struct aws_input_stream *body_stream,
     enum aws_s3_tester_sse_type sse_type);
+
+int aws_s3_tester_client_new(
+    struct aws_s3_tester *tester,
+    struct aws_s3_tester_client_options *options,
+    struct aws_s3_client **out_client);
+
+int aws_s3_tester_send_meta_request_with_options(
+    struct aws_s3_tester *tester,
+    struct aws_s3_tester_meta_request_options *options,
+    struct aws_s3_meta_request_test_results *test_results);
 
 /* Will copy the client's vtable into a new vtable that can be mutated. Returns the vtable that can be mutated. */
 struct aws_s3_client_vtable *aws_s3_tester_patch_client_vtable(
@@ -197,11 +269,7 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
     struct aws_s3_tester *tester,
     size_t index);
 
-enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
-    AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
-    AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
-};
-
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
@@ -209,6 +277,7 @@ int aws_s3_tester_send_meta_request(
     struct aws_s3_meta_request_test_results *test_results,
     uint32_t flags);
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
@@ -217,6 +286,7 @@ int aws_s3_tester_send_get_object_meta_request(
     enum aws_s3_tester_sse_type sse_type,
     struct aws_s3_meta_request_test_results *out_results);
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,

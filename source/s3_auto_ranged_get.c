@@ -367,6 +367,8 @@ static int s_s3_auto_ranged_get_header_block_done(
     auto_ranged_get->synced_data.total_num_parts = num_parts;
     s_s3_auto_ranged_get_unlock_synced_data(auto_ranged_get);
 
+    int result = AWS_OP_SUCCESS;
+
     if (meta_request->headers_callback != NULL) {
         struct aws_http_headers *response_headers = aws_http_headers_new(meta_request->allocator);
 
@@ -379,17 +381,21 @@ static int s_s3_auto_ranged_get_header_block_done(
         aws_http_headers_set(
             response_headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
 
-        meta_request->headers_callback(
-            meta_request, response_headers, AWS_S3_RESPONSE_STATUS_SUCCESS, meta_request->user_data);
+        if (meta_request->headers_callback(
+                meta_request, response_headers, AWS_S3_RESPONSE_STATUS_SUCCESS, meta_request->user_data)) {
+
+            aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
+            result = AWS_OP_ERR;
+        }
 
         aws_http_headers_release(response_headers);
     }
 
-    if (num_parts > 1) {
+    if (result == AWS_OP_SUCCESS) {
         aws_s3_meta_request_push_to_client(meta_request);
     }
 
-    return AWS_OP_SUCCESS;
+    return result;
 }
 
 static void s_s3_auto_ranged_get_notify_request_destroyed(

@@ -237,7 +237,7 @@ struct aws_s3_client *aws_s3_client_new(
         };
 
         client->body_streaming_elg = aws_event_loop_group_new_default_pinned_to_cpu_group(
-            client->allocator, num_streaming_threads, 0, &body_streaming_elg_shutdown_options);
+            client->allocator, num_streaming_threads, 1, &body_streaming_elg_shutdown_options);
         client->synced_data.body_streaming_elg_allocated = true;
     }
 
@@ -1868,7 +1868,10 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
 
         uint64_t range_start = (request->part_number - 1) * meta_request->part_size;
         if (meta_request->body_callback != NULL) {
-            meta_request->body_callback(meta_request, &body_buffer_byte_cursor, range_start, meta_request->user_data);
+            if (meta_request->body_callback(
+                    meta_request, &body_buffer_byte_cursor, range_start, meta_request->user_data)) {
+                aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
+            }
         }
 
         aws_s3_request_release(request);
