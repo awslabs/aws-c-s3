@@ -391,7 +391,7 @@ static int s_s3_auto_ranged_get_header_block_done(
         aws_http_headers_release(response_headers);
     }
 
-    if (result == AWS_OP_SUCCESS) {
+    if (num_parts > 1 && result == AWS_OP_SUCCESS) {
         aws_s3_meta_request_push_to_client(meta_request);
     }
 
