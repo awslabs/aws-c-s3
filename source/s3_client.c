@@ -1294,6 +1294,9 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
                     &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
 
                 meta_request->client_process_work_threaded_data.scheduled = true;
+            } else {
+                aws_s3_meta_request_release(meta_request);
+                meta_request = NULL;
             }
         } else if (meta_request_work->op == AWS_S3_META_REQUEST_WORK_OP_REMOVE) {
             if (meta_request->client_process_work_threaded_data.scheduled) {

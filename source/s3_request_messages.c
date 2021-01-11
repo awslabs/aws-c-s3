@@ -392,6 +392,10 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
     uint32_t multipart_upload_ops = (flags & AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS) != 0;
     uint32_t no_acl = (flags & AWS_S3_COPY_MESSAGE_WITHOUT_ACL) != 0;
 
+    if (message == NULL) {
+        return NULL;
+    }
+
     struct aws_byte_cursor request_method;
     if (aws_http_message_get_request_method(base_message, &request_method)) {
         goto error_clean_up;

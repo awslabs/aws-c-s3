@@ -1,3 +1,10 @@
+#ifndef AWS_S3_AUTO_RANGED_PUT_H
+#define AWS_S3_AUTO_RANGED_PUT_H
+
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0.
+ */
 
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
@@ -21,15 +28,6 @@ enum aws_s3_auto_ranged_put_request_tag {
     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD
 };
 
-static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
-static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
-
-static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-MD5"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
-};
-
 struct aws_s3_auto_ranged_put {
     struct aws_s3_meta_request base;
 
@@ -50,3 +48,5 @@ struct aws_s3_auto_ranged_put {
 
     } synced_data;
 };
+
+#endif
