@@ -267,6 +267,32 @@ error_clean_up:
     return NULL;
 }
 
+struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    const struct aws_string *upload_id) {
+    struct aws_http_message *message =
+        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS);
+
+    if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, message)) {
+        goto error_clean_up;
+    }
+    aws_http_message_set_request_method(message, aws_byte_cursor_from_c_str("DELETE"));
+
+    return message;
+
+error_clean_up:
+
+    AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Could not create abort multipart upload message");
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
 /* Sets up the request path for a create-multipart upload request. */
 static int s_s3_create_multipart_set_up_request_path(
     struct aws_allocator *allocator,
@@ -365,10 +391,6 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
     uint32_t sse_included = (flags & AWS_S3_COPY_MESSAGE_INCLUDE_SSE) != 0;
     uint32_t multipart_upload_ops = (flags & AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS) != 0;
     uint32_t no_acl = (flags & AWS_S3_COPY_MESSAGE_WITHOUT_ACL) != 0;
-
-    if (message == NULL) {
-        return NULL;
-    }
 
     struct aws_byte_cursor request_method;
     if (aws_http_message_get_request_method(base_message, &request_method)) {

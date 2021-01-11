@@ -211,6 +211,21 @@ int aws_s3_meta_request_init_base(
     return AWS_OP_SUCCESS;
 }
 
+void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable->finish);
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    bool active = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE;
+    if (active) {
+        meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELLING;
+    }
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    if (active) {
+        meta_request->vtable->finish(meta_request, NULL, AWS_ERROR_S3_CANCELED);
+    }
+}
+
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
@@ -868,6 +883,18 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(vip_connection, stream, error_code);
 }
 
+void aws_s3_meta_request_finish_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *failed_request,
+    int error_code) {
+
+    if (failed_request != NULL) {
+        aws_s3_meta_request_finish(meta_request, failed_request, failed_request->send_data.response_status, error_code);
+    } else {
+        aws_s3_meta_request_finish(meta_request, NULL, 0, AWS_ERROR_S3_CANCELED);
+    }
+}
+
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
@@ -953,7 +980,7 @@ void aws_s3_meta_request_send_request_finish_default(
     } else {
         /* If the request failed due to an invalid, ie, unrecoverable, response status, then finish the meta request
          * with that request as the failing request. */
-        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
+        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_CANCELED) {
 
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
@@ -965,7 +992,6 @@ void aws_s3_meta_request_send_request_finish_default(
                 response_status);
 
             aws_s3_meta_request_finish(meta_request, request, response_status, error_code);
-
         } else {
             /* Otherwise, set this up for a retry. */
             finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;

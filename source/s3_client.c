@@ -1883,11 +1883,25 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
     while (!aws_linked_list_empty(&payload->requests)) {
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&payload->requests);
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
+        struct aws_s3_meta_request *meta_request = request->meta_request;
+
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        bool active = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+
+        if (!active) {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p meta request %p is not active, drop the body.",
+                (void *)client,
+                (void *)meta_request);
+            aws_s3_request_release(request);
+            continue;
+        }
+
         struct aws_byte_cursor body_buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
         AWS_ASSERT(request->part_number >= 1);
-
-        struct aws_s3_meta_request *meta_request = request->meta_request;
 
         uint64_t range_start = (request->part_number - 1) * meta_request->part_size;
         if (meta_request->body_callback != NULL) {

@@ -62,6 +62,11 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     const struct aws_string *upload_id,
     const struct aws_array_list *etags);
 
+struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    const struct aws_string *upload_id);
+
 /* TODO: maybe set a list of the headers we want */
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
