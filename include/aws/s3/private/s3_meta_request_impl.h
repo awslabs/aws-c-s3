@@ -42,6 +42,7 @@ enum aws_s3_request_desc_flags {
     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
     AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY = 0x00000002,
     AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x0000004,
+    AWS_S3_REQUEST_DESC_DISPATCH_ASYNC = 0x00000008,
 };
 
 /* Represents an in-flight active request.  Does not persist past a the execution of the request. */
@@ -83,6 +84,9 @@ struct aws_s3_request {
 
     /* When true, the response body buffer will be allocated in the size of a part. */
     uint32_t part_size_response_body : 1;
+
+    /* When true, aws_s3_meta_request_make_request will be issued in the meta request's event loop. */
+    uint32_t dispatch_async : 1;
 
     /* Members of this structure will be repopulated each time the request is sent.  For example, If the request fails,
      * and needs to be retried, then the members of this structure will be cleaned up and re-populated on the next send.
@@ -194,10 +198,6 @@ struct aws_s3_meta_request {
         /* Client that created this meta request which also processes this request.  After the meta request is finished,
          * this reference is removed. */
         struct aws_s3_client *client;
-
-        /* Body of stream of the initial_request_message.  We store this here so that parts can take turns seeking to
-         * their own specific position (which should be in close proximity of one another). */
-        struct aws_input_stream *initial_body_stream;
 
         /* Priority queue for pending streaming requests.  We use a priority queue to keep parts in order so that we
          * can stream them to the caller in order. */

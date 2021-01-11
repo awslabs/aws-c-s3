@@ -528,6 +528,8 @@ static int s_s3_auto_ranged_put_stream_complete(
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     AWS_PRECONDITION(auto_ranged_put);
 
+    int result = AWS_OP_SUCCESS;
+
     if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
         struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
@@ -637,5 +639,5 @@ static int s_s3_auto_ranged_put_stream_complete(
         AWS_FATAL_ASSERT(false);
     }
 
-    return AWS_OP_SUCCESS;
+    return result;
 }
