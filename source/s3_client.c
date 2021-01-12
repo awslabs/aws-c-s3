@@ -394,11 +394,8 @@ static void s_s3_client_start_destroy(void *user_data) {
     /* Iterate through the local list, removing each VIP. */
     while (!aws_linked_list_empty(&local_vip_list)) {
         struct aws_linked_list_node *vip_node = aws_linked_list_pop_back(&local_vip_list);
-
         struct aws_s3_vip *vip = AWS_CONTAINER_OF(vip_node, struct aws_s3_vip, node);
-
         aws_s3_vip_start_destroy(vip);
-        vip = NULL;
     }
 
     aws_event_loop_group_release(client->body_streaming_elg);
@@ -1947,6 +1944,7 @@ static int s_s3_client_add_vips_default(struct aws_s3_client *client, const stru
     }
 
     struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
+    bool vip_added = false;
 
     for (size_t address_index = 0; address_index < aws_array_list_length(host_addresses); ++address_index) {
 
@@ -1957,8 +1955,8 @@ static int s_s3_client_add_vips_default(struct aws_s3_client *client, const stru
         if (client->synced_data.allocated_vip_count >= aws_s3_client_get_max_allocated_vip_count(client)) {
             AWS_LOGF_WARN(
                 AWS_LS_S3_CLIENT,
-                "id=%p Allocated VIP count (%d) is greater than or equal to twice the amount of allowed VIPs (%d). "
-                "Waiting for enough VIPs to clean up before accepting any new addresses.",
+                "id=%p Allocated VIP count (%d) is greater than or equal to the maximum amount of allowed allocated "
+                "VIPs (%d). Waiting for enough VIPs to clean up before accepting any new addresses.",
                 (void *)client,
                 client->synced_data.allocated_vip_count,
                 client->ideal_vip_count);
@@ -2013,6 +2011,10 @@ static int s_s3_client_add_vips_default(struct aws_s3_client *client, const stru
             (const char *)host_address_byte_cursor.ptr,
             client->synced_data.active_vip_count);
 
+        vip_added = true;
+    }
+
+    if (vip_added) {
         s_s3_client_schedule_process_work_synced(client);
     }
 
