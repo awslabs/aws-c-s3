@@ -30,13 +30,13 @@ enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT
 };
 
-typedef void(aws_s3_meta_request_headers_callback_fn)(
+typedef int(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data);
 
-typedef void(aws_s3_meta_request_receive_body_callback_fn)(
+typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t range_start,

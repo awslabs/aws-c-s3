@@ -583,6 +583,8 @@ static int s_s3_auto_ranged_put_stream_complete(
 
     } else if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD) {
 
+        int finish_error_code = AWS_ERROR_SUCCESS;
+
         if (meta_request->headers_callback != NULL) {
             struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
 
@@ -616,13 +618,21 @@ static int s_s3_auto_ranged_put_stream_complete(
             }
 
             /* Notify the user of the headers. */
-            meta_request->headers_callback(
-                meta_request, final_response_headers, request->send_data.response_status, meta_request->user_data);
+            if (meta_request->headers_callback(
+                    meta_request,
+                    final_response_headers,
+                    request->send_data.response_status,
+                    meta_request->user_data)) {
+
+                finish_error_code = aws_last_error_or_unknown();
+            }
 
             aws_http_headers_release(final_response_headers);
         }
 
-        aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
+        aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, finish_error_code);
+
+        return (finish_error_code == AWS_ERROR_SUCCESS) ? AWS_OP_SUCCESS : AWS_OP_ERR;
     } else {
         AWS_FATAL_ASSERT(false);
     }
