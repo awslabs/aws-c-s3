@@ -1888,7 +1888,9 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
-        bool active = aws_s3_meta_request_check_active(meta_request);
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        bool active = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
 
         if (!active) {
             AWS_LOGF_DEBUG(

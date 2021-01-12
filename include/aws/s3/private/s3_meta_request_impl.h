@@ -264,9 +264,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
 
 struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_request *meta_request);
 
-/* lock will be acquired and release by this function */
-bool aws_s3_meta_request_check_active(struct aws_s3_meta_request *meta_request);
-
 int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
