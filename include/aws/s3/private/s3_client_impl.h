@@ -102,8 +102,6 @@ struct aws_s3_client_vtable {
 
     void (*push_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
-    void (*remove_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
     void (*acquire_http_connection)(
         struct aws_s3_client *client,
         struct aws_s3_vip_connection *vip_connection,
@@ -240,8 +238,6 @@ struct aws_s3_client {
 };
 
 void aws_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
-void aws_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
 int aws_s3_client_make_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 

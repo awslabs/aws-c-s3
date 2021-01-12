@@ -488,7 +488,6 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .push_meta_request = aws_s3_client_push_meta_request_empty,
-    .remove_meta_request = aws_s3_client_remove_meta_request_empty,
     .acquire_http_connection = aws_s3_client_acquire_http_connection_empty,
 };
 
@@ -1320,11 +1319,6 @@ int aws_s3_tester_validate_put_object_results(
 }
 
 void aws_s3_client_push_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
-    (void)client;
-    (void)meta_request;
-}
-
-void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
     (void)client;
     (void)meta_request;
 }

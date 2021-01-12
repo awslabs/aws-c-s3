@@ -119,23 +119,6 @@ void aws_s3_meta_request_push_to_client(struct aws_s3_meta_request *meta_request
     aws_s3_client_release(client);
 }
 
-void aws_s3_meta_request_remove_from_client(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
-
-    if (client != NULL) {
-        aws_s3_client_remove_meta_request(client, meta_request);
-    } else {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request trying to schedule work but client is null.",
-            (void *)meta_request);
-    }
-
-    aws_s3_client_release(client);
-}
-
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,

@@ -31,7 +31,6 @@
 
 enum aws_s3_meta_request_work_op {
     AWS_S3_META_REQUEST_WORK_OP_PUSH,
-    AWS_S3_META_REQUEST_WORK_OP_REMOVE,
 };
 
 struct aws_s3_meta_request_work {
@@ -141,12 +140,7 @@ static void s_s3_client_push_meta_request_default(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request);
 
-/* Default remove-meta-request function to be used in the client vtable. */
-static void s_s3_client_remove_meta_request_default(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request);
-
-/* Default remove-meta-request function to be used in the client vtable. */
+/* Default acquire HTTP connection function to be used in the client vtable. */
 static void s_s3_client_acquire_http_connection_default(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
@@ -155,7 +149,6 @@ static void s_s3_client_acquire_http_connection_default(
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory_default,
     .push_meta_request = s_s3_client_push_meta_request_default,
-    .remove_meta_request = s_s3_client_remove_meta_request_default,
     .acquire_http_connection = s_s3_client_acquire_http_connection_default,
     .add_vips = s_s3_client_add_vips_default,
     .remove_vips = s_s3_client_remove_vips_default,
@@ -1123,20 +1116,6 @@ static void s_s3_client_push_meta_request_default(
     s_s3_client_schedule_meta_request_work(client, meta_request, AWS_S3_META_REQUEST_WORK_OP_PUSH);
 }
 
-void aws_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(client->vtable);
-    AWS_PRECONDITION(client->vtable->remove_meta_request);
-
-    client->vtable->remove_meta_request(client, meta_request);
-}
-
-static void s_s3_client_remove_meta_request_default(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request) {
-    s_s3_client_schedule_meta_request_work(client, meta_request, AWS_S3_META_REQUEST_WORK_OP_REMOVE);
-}
-
 static void s_s3_client_schedule_process_work_synced(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->vtable);
@@ -1148,6 +1127,7 @@ static void s_s3_client_schedule_process_work_synced(struct aws_s3_client *clien
 }
 
 static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_client *client) {
+
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     if (client->synced_data.process_work_task_scheduled) {
@@ -1269,16 +1249,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                     &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
 
                 meta_request->client_process_work_threaded_data.scheduled = true;
-            }
-        } else if (meta_request_work->op == AWS_S3_META_REQUEST_WORK_OP_REMOVE) {
-            if (meta_request->client_process_work_threaded_data.scheduled) {
-
-                if (client->threaded_data.next_meta_request == meta_request) {
-                    client->threaded_data.next_meta_request =
-                        s_s3_client_next_meta_request_threaded(client, meta_request);
-                }
-
-                s_s3_client_remove_meta_request_threaded(client, meta_request);
+            } else {
+                aws_s3_meta_request_release(meta_request);
+                meta_request = NULL;
             }
         }
 
