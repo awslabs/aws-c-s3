@@ -900,7 +900,6 @@ static int s_s3_next_request_cancel_in_the_middle(
 
     int result = AWS_OP_SUCCESS;
 
-    /* TODO: haven't dived into it, but assuming the finish state has been handled well */
     aws_s3_meta_request_lock_synced_data(meta_request);
     bool cancelling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELLING;
     aws_s3_meta_request_unlock_synced_data(meta_request);
