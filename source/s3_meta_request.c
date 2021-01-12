@@ -429,6 +429,13 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
     return is_finished;
 }
 
+bool aws_s3_meta_request_check_active(struct aws_s3_meta_request *meta_request) {
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    bool active = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    return active;
+}
+
 int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,
@@ -880,6 +887,7 @@ void aws_s3_meta_request_finish(
     int response_status,
     int error_code) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable);
     AWS_PRECONDITION(meta_request->vtable->finish);
 
     meta_request->vtable->finish(meta_request, failed_request, response_status, error_code);
