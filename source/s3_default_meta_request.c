@@ -247,12 +247,14 @@ static int s_s3_meta_request_default_header_block_done(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_ASSERT(meta_request);
 
-    if (meta_request->headers_callback != NULL) {
-        meta_request->headers_callback(
-            meta_request,
-            request->send_data.response_headers,
-            request->send_data.response_status,
-            meta_request->user_data);
+    if (meta_request->headers_callback != NULL && meta_request->headers_callback(
+                                                      meta_request,
+                                                      request->send_data.response_headers,
+                                                      request->send_data.response_status,
+                                                      meta_request->user_data)) {
+
+        aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
+        return AWS_OP_ERR;
     }
 
     return AWS_OP_SUCCESS;
