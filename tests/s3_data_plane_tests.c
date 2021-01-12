@@ -477,7 +477,7 @@ static int s_test_s3_put_object_helper(struct aws_allocator *allocator, enum aws
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_NONE, NULL));
+        &tester, client, 5 * 1024, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_NONE, NULL));
 
     aws_string_destroy(endpoint);
     aws_tls_ctx_release(context);
