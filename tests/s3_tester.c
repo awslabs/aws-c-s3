@@ -409,6 +409,30 @@ size_t aws_s3_tester_inc_counter2(struct aws_s3_tester *tester) {
     return result;
 }
 
+void aws_s3_tester_reset_counter1(struct aws_s3_tester *tester) {
+    aws_s3_tester_lock_synced_data(tester);
+    tester->synced_data.counter1 = 0;
+    aws_s3_tester_unlock_synced_data(tester);
+}
+
+void aws_s3_tester_reset_counter2(struct aws_s3_tester *tester) {
+    aws_s3_tester_lock_synced_data(tester);
+    tester->synced_data.counter2 = 0;
+    aws_s3_tester_unlock_synced_data(tester);
+}
+
+void aws_s3_tester_set_counter1_desired(struct aws_s3_tester *tester, size_t value) {
+    aws_s3_tester_lock_synced_data(tester);
+    tester->synced_data.desired_counter1 = value;
+    aws_s3_tester_unlock_synced_data(tester);
+}
+
+void aws_s3_tester_set_counter2_desired(struct aws_s3_tester *tester, size_t value) {
+    aws_s3_tester_lock_synced_data(tester);
+    tester->synced_data.desired_counter2 = value;
+    aws_s3_tester_unlock_synced_data(tester);
+}
+
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 

@@ -128,14 +128,18 @@ void aws_s3_tester_notify_meta_request_finished(
 void aws_s3_tester_notify_meta_request_shutdown(struct aws_s3_tester *tester);
 
 void aws_s3_tester_wait_for_signal(struct aws_s3_tester *tester);
-
 void aws_s3_tester_notify_signal(struct aws_s3_tester *tester);
 
 void aws_s3_tester_wait_for_counters(struct aws_s3_tester *tester);
 
 size_t aws_s3_tester_inc_counter1(struct aws_s3_tester *tester);
-
 size_t aws_s3_tester_inc_counter2(struct aws_s3_tester *tester);
+
+void aws_s3_tester_reset_counter1(struct aws_s3_tester *tester);
+void aws_s3_tester_reset_counter2(struct aws_s3_tester *tester);
+
+void aws_s3_tester_set_counter1_desired(struct aws_s3_tester *tester, size_t value);
+void aws_s3_tester_set_counter2_desired(struct aws_s3_tester *tester, size_t value);
 
 /* Handle cleaning up the tester.  If aws_s3_tester_bind_client_shutdown was used, then it will wait for the client to
  * finish shutting down before releasing any resources. */

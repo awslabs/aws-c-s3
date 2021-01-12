@@ -108,6 +108,14 @@ struct aws_s3_client_vtable {
         struct aws_s3_client *client,
         struct aws_s3_vip_connection *vip_connection,
         aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
+
+    int (*add_vips)(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+    void (*remove_vips)(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+    void (*schedule_process_work_synced)(struct aws_s3_client *client);
+
+    void (*process_work)(struct aws_s3_client *client);
 };
 
 /* Represents the state of the S3 client. */
@@ -253,6 +261,12 @@ void aws_s3_client_stream_response_body(
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
+void aws_s3_set_dns_ttl(size_t ttl);
+
+AWS_S3_API
+uint32_t aws_s3_client_get_max_allocated_vip_count(struct aws_s3_client *client);
+
+AWS_S3_API
 struct aws_s3_vip *aws_s3_vip_new(
     struct aws_s3_client *client,
     const struct aws_byte_cursor *host_address,
@@ -270,6 +284,20 @@ struct aws_s3_vip *aws_s3_find_vip(const struct aws_linked_list *vip_list, const
 
 AWS_S3_API
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+
+/* Sets up vips for each of the given host addresses as long as they are not already in use by other vip structures. */
+AWS_S3_API
+int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+/* Removes vips associated with each of the given host addresses. */
+AWS_S3_API
+void aws_s3_client_remove_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+AWS_S3_API
+void aws_s3_client_lock_synced_data(struct aws_s3_client *client);
+
+AWS_S3_API
+void aws_s3_client_unlock_synced_data(struct aws_s3_client *client);
 
 AWS_EXTERN_C_END
 

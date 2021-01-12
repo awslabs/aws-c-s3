@@ -56,9 +56,10 @@ static const uint16_t s_https_port = 443;
 /* TODO Provide more information on these values. */
 static const uint64_t s_default_part_size = 5 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 20 * 1024 * 1024;
-static const size_t s_default_dns_host_address_ttl_seconds = 5 * 60;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
+
+static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 
@@ -109,20 +110,26 @@ static void s_s3_client_on_acquire_http_connection(
     int error_code,
     void *user_data);
 
-/* Schedule task for processing work. */
-static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client);
+/* Schedule task for processing work. (Calls the corresponding vtable function.) */
+static void s_s3_client_schedule_process_work_synced(struct aws_s3_client *client);
+
+/* Default implementation for scheduling processing of work. */
+static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_client *client);
 
 /* Actual task function that processes work. */
 static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
+static void s_s3_client_process_work_default(struct aws_s3_client *client);
+
 /* Task function for streaming body chunks back to the caller. */
 static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-/* Sets up vips for each of the given host addresses as long as they are not already in use by other vip structures. */
-static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
-
 /* Ask the host resolver to start resolving addresses. */
 static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client);
+
+static int s_s3_client_add_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+static void s_s3_client_remove_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
 
 /* Default factory function for creating a meta request. */
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
@@ -150,13 +157,25 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .push_meta_request = s_s3_client_push_meta_request_default,
     .remove_meta_request = s_s3_client_remove_meta_request_default,
     .acquire_http_connection = s_s3_client_acquire_http_connection_default,
+    .add_vips = s_s3_client_add_vips_default,
+    .remove_vips = s_s3_client_remove_vips_default,
+    .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
+    .process_work = s_s3_client_process_work_default,
 };
 
-static void s_s3_client_lock_synced_data(struct aws_s3_client *client) {
+void aws_s3_set_dns_ttl(size_t ttl) {
+    s_dns_host_address_ttl_seconds = ttl;
+}
+
+uint32_t aws_s3_client_get_max_allocated_vip_count(struct aws_s3_client *client) {
+    return (client->ideal_vip_count * 2);
+}
+
+void aws_s3_client_lock_synced_data(struct aws_s3_client *client) {
     aws_mutex_lock(&client->synced_data.lock);
 }
 
-static void s_s3_client_unlock_synced_data(struct aws_s3_client *client) {
+void aws_s3_client_unlock_synced_data(struct aws_s3_client *client) {
     aws_mutex_unlock(&client->synced_data.lock);
 }
 
@@ -348,12 +367,14 @@ static void s_s3_client_start_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
+    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client starting destruction..", (void *)client);
+
     struct aws_linked_list local_vip_list;
     aws_linked_list_init(&local_vip_list);
 
     struct aws_host_listener *host_listener = NULL;
 
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
 
     /* Grab the host listener from the synced_data so that we can remove it outside of the lock. */
     host_listener = client->synced_data.host_listener;
@@ -363,33 +384,28 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_linked_list_swap_contents(&local_vip_list, &client->synced_data.vips);
     client->synced_data.active_vip_count = 0;
 
-    s_s3_client_unlock_synced_data(client);
+    aws_s3_client_unlock_synced_data(client);
 
     if (host_listener != NULL) {
         aws_host_resolver_remove_host_listener(client->client_bootstrap->host_resolver, host_listener);
         host_listener = NULL;
     }
 
-    if (!aws_linked_list_empty(&local_vip_list)) {
-        /* Iterate through the local list, removing each VIP. */
-        while (!aws_linked_list_empty(&local_vip_list)) {
-            struct aws_linked_list_node *vip_node = aws_linked_list_pop_back(&local_vip_list);
-
-            struct aws_s3_vip *vip = AWS_CONTAINER_OF(vip_node, struct aws_s3_vip, node);
-
-            aws_s3_vip_start_destroy(vip);
-            vip = NULL;
-        }
-
-        s_s3_client_lock_synced_data(client);
-        s_s3_client_schedule_process_work_task_synced(client);
-        s_s3_client_unlock_synced_data(client);
+    /* Iterate through the local list, removing each VIP. */
+    while (!aws_linked_list_empty(&local_vip_list)) {
+        struct aws_linked_list_node *vip_node = aws_linked_list_pop_back(&local_vip_list);
+        struct aws_s3_vip *vip = AWS_CONTAINER_OF(vip_node, struct aws_s3_vip, node);
+        aws_s3_vip_start_destroy(vip);
     }
 
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
 
     s_s3_client_check_for_shutdown(client, s_s3_client_reset_active_synced);
+
+    aws_s3_client_lock_synced_data(client);
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 static void s_s3_client_check_for_shutdown(
@@ -399,7 +415,7 @@ static void s_s3_client_check_for_shutdown(
 
     bool finish_destroy = false;
 
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
 
     if (update_fn != NULL) {
         update_fn(client);
@@ -416,7 +432,7 @@ static void s_s3_client_check_for_shutdown(
 
     client->synced_data.finish_destroy = finish_destroy;
 
-    s_s3_client_unlock_synced_data(client);
+    aws_s3_client_unlock_synced_data(client);
 
     if (finish_destroy) {
         s_s3_client_finish_destroy(client);
@@ -426,6 +442,8 @@ static void s_s3_client_check_for_shutdown(
 static void s_s3_client_finish_destroy(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_client *client = user_data;
+
+    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
     aws_string_destroy(client->region);
     client->region = NULL;
@@ -675,6 +693,8 @@ void aws_s3_vip_start_destroy(struct aws_s3_vip *vip) {
         return;
     }
 
+    AWS_LOGF_DEBUG(AWS_LS_S3_VIP, "id=%p Starting destroy of VIP.", (void *)vip);
+
     s_s3_vip_check_for_shutdown(vip, s_s3_vip_set_reset_active);
 }
 
@@ -685,7 +705,7 @@ static void s_s3_vip_check_for_shutdown(struct aws_s3_vip *vip, s3_client_vip_up
     bool finish_destroy = false;
     struct aws_http_connection_manager *conn_manager = NULL;
 
-    s_s3_client_lock_synced_data(vip->owning_client);
+    aws_s3_client_lock_synced_data(vip->owning_client);
 
     if (update_fn != NULL) {
         update_fn(vip);
@@ -718,7 +738,7 @@ static void s_s3_vip_check_for_shutdown(struct aws_s3_vip *vip, s3_client_vip_up
     finish_destroy = true;
 
 unlock:
-    s_s3_client_unlock_synced_data(vip->owning_client);
+    aws_s3_client_unlock_synced_data(vip->owning_client);
 
     if (conn_manager != NULL) {
         aws_http_connection_manager_release(conn_manager);
@@ -753,6 +773,8 @@ static void s_s3_vip_finish_destroy(void *user_data) {
     struct aws_s3_vip *vip = user_data;
     AWS_PRECONDITION(vip);
 
+    AWS_LOGF_DEBUG(AWS_LS_S3_VIP, "id=%p Finishing destroy of VIP.", (void *)vip);
+
     /* Clean up the address string. */
     aws_string_destroy(vip->host_address);
     vip->host_address = NULL;
@@ -778,11 +800,22 @@ static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
 /* Destroy a VIP Connection structure. */
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
 
-    if (client == NULL || vip_connection == NULL) {
+    if (client == NULL) {
+        AWS_ASSERT(vip_connection == NULL);
+        return;
+    }
+
+    if (vip_connection == NULL) {
         return;
     }
 
     struct aws_s3_vip *owning_vip = vip_connection->owning_vip;
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_VIP_CONNECTION,
+        "id=%p Destroying VIP Connection owned by vip %p.",
+        (void *)vip_connection,
+        (void *)owning_vip);
 
     if (vip_connection->http_connection != NULL) {
         AWS_ASSERT(owning_vip->http_connection_manager);
@@ -878,7 +911,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
 
     /* TODO This is temporary until we add multiple bucket support. */
     if (client->synced_data.endpoint == NULL) {
@@ -886,7 +919,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             aws_string_new_from_array(client->allocator, host_header_value.ptr, host_header_value.len);
     }
 
-    s_s3_client_unlock_synced_data(client);
+    aws_s3_client_unlock_synced_data(client);
 
     if (s_s3_client_start_resolving_addresses(client)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not start resolving endpoint for meta request.", (void *)client);
@@ -1055,85 +1088,6 @@ static void s_s3_client_vip_shutdown_callback(void *user_data) {
     s_s3_client_check_for_shutdown(client, s_s3_client_sub_vip_count_synced);
 }
 
-static int s_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(host_addresses);
-
-    struct aws_s3_vip *vip = NULL;
-    int result = AWS_OP_SUCCESS;
-
-    s_s3_client_lock_synced_data(client);
-
-    if (!client->synced_data.active) {
-        goto unlock;
-    }
-
-    struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
-
-    for (size_t address_index = 0; address_index < aws_array_list_length(host_addresses); ++address_index) {
-
-        if (client->synced_data.active_vip_count >= client->ideal_vip_count) {
-            break;
-        }
-
-        struct aws_host_address *host_address = NULL;
-
-        aws_array_list_get_at_ptr(host_addresses, (void **)&host_address, address_index);
-
-        /* For now, only support ipv4 addresses. */
-        if (host_address->record_type != AWS_ADDRESS_RECORD_TYPE_A) {
-            continue;
-        }
-
-        struct aws_byte_cursor host_address_byte_cursor = aws_byte_cursor_from_string(host_address->address);
-
-        /* If we didn't find a match in the table, we have a VIP to add! */
-        if (aws_s3_find_vip(&client->synced_data.vips, &host_address_byte_cursor) != NULL) {
-            continue;
-        }
-
-        struct aws_linked_list vip_connections;
-        aws_linked_list_init(&vip_connections);
-
-        /* Allocate the new VIP. */
-        vip = aws_s3_vip_new(
-            client,
-            &host_address_byte_cursor,
-            &server_name,
-            s_num_connections_per_vip,
-            &vip_connections,
-            s_s3_client_vip_shutdown_callback,
-            client);
-
-        if (vip == NULL) {
-            result = AWS_OP_ERR;
-            break;
-        }
-
-        aws_linked_list_move_all_back(&client->synced_data.pending_vip_connection_updates, &vip_connections);
-
-        ++client->synced_data.allocated_vip_count;
-        ++client->synced_data.active_vip_count;
-
-        aws_linked_list_push_back(&client->synced_data.vips, &vip->node);
-
-        AWS_LOGF_INFO(
-            AWS_LS_S3_CLIENT,
-            "id=%p Initiating creation of VIP with address '%s', total active vip count %d",
-            (void *)client,
-            (const char *)host_address_byte_cursor.ptr,
-            client->synced_data.active_vip_count);
-
-        s_s3_client_schedule_process_work_task_synced(client);
-    }
-
-unlock:
-
-    s_s3_client_unlock_synced_data(client);
-
-    return result;
-}
-
 static void s_s3_client_schedule_meta_request_work(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
@@ -1141,7 +1095,7 @@ static void s_s3_client_schedule_meta_request_work(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(meta_request);
 
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
 
     struct aws_s3_meta_request_work *meta_request_work =
         aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_meta_request_work));
@@ -1151,8 +1105,8 @@ static void s_s3_client_schedule_meta_request_work(
     aws_s3_meta_request_acquire(meta_request);
     aws_linked_list_push_back(&client->synced_data.pending_meta_request_work, &meta_request_work->node);
 
-    s_s3_client_schedule_process_work_task_synced(client);
-    s_s3_client_unlock_synced_data(client);
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 void aws_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
@@ -1183,7 +1137,17 @@ static void s_s3_client_remove_meta_request_default(
     s_s3_client_schedule_meta_request_work(client, meta_request, AWS_S3_META_REQUEST_WORK_OP_REMOVE);
 }
 
-static void s_s3_client_schedule_process_work_task_synced(struct aws_s3_client *client) {
+static void s_s3_client_schedule_process_work_synced(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->schedule_process_work_synced);
+
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+
+    client->vtable->schedule_process_work_synced(client);
+}
+
+static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_client *client) {
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     if (client->synced_data.process_work_task_scheduled) {
@@ -1243,13 +1207,22 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     (void)task;
     (void)task_status;
 
-    struct aws_s3_client *client = arg;
-    AWS_PRECONDITION(client);
-
-    bool invalid_endpoint = false;
-
     /* Client keeps a reference to the event loop group; a 'canceled' status should not happen.*/
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+
+    struct aws_s3_client *client = arg;
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->process_work);
+
+    client->vtable->process_work(client);
+}
+
+static void s_s3_client_process_work_default(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+
+    bool client_active = false;
+    bool invalid_endpoint = false;
 
     struct aws_linked_list meta_request_work_list;
     aws_linked_list_init(&meta_request_work_list);
@@ -1260,7 +1233,10 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     /*******************/
     /* Step 1: Move everything into thread local memory. */
     /*******************/
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
+
+    client_active = client->synced_data.active != 0;
+    invalid_endpoint = client->synced_data.invalid_endpoint != 0;
 
     /* Once we exit this mutex, someone can reschedule this task. */
     client->synced_data.process_work_task_scheduled = false;
@@ -1272,8 +1248,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
 
-    invalid_endpoint = client->synced_data.invalid_endpoint != 0;
-    s_s3_client_unlock_synced_data(client);
+    aws_s3_client_unlock_synced_data(client);
 
     /*******************/
     /* Step 2: Process any meta request work. */
@@ -1341,8 +1316,10 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
         size_t owning_vip_active = aws_atomic_load_int(&vip_connection->owning_vip->active);
 
-        /* If this VIP connection is pending destruction, go ahead and clean it up now. */
-        if (owning_vip_active == 0) {
+        if (!owning_vip_active &&
+            (!client_active || (vip_connection->http_connection == NULL ||
+                                !aws_http_connection_is_open(vip_connection->http_connection) ||
+                                vip_connection->request_count >= s_s3_max_request_count_per_connection))) {
             aws_s3_vip_connection_destroy(client, vip_connection);
             continue;
         }
@@ -1768,10 +1745,10 @@ reset_vip_connection:
     vip_connection->request = NULL;
 
     /* Throw this VIP Connection structure back into the update list. */
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
     aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
-    s_s3_client_schedule_process_work_task_synced(client);
-    s_s3_client_unlock_synced_data(client);
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_code, void *user_data) {
@@ -1829,10 +1806,10 @@ error_clean_up:
 
 /* Called by aws_s3_request when it has finished being destroyed */
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client) {
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
     ++client->synced_data.pending_request_count;
-    s_s3_client_schedule_process_work_task_synced(client);
-    s_s3_client_unlock_synced_data(client);
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 struct s3_streaming_body_payload {
@@ -1926,13 +1903,178 @@ static void s_s3_client_on_host_resolver_address_resolved(
             err_code,
             aws_error_str(err_code));
 
-        s_s3_client_lock_synced_data(client);
+        aws_s3_client_lock_synced_data(client);
         client->synced_data.invalid_endpoint = true;
-        s_s3_client_schedule_process_work_task_synced(client);
-        s_s3_client_unlock_synced_data(client);
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
     } else {
         AWS_ASSERT(host_addresses);
-        s_s3_client_add_vips(client, host_addresses);
+
+        if (aws_s3_client_add_vips(client, host_addresses)) {
+            int last_error_code = aws_last_error_or_unknown();
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Error %d occurred whileadding VIPs (%s)",
+                (void *)client,
+                last_error_code,
+                aws_error_str(last_error_code));
+        }
+    }
+}
+
+int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->add_vips);
+
+    return client->vtable->add_vips(client, host_addresses);
+}
+
+static int s_s3_client_add_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(host_addresses);
+
+    struct aws_s3_vip *vip = NULL;
+    int result = AWS_OP_SUCCESS;
+
+    aws_s3_client_lock_synced_data(client);
+
+    if (!client->synced_data.active) {
+        goto unlock;
+    }
+
+    struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
+    bool vip_added = false;
+
+    for (size_t address_index = 0; address_index < aws_array_list_length(host_addresses); ++address_index) {
+
+        if (client->synced_data.active_vip_count >= client->ideal_vip_count) {
+            break;
+        }
+
+        if (client->synced_data.allocated_vip_count >= aws_s3_client_get_max_allocated_vip_count(client)) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_CLIENT,
+                "id=%p Allocated VIP count (%d) is greater than or equal to the maximum amount of allowed allocated "
+                "VIPs (%d). Waiting for enough VIPs to clean up before accepting any new addresses.",
+                (void *)client,
+                client->synced_data.allocated_vip_count,
+                client->ideal_vip_count);
+            break;
+        }
+
+        struct aws_host_address *host_address = NULL;
+
+        aws_array_list_get_at_ptr(host_addresses, (void **)&host_address, address_index);
+
+        /* For now, only support ipv4 addresses. */
+        if (host_address->record_type != AWS_ADDRESS_RECORD_TYPE_A) {
+            continue;
+        }
+
+        struct aws_byte_cursor host_address_byte_cursor = aws_byte_cursor_from_string(host_address->address);
+
+        /* If we didn't find a match in the table, we have a VIP to add! */
+        if (aws_s3_find_vip(&client->synced_data.vips, &host_address_byte_cursor) != NULL) {
+            continue;
+        }
+
+        struct aws_linked_list vip_connections;
+        aws_linked_list_init(&vip_connections);
+
+        /* Allocate the new VIP. */
+        vip = aws_s3_vip_new(
+            client,
+            &host_address_byte_cursor,
+            &server_name,
+            s_num_connections_per_vip,
+            &vip_connections,
+            s_s3_client_vip_shutdown_callback,
+            client);
+
+        if (vip == NULL) {
+            result = AWS_OP_ERR;
+            break;
+        }
+
+        aws_linked_list_move_all_back(&client->synced_data.pending_vip_connection_updates, &vip_connections);
+
+        ++client->synced_data.allocated_vip_count;
+        ++client->synced_data.active_vip_count;
+
+        aws_linked_list_push_back(&client->synced_data.vips, &vip->node);
+
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p Initiating creation of VIP with address '%s', total active vip count %d",
+            (void *)client,
+            (const char *)host_address_byte_cursor.ptr,
+            client->synced_data.active_vip_count);
+
+        vip_added = true;
+    }
+
+    if (vip_added) {
+        s_s3_client_schedule_process_work_synced(client);
+    }
+
+unlock:
+
+    aws_s3_client_unlock_synced_data(client);
+
+    return result;
+}
+
+void aws_s3_client_remove_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->remove_vips);
+
+    client->vtable->remove_vips(client, host_addresses);
+}
+
+static void s_s3_client_remove_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(host_addresses);
+
+    bool vips_destroyed = false;
+
+    for (size_t address_index = 0; address_index < aws_array_list_length(host_addresses); ++address_index) {
+        aws_s3_client_lock_synced_data(client);
+
+        struct aws_host_address *host_address = NULL;
+        aws_array_list_get_at_ptr(host_addresses, (void **)&host_address, address_index);
+
+        struct aws_byte_cursor host_address_byte_cursor = aws_byte_cursor_from_string(host_address->address);
+        struct aws_s3_vip *vip = aws_s3_find_vip(&client->synced_data.vips, &host_address_byte_cursor);
+
+        if (vip != NULL) {
+            aws_linked_list_remove(&vip->node);
+            AWS_ASSERT(client->synced_data.active_vip_count > 0);
+            --client->synced_data.active_vip_count;
+        }
+
+        aws_s3_client_unlock_synced_data(client);
+
+        if (vip == NULL) {
+            continue;
+        }
+
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p Removing VIP with address '%s', total active vip count %d",
+            (void *)client,
+            (const char *)host_address_byte_cursor.ptr,
+            client->synced_data.active_vip_count);
+
+        aws_s3_vip_start_destroy(vip);
+        vips_destroyed = true;
+    }
+
+    if (vips_destroyed) {
+        aws_s3_client_lock_synced_data(client);
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
     }
 }
 
@@ -1947,7 +2089,21 @@ static void s_s3_client_host_listener_resolved_address_callback(
     AWS_PRECONDITION(user_data);
 
     struct aws_s3_client *client = user_data;
-    s_s3_client_add_vips(client, host_addresses);
+    aws_s3_client_add_vips(client, host_addresses);
+}
+
+static void s_s3_client_host_listener_expired_address_callback(
+    struct aws_host_listener *listener,
+    const struct aws_array_list *host_addresses,
+    void *user_data) {
+    (void)listener;
+
+    AWS_PRECONDITION(listener);
+    AWS_PRECONDITION(host_addresses);
+    AWS_PRECONDITION(user_data);
+
+    struct aws_s3_client *client = user_data;
+    aws_s3_client_remove_vips(client, host_addresses);
 }
 
 static void s_s3_client_set_host_listener_shutdown_synced(struct aws_s3_client *client) {
@@ -1977,14 +2133,16 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
     struct aws_host_listener_options options = {
         .host_name = aws_byte_cursor_from_string(client->synced_data.endpoint),
         .resolved_address_callback = s_s3_client_host_listener_resolved_address_callback,
+        .expired_address_callback = s_s3_client_host_listener_expired_address_callback,
         .shutdown_callback = s_s3_client_host_listener_shutdown_callback,
+        .pin_host_entry = true,
         .user_data = client,
     };
 
     bool listener_already_exists = false;
     bool error_occurred = false;
 
-    s_s3_client_lock_synced_data(client);
+    aws_s3_client_lock_synced_data(client);
 
     if (client->synced_data.host_listener != NULL) {
         listener_already_exists = true;
@@ -2009,7 +2167,7 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
     client->synced_data.host_listener_allocated = true;
 
 unlock:
-    s_s3_client_unlock_synced_data(client);
+    aws_s3_client_unlock_synced_data(client);
 
     if (listener_already_exists) {
         return AWS_OP_SUCCESS;
@@ -2022,7 +2180,7 @@ unlock:
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);
     host_resolver_config.impl = aws_default_dns_resolve;
-    host_resolver_config.max_ttl = s_default_dns_host_address_ttl_seconds;
+    host_resolver_config.max_ttl = s_dns_host_address_ttl_seconds;
     host_resolver_config.impl_data = client;
 
     if (aws_host_resolver_resolve_host(
