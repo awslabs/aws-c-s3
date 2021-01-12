@@ -177,10 +177,6 @@ int aws_s3_meta_request_init_base(
     meta_request->initial_request_message = options->message;
     aws_http_message_acquire(options->message);
 
-    /* Store a copy of the original message's initial body stream in our synced data, so that concurrent requests can
-     * safely take turns reading from it when needed. */
-    meta_request->synced_data.initial_body_stream = aws_http_message_get_body_stream(options->message);
-
     if (aws_mutex_init(&meta_request->synced_data.lock)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not initialize mutex for meta request", (void *)meta_request);
@@ -291,6 +287,7 @@ struct aws_s3_request *aws_s3_request_new(
     request->record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
     request->stream_response_body = (flags & AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY) != 0;
     request->part_size_response_body = (flags & AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY) != 0;
+    request->dispatch_async = (flags & AWS_S3_REQUEST_DESC_DISPATCH_ASYNC) != 0;
 
     return request;
 }
@@ -446,7 +443,6 @@ int aws_s3_meta_request_make_request(
 
     /* Sign the newly created message. */
     if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
-
         goto call_finished_callback;
     }
 
@@ -1112,21 +1108,7 @@ int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, stru
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    int result = aws_s3_meta_request_read_body_synced(meta_request, buffer);
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    return result;
-}
-
-int aws_s3_meta_request_read_body_synced(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(buffer);
-    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
-
-    struct aws_input_stream *initial_body_stream = meta_request->synced_data.initial_body_stream;
+    struct aws_input_stream *initial_body_stream = aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(initial_body_stream);
 
     /* Copy it into our buffer. */

@@ -1551,6 +1551,14 @@ static void s_s3_client_acquire_http_connection_default(
     }
 }
 
+struct aws_s3_make_request_async_payload {
+    struct aws_s3_client *client;
+    struct aws_s3_vip_connection *vip_connection;
+    struct aws_task task;
+};
+
+static void s_s3_client_make_request_async_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
 static void s_s3_client_on_acquire_http_connection(
     struct aws_http_connection *incoming_http_connection,
     int error_code,
@@ -1623,7 +1631,21 @@ static void s_s3_client_on_acquire_http_connection(
             vip_connection->request_count);
     }
 
-    aws_s3_meta_request_make_request(meta_request, client, vip_connection);
+    if (vip_connection->request->dispatch_async) {
+        struct aws_s3_make_request_async_payload *payload =
+            aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_make_request_async_payload));
+
+        aws_s3_client_acquire(client);
+        payload->client = client;
+        payload->vip_connection = vip_connection;
+
+        aws_task_init(
+            &payload->task, s_s3_client_make_request_async_task, payload, "s3_client_meta_request_make_request_async");
+        aws_event_loop_schedule_task_now(meta_request->client_data.body_streaming_event_loop, &payload->task);
+
+    } else {
+        aws_s3_meta_request_make_request(meta_request, client, vip_connection);
+    }
 
     return;
 
@@ -1631,6 +1653,39 @@ error_clean_up:
 
     aws_s3_client_notify_connection_finished(
         client, vip_connection, error_code, AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY);
+}
+
+static void s_s3_client_make_request_async_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    (void)task_status;
+
+    struct aws_s3_make_request_async_payload *payload = arg;
+    AWS_PRECONDITION(payload);
+
+    struct aws_s3_client *client = payload->client;
+    AWS_PRECONDITION(client);
+
+    struct aws_s3_vip_connection *vip_connection = payload->vip_connection;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_request *request = vip_connection->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    /* Client owns this event loop group. A cancel should not be possible. */
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+
+    if (aws_s3_meta_request_is_finished(meta_request)) {
+        aws_s3_client_notify_connection_finished(
+            client, vip_connection, AWS_ERROR_SUCCESS, AWS_S3_VIP_CONNECTION_FINISH_CODE_SUCCESS);
+    } else {
+        aws_s3_meta_request_make_request(meta_request, client, vip_connection);
+    }
+
+    aws_mem_release(client->sba_allocator, payload);
+    aws_s3_client_release(client);
 }
 
 /* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
