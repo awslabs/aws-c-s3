@@ -1882,8 +1882,6 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
 
         AWS_ASSERT(request->part_number >= 1);
 
-        struct aws_s3_meta_request *meta_request = request->meta_request;
-
         if (aws_s3_meta_request_is_finished(meta_request)) {
             aws_s3_request_release(request);
             continue;
