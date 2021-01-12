@@ -922,7 +922,7 @@ int aws_s3_tester_send_meta_request_with_options(
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT)) {
 
             uint32_t object_size_mb = options->put_options.object_size_mb;
-            size_t object_size_bytes = object_size_mb * 1024 * 1024;
+            size_t object_size_bytes = (size_t)object_size_mb * 1024 * 1024;
 
             if (options->put_options.ensure_multipart) {
                 if (object_size_bytes == 0) {
@@ -1206,7 +1206,7 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_allocator *allocator = tester->allocator;
 
     struct aws_byte_buf test_buffer;
-    aws_s3_create_test_buffer(allocator, file_size_mb * 1024 * 1024, &test_buffer);
+    aws_s3_create_test_buffer(allocator, (size_t)file_size_mb * 1024 * 1024, &test_buffer);
 
     struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
     struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
