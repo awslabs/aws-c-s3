@@ -166,6 +166,10 @@ static void s_s3_auto_ranged_put_finish(
     }
     auto_ranged_put->synced_data.error_code = error_code;
     auto_ranged_put->synced_data.failed_request = failed_request;
+    /* Keep the failed request alive until we are done with the gracefully finish */
+    if (failed_request) {
+        aws_s3_request_acquire(failed_request);
+    }
     auto_ranged_put->synced_data.finish_status_code = status_code;
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* state of meta request has been set now, and the state of auto ranged put will set properly by the task */
@@ -198,6 +202,7 @@ static int s_s3_auto_ranged_put_next_request(
                 *out_request = NULL;
                 /* meta request not active before everything gets started, just finish the meta request */
                 aws_s3_meta_request_finish_default(meta_request, failed_request, status_code, error_code);
+                aws_s3_request_release(failed_request);
                 return result;
             }
 
@@ -617,7 +622,6 @@ static int s_s3_auto_ranged_put_stream_complete(
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
             int finish_error_code = AWS_ERROR_SUCCESS;
-
             if (meta_request->headers_callback != NULL) {
                 struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
 
@@ -665,6 +669,10 @@ static int s_s3_auto_ranged_put_stream_complete(
 
                 aws_http_headers_release(final_response_headers);
             }
+            s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+            /* In case other thread called finish with some failed request after sending the complete multipart */
+            aws_s3_request_release(auto_ranged_put->synced_data.failed_request);
+            s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
             /* Response of complete multipart upload has received, just finish the request without extra ops */
             aws_s3_meta_request_finish_default(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, finish_error_code);
             break;
@@ -681,6 +689,7 @@ static int s_s3_auto_ranged_put_stream_complete(
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
             aws_s3_meta_request_finish_default(
                 meta_request, failed_request, request->send_data.response_status, error_code);
+            aws_s3_request_release(failed_request);
             break;
         }
         default:

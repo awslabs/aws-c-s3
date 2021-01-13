@@ -1067,7 +1067,6 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_next_request(
 AWS_TEST_CASE(
     test_s3_cancel_multipart_upload_during_parts_upload,
     s_test_s3_cancel_multipart_upload_during_parts_upload)
-
 static int s_test_s3_cancel_multipart_upload_during_parts_upload(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
@@ -1097,6 +1096,8 @@ static int s_test_s3_cancel_multipart_upload_during_parts_upload(struct aws_allo
     return 0;
 }
 
+/* TODO: instead of random, we should have some efforts to base on the request we made to test the cancel can happen
+ * anytime by user. */
 AWS_TEST_CASE(test_s3_cancel_multipart_upload_random, s_test_s3_cancel_multipart_upload_random)
 static int s_test_s3_cancel_multipart_upload_random(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
