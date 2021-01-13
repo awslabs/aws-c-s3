@@ -2030,7 +2030,7 @@ static int s_s3_client_add_vips_default(struct aws_s3_client *client, const stru
         }
     }
 
-    current_throughput_gbps += client->synced_data.current_throughput_gbps * 0.1;
+    current_throughput_gbps += client->synced_data.current_throughput_gbps * 0.05;
 
     if (!client->synced_data.active) {
         goto unlock;
@@ -2039,7 +2039,21 @@ static int s_s3_client_add_vips_default(struct aws_s3_client *client, const stru
     struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
     bool vip_added = false;
 
-    uint32_t max_vip_count = client->ideal_vip_count + client->ideal_vip_count / 2;
+    double throughput_delta = client->throughput_target_gbps - current_throughput_gbps;
+
+    if (throughput_delta < 0.0) {
+        throughput_delta = 0.0;
+    }
+
+    uint32_t possible_max_vip_count_1 =
+        (uint32_t)((double)client->synced_data.active_vip_count + throughput_delta / s_throughput_per_vip_gbps);
+    uint32_t possible_max_vip_count_2 = (uint32_t)((double)client->ideal_vip_count * 1.5);
+
+    uint32_t max_vip_count = possible_max_vip_count_1;
+
+    if (possible_max_vip_count_2 < max_vip_count) {
+        max_vip_count = possible_max_vip_count_2;
+    }
 
     for (size_t address_index = 0; address_index < aws_array_list_length(host_addresses); ++address_index) {
 
