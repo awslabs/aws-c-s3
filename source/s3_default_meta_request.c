@@ -61,7 +61,9 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .incoming_body = NULL,
     .stream_complete = NULL,
     .notify_request_destroyed = s_s3_meta_request_default_notify_request_destroyed,
-    .destroy = s_s3_meta_request_default_destroy};
+    .destroy = s_s3_meta_request_default_destroy,
+    .finish = aws_s3_meta_request_finish_default,
+};
 
 static void s_s3_meta_request_default_lock_synced_data(struct aws_s3_meta_request_default *meta_request_default) {
     AWS_PRECONDITION(meta_request_default);
@@ -209,7 +211,7 @@ static int s_s3_meta_request_default_prepare_request(
     AWS_PRECONDITION(meta_request_default);
 
     struct aws_http_message *message = aws_s3_message_util_copy_http_message(
-        meta_request->allocator, meta_request->initial_request_message, true /*sse*/);
+        meta_request->allocator, meta_request->initial_request_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
 
     if (is_initial_prepare && meta_request_default->content_length > 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);

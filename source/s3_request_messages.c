@@ -37,7 +37,8 @@ struct aws_http_message *aws_s3_get_object_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, true /*sse*/);
+    struct aws_http_message *message =
+        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
 
     if (message == NULL) {
         return NULL;
@@ -73,7 +74,7 @@ struct aws_http_message *aws_s3_put_object_message_new(
     AWS_PRECONDITION(base_message);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, false /*sse*/);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, 0);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -111,7 +112,8 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     AWS_PRECONDITION(allocator);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, true /*sse*/);
+    struct aws_http_message *message =
+        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
     struct aws_http_headers *headers = NULL;
 
     if (message == NULL) {
@@ -179,7 +181,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     AWS_PRECONDITION(etags);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, false /*sse*/);
+    struct aws_http_message *message =
+        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS);
     struct aws_http_headers *headers = NULL;
 
     if (message == NULL) {
@@ -197,10 +200,6 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     if (headers == NULL) {
         goto error_clean_up;
     }
-
-    aws_http_headers_erase(headers, g_content_length_header_name);
-
-    aws_http_headers_erase(headers, g_content_type_header_name);
 
     /* Create XML payload with all of the etags of finished parts */
     {
@@ -258,6 +257,32 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 error_clean_up:
 
     AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Could not create complete multipart message");
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    const struct aws_string *upload_id) {
+    struct aws_http_message *message =
+        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS);
+
+    if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, message)) {
+        goto error_clean_up;
+    }
+    aws_http_message_set_request_method(message, g_delete_method);
+
+    return message;
+
+error_clean_up:
+
+    AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Could not create abort multipart upload message");
 
     if (message != NULL) {
         aws_http_message_release(message);
@@ -357,11 +382,13 @@ error_clean_up:
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    bool sse) {
+    uint32_t flags) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
+    uint32_t sse_included = (flags & AWS_S3_COPY_MESSAGE_INCLUDE_SSE) != 0;
+    uint32_t multipart_upload_ops = (flags & AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS) != 0;
 
     if (message == NULL) {
         return NULL;
@@ -394,8 +421,19 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
             goto error_clean_up;
         }
 
+        if (multipart_upload_ops) {
+            if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "host") ||
+                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-request-payer") ||
+                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-expected-bucket-owner")) {
+                if (aws_http_message_add_header(message, header)) {
+                    goto error_clean_up;
+                }
+            }
+            continue;
+        }
+
         /* For SSE upload, the sse related headers should only be shown in the create_multipart_upload.*/
-        if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption") && !sse) {
+        if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption") && !sse_included) {
             continue;
         }
 

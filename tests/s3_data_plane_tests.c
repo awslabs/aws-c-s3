@@ -891,6 +891,313 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
     return 0;
 }
 
+static int s_s3_next_request_cancel_in_the_middle(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request **out_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_request);
+
+    struct aws_s3_request *request = NULL;
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    int result = AWS_OP_SUCCESS;
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    bool cancelling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELLING;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    aws_mutex_lock(&auto_ranged_put->base.synced_data.lock);
+
+    switch (auto_ranged_put->synced_data.state) {
+        case AWS_S3_AUTO_RANGED_PUT_STATE_START: {
+
+            if (cancelling) {
+                /* Another lock will be acquired in request finish, release the lock here for simplicity */
+                aws_mutex_unlock(&auto_ranged_put->base.synced_data.lock);
+                *out_request = NULL;
+                /* meta request not active before everything gets started, just finish the meta request */
+                aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, AWS_ERROR_SUCCESS);
+                return result;
+            }
+
+            struct aws_input_stream *initial_request_body = meta_request->synced_data.initial_body_stream;
+
+            AWS_FATAL_ASSERT(initial_request_body);
+
+            /* Setup for a create-multipart upload */
+            request = aws_s3_request_new(
+                meta_request,
+                AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
+                0,
+                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+
+            /* We'll need to wait for the initial create to get back so that we can get the upload-id. */
+            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE;
+            break;
+        }
+        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE: {
+            break;
+        }
+        case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
+
+            /* Keep setting up to send parts until we've sent all of them at least once. */
+            if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts &&
+                !cancelling) {
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
+                    0,
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+
+                ++auto_ranged_put->synced_data.num_parts_sent;
+            } else {
+                auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
+            }
+
+            break;
+        }
+        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS: {
+            break;
+        }
+        case AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE: {
+            if (cancelling) {
+                if (!auto_ranged_put->synced_data.upload_id) {
+                    /* which mean the response of the create multipart upload have not arrived yet, and none of the put
+                     * has been sent, we can just finish the request without abort message */
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p request cancelled before any parts get sent.",
+                        (void *)meta_request);
+                    /* TODO: which state it should be??? */
+                    auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+
+                    break;
+                }
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
+                    0,
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                /* TODO: which state it should be??? */
+                auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+            } else {
+                /* never completes, we call cancel instead */
+                aws_raise_error(AWS_ERROR_UNKNOWN);
+                /* trigger retry */
+                return AWS_OP_ERR;
+            }
+            break;
+        }
+        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE: {
+            break;
+        }
+        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST: {
+            break;
+        }
+        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL:
+            break;
+
+        default:
+            AWS_FATAL_ASSERT(false);
+            break;
+    }
+    bool call_cancel = false;
+    if (auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS ||
+        auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS) {
+        call_cancel = true;
+    }
+    aws_mutex_unlock(&auto_ranged_put->base.synced_data.lock);
+    if (call_cancel) {
+        aws_s3_meta_request_cancel(meta_request);
+    }
+
+    if (request != NULL) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Returning request %p for part %d of %d",
+            (void *)meta_request,
+            (void *)request,
+            request->part_number,
+            auto_ranged_put->synced_data.total_num_parts);
+    }
+
+    *out_request = request;
+
+    return result;
+}
+
+static struct aws_s3_meta_request *s_meta_request_factory_patch_next_request(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->next_request = s_s3_next_request_cancel_in_the_middle;
+
+    return meta_request;
+}
+
+AWS_TEST_CASE(
+    test_s3_cancel_multipart_upload_during_parts_upload,
+    s_test_s3_cancel_multipart_upload_during_parts_upload)
+static int s_test_s3_cancel_multipart_upload_during_parts_upload(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request;
+
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 100, 0, AWS_S3_TESTER_SSE_NONE, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually
+     * ensure the abort succeed */
+    return 0;
+}
+
+/* TODO: instead of random, we should have some efforts to base on the request we made to test the cancel can happen
+ * anytime by user. */
+AWS_TEST_CASE(test_s3_cancel_multipart_upload_random, s_test_s3_cancel_multipart_upload_random)
+static int s_test_s3_cancel_multipart_upload_random(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, AWS_S3_TESTER_SSE_NONE, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually
+     * ensure the abort succeed */
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_singlepart_upload_random, s_test_s3_cancel_singlepart_upload_random)
+static int s_test_s3_cancel_singlepart_upload_random(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 150 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, AWS_S3_TESTER_SSE_NONE, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_multipart_download_random, s_test_s3_cancel_multipart_download_random)
+static int s_test_s3_cancel_multipart_download_random(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester,
+        client,
+        aws_byte_cursor_from_c_str("/get_object_test_10MB.txt"),
+        AWS_S3_TESTER_SEND_META_REQUEST_CANCEL,
+        AWS_S3_TESTER_SSE_NONE,
+        NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    /* TODO: we may need to test a huge file, and cancel in the middle of transition, it's might be low priority */
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_singlepart_download_random, s_test_s3_cancel_singlepart_download_random)
+static int s_test_s3_cancel_singlepart_download_random(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 15 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester,
+        client,
+        aws_byte_cursor_from_c_str("/get_object_test_10MB.txt"),
+        AWS_S3_TESTER_SEND_META_REQUEST_CANCEL,
+        AWS_S3_TESTER_SSE_NONE,
+        NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    /* TODO: we may need to test a huge file, and cancel in the middle of transition, it's might be low priority */
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_bad_endpoint, s_test_s3_bad_endpoint)
 static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

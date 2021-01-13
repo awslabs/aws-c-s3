@@ -16,6 +16,8 @@
 #include <aws/io/tls_channel_handler.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
+#include <stdlib.h>
+#include <time.h>
 
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
@@ -1065,6 +1067,13 @@ int aws_s3_tester_send_meta_request(
 
     ASSERT_TRUE(meta_request != NULL);
 
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
+        /* take a random sleep from 0-1 ms. */
+        srand((uint32_t)time(NULL));
+        aws_thread_current_sleep(rand() % 1000000);
+        aws_s3_meta_request_cancel(meta_request);
+    }
+
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(tester);
 
@@ -1074,6 +1083,8 @@ int aws_s3_tester_send_meta_request(
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
         ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
+        ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_S3_CANCELED);
     } else {
         ASSERT_FALSE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     }

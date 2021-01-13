@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/s3/private/s3_auto_ranged_put.h>
 #include <aws/s3/private/s3_client_impl.h>
 #include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/s3.h>
@@ -31,6 +32,7 @@ enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
 enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
     AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
+    AWS_S3_TESTER_SEND_META_REQUEST_CANCEL = 0x00000004,
 };
 
 enum aws_s3_tester_sse_type {
@@ -279,7 +281,6 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
     struct aws_s3_tester *tester,
     size_t index);
 
-/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,

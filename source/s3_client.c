@@ -1269,6 +1269,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                     &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
 
                 meta_request->client_process_work_threaded_data.scheduled = true;
+            } else {
+                aws_s3_meta_request_release(meta_request);
+                meta_request = NULL;
             }
         } else if (meta_request_work->op == AWS_S3_META_REQUEST_WORK_OP_REMOVE) {
             if (meta_request->client_process_work_threaded_data.scheduled) {
@@ -1860,11 +1863,24 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
     while (!aws_linked_list_empty(&payload->requests)) {
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&payload->requests);
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
+        struct aws_s3_meta_request *meta_request = request->meta_request;
+
+        bool active = aws_s3_meta_request_check_active(meta_request);
+
+        if (!active) {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p meta request %p is not active, drop the body of s3 request %p.",
+                (void *)client,
+                (void *)meta_request,
+                (void *)request);
+            aws_s3_request_release(request);
+            continue;
+        }
+
         struct aws_byte_cursor body_buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
         AWS_ASSERT(request->part_number >= 1);
-
-        struct aws_s3_meta_request *meta_request = request->meta_request;
 
         if (aws_s3_meta_request_is_finished(meta_request)) {
             aws_s3_request_release(request);
