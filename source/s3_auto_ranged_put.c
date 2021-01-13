@@ -167,7 +167,9 @@ static void s_s3_auto_ranged_put_finish(
     auto_ranged_put->synced_data.error_code = error_code;
     auto_ranged_put->synced_data.failed_request = failed_request;
     /* Keep the failed request alive until we are done with the gracefully finish */
-    aws_s3_request_acquire(failed_request);
+    if (failed_request) {
+        aws_s3_request_acquire(failed_request);
+    }
     auto_ranged_put->synced_data.finish_status_code = status_code;
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* state of meta request has been set now, and the state of auto ranged put will set properly by the task */
