@@ -108,7 +108,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     }
 
     auto_ranged_put->synced_data.total_num_parts = num_parts;
-    auto_ranged_put->synced_data.next_part_number = 1;
+    auto_ranged_put->threaded_next_request_data.next_part_number = 1;
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
@@ -128,8 +128,8 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    aws_string_destroy(auto_ranged_put->synced_data.upload_id);
-    auto_ranged_put->synced_data.upload_id = NULL;
+    aws_string_destroy(auto_ranged_put->upload_id);
+    auto_ranged_put->upload_id = NULL;
 
     for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
          ++etag_index) {
@@ -152,26 +152,47 @@ static void s_s3_auto_ranged_put_finish(
     int error_code) {
     (void)status_code;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    bool active = aws_s3_meta_request_check_active(meta_request);
+
+    bool no_longer_active = false;
+    bool cancelling = false;
+
     aws_s3_meta_request_lock_synced_data(meta_request);
-    if (active) {
-        if (error_code == AWS_ERROR_SUCCESS ||
-            (failed_request != NULL &&
-             failed_request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD)) {
-            aws_s3_meta_request_unlock_synced_data(meta_request);
-            aws_s3_meta_request_finish_default(meta_request, failed_request, status_code, error_code);
-            return;
-        }
-        meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELLING;
+
+    if (meta_request->synced_data.state != AWS_S3_META_REQUEST_STATE_ACTIVE) {
+        no_longer_active = true;
+        goto unlock;
     }
+
+    if (error_code == AWS_ERROR_SUCCESS ||
+        (failed_request != NULL &&
+         failed_request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD)) {
+        goto unlock;
+    }
+
+    meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELLING;
     auto_ranged_put->synced_data.error_code = error_code;
     auto_ranged_put->synced_data.failed_request = failed_request;
+
     /* Keep the failed request alive until we are done with the gracefully finish */
     if (failed_request) {
         aws_s3_request_acquire(failed_request);
     }
+
     auto_ranged_put->synced_data.finish_status_code = status_code;
+    cancelling = true;
+
+unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    if (no_longer_active) {
+        return;
+    }
+
+    if (!cancelling) {
+        aws_s3_meta_request_finish_default(meta_request, failed_request, status_code, error_code);
+        return;
+    }
+
     /* state of meta request has been set now, and the state of auto ranged put will set properly by the task */
     aws_s3_meta_request_push_to_client(meta_request);
 }
@@ -206,10 +227,6 @@ static int s_s3_auto_ranged_put_next_request(
                 return result;
             }
 
-            struct aws_input_stream *initial_request_body = meta_request->synced_data.initial_body_stream;
-
-            AWS_FATAL_ASSERT(initial_request_body);
-
             /* Setup for a create-multipart upload */
             request = aws_s3_request_new(
                 meta_request,
@@ -226,18 +243,34 @@ static int s_s3_auto_ranged_put_next_request(
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
 
-            /* Keep setting up to send parts until we've sent all of them at least once. */
-            if (!cancelling &&
-                auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
+            if (cancelling) {
+
+                if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
+                    request = aws_s3_request_new(
+                        meta_request,
+                        AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
+                        0,
+                        AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                    auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+                } else {
+                    auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
+                }
+
+            } else if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
+                /* Keep setting up to send parts until we've sent all of them at least once. */
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
                     0,
                     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
+                aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
+                request->part_number = auto_ranged_put->threaded_next_request_data.next_part_number;
+                ++auto_ranged_put->threaded_next_request_data.next_part_number;
+
+                aws_s3_meta_request_read_body(meta_request, &request->request_body);
+
                 ++auto_ranged_put->synced_data.num_parts_sent;
-            } else {
-                auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
             }
 
             break;
@@ -253,6 +286,7 @@ static int s_s3_auto_ranged_put_next_request(
                     0,
                     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+
             } else {
                 /* If all parts have been completed, set up to send a complete-multipart-upload request. */
                 request = aws_s3_request_new(
@@ -262,6 +296,9 @@ static int s_s3_auto_ranged_put_next_request(
                     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE;
+
+                aws_byte_buf_init(
+                    &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
             }
             break;
         }
@@ -318,37 +355,13 @@ static int s_s3_auto_ranged_put_prepare_request(
     switch (request->request_tag) {
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
-
-            bool error_occurred = false;
-
-            if (is_initial_prepare) {
-
-                AWS_ASSERT(request->request_body.capacity == 0);
-
-                aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
-                s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-
-                request->part_number = auto_ranged_put->synced_data.next_part_number;
-                ++auto_ranged_put->synced_data.next_part_number;
-
-                if (aws_s3_meta_request_read_body_synced(meta_request, &request->request_body)) {
-                    error_occurred = true;
-                }
-
-                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-            }
-
-            if (error_occurred) {
-                goto message_create_failed;
-            }
-
             /* Create a new put-object message to upload a part. */
             message = aws_s3_put_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,
                 request->part_number,
-                auto_ranged_put->synced_data.upload_id);
+                auto_ranged_put->upload_id);
 
         } break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
@@ -362,15 +375,9 @@ static int s_s3_auto_ranged_put_prepare_request(
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
 
-            AWS_FATAL_ASSERT(auto_ranged_put->synced_data.upload_id);
-
-            if (is_initial_prepare) {
-                AWS_ASSERT(request->request_body.capacity == 0)
-                aws_byte_buf_init(
-                    &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
-            } else {
-                aws_byte_buf_reset(&request->request_body, false);
-            }
+            AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
+            AWS_ASSERT(request->request_body.capacity > 0);
+            aws_byte_buf_reset(&request->request_body, false);
 
             /* Build the message to complete our multipart upload, which includes a payload describing all of our
              * completed parts. */
@@ -378,7 +385,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,
-                auto_ranged_put->synced_data.upload_id,
+                auto_ranged_put->upload_id,
                 &auto_ranged_put->synced_data.etag_list);
 
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
@@ -388,16 +395,16 @@ static int s_s3_auto_ranged_put_prepare_request(
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
 
-            AWS_FATAL_ASSERT(auto_ranged_put->synced_data.upload_id);
+            AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p Abort multipart upload request for upload id %s.",
                 (void *)meta_request,
-                aws_string_c_str(auto_ranged_put->synced_data.upload_id));
+                aws_string_c_str(auto_ranged_put->upload_id));
 
             /* Build the message to abort our multipart upload */
             message = aws_s3_abort_multipart_upload_message_new(
-                meta_request->allocator, meta_request->initial_request_message, auto_ranged_put->synced_data.upload_id);
+                meta_request->allocator, meta_request->initial_request_message, auto_ranged_put->upload_id);
 
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
@@ -575,12 +582,11 @@ static int s_s3_auto_ranged_put_stream_complete(
                 return AWS_OP_ERR;
             }
 
-            s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-
             /* Store the multipart upload id and set that we are ready for sending parts. */
-            auto_ranged_put->synced_data.upload_id = upload_id;
-            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS;
+            auto_ranged_put->upload_id = upload_id;
 
+            s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS;
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
             /* Create Multipart Upload finished successfully, so now we should have parts to send. */
@@ -685,7 +691,7 @@ static int s_s3_auto_ranged_put_stream_complete(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p Finished aborting multipart upload for upload id %s.",
                 (void *)meta_request,
-                aws_string_c_str(auto_ranged_put->synced_data.upload_id));
+                aws_string_c_str(auto_ranged_put->upload_id));
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
             aws_s3_meta_request_finish_default(
                 meta_request, failed_request, request->send_data.response_status, error_code);

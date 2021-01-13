@@ -1288,6 +1288,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                 }
 
                 s_s3_client_remove_meta_request_threaded(client, meta_request);
+            } else {
+                aws_s3_meta_request_release(meta_request);
+                meta_request = NULL;
             }
         }
 
