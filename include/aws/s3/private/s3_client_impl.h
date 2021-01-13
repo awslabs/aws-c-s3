@@ -201,7 +201,7 @@ struct aws_s3_client {
         struct aws_host_listener *host_listener;
 
         uint64_t throughput_timestamp_millis;
-        
+
         uint64_t pending_throughput_bytes;
 
         double current_throughput_gbps;
