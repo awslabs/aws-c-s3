@@ -1978,6 +1978,45 @@ static void s_s3_client_on_host_resolver_address_resolved(
     }
 }
 
+void aws_s3_client_aggregate_throughput(
+    struct aws_s3_client *client,
+    size_t throughput,
+    double *current_throughput_gbps,
+    double *running_throughput_average_gbps) {
+
+    struct aws_date_time current_timestamp;
+    aws_date_time_init_now(&current_timestamp);
+    uint64_t current_timestamp_millis = aws_date_time_as_millis(&current_timestamp);
+
+    aws_s3_client_lock_synced_data(client);
+    client->synced_data.pending_throughput_bytes += throughput;
+
+    double time_delta = (current_timestamp_millis - client->synced_data.throughput_timestamp_millis) / 1000.0;
+
+    if(time_delta > 1.0) {
+        client->synced_data.throughput_timestamp_millis = current_timestamp_millis;
+
+        double rate_in_bytes = (double)client->synced_data.pending_throughput_bytes / time_delta;
+        client->synced_data.current_throughput_gbps = rate_in_bytes * 8.0 / 1000.0 / 1000.0 / 1000.0;
+        
+        if(client->synced_data.running_throughput_average_gbps == 0.0) {
+            client->synced_data.running_throughput_average_gbps = client->synced_data.current_throughput_gbps;
+        } else {
+            client->synced_data.running_throughput_average_gbps = (client->synced_data.running_throughput_average_gbps + client->synced_data.current_throughput_gbps) * 0.5;
+        }
+    }
+
+    if (current_throughput_gbps) {
+        *current_throughput_gbps = client->synced_data.current_throughput_gbps;
+    }
+
+    if(running_throughput_average_gbps) {
+        *running_throughput_average_gbps = client->synced_data.running_throughput_average_gbps;
+    }
+
+    aws_s3_client_unlock_synced_data(client);
+}
+
 int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->vtable);
@@ -2002,9 +2041,19 @@ static int s_s3_client_add_vips_default(struct aws_s3_client *client, const stru
     struct aws_byte_cursor server_name = aws_byte_cursor_from_string(client->synced_data.endpoint);
     bool vip_added = false;
 
+    double current_throughput_gbps = 0.0;
+    aws_s3_client_aggregate_throughput(client, 0, &current_throughput_gbps, NULL);
+    current_throughput_gbps += current_throughput_gbps * 0.1;
+
+    uint32_t max_vip_count = client->ideal_vip_count + client->ideal_vip_count/2;
+
     for (size_t address_index = 0; address_index < aws_array_list_length(host_addresses); ++address_index) {
 
-        if (client->synced_data.active_vip_count >= client->ideal_vip_count) {
+        if (client->synced_data.active_vip_count >= max_vip_count) {
+            break;
+        }
+
+        if (current_throughput_gbps >= client->throughput_target_gbps) {
             break;
         }
 
