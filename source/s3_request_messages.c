@@ -74,7 +74,8 @@ struct aws_http_message *aws_s3_put_object_message_new(
     AWS_PRECONDITION(base_message);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, 0);
+    uint32_t flag = part_number > 0 ? AWS_S3_COPY_MESSAGE_WITHOUT_ACL : 0;
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, flag);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -389,6 +390,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_http_message *message = aws_http_message_new_request(allocator);
     uint32_t sse_included = (flags & AWS_S3_COPY_MESSAGE_INCLUDE_SSE) != 0;
     uint32_t multipart_upload_ops = (flags & AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS) != 0;
+    uint32_t no_acl = (flags & AWS_S3_COPY_MESSAGE_WITHOUT_ACL) != 0;
 
     if (message == NULL) {
         return NULL;
@@ -433,7 +435,11 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
         }
 
         /* For SSE upload, the sse related headers should only be shown in the create_multipart_upload.*/
-        if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption") && !sse_included) {
+        if (!sse_included && aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption")) {
+            continue;
+        }
+
+        if (no_acl && aws_byte_cursor_eq_ignore_case(&header.name, &g_acl_header_name)) {
             continue;
         }
 

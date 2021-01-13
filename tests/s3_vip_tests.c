@@ -408,12 +408,7 @@ static int s_test_s3_client_resolve_vips(struct aws_allocator *allocator, void *
     patched_client_vtable->remove_vips = s_resolve_vips_test_s3_client_remove_vips;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        g_s3_path_get_object_test_1MB,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
-        AWS_S3_TESTER_SSE_NONE,
-        NULL));
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_tester_wait_for_counters(&tester);
 

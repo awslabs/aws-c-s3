@@ -20,6 +20,8 @@ enum aws_s3_copy_http_message_flags {
     AWS_S3_COPY_MESSAGE_INCLUDE_SSE = 0x00000001,
     /* For multipart upload complete and abort, only host and two payer related headers are needed */
     AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS = 0x00000002,
+    /* For ranged put, acl should not be there */
+    AWS_S3_COPY_MESSAGE_WITHOUT_ACL = 0x00000004,
 };
 
 /* Create an HTTP request for an S3 Get Object Request, using the original request as a basis. If multipart is not

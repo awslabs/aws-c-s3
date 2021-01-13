@@ -53,7 +53,7 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
 
     /* Don't specify EXPECT SUCCESS flag for aws_s3_tester_send_get_object_meta_request to expect a failure. */
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, 0, AWS_S3_TESTER_SSE_NONE, &meta_request_test_results));
+        &tester, client, g_s3_path_get_object_test_1MB, 0, &meta_request_test_results));
 
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_MAX_RETRIES_EXCEEDED);
 
@@ -106,12 +106,7 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
     patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_first;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        g_s3_path_get_object_test_1MB,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
-        AWS_S3_TESTER_SSE_NONE,
-        NULL));
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -165,8 +160,7 @@ static int s_test_s3_meta_request_fail_next_request(struct aws_allocator *alloca
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, 0, AWS_S3_TESTER_SSE_NONE, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -236,12 +230,7 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_prepare_request;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        g_s3_path_get_object_test_1MB,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
-        AWS_S3_TESTER_SSE_NONE,
-        NULL));
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -311,12 +300,7 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
     patched_client_vtable->meta_request_factory = s_s3_meta_request_factory_sign_request;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        g_s3_path_get_object_test_1MB,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
-        AWS_S3_TESTER_SSE_NONE,
-        NULL));
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -428,12 +412,7 @@ static int s_test_s3_meta_request_send_request_finish_fail(struct aws_allocator 
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_send_request_finish;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        g_s3_path_get_object_test_1MB,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS,
-        AWS_S3_TESTER_SSE_NONE,
-        NULL));
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -503,7 +482,7 @@ static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allo
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, AWS_S3_TESTER_SSE_NONE, NULL));
+        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
