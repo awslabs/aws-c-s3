@@ -182,6 +182,10 @@ static int s_s3_meta_request_default_next_request(
 
         request = aws_s3_request_new(meta_request, 0, part_number, request_flags);
 
+        if (meta_request_default->content_length > 0) {
+            aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
+        }
+
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
     }
@@ -212,7 +216,6 @@ static int s_s3_meta_request_default_prepare_request(
         meta_request->allocator, meta_request->initial_request_message, true /*sse*/);
 
     if (is_initial_prepare && meta_request_default->content_length > 0) {
-        aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
         aws_s3_meta_request_read_body(meta_request, &request->request_body);
     }
 

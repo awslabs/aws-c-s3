@@ -192,8 +192,11 @@ struct aws_s3_client {
         /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
 
-        /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
-        uint32_t pending_request_count;
+        /* Counter for number of requests that have been finished/released since last work task update, allowing us to create new requests. */
+        uint32_t num_requests_finished;
+
+        /* Counter for number of active connections that are now inactive since last work task update.*/
+        uint32_t num_active_connections_returned;
 
         /* Host listener to get new IP addresses. */
         struct aws_host_listener *host_listener;
@@ -235,6 +238,9 @@ struct aws_s3_client {
 
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
+
+        /* Total number of connections currently processing requests. */
+        uint32_t num_active_connections;
 
     } threaded_data;
 };
