@@ -48,7 +48,7 @@ static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
-static const uint8_t s_max_request_jitter_range = 50;
+static const uint8_t s_max_request_jitter_range = 0;
 
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
@@ -1361,6 +1361,10 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         }
 
         if (dead_http_connection) {
+            if (vip_connection->http_connection != NULL) {
+                aws_http_connection_close(vip_connection->http_connection);
+            }
+
             vip_connection->is_retry = false;
             ++client->threaded_data.num_active_connections;
             s_s3_client_process_request(client, vip_connection);
@@ -1638,12 +1642,15 @@ static void s_s3_client_on_acquire_http_connection(
         AWS_ASSERT(s_s3_max_request_count_per_connection > s_max_request_jitter_range);
 
         uint8_t jitter_value = 0;
-        if (aws_device_random_u8(&jitter_value)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
-        }
 
-        jitter_value %= s_max_request_jitter_range;
+        if (s_max_request_jitter_range > 0) {
+            if (aws_device_random_u8(&jitter_value)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
+            }
+
+            jitter_value %= s_max_request_jitter_range;
+        }
 
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
@@ -1655,7 +1662,10 @@ static void s_s3_client_on_acquire_http_connection(
             (void *)client,
             (void *)vip_connection);
     } else {
-        ++vip_connection->request_count;
+
+        if (vip_connection->request != NULL) {
+            ++vip_connection->request_count;
+        }
 
         AWS_LOGF_INFO(
             AWS_LS_S3_CLIENT,
