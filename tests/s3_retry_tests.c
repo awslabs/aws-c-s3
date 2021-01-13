@@ -55,7 +55,9 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
         &tester, client, g_s3_path_get_object_test_1MB, 0, AWS_S3_TESTER_SSE_NONE, &meta_request_test_results));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_MAX_RETRIES_EXCEEDED);
+    ASSERT_TRUE(
+        meta_request_test_results.finished_error_code ==
+        AWS_ERROR_S3_INVALID_ENDPOINT); // AWS_IO_MAX_RETRIES_EXCEEDED);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
