@@ -38,6 +38,26 @@ enum aws_s3_subject {
     AWS_LS_S3_LAST = AWS_LOG_SUBJECT_END_RANGE(AWS_C_S3_PACKAGE_ID)
 };
 
+struct aws_s3_cpu_group_info {
+    /* group index, this usually refers to a particular numa node */
+    uint16_t cpu_group;
+    /* array of network devices on this node */
+    const struct aws_byte_cursor *nic_name_array;
+    /* length of network devices array */
+    size_t nic_name_array_length;
+};
+
+struct aws_s3_compute_platform_info {
+    /* name of the instance-type: example c5n.18xlarge */
+    const struct aws_byte_cursor instance_type;
+    /* max throughput for this instance type */
+    uint16_t max_throughput_gbps;
+    /* array of cpu group info. This will always have at least one entry. */
+    const struct aws_s3_cpu_group_info *cpu_group_info_array;
+    /* length of cpu group info array */
+    size_t cpu_group_info_array_length;
+};
+
 AWS_EXTERN_C_BEGIN
 
 /**
@@ -46,6 +66,13 @@ AWS_EXTERN_C_BEGIN
  */
 AWS_S3_API
 void aws_s3_library_init(struct aws_allocator *allocator);
+
+/**
+ * Retrieves the pre-configured metadata for an ec2 instance type. If no such pre-configuration exists, returns NULL.
+ */
+AWS_S3_API
+struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instance_type(
+    const struct aws_byte_cursor instance_type_name);
 
 /**
  * Shuts down the internal datastructures used by aws-c-s3.
