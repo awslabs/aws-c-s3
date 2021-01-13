@@ -54,8 +54,8 @@ static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
 /* TODO Provide more information on these values. */
-static const size_t s_default_part_size = 5 * 1024 * 1024;
-static const size_t s_default_max_part_size = 20 * 1024 * 1024;
+static const size_t s_default_part_size = 8 * 1024 * 1024;
+static const size_t s_default_max_part_size = 32 * 1024 * 1024;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 
