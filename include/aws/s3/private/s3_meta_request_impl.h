@@ -204,10 +204,6 @@ struct aws_s3_meta_request {
          * this reference is removed. */
         struct aws_s3_client *client;
 
-        /* Body of stream of the initial_request_message.  We store this here so that parts can take turns seeking to
-         * their own specific position (which should be in close proximity of one another). */
-        struct aws_input_stream *initial_body_stream;
-
         /* Priority queue for pending streaming requests.  We use a priority queue to keep parts in order so that we
          * can stream them to the caller in order. */
         struct aws_priority_queue pending_body_streaming_requests;
