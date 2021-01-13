@@ -803,7 +803,7 @@ static int s_s3_meta_request_incoming_body(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
 
-    aws_s3_client_aggregate_throughput(vip_connection->owning_vip->owning_client, data->len, NULL, NULL);
+    aws_s3_client_aggregate_throughput(vip_connection->owning_vip->owning_client, data->len);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,

@@ -164,6 +164,8 @@ struct aws_s3_client {
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
 
+    struct aws_atomic_var pending_throughput_bytes;
+
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
@@ -195,14 +197,10 @@ struct aws_s3_client {
         /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
         uint32_t pending_request_count;
 
-        size_t current_throughput;
-
         /* Host listener to get new IP addresses. */
         struct aws_host_listener *host_listener;
 
-        uint64_t throughput_timestamp_millis;
-
-        uint64_t pending_throughput_bytes;
+        size_t throughput_timestamp_millis;
 
         double current_throughput_gbps;
 
@@ -268,11 +266,7 @@ void aws_s3_client_stream_response_body(
     struct aws_s3_meta_request *meta_request,
     struct aws_linked_list *requests);
 
-void aws_s3_client_aggregate_throughput(
-    struct aws_s3_client *client,
-    size_t throughput,
-    double *current_throughput_gbps,
-    double *running_throughput_average_gbps);
+void aws_s3_client_aggregate_throughput(struct aws_s3_client *client, size_t throughput);
 
 AWS_EXTERN_C_BEGIN
 
