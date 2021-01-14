@@ -218,7 +218,7 @@ static int s_s3_meta_request_default_prepare_request(
         meta_request->allocator, meta_request->initial_request_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
 
     if (is_initial_prepare && meta_request_default->content_length > 0) {
-        if(aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+        if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
             goto read_body_failed;
         }
     }
