@@ -227,7 +227,17 @@ static void s_s3_client_conn_opened(struct aws_s3_client *client) {
     s_s3_client_log_stats(client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_OPENED, &active_conn_count);
 }
 
-static void s_s3_client_conn_closed(struct aws_s3_client *client) {
+static void s_s3_client_conn_closed(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+
+    if (vip_connection != NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p CLIENT-STATS-LOGGING Closing connection.  Request-Count:%d  Max-Request_count:%d",
+            (void *)client,
+            vip_connection->request_count,
+            vip_connection->max_request_count);
+    }
+
     size_t active_conn_count = aws_atomic_fetch_sub(&client->active_conn_count, 1) - 1;
     s_s3_client_log_stats(client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_CLOSED, &active_conn_count);
 }
@@ -892,7 +902,7 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
 
         aws_http_connection_manager_release_connection(
             owning_vip->http_connection_manager, vip_connection->http_connection);
-        s_s3_client_conn_closed(client);
+        s_s3_client_conn_closed(client, vip_connection);
 
         vip_connection->http_connection = NULL;
     }
@@ -1661,10 +1671,10 @@ static void s_s3_client_acquire_http_connection_default(
             /* TODO handle possible error here? */
             aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
 
+            s_s3_client_conn_closed(client, vip_connection);
+
             *http_connection = NULL;
             *connection_request_count = 0;
-
-            s_s3_client_conn_closed(client);
 
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT, "id=%p VIP Connection %p hit request limit.", (void *)client, (void *)vip_connection);
@@ -1679,7 +1689,7 @@ static void s_s3_client_acquire_http_connection_default(
             /* If our connection is closed for some reason, also get rid of it.*/
             aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
 
-            s_s3_client_conn_closed(client);
+            s_s3_client_conn_closed(client, vip_connection);
 
             *http_connection = NULL;
             *connection_request_count = 0;
@@ -1733,7 +1743,7 @@ static void s_s3_client_on_acquire_http_connection(
 
         if (*current_http_connection != NULL) {
             aws_http_connection_manager_release_connection(http_connection_manager, *current_http_connection);
-            s_s3_client_conn_closed(client);
+            s_s3_client_conn_closed(client, vip_connection);
             *current_http_connection = NULL;
         }
 
