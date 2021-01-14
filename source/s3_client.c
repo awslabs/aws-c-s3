@@ -920,8 +920,11 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
     if (vip_connection->http_connection != NULL) {
         AWS_ASSERT(owning_vip->http_connection_manager);
 
+        aws_http_connection_close(vip_connection->http_connection);
+
         aws_http_connection_manager_release_connection(
             owning_vip->http_connection_manager, vip_connection->http_connection);
+            
         s_s3_client_conn_closed(client, vip_connection, "VIP Destruction", 0);
 
         vip_connection->http_connection = NULL;
