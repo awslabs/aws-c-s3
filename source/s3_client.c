@@ -47,6 +47,7 @@ static const uint32_t s_connection_timeout_ms = 3000;
 /* TODO Provide analysis on origins of this value. */
 static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
+static const uint32_t s_max_conns_to_open_a_second = 2;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
 static const uint8_t s_max_request_jitter_range = 50;
@@ -346,6 +347,9 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->pending_throughput_bytes, 0);
 
+    aws_array_list_init_dynamic(
+        &client->threaded_data.open_conn_timestamps_millis, client->allocator, 32, sizeof(size_t));
+
     return client;
 
 on_error:
@@ -462,6 +466,8 @@ static void s_s3_client_finish_destroy(void *user_data) {
 
     aws_string_destroy(client->synced_data.endpoint);
     client->synced_data.endpoint = NULL;
+
+    aws_array_list_clean_up(&client->threaded_data.open_conn_timestamps_millis);
 
     if (client->tls_connection_options) {
         aws_tls_connection_options_clean_up(client->tls_connection_options);
@@ -1276,7 +1282,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* TODO aws_sub_u32_checked */
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
-
     aws_s3_client_unlock_synced_data(client);
 
     /*******************/
@@ -1344,6 +1349,37 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     const uint32_t max_requests_in_flight =
         client->ideal_vip_count * s_num_connections_per_vip * max_requests_multiplier;
 
+    struct aws_date_time current_timestamp;
+    aws_date_time_init_now(&current_timestamp);
+    size_t current_timestamp_millis = aws_date_time_as_millis(&current_timestamp);
+
+    /* Scrub old timestamps. */
+    {
+        uint32_t i = 0;
+
+        while (i < aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis)) {
+            size_t timestamp_i = 0;
+            aws_array_list_get_at(&client->threaded_data.open_conn_timestamps_millis, &timestamp_i, i);
+
+            size_t timestamp_delta = current_timestamp_millis - timestamp_i;
+
+            if (timestamp_delta >= 1000) {
+                size_t last_timestamp = 0;
+
+                aws_array_list_get_at(
+                    &client->threaded_data.open_conn_timestamps_millis,
+                    &last_timestamp,
+                    aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis) - 1);
+
+                aws_array_list_set_at(&client->threaded_data.open_conn_timestamps_millis, &last_timestamp, i);
+
+                aws_array_list_pop_back(&client->threaded_data.open_conn_timestamps_millis);
+            } else {
+                ++i;
+            }
+        }
+    }
+
     while (!aws_linked_list_empty(&vip_connections_updates)) {
 
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections_updates);
@@ -1351,12 +1387,26 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
         size_t owning_vip_active = aws_atomic_load_int(&vip_connection->owning_vip->active);
 
-        if (!owning_vip_active &&
-            (!client_active || (vip_connection->http_connection == NULL ||
-                                !aws_http_connection_is_open(vip_connection->http_connection) ||
-                                vip_connection->request_count >= s_s3_max_request_count_per_connection))) {
+        bool dead_connection =
+            (vip_connection->http_connection == NULL || !aws_http_connection_is_open(vip_connection->http_connection) ||
+             vip_connection->request_count >= s_s3_max_request_count_per_connection);
+
+        if (!owning_vip_active && (!client_active || dead_connection)) {
             aws_s3_vip_connection_destroy(client, vip_connection);
             continue;
+        }
+
+        if (dead_connection) {
+            bool too_many_have_had_to_open =
+                aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis) >=
+                s_max_conns_to_open_a_second;
+
+            if (too_many_have_had_to_open) {
+                aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &vip_connection->node);
+                continue;
+            } else {
+                aws_array_list_push_back(&client->threaded_data.open_conn_timestamps_millis, &current_timestamp_millis);
+            }
         }
 
         AWS_ASSERT(vip_connection->request == NULL);

@@ -232,6 +232,8 @@ struct aws_s3_client {
     } synced_data;
 
     struct {
+        struct aws_array_list open_conn_timestamps_millis;
+
         /* List of all VIP Connections for each VIP. */
         struct aws_linked_list idle_vip_connections;
 
