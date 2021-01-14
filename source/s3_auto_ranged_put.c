@@ -17,7 +17,7 @@ static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
 static void s_s3_auto_ranged_put_lock_synced_data(struct aws_s3_auto_ranged_put *auto_ranged_put);
 static void s_s3_auto_ranged_put_unlock_synced_data(struct aws_s3_auto_ranged_put *auto_ranged_put);
 
-static void s_s3_auto_ranged_put_finish_cancel(struct aws_s3_meta_request *meta_request);
+static void s_s3_auto_ranged_put_cancel_finished(struct aws_s3_meta_request *meta_request);
 
 static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request *meta_request);
 
@@ -42,9 +42,7 @@ static int s_s3_auto_ranged_put_stream_complete(
 
 static void s_s3_auto_ranged_put_finish(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int status_code,
-    int error_code);
+    const struct aws_s3_meta_request_finish_options *finish_options);
 
 static void s_s3_auto_ranged_put_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
@@ -75,6 +73,49 @@ static void s_s3_auto_ranged_put_unlock_synced_data(struct aws_s3_auto_ranged_pu
     AWS_PRECONDITION(auto_ranged_put);
 
     aws_mutex_unlock(&auto_ranged_put->base.synced_data.lock);
+}
+
+static struct aws_s3_meta_request_finish_options *s_copy_finish_options(
+    struct aws_allocator *allocator,
+    const struct aws_s3_meta_request_finish_options *options) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(options);
+
+    struct aws_s3_meta_request_finish_options *options_copy =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_finish_options));
+
+    options_copy->error_code = options->error_code;
+    options_copy->response_status = options->response_status;
+
+    if (options->error_response_headers != NULL) {
+        options_copy->error_response_headers = options->error_response_headers;
+        aws_http_headers_acquire(options->error_response_headers);
+    }
+
+    if (options->error_response_body != NULL) {
+        options_copy->error_response_body = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
+        aws_byte_buf_init_copy(options_copy->error_response_body, allocator, options->error_response_body);
+    }
+
+    return options_copy;
+}
+
+static void s_destroy_finish_options_copy(
+    struct aws_allocator *allocator,
+    struct aws_s3_meta_request_finish_options *options) {
+    AWS_PRECONDITION(allocator);
+
+    if (options == NULL) {
+        return;
+    }
+    aws_http_headers_release(options->error_response_headers);
+
+    if (options->error_response_body != NULL) {
+        aws_byte_buf_clean_up(options->error_response_body);
+        aws_mem_release(allocator, options->error_response_body);
+    }
+
+    aws_mem_release(allocator, options);
 }
 
 /* Allocate a new auto-ranged put meta request */
@@ -148,17 +189,19 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     aws_array_list_clean_up(&auto_ranged_put->synced_data.etag_list);
     aws_http_headers_release(auto_ranged_put->synced_data.needed_response_headers);
+    s_destroy_finish_options_copy(meta_request->allocator, auto_ranged_put->synced_data.cached_finish_options);
 
     aws_mem_release(meta_request->allocator, auto_ranged_put);
 }
 
 static void s_s3_auto_ranged_put_finish(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int status_code,
-    int error_code) {
-    (void)status_code;
+    const struct aws_s3_meta_request_finish_options *options) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(options);
+
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    AWS_PRECONDITION(auto_ranged_put);
 
     bool not_active = false;
     bool cancelling = false;
@@ -171,26 +214,20 @@ static void s_s3_auto_ranged_put_finish(
     }
 
     /* If this is a successful finish, then don't try to cancel. */
-    if (error_code == AWS_ERROR_SUCCESS) {
+    if (options->error_code == AWS_ERROR_SUCCESS) {
         goto unlock;
     }
 
-    /* TODO */
     /* If the complete message has already been sent, then cancelling is not possible. */
     if (auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE) {
         goto unlock;
     }
 
     meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELING;
-    auto_ranged_put->synced_data.error_code = error_code;
-    auto_ranged_put->synced_data.failed_request = failed_request;
 
-    /* Keep the failed request alive until we are done with the graceful finish */
-    if (failed_request) {
-        aws_s3_request_acquire(failed_request);
-    }
+    AWS_ASSERT(auto_ranged_put->synced_data.cached_finish_options == NULL);
+    auto_ranged_put->synced_data.cached_finish_options = s_copy_finish_options(meta_request->allocator, options);
 
-    auto_ranged_put->synced_data.finish_status_code = status_code;
     cancelling = true;
 
 unlock:
@@ -204,10 +241,44 @@ unlock:
     /* If cancelling, we may have an abort message to send, so re-push the meta request to the client for processing. */
     if (cancelling) {
         aws_s3_meta_request_push_to_client(meta_request);
-        return;
+    } else {
+        aws_s3_meta_request_finish_default(meta_request, options);
+    }
+}
+
+static void s_s3_auto_ranged_put_cancel_finished(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    AWS_PRECONDITION(auto_ranged_put);
+
+    bool already_finished_canceling = false;
+    struct aws_s3_meta_request_finish_options *finish_options = NULL;
+
+    s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+
+    already_finished_canceling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELED;
+
+    if (already_finished_canceling) {
+        AWS_ASSERT(auto_ranged_put->synced_data.cached_finish_options == NULL);
+        goto unlock;
     }
 
-    aws_s3_meta_request_finish_default(meta_request, failed_request, status_code, error_code);
+    meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELED;
+
+    finish_options = auto_ranged_put->synced_data.cached_finish_options;
+    auto_ranged_put->synced_data.cached_finish_options = NULL;
+    AWS_ASSERT(finish_options != NULL);
+
+unlock:
+    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+    if (!already_finished_canceling) {
+        aws_s3_meta_request_finish_default(meta_request, finish_options);
+
+        s_destroy_finish_options_copy(meta_request->allocator, finish_options);
+        meta_request->cached_signing_config = NULL;
+    }
 }
 
 static int s_s3_auto_ranged_put_next_request(
@@ -228,7 +299,7 @@ static int s_s3_auto_ranged_put_next_request(
         case AWS_S3_AUTO_RANGED_PUT_STATE_START: {
 
             if (cancelling) {
-                s_s3_auto_ranged_put_finish_cancel(meta_request);
+                s_s3_auto_ranged_put_cancel_finished(meta_request);
                 return result;
             }
 
@@ -273,9 +344,12 @@ static int s_s3_auto_ranged_put_next_request(
                 request->part_number = auto_ranged_put->threaded_next_request_data.next_part_number;
                 ++auto_ranged_put->threaded_next_request_data.next_part_number;
 
-                aws_s3_meta_request_read_body(meta_request, &request->request_body);
-
-                ++auto_ranged_put->synced_data.num_parts_sent;
+                if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+                    aws_s3_request_release(request);
+                    result = AWS_OP_ERR;
+                } else {
+                    ++auto_ranged_put->synced_data.num_parts_sent;
+                }
             }
 
             break;
@@ -654,38 +728,14 @@ static int s_s3_auto_ranged_put_stream_complete(
             aws_s3_meta_request_finish(meta_request, NULL, AWS_S3_RESPONSE_STATUS_SUCCESS, finish_error_code);
             break;
         }
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
+            break;
+        }
         default:
             AWS_FATAL_ASSERT(false);
     }
 
     return AWS_OP_SUCCESS;
-}
-
-static void s_s3_auto_ranged_put_finish_cancel(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    AWS_PRECONDITION(auto_ranged_put);
-
-    bool already_finished_canceling = false;
-
-    s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-
-    already_finished_canceling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELED;
-    meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_CANCELED;
-
-    struct aws_s3_request *failed_request = auto_ranged_put->synced_data.failed_request;
-    auto_ranged_put->synced_data.failed_request = NULL;
-    int error_code = auto_ranged_put->synced_data.error_code;
-    int status_code = auto_ranged_put->synced_data.finish_status_code;
-
-    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-
-    if (!already_finished_canceling) {
-        aws_s3_meta_request_finish_default(meta_request, failed_request, status_code, error_code);
-    }
-
-    aws_s3_request_release(failed_request);
 }
 
 static void s_s3_auto_ranged_put_notify_request_destroyed(
@@ -708,7 +758,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
         ++auto_ranged_put->synced_data.num_parts_completed;
 
         if (cancelling) {
-            /* request is cancelling, if all sent parts completed, we can send abort now */
+            /* Request is canceling, if all sent parts completed, we can send abort now */
             if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE;
                 notify_work_available = true;
@@ -732,6 +782,6 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
         }
 
     } else if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD) {
-        s_s3_auto_ranged_put_finish_cancel(meta_request);
+        s_s3_auto_ranged_put_cancel_finished(meta_request);
     }
 }

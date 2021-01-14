@@ -876,18 +876,6 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(vip_connection, stream, error_code);
 }
 
-void aws_s3_meta_request_finish(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int response_status,
-    int error_code) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
-    AWS_PRECONDITION(meta_request->vtable->finish);
-
-    meta_request->vtable->finish(meta_request, failed_request, response_status, error_code);
-}
-
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
@@ -986,7 +974,7 @@ void aws_s3_meta_request_send_request_finish_default(
 
             aws_s3_meta_request_finish(meta_request, request, response_status, error_code);
         } else {
-        	/* Otherwise, set this up for a retry if the meta request is active. */
+            /* Otherwise, set this up for a retry if the meta request is active. */
             if (aws_s3_meta_request_check_active(meta_request)) {
                 finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
             } else {
@@ -1057,11 +1045,41 @@ struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_
     return request;
 }
 
-void aws_s3_meta_request_finish_default(
+void aws_s3_meta_request_finish(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
     int response_status,
     int error_code) {
+
+    struct aws_s3_meta_request_finish_options options = {
+        .error_response_headers = NULL,
+        .error_response_body = NULL,
+        .error_code = error_code,
+        .response_status = response_status,
+    };
+
+    if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
+        options.error_response_headers = failed_request->send_data.response_headers;
+        options.error_response_body = &failed_request->send_data.response_body;
+    }
+
+    aws_s3_meta_request_finish_with_options(meta_request, &options);
+}
+
+void aws_s3_meta_request_finish_with_options(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_finish_options *options) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable);
+    AWS_PRECONDITION(meta_request->vtable->finish);
+    AWS_PRECONDITION(options);
+
+    meta_request->vtable->finish(meta_request, options);
+}
+
+void aws_s3_meta_request_finish_default(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_finish_options *options) {
     AWS_PRECONDITION(meta_request);
 
     bool already_finished = false;
@@ -1110,22 +1128,17 @@ unlock:
         AWS_LS_S3_META_REQUEST,
         "id=%p Meta request finished with error code %d (%s)",
         (void *)meta_request,
-        error_code,
-        aws_error_str(error_code));
+        options->error_code,
+        aws_error_str(options->error_code));
 
     if (meta_request->finish_callback != NULL) {
 
         struct aws_s3_meta_request_result meta_request_result = {
-            .error_response_headers = NULL,
-            .error_response_body = NULL,
-            .error_code = error_code,
-            .response_status = response_status,
+            .error_response_headers = options->error_response_headers,
+            .error_response_body = options->error_response_body,
+            .error_code = options->error_code,
+            .response_status = options->response_status,
         };
-
-        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
-            meta_request_result.error_response_headers = failed_request->send_data.response_headers;
-            meta_request_result.error_response_body = &failed_request->send_data.response_body;
-        }
 
         meta_request->finish_callback(meta_request, &meta_request_result, meta_request->user_data);
     }

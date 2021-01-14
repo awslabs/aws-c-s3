@@ -218,7 +218,9 @@ static int s_s3_meta_request_default_prepare_request(
         meta_request->allocator, meta_request->initial_request_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
 
     if (is_initial_prepare && meta_request_default->content_length > 0) {
-        aws_s3_meta_request_read_body(meta_request, &request->request_body);
+        if(aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+            goto read_body_failed;
+        }
     }
 
     aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
@@ -231,6 +233,10 @@ static int s_s3_meta_request_default_prepare_request(
         AWS_LS_S3_META_REQUEST, "id=%p: Meta Request prepared request %p", (void *)meta_request, (void *)request);
 
     return AWS_OP_SUCCESS;
+
+read_body_failed:
+    aws_http_message_release(message);
+    return AWS_OP_ERR;
 }
 
 static int s_s3_meta_request_default_header_block_done(

@@ -48,10 +48,7 @@ struct aws_s3_auto_ranged_put {
         uint32_t num_parts_completed;
 
         struct aws_http_headers *needed_response_headers;
-
-        struct aws_s3_request *failed_request;
-        int finish_status_code;
-        int error_code;
+        struct aws_s3_meta_request_finish_options *cached_finish_options;
     } synced_data;
 };
 

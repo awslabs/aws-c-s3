@@ -110,6 +110,18 @@ struct aws_s3_request {
     } send_data;
 };
 
+/* Options for finishing the meta request. */
+struct aws_s3_meta_request_finish_options {
+
+    struct aws_http_headers *error_response_headers;
+
+    struct aws_byte_buf *error_response_body;
+
+    int response_status;
+
+    int error_code;
+};
+
 struct aws_s3_meta_request_vtable {
     /* Pass back a request with a populated description.  If no work is available, this is allowed to pass back a NULL
      * pointer. */
@@ -158,11 +170,7 @@ struct aws_s3_meta_request_vtable {
     void (*notify_request_destroyed)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
     /* Finish the meta request either succeed or failed. */
-    void (*finish)(
-        struct aws_s3_meta_request *,
-        struct aws_s3_request *failed_request,
-        int response_status,
-        int error_code);
+    void (*finish)(struct aws_s3_meta_request *meta_request, const struct aws_s3_meta_request_finish_options *options);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
@@ -276,6 +284,10 @@ void aws_s3_meta_request_finish(
     int response_status,
     int error_code);
 
+void aws_s3_meta_request_finish_with_options(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_finish_options *finish_options);
+
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
@@ -346,9 +358,7 @@ int aws_s3_meta_request_sign_request_default(
 AWS_S3_API
 void aws_s3_meta_request_finish_default(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int response_status,
-    int error_code);
+    const struct aws_s3_meta_request_finish_options *options);
 
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(

@@ -1361,7 +1361,7 @@ static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *alloc
     };
 
     aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
