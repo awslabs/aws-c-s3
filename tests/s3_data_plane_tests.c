@@ -1351,17 +1351,76 @@ static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *alloc
     struct aws_s3_tester_meta_request_options options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .headers_callback = s_s3_test_headers_callback_raise_error,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
                 .ensure_multipart = true,
-                .invalid = true,
+                .invalid_request = true,
             },
     };
 
     aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
+    ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_put_single_part_fail_object_inputstream_fail_reading,
+    s_test_s3_put_single_part_fail_object_inputstream_fail_reading)
+static int s_test_s3_put_single_part_fail_object_inputstream_fail_reading(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .ensure_multipart = true,
+                .invalid_input_stream = true,
+                .content_length = 10,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+
+    /* TODO: The invalid input will trigger retry. But the error code should still be the one from input stream */
+    ASSERT_TRUE(meta_request_test_results.finished_error_code != AWS_ERROR_SUCCESS);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_fail_object_inputstream_fail_reading, s_test_s3_put_fail_object_inputstream_fail_reading)
+static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .ensure_multipart = true,
+                .invalid_input_stream = true,
+                .content_length = 10 * 1024 * 1024,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+
+    /* TODO: The invalid input will trigger retry. But the error code should still be the one from input stream */
+    ASSERT_TRUE(meta_request_test_results.finished_error_code != AWS_ERROR_SUCCESS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

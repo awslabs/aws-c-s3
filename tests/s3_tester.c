@@ -948,8 +948,12 @@ int aws_s3_tester_send_meta_request_with_options(
             aws_s3_create_test_buffer(allocator, object_size_bytes, &input_stream_buffer);
 
             struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffer);
-            input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
-
+            FILE *invalid_file = fopen("./", "r");
+            if (options->put_options.invalid_input_stream) {
+                input_stream = aws_input_stream_new_from_open_file(allocator, invalid_file);
+            } else {
+                input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+            }
             char object_path_buffer[128] = "";
             switch (options->sse_type) {
                 case AWS_S3_TESTER_SSE_NONE:
@@ -986,14 +990,25 @@ int aws_s3_tester_send_meta_request_with_options(
                 input_stream,
                 options->sse_type);
 
-            meta_request_options.message = message;
+            if (options->put_options.content_length) {
+                /* make a invalid request */
+                char content_length_buffer[64] = "";
+                snprintf(
+                    content_length_buffer, sizeof(content_length_buffer), "%zu", options->put_options.content_length);
 
-            if (options->put_options.invalid) {
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                aws_http_headers_set(
+                    headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
+            }
+
+            if (options->put_options.invalid_request) {
                 /* make a invalid request */
                 struct aws_http_headers *headers = aws_http_message_get_headers(message);
                 aws_http_headers_add(
                     headers, aws_byte_cursor_from_c_str("Content-MD5"), aws_byte_cursor_from_c_str("something"));
             }
+
+            meta_request_options.message = message;
         }
 
         ASSERT_TRUE(meta_request_options.message != NULL);

@@ -150,7 +150,10 @@ struct aws_s3_tester_meta_request_options {
     struct {
         uint32_t object_size_mb;
         bool ensure_multipart;
-        bool invalid;
+        bool invalid_request;
+        bool invalid_input_stream;
+        /* manually overwrite the content length for some invalid input stream */
+        size_t content_length;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
