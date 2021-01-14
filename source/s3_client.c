@@ -1773,7 +1773,7 @@ static void s_s3_client_on_acquire_http_connection(
 
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
-        vip_connection->max_request_count = s_s3_max_request_count_per_connection - (uint32_t)jitter_value;
+        vip_connection->max_request_count = s_s3_max_request_count_per_connection; /* - (uint32_t)jitter_value;*/
 
         AWS_LOGF_INFO(
             AWS_LS_S3_CLIENT,
