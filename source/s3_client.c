@@ -1081,10 +1081,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             part_size = client_part_size;
         }
 
-        if (client->tls_connection_options != NULL && (part_size % 32) > 0) {
-            part_size = part_size - (part_size % 32);
-        }
-
         uint32_t num_parts = (uint32_t)(content_length / part_size);
 
         if ((content_length % part_size) > 0) {
