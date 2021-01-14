@@ -1744,13 +1744,7 @@ static void s_s3_client_on_acquire_http_connection(
 
     /* If our cached connection is not equal to the one we just received, switch to the received one. */
     if (*current_http_connection != incoming_http_connection) {
-
-        /* TODO get rid of this, should be able to assume that current_http_connection is NULL*/
-        if (*current_http_connection != NULL) {
-            aws_http_connection_manager_release_connection(http_connection_manager, *current_http_connection);
-            s_s3_client_conn_closed(client, vip_connection, "Connections unexpectedly didn't match.");
-            *current_http_connection = NULL;
-        }
+        AWS_ASSERT(*current_http_connection == NULL);
 
         s_s3_client_conn_opened(client);
 
@@ -1773,16 +1767,9 @@ static void s_s3_client_on_acquire_http_connection(
             "id=%p Incoming connection has changed on VIP Connection %p.  Resetting local request count.",
             (void *)client,
             (void *)vip_connection);
-    } else {
-        ++vip_connection->request_count;
-
-        AWS_LOGF_INFO(
-            AWS_LS_S3_CLIENT,
-            "id=%p Incoming connection has NOT changed on VIP Connection %p.  Increasing local request count. %d",
-            (void *)client,
-            (void *)vip_connection,
-            vip_connection->request_count);
     }
+
+    ++vip_connection->request_count;
 
     aws_s3_meta_request_make_request(meta_request, client, vip_connection);
 
