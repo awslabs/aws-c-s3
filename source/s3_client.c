@@ -47,7 +47,7 @@ static const uint32_t s_connection_timeout_ms = 3000;
 /* TODO Provide analysis on origins of this value. */
 static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
-static const uint32_t s_max_conns_to_open_a_second = 2;
+static const uint32_t s_max_conns_to_open_a_second = 15;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
 static const uint8_t s_max_request_jitter_range = 50;
