@@ -1737,9 +1737,6 @@ static void s_s3_client_on_acquire_http_connection(
         goto error_clean_up;
     }
 
-    struct aws_http_connection_manager *http_connection_manager = vip_connection->owning_vip->http_connection_manager;
-    AWS_ASSERT(http_connection_manager);
-
     struct aws_http_connection **current_http_connection = &vip_connection->http_connection;
 
     /* If our cached connection is not equal to the one we just received, switch to the received one. */
