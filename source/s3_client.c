@@ -181,6 +181,57 @@ void aws_s3_client_unlock_synced_data(struct aws_s3_client *client) {
     aws_mutex_unlock(&client->synced_data.lock);
 }
 
+enum aws_s3_client_log_stats_reason {
+    AWS_S3_CLIENT_LOG_STATS_REASON_CONN_NONE,
+    AWS_S3_CLIENT_LOG_STATS_REASON_CONN_OPENED,
+    AWS_S3_CLIENT_LOG_STATS_REASON_CONN_CLOSED,
+};
+
+const char *aws_s3_client_log_stats_reason_to_string(enum aws_s3_client_log_stats_reason reason) {
+    switch (reason) {
+        case AWS_S3_CLIENT_LOG_STATS_REASON_CONN_NONE:
+            return "None";
+        case AWS_S3_CLIENT_LOG_STATS_REASON_CONN_OPENED:
+            return "Connection opened";
+        case AWS_S3_CLIENT_LOG_STATS_REASON_CONN_CLOSED:
+            return "Connection closed";
+    }
+
+    return "None";
+}
+
+static void s_s3_client_log_stats(
+    struct aws_s3_client *client,
+    enum aws_s3_client_log_stats_reason reason,
+    size_t *num_active_connections_in) {
+    AWS_PRECONDITION(client);
+
+    size_t num_active_connections = 0;
+
+    if (num_active_connections_in) {
+        num_active_connections = *num_active_connections_in;
+    } else {
+        num_active_connections = aws_atomic_load_int(&client->active_conn_count);
+    }
+
+    AWS_LOGF_ERROR(
+        AWS_LS_S3_CLIENT,
+        "id=%p CLIENT-STATS-LOGGING  Active-Connections:%d  Log-Reason:'%s'",
+        (void *)client,
+        (int32_t)num_active_connections,
+        aws_s3_client_log_stats_reason_to_string(reason));
+}
+
+static void s_s3_client_conn_opened(struct aws_s3_client *client) {
+    size_t active_conn_count = aws_atomic_fetch_add(&client->active_conn_count, 1) + 1;
+    s_s3_client_log_stats(client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_OPENED, &active_conn_count);
+}
+
+static void s_s3_client_conn_closed(struct aws_s3_client *client) {
+    size_t active_conn_count = aws_atomic_fetch_sub(&client->active_conn_count, 1) - 1;
+    s_s3_client_log_stats(client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_CLOSED, &active_conn_count);
+}
+
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
@@ -346,6 +397,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->synced_data.throughput_timestamp_millis = aws_date_time_as_millis(&current_timestamp);
 
     aws_atomic_init_int(&client->pending_throughput_bytes, 0);
+    aws_atomic_init_int(&client->active_conn_count, 0);
 
     aws_array_list_init_dynamic(
         &client->threaded_data.open_conn_timestamps_millis, client->allocator, 32, sizeof(size_t));
@@ -840,6 +892,7 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
 
         aws_http_connection_manager_release_connection(
             owning_vip->http_connection_manager, vip_connection->http_connection);
+        s_s3_client_conn_closed(client);
 
         vip_connection->http_connection = NULL;
     }
@@ -1611,6 +1664,8 @@ static void s_s3_client_acquire_http_connection_default(
             *http_connection = NULL;
             *connection_request_count = 0;
 
+            s_s3_client_conn_closed(client);
+
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT, "id=%p VIP Connection %p hit request limit.", (void *)client, (void *)vip_connection);
 
@@ -1623,6 +1678,8 @@ static void s_s3_client_acquire_http_connection_default(
 
             /* If our connection is closed for some reason, also get rid of it.*/
             aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
+
+            s_s3_client_conn_closed(client);
 
             *http_connection = NULL;
             *connection_request_count = 0;
@@ -1676,8 +1733,11 @@ static void s_s3_client_on_acquire_http_connection(
 
         if (*current_http_connection != NULL) {
             aws_http_connection_manager_release_connection(http_connection_manager, *current_http_connection);
+            s_s3_client_conn_closed(client);
             *current_http_connection = NULL;
         }
+
+        s_s3_client_conn_opened(client);
 
         AWS_ASSERT(s_s3_max_request_count_per_connection > s_max_request_jitter_range);
 
