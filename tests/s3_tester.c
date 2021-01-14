@@ -987,6 +987,13 @@ int aws_s3_tester_send_meta_request_with_options(
                 options->sse_type);
 
             meta_request_options.message = message;
+
+            if (options->put_options.invalid) {
+                /* make a invalid request */
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                aws_http_headers_add(
+                    headers, aws_byte_cursor_from_c_str("Content-MD5"), aws_byte_cursor_from_c_str("something"));
+            }
         }
 
         ASSERT_TRUE(meta_request_options.message != NULL);

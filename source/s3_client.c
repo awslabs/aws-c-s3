@@ -55,7 +55,7 @@ static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
 /* TODO Provide more information on these values. */
-static const size_t s_default_part_size = 8 * 1024 * 1024;
+static const size_t s_default_part_size = 5 * 1024 * 1024;
 static const size_t s_default_max_part_size = 32 * 1024 * 1024;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
@@ -917,15 +917,31 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
+    bool endpoint_matches = false;
+
     aws_s3_client_lock_synced_data(client);
 
     /* TODO This is temporary until we add multiple bucket support. */
     if (client->synced_data.endpoint == NULL) {
         client->synced_data.endpoint =
             aws_string_new_from_array(client->allocator, host_header_value.ptr, host_header_value.len);
+        endpoint_matches = true;
+    } else {
+        struct aws_byte_cursor synced_endpoint_byte_cursor = aws_byte_cursor_from_string(client->synced_data.endpoint);
+        endpoint_matches = aws_byte_cursor_eq_ignore_case(&synced_endpoint_byte_cursor, &host_header_value);
     }
 
     aws_s3_client_unlock_synced_data(client);
+
+    if (!endpoint_matches) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; message points to a different host than previous requests. "
+            "Currently, only one endpoint is supported per client.",
+            (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
 
     if (s_s3_client_start_resolving_addresses(client)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not start resolving endpoint for meta request.", (void *)client);
@@ -1063,6 +1079,10 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
         if (part_size < client_part_size) {
             part_size = client_part_size;
+        }
+
+        if (client->tls_connection_options != NULL && (part_size % 32) > 0) {
+            part_size = part_size - (part_size % 32);
         }
 
         uint32_t num_parts = (uint32_t)(content_length / part_size);

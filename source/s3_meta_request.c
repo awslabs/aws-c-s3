@@ -986,8 +986,12 @@ void aws_s3_meta_request_send_request_finish_default(
 
             aws_s3_meta_request_finish(meta_request, request, response_status, error_code);
         } else {
-            /* Otherwise, set this up for a retry. */
-            finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
+        	/* Otherwise, set this up for a retry if the meta request is active. */
+            if (aws_s3_meta_request_check_active(meta_request)) {
+                finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
+            } else {
+                finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED;
+            }
         }
     }
 
@@ -1078,7 +1082,7 @@ void aws_s3_meta_request_finish_default(
     client = meta_request->synced_data.client;
     meta_request->synced_data.client = NULL;
 
-    /* Cleaning out the pending-stream-to-caller priority queue*/
+    /* Clean out the pending-stream-to-caller priority queue*/
     struct aws_s3_request *request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
 
     while (request != NULL) {

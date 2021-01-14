@@ -35,7 +35,8 @@ typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
 
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
-    AWS_S3_META_REQUEST_STATE_CANCELLING,
+    AWS_S3_META_REQUEST_STATE_CANCELING,
+    AWS_S3_META_REQUEST_STATE_CANCELED,
     AWS_S3_META_REQUEST_STATE_FINISHED,
 };
 

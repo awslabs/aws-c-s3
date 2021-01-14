@@ -1341,6 +1341,33 @@ static int s_test_s3_default_fail_body_callback(struct aws_allocator *allocator,
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_put_fail_object_invalid_request, s_test_s3_put_fail_object_invalid_request)
+static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .headers_callback = s_s3_test_headers_callback_raise_error,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .ensure_multipart = true,
+                .invalid = true,
+            },
+    };
+
+    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_object_clamp_part_size, s_test_s3_put_object_clamp_part_size)
 static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
