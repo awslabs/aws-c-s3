@@ -299,6 +299,8 @@ static int s_s3_auto_ranged_put_next_request(
         case AWS_S3_AUTO_RANGED_PUT_STATE_START: {
 
             if (cancelling) {
+                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
                 s_s3_auto_ranged_put_cancel_finished(meta_request);
                 return result;
             }
