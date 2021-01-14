@@ -155,6 +155,7 @@ static void s_s3_auto_ranged_put_finish(
 
     bool no_longer_active = false;
     bool cancelling = false;
+    bool notify_work_available = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
@@ -165,7 +166,8 @@ static void s_s3_auto_ranged_put_finish(
 
     if (error_code == AWS_ERROR_SUCCESS ||
         (failed_request != NULL &&
-         failed_request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD)) {
+         (failed_request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD ||
+          failed_request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD))) {
         goto unlock;
     }
 
@@ -180,9 +182,22 @@ static void s_s3_auto_ranged_put_finish(
 
     auto_ranged_put->synced_data.finish_status_code = status_code;
     cancelling = true;
+    notify_work_available = true;
 
 unlock:
+    if (failed_request) {
+        ++auto_ranged_put->synced_data.num_parts_failed;
+        if (auto_ranged_put->synced_data.num_parts_completed + auto_ranged_put->synced_data.num_parts_failed ==
+            auto_ranged_put->synced_data.num_parts_sent) {
+            notify_work_available = true;
+        }
+    }
+
     aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    if (notify_work_available) {
+        aws_s3_meta_request_push_to_client(meta_request);
+    }
 
     if (no_longer_active) {
         return;
@@ -192,9 +207,6 @@ unlock:
         aws_s3_meta_request_finish_default(meta_request, failed_request, status_code, error_code);
         return;
     }
-
-    /* state of meta request has been set now, and the state of auto ranged put will set properly by the task */
-    aws_s3_meta_request_push_to_client(meta_request);
 }
 
 static int s_s3_auto_ranged_put_next_request(
@@ -245,7 +257,8 @@ static int s_s3_auto_ranged_put_next_request(
 
             if (cancelling) {
 
-                if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
+                if (auto_ranged_put->synced_data.num_parts_completed + auto_ranged_put->synced_data.num_parts_failed ==
+                    auto_ranged_put->synced_data.num_parts_sent) {
                     request = aws_s3_request_new(
                         meta_request,
                         AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
