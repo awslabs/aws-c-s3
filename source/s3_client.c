@@ -1899,6 +1899,9 @@ reset_vip_connection:
         if (vip_connection->http_connection != NULL) {
             aws_http_connection_close(vip_connection->http_connection);
 
+            aws_http_connection_manager_release_connection(
+                vip_connection->owning_vip->http_connection_manager, vip_connection->http_connection);
+
             s_s3_client_conn_closed(client, vip_connection, "Request failed to retry.");
 
             vip_connection->http_connection = NULL;
