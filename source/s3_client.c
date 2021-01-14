@@ -203,10 +203,12 @@ const char *aws_s3_client_log_stats_reason_to_string(enum aws_s3_client_log_stat
 static void s_s3_client_log_stats(
     struct aws_s3_client *client,
     enum aws_s3_client_log_stats_reason reason,
-    size_t *num_active_connections_in) {
+    size_t *num_active_connections_in,
+    size_t *num_unexpected_close_in) {
     AWS_PRECONDITION(client);
 
     size_t num_active_connections = 0;
+    size_t num_unexpected_close = 0;
 
     if (num_active_connections_in) {
         num_active_connections = *num_active_connections_in;
@@ -214,23 +216,31 @@ static void s_s3_client_log_stats(
         num_active_connections = aws_atomic_load_int(&client->active_conn_count);
     }
 
+    if (num_unexpected_close_in) {
+        num_unexpected_close = *num_unexpected_close_in;
+    } else {
+        num_unexpected_close = aws_atomic_load_int(&client->num_unexpected_close);
+    }
+
     AWS_LOGF_ERROR(
         AWS_LS_S3_CLIENT,
-        "id=%p CLIENT-STATS-LOGGING  Active-Connections:%d  Log-Reason:'%s'",
+        "id=%p CLIENT-STATS-LOGGING  Active-Connections:%d  Unexpected-Closed:%d  Log-Reason:'%s'",
         (void *)client,
         (int32_t)num_active_connections,
+        (int32_t)num_unexpected_close,
         aws_s3_client_log_stats_reason_to_string(reason));
 }
 
 static void s_s3_client_conn_opened(struct aws_s3_client *client) {
     size_t active_conn_count = aws_atomic_fetch_add(&client->active_conn_count, 1) + 1;
-    s_s3_client_log_stats(client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_OPENED, &active_conn_count);
+    s_s3_client_log_stats(client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_OPENED, &active_conn_count, NULL);
 }
 
 static void s_s3_client_conn_closed(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
-    const char *close_reason) {
+    const char *close_reason,
+    size_t unexpected_count) {
 
     if (vip_connection != NULL) {
         AWS_LOGF_ERROR(
@@ -243,7 +253,12 @@ static void s_s3_client_conn_closed(
     }
 
     size_t active_conn_count = aws_atomic_fetch_sub(&client->active_conn_count, 1) - 1;
-    s_s3_client_log_stats(client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_CLOSED, &active_conn_count);
+
+    size_t unexpected_conn_count =
+        aws_atomic_fetch_add(&client->num_unexpected_close, unexpected_count) + unexpected_count;
+
+    s_s3_client_log_stats(
+        client, AWS_S3_CLIENT_LOG_STATS_REASON_CONN_CLOSED, &active_conn_count, &unexpected_conn_count);
 }
 
 struct aws_s3_client *aws_s3_client_new(
@@ -412,6 +427,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->pending_throughput_bytes, 0);
     aws_atomic_init_int(&client->active_conn_count, 0);
+    aws_atomic_init_int(&client->num_unexpected_close, 0);
 
     aws_array_list_init_dynamic(
         &client->threaded_data.open_conn_timestamps_millis, client->allocator, 32, sizeof(size_t));
@@ -906,7 +922,7 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
 
         aws_http_connection_manager_release_connection(
             owning_vip->http_connection_manager, vip_connection->http_connection);
-        s_s3_client_conn_closed(client, vip_connection, "VIP Destruction");
+        s_s3_client_conn_closed(client, vip_connection, "VIP Destruction", 0);
 
         vip_connection->http_connection = NULL;
     }
@@ -1675,7 +1691,7 @@ static void s_s3_client_acquire_http_connection_default(
             /* TODO handle possible error here? */
             aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
 
-            s_s3_client_conn_closed(client, vip_connection, "Request Count Exceeded");
+            s_s3_client_conn_closed(client, vip_connection, "Request Count Exceeded", 0);
 
             *http_connection = NULL;
             *connection_request_count = 0;
@@ -1693,7 +1709,7 @@ static void s_s3_client_acquire_http_connection_default(
             /* If our connection is closed for some reason, also get rid of it.*/
             aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
 
-            s_s3_client_conn_closed(client, vip_connection, "Connection was unexpectedly closed.");
+            s_s3_client_conn_closed(client, vip_connection, "Connection was unexpectedly closed.", 1);
 
             *http_connection = NULL;
             *connection_request_count = 0;
@@ -1886,7 +1902,7 @@ reset_vip_connection:
             aws_http_connection_manager_release_connection(
                 vip_connection->owning_vip->http_connection_manager, vip_connection->http_connection);
 
-            s_s3_client_conn_closed(client, vip_connection, "Request failed to retry.");
+            s_s3_client_conn_closed(client, vip_connection, "Request failed to retry.", 0);
 
             vip_connection->http_connection = NULL;
         }
