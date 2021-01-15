@@ -177,10 +177,6 @@ int aws_s3_meta_request_init_base(
     meta_request->initial_request_message = options->message;
     aws_http_message_acquire(options->message);
 
-    /* Store a copy of the original message's initial body stream in our synced data, so that concurrent requests can
-     * safely take turns reading from it when needed. */
-    meta_request->synced_data.initial_body_stream = aws_http_message_get_body_stream(options->message);
-
     if (aws_mutex_init(&meta_request->synced_data.lock)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not initialize mutex for meta request", (void *)meta_request);
@@ -385,7 +381,7 @@ static void s_s3_request_destroy(void *user_data) {
         struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
 
         if (client != NULL) {
-            aws_s3_client_notify_request_destroyed(client);
+            aws_s3_client_notify_request_destroyed(client, request);
             aws_s3_client_release(client);
             client = NULL;
         }
@@ -459,7 +455,6 @@ int aws_s3_meta_request_make_request(
 
     /* Sign the newly created message. */
     if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
-
         goto call_finished_callback;
     }
 
@@ -881,18 +876,6 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(vip_connection, stream, error_code);
 }
 
-void aws_s3_meta_request_finish(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int response_status,
-    int error_code) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
-    AWS_PRECONDITION(meta_request->vtable->finish);
-
-    meta_request->vtable->finish(meta_request, failed_request, response_status, error_code);
-}
-
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
@@ -991,8 +974,12 @@ void aws_s3_meta_request_send_request_finish_default(
 
             aws_s3_meta_request_finish(meta_request, request, response_status, error_code);
         } else {
-            /* Otherwise, set this up for a retry. */
-            finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
+            /* Otherwise, set this up for a retry if the meta request is active. */
+            if (aws_s3_meta_request_check_active(meta_request)) {
+                finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
+            } else {
+                finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED;
+            }
         }
     }
 
@@ -1058,11 +1045,41 @@ struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_
     return request;
 }
 
-void aws_s3_meta_request_finish_default(
+void aws_s3_meta_request_finish(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
     int response_status,
     int error_code) {
+
+    struct aws_s3_meta_request_finish_options options = {
+        .error_response_headers = NULL,
+        .error_response_body = NULL,
+        .error_code = error_code,
+        .response_status = response_status,
+    };
+
+    if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
+        options.error_response_headers = failed_request->send_data.response_headers;
+        options.error_response_body = &failed_request->send_data.response_body;
+    }
+
+    aws_s3_meta_request_finish_with_options(meta_request, &options);
+}
+
+void aws_s3_meta_request_finish_with_options(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_finish_options *options) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable);
+    AWS_PRECONDITION(meta_request->vtable->finish);
+    AWS_PRECONDITION(options);
+
+    meta_request->vtable->finish(meta_request, options);
+}
+
+void aws_s3_meta_request_finish_default(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_finish_options *options) {
     AWS_PRECONDITION(meta_request);
 
     bool already_finished = false;
@@ -1083,7 +1100,7 @@ void aws_s3_meta_request_finish_default(
     client = meta_request->synced_data.client;
     meta_request->synced_data.client = NULL;
 
-    /* Cleaning out the pending-stream-to-caller priority queue*/
+    /* Clean out the pending-stream-to-caller priority queue*/
     struct aws_s3_request *request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
 
     while (request != NULL) {
@@ -1111,22 +1128,17 @@ unlock:
         AWS_LS_S3_META_REQUEST,
         "id=%p Meta request finished with error code %d (%s)",
         (void *)meta_request,
-        error_code,
-        aws_error_str(error_code));
+        options->error_code,
+        aws_error_str(options->error_code));
 
     if (meta_request->finish_callback != NULL) {
 
         struct aws_s3_meta_request_result meta_request_result = {
-            .error_response_headers = NULL,
-            .error_response_body = NULL,
-            .error_code = error_code,
-            .response_status = response_status,
+            .error_response_headers = options->error_response_headers,
+            .error_response_body = options->error_response_body,
+            .error_code = options->error_code,
+            .response_status = options->response_status,
         };
-
-        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
-            meta_request_result.error_response_headers = failed_request->send_data.response_headers;
-            meta_request_result.error_response_body = &failed_request->send_data.response_body;
-        }
 
         meta_request->finish_callback(meta_request, &meta_request_result, meta_request->user_data);
     }
@@ -1136,21 +1148,8 @@ int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, stru
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    int result = aws_s3_meta_request_read_body_synced(meta_request, buffer);
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    return result;
-}
-
-int aws_s3_meta_request_read_body_synced(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(buffer);
-    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
-
-    struct aws_input_stream *initial_body_stream = meta_request->synced_data.initial_body_stream;
+    struct aws_input_stream *initial_body_stream =
+        aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(initial_body_stream);
 
     /* Copy it into our buffer. */

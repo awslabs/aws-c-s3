@@ -31,22 +31,24 @@ enum aws_s3_auto_ranged_put_request_tag {
 struct aws_s3_auto_ranged_put {
     struct aws_s3_meta_request base;
 
+    /* Useable after the Create Multipart Upload request succeeds. */
+    struct aws_string *upload_id;
+
+    struct {
+        /* Only meant for use in the next_request function, which is never called concurrently. */
+        uint32_t next_part_number;
+    } threaded_next_request_data;
+
     struct {
         enum aws_s3_auto_ranged_put_state state;
         struct aws_array_list etag_list;
 
         uint32_t total_num_parts;
-        uint32_t next_part_number;
         uint32_t num_parts_sent;
         uint32_t num_parts_completed;
 
-        struct aws_string *upload_id;
         struct aws_http_headers *needed_response_headers;
-
-        struct aws_s3_request *failed_request;
-        int finish_status_code;
-        int error_code;
-
+        struct aws_s3_meta_request_finish_options *cached_finish_options;
     } synced_data;
 };
 

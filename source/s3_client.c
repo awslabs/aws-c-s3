@@ -55,8 +55,8 @@ static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
 /* TODO Provide more information on these values. */
-static const size_t s_default_part_size = 5 * 1024 * 1024;
-static const size_t s_default_max_part_size = 20 * 1024 * 1024;
+static const size_t s_default_part_size = 8 * 1024 * 1024;
+static const size_t s_default_max_part_size = 32 * 1024 * 1024;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 
@@ -917,15 +917,31 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
+    bool endpoint_matches = false;
+
     aws_s3_client_lock_synced_data(client);
 
     /* TODO This is temporary until we add multiple bucket support. */
     if (client->synced_data.endpoint == NULL) {
         client->synced_data.endpoint =
             aws_string_new_from_array(client->allocator, host_header_value.ptr, host_header_value.len);
+        endpoint_matches = true;
+    } else {
+        struct aws_byte_cursor synced_endpoint_byte_cursor = aws_byte_cursor_from_string(client->synced_data.endpoint);
+        endpoint_matches = aws_byte_cursor_eq_ignore_case(&synced_endpoint_byte_cursor, &host_header_value);
     }
 
     aws_s3_client_unlock_synced_data(client);
+
+    if (!endpoint_matches) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; message points to a different host than previous requests. "
+            "Currently, only one endpoint is supported per client.",
+            (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
 
     if (s_s3_client_start_resolving_addresses(client)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not start resolving endpoint for meta request.", (void *)client);
@@ -1251,6 +1267,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
     aws_linked_list_swap_contents(&vip_connections_updates, &client->synced_data.pending_vip_connection_updates);
 
+    /* TODO aws_sub_u32_checked */
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
 
@@ -1288,6 +1305,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                 }
 
                 s_s3_client_remove_meta_request_threaded(client, meta_request);
+            } else {
+                aws_s3_meta_request_release(meta_request);
+                meta_request = NULL;
             }
         }
 
@@ -1382,6 +1402,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             /* At this point, the vip connection owns the only existing ref count to the request.*/
             vip_connection->request = request;
             vip_connection->is_retry = false;
+            request->client_data.in_flight = true;
             ++client->threaded_data.num_requests_in_flight;
             s_s3_client_process_request(client, vip_connection);
         }
@@ -1814,11 +1835,16 @@ error_clean_up:
 }
 
 /* Called by aws_s3_request when it has finished being destroyed */
-void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client) {
-    aws_s3_client_lock_synced_data(client);
-    ++client->synced_data.pending_request_count;
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(request);
+
+    if (request->client_data.in_flight) {
+        aws_s3_client_lock_synced_data(client);
+        ++client->synced_data.pending_request_count;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
 }
 
 struct s3_streaming_body_payload {
