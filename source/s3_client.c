@@ -1266,7 +1266,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
     aws_linked_list_swap_contents(&vip_connections_updates, &client->synced_data.pending_vip_connection_updates);
-    
+
     /* TODO aws_sub_u32_checked */
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
