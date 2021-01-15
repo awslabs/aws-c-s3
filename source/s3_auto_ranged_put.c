@@ -290,41 +290,42 @@ static int s_s3_auto_ranged_put_next_request(
     struct aws_s3_request *request = NULL;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
+    bool finish_canceling = false;
+
     s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-    bool cancelling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELING;
+    bool canceling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELING;
 
     switch (auto_ranged_put->synced_data.state) {
         case AWS_S3_AUTO_RANGED_PUT_STATE_START: {
 
-            if (cancelling) {
-                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-                s_s3_auto_ranged_put_cancel_finished(meta_request);
-                return AWS_OP_SUCCESS;
+            if (canceling) {
+                /* If we are canceling, then at this point, we haven't sent anything yet, so go ahead and cancel. */
+                finish_canceling = true;
+            } else {
+                /* Setup for a create-multipart upload */
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
+                    0,
+                    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+
+                /* We'll need to wait for the initial create to get back so that we can get the upload-id. */
+                auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE;
             }
 
-            /* Setup for a create-multipart upload */
-            request = aws_s3_request_new(
-                meta_request,
-                AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
-                0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-
-            /* We'll need to wait for the initial create to get back so that we can get the upload-id. */
-            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE;
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE: {
-            if (cancelling) {
-                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-                s_s3_auto_ranged_put_cancel_finished(meta_request);
-                return AWS_OP_SUCCESS;
-            }
+
+            /* If we are canceling, and we're just waiting for the create to finish, jump straight to finishing the
+             * cancel. */
+            finish_canceling = canceling;
 
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
 
-            if (cancelling) {
+            if (canceling) {
 
                 if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
                     request = aws_s3_request_new(
@@ -358,7 +359,7 @@ static int s_s3_auto_ranged_put_next_request(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE: {
-            if (cancelling) {
+            if (canceling) {
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
@@ -393,6 +394,12 @@ static int s_s3_auto_ranged_put_next_request(
     }
 
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+    if (finish_canceling) {
+        AWS_ASSERT(request == NULL);
+        s_s3_auto_ranged_put_cancel_finished(meta_request);
+        return AWS_OP_SUCCESS;
+    }
 
     if (request != NULL) {
 
