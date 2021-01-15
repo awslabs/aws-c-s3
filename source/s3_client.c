@@ -1402,7 +1402,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             /* At this point, the vip connection owns the only existing ref count to the request.*/
             vip_connection->request = request;
             vip_connection->is_retry = false;
-            request->client_data.in_flight = true;
+            request->request_was_sent = true;
             ++client->threaded_data.num_requests_in_flight;
             s_s3_client_process_request(client, vip_connection);
         }
@@ -1839,7 +1839,7 @@ void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
-    if (request->client_data.in_flight) {
+    if (request->request_was_sent) {
         aws_s3_client_lock_synced_data(client);
         ++client->synced_data.pending_request_count;
         s_s3_client_schedule_process_work_synced(client);

@@ -18,7 +18,6 @@ enum aws_s3_auto_ranged_put_state {
     AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL,
     AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE,
     AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE,
-    AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST
 };
 
 enum aws_s3_auto_ranged_put_request_tag {
@@ -49,6 +48,9 @@ struct aws_s3_auto_ranged_put {
 
         struct aws_http_headers *needed_response_headers;
         struct aws_s3_meta_request_finish_options *cached_finish_options;
+
+        bool create_multipart_upload_successful;
+
     } synced_data;
 };
 
