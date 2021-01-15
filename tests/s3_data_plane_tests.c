@@ -1419,8 +1419,7 @@ static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocat
 
     aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
 
-    /* TODO: The invalid input will trigger retry. But the error code should still be the one from input stream */
-    ASSERT_TRUE(meta_request_test_results.finished_error_code != AWS_ERROR_SUCCESS);
+    ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_IO_STREAM_READ_FAILED);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
