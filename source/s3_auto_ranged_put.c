@@ -403,11 +403,10 @@ after_unlock:
     if (request != NULL) {
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Returning request %p for part %d of %d",
+            "id=%p: Returning request %p for part %d",
             (void *)meta_request,
             (void *)request,
-            request->part_number,
-            auto_ranged_put->synced_data.total_num_parts);
+            request->part_number);
     }
 
     *out_request = request;
