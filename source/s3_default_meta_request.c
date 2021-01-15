@@ -181,7 +181,7 @@ static int s_s3_meta_request_default_next_request(
 
     s_s3_meta_request_default_unlock_synced_data(meta_request_default);
 
-    if (meta_request_default->content_length > 0) {
+    if (request != NULL && meta_request_default->content_length > 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
         if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
