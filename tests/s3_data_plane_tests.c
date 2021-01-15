@@ -1029,6 +1029,52 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_next_request_sen
     return meta_request;
 }
 
+static int s_s3_next_request_cancel_waiting_send_complete(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request **out_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_request);
+
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    bool call_cancel = auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE;
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    if (call_cancel) {
+        aws_s3_meta_request_cancel(meta_request);
+    }
+
+    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
+    struct aws_s3_tester *tester = results->tester;
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+
+    return original_meta_request_vtable->next_request(meta_request, out_request);
+}
+
+static struct aws_s3_meta_request *s_meta_request_factory_patch_next_request_send_complete(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->next_request = s_s3_next_request_cancel_waiting_send_complete;
+
+    return meta_request;
+}
+
 static struct aws_s3_meta_request *s_meta_request_factory_patch_next_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
@@ -1066,12 +1112,12 @@ static int s_cancel_multipart_upload_helper(struct aws_allocator *allocator, enu
     switch (state) {
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE:
             patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request_waiting_for_create;
-            /* code */
             break;
-
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS:
             patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request_sending_parts;
-            /* code */
+            break;
+        case AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE:
+            patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request_send_complete;
             break;
         default:
             break;
@@ -1135,11 +1181,11 @@ static int s_test_s3_cancel_multipart_upload_sending_parts(struct aws_allocator 
     return s_cancel_multipart_upload_helper(allocator, AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS);
 }
 
-AWS_TEST_CASE(test_s3_cancel_multipart_upload_sending_parts, s_test_s3_cancel_multipart_upload_sending_parts)
-static int s_test_s3_cancel_multipart_upload_sending_parts(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_cancel_multipart_upload_send_complete, s_test_s3_cancel_multipart_upload_send_complete)
+static int s_test_s3_cancel_multipart_upload_send_complete(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    return s_cancel_multipart_upload_helper(allocator, AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS);
+    return s_cancel_multipart_upload_helper(allocator, AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE);
 }
 
 /* TODO: instead of random, we should have some efforts to base on the request we made to test the cancel can happen
