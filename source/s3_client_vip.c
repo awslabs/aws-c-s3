@@ -11,7 +11,6 @@
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>
-#include <aws/http/connection_manager.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -27,6 +26,11 @@ static const uint32_t s_connection_timeout_ms = 3000;
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
+
+static const uint32_t s_s3_max_request_count_per_connection = 100;
+
+/* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
+static const uint8_t s_max_request_jitter_range = 50;
 
 const uint32_t g_num_connections_per_vip = 10;
 
@@ -120,90 +124,6 @@ struct aws_s3_vip *aws_s3_vip_new(
     vip->shutdown_callback = shutdown_callback;
     vip->shutdown_user_data = shutdown_user_data;
 
-    /* Try to set up an HTTP connection manager. */
-    struct aws_socket_options socket_options;
-    AWS_ZERO_STRUCT(socket_options);
-    socket_options.type = AWS_SOCKET_STREAM;
-    socket_options.domain = AWS_SOCKET_IPV4;
-    socket_options.connect_timeout_ms = s_connection_timeout_ms;
-
-    struct aws_http_connection_manager_options manager_options;
-    AWS_ZERO_STRUCT(manager_options);
-    manager_options.bootstrap = client->client_bootstrap;
-    manager_options.initial_window_size = SIZE_MAX;
-    manager_options.socket_options = &socket_options;
-    manager_options.host = aws_byte_cursor_from_string(vip->host_address);
-    manager_options.max_connections = num_vip_connections;
-    manager_options.shutdown_complete_callback = s_s3_vip_http_connection_manager_shutdown_callback;
-    manager_options.shutdown_complete_user_data = vip;
-
-    struct aws_uri proxy_uri;
-    AWS_ZERO_STRUCT(proxy_uri);
-    struct aws_http_proxy_options *proxy_options = NULL;
-    struct aws_tls_connection_options *proxy_tls_options = NULL;
-    struct aws_tls_connection_options *manager_tls_options = NULL;
-
-    if (s_s3_client_get_proxy_uri(client, &proxy_uri) == AWS_OP_SUCCESS) {
-        proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
-        proxy_options->host = proxy_uri.host_name;
-        proxy_options->port = proxy_uri.port;
-
-        manager_options.proxy_options = proxy_options;
-    }
-
-    if (client->tls_connection_options != NULL) {
-        manager_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
-        aws_tls_connection_options_copy(manager_tls_options, client->tls_connection_options);
-
-        /* TODO fix this in the actual aws_tls_connection_options_set_server_name function. */
-        if (manager_tls_options->server_name != NULL) {
-            aws_string_destroy(manager_tls_options->server_name);
-            manager_tls_options->server_name = NULL;
-        }
-
-        aws_tls_connection_options_set_server_name(
-            manager_tls_options, client->allocator, (struct aws_byte_cursor *)server_name);
-
-        manager_options.tls_connection_options = manager_tls_options;
-        manager_options.port = s_https_port;
-    } else {
-        manager_options.port = s_http_port;
-    }
-
-    vip->http_connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
-    vip->synced_data.http_connection_manager_active = true;
-
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_CLIENT,
-        "id=%p: Created connection manager %p for VIP %p",
-        (void *)client,
-        (void *)vip->http_connection_manager,
-        (void *)vip);
-
-    if (manager_tls_options != NULL) {
-        aws_tls_connection_options_clean_up(manager_tls_options);
-        aws_mem_release(client->allocator, manager_tls_options);
-        manager_tls_options = NULL;
-    }
-
-    if (proxy_tls_options != NULL) {
-        aws_tls_connection_options_clean_up(proxy_tls_options);
-        aws_mem_release(client->allocator, proxy_tls_options);
-        proxy_tls_options = NULL;
-    }
-
-    if (proxy_options != NULL) {
-        aws_mem_release(client->allocator, proxy_options);
-        proxy_options = NULL;
-    }
-
-    aws_uri_clean_up(&proxy_uri);
-
-    if (vip->http_connection_manager == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_VIP, "id=%p: Could not allocate aws_s3_vip connection manager.", (void *)vip);
-        goto error_clean_up;
-    }
-
     aws_atomic_init_int(&vip->active, 1);
 
     for (uint32_t i = 0; i < num_vip_connections; ++i) {
@@ -216,16 +136,6 @@ struct aws_s3_vip *aws_s3_vip_new(
     }
 
     return vip;
-
-error_clean_up:
-
-    if (vip != NULL) {
-        aws_string_destroy(vip->host_address);
-        aws_mem_release(client->allocator, vip);
-        vip = NULL;
-    }
-
-    return NULL;
 }
 
 static void s_s3_vip_set_reset_active(struct aws_s3_vip *vip) {
@@ -249,7 +159,6 @@ static void s_s3_vip_check_for_shutdown(struct aws_s3_vip *vip, s3_client_vip_up
     AWS_PRECONDITION(vip->owning_client);
 
     bool finish_destroy = false;
-    struct aws_http_connection_manager *conn_manager = NULL;
 
     aws_s3_client_lock_synced_data(vip->owning_client);
 
@@ -267,52 +176,14 @@ static void s_s3_vip_check_for_shutdown(struct aws_s3_vip *vip, s3_client_vip_up
         goto unlock;
     }
 
-    /* If the connection manager is active, then we can try initiating a clean up of it now. */
-    if (vip->synced_data.http_connection_manager_active) {
-
-        /* If the connection manager is not NULL, take the pointer from the synced data so that it we can clean it up
-         * outside of the lock. We reset the pointer on the synced_data so that nothing else entering this function will
-         * trigger a double release. */
-        if (vip->http_connection_manager != NULL) {
-            conn_manager = vip->http_connection_manager;
-            vip->http_connection_manager = NULL;
-        }
-
-        goto unlock;
-    }
-
     finish_destroy = true;
 
 unlock:
     aws_s3_client_unlock_synced_data(vip->owning_client);
 
-    if (conn_manager != NULL) {
-        aws_http_connection_manager_release(conn_manager);
-        conn_manager = NULL;
-    }
-
     if (finish_destroy) {
         s_s3_vip_finish_destroy(vip);
     }
-}
-
-static void s_s3_vip_set_conn_manager_shutdown(struct aws_s3_vip *vip) {
-    AWS_PRECONDITION(vip);
-    AWS_PRECONDITION(vip->owning_client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(vip->owning_client);
-    vip->synced_data.http_connection_manager_active = false;
-}
-
-static void s_s3_vip_http_connection_manager_shutdown_callback(void *user_data) {
-    AWS_PRECONDITION(user_data);
-
-    struct aws_s3_vip *vip = user_data;
-    AWS_PRECONDITION(vip);
-
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_CLIENT, "id=%p VIP %p Connection manager shutdown", (void *)vip->owning_client, (void *)vip);
-
-    s_s3_vip_check_for_shutdown(vip, s_s3_vip_set_conn_manager_shutdown);
 }
 
 static void s_s3_vip_finish_destroy(void *user_data) {
@@ -345,7 +216,6 @@ static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
 
 /* Destroy a VIP Connection structure. */
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
-
     if (client == NULL) {
         AWS_ASSERT(vip_connection == NULL);
         return;
@@ -363,14 +233,7 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
         (void *)vip_connection,
         (void *)owning_vip);
 
-    if (vip_connection->http_connection != NULL) {
-        AWS_ASSERT(owning_vip->http_connection_manager);
-
-        aws_http_connection_manager_release_connection(
-            owning_vip->http_connection_manager, vip_connection->http_connection);
-
-        vip_connection->http_connection = NULL;
-    }
+    AWS_ASSERT(vip_connection->http_connection == NULL);
 
     aws_retry_token_release(vip_connection->retry_token);
     vip_connection->retry_token = NULL;
@@ -448,14 +311,6 @@ static void s_s3_client_on_host_resolver_address_resolved(
     }
 }
 
-int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(client->vtable);
-    AWS_PRECONDITION(client->vtable->add_vips);
-
-    return client->vtable->add_vips(client, host_addresses);
-}
-
 static void s_s3_client_sub_vip_count_synced(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
@@ -467,6 +322,14 @@ static void s_s3_client_vip_shutdown_callback(void *user_data) {
     struct aws_s3_client *client = user_data;
 
     aws_s3_client_check_for_shutdown(client, s_s3_client_sub_vip_count_synced);
+}
+
+int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->add_vips);
+
+    return client->vtable->add_vips(client, host_addresses);
 }
 
 int aws_s3_client_add_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
@@ -536,7 +399,11 @@ int aws_s3_client_add_vips_default(struct aws_s3_client *client, const struct aw
             break;
         }
 
-        aws_linked_list_move_all_back(&client->synced_data.pending_vip_connection_updates, &vip_connections);
+        while (!aws_linked_list_empty(&vip_connections)) {
+            struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections);
+            struct aws_s3_vip_connection *vip_connection = AWS_CONTAINER_OF(node, struct aws_s3_vip_connection, node);
+            aws_s3_client_open_vip_connection(client, vip_connection);
+        }
 
         ++client->synced_data.allocated_vip_count;
         ++client->synced_data.active_vip_count;
@@ -742,4 +609,165 @@ unlock:
     }
 
     return AWS_OP_SUCCESS;
+}
+
+void aws_s3_client_close_vip_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(vip_connection);
+    (void)client;
+
+    if (vip_connection->http_connection == NULL) {
+        return;
+    }
+
+    aws_http_connection_release(vip_connection->http_connection);
+    vip_connection->http_connection = NULL;
+}
+
+static void s_s3_client_on_vip_connection_setup(
+    struct aws_http_connection *connection,
+    int error_code,
+    void *user_data);
+
+static void s_s3_client_on_vip_connection_shutdown(
+    struct aws_http_connection *connection,
+    int error_code,
+    void *user_data);
+
+void aws_s3_client_open_vip_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_vip *vip = vip_connection->owning_vip;
+
+    struct aws_socket_options socket_options = {
+        .type = AWS_SOCKET_STREAM,
+        .domain = AWS_SOCKET_IPV4,
+        .connect_timeout_ms = s_connection_timeout_ms,
+    };
+
+    struct aws_http_client_connection_options connection_options = {
+        .self_size = sizeof(struct aws_http_client_connection_options),
+        .allocator = client->allocator,
+        .bootstrap = client->client_bootstrap,
+        .host_name = aws_byte_cursor_from_string(vip->host_address),
+        .port = 0,
+        .socket_options = &socket_options,
+        .initial_window_size = SIZE_MAX,
+        .user_data = vip_connection,
+        .on_setup = s_s3_client_on_vip_connection_setup,
+        .on_shutdown = s_s3_client_on_vip_connection_shutdown,
+    };
+
+    struct aws_http_proxy_options *proxy_options = NULL;
+    struct aws_tls_connection_options *proxy_tls_options = NULL;
+    struct aws_tls_connection_options *connection_tls_options = NULL;
+
+    struct aws_uri proxy_uri;
+    AWS_ZERO_STRUCT(proxy_uri);
+
+    if (s_s3_client_get_proxy_uri(client, &proxy_uri) == AWS_OP_SUCCESS) {
+        proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
+        proxy_options->host = proxy_uri.host_name;
+        proxy_options->port = proxy_uri.port;
+
+        connection_options.proxy_options = proxy_options;
+    }
+
+    if (client->tls_connection_options != NULL) {
+        connection_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+        aws_tls_connection_options_copy(connection_tls_options, client->tls_connection_options);
+
+        /* TODO fix this in the actual aws_tls_connection_options_set_server_name function. */
+        if (connection_tls_options->server_name != NULL) {
+            aws_string_destroy(connection_tls_options->server_name);
+            connection_tls_options->server_name = NULL;
+        }
+
+        aws_tls_connection_options_set_server_name(
+            connection_tls_options, client->allocator, (struct aws_byte_cursor *)server_name);
+
+        connection_options.tls_connection_options = connection_tls_options;
+        connection_options.port = s_https_port;
+    } else {
+        connection_options.port = s_http_port;
+    }
+
+    if (aws_http_client_connect(&connection_options)) {
+        /* TODO Error */
+    }
+
+    if (connection_tls_options != NULL) {
+        aws_tls_connection_options_clean_up(connection_tls_options);
+        aws_mem_release(client->allocator, connection_tls_options);
+        connection_tls_options = NULL;
+    }
+
+    if (proxy_tls_options != NULL) {
+        aws_tls_connection_options_clean_up(proxy_tls_options);
+        aws_mem_release(client->allocator, proxy_tls_options);
+        proxy_tls_options = NULL;
+    }
+
+    if (proxy_options != NULL) {
+        aws_mem_release(client->allocator, proxy_options);
+        proxy_options = NULL;
+    }
+
+    aws_uri_clean_up(&proxy_uri);
+}
+
+static void s_s3_client_on_vip_connection_setup(
+    struct aws_http_connection *connection,
+    int error_code,
+    void *user_data) {
+
+    if (error_code != AWS_ERROR_SUCCESS) {
+        /* TODO retry */
+        return;
+    }
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    vip_connection->http_connection = connection;
+
+    struct aws_s3_vip *vip = vip_connection->owning_vip;
+    struct aws_s3_client *client = vip->owning_client;
+
+    uint8_t jitter_value = 0;
+    if (aws_device_random_u8(&jitter_value)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
+    }
+
+    jitter_value %= s_max_request_jitter_range;
+    vip_connection->request_count = 0;
+    vip_connection->max_request_count = s_s3_max_request_count_per_connection - (uint32_t)jitter_value;
+
+    /* ++vip_connection->request_count; TODO */
+
+    aws_s3_client_lock_synced_data(client);
+    aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
+    aws_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
+}
+
+static void s_s3_client_on_vip_connection_shutdown(
+    struct aws_http_connection *connection,
+    int error_code,
+    void *user_data) {
+
+    if (error_code != AWS_ERROR_SUCCESS) {
+        /* TODO */
+    }
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    vip_connection->http_connection = NULL;
+
+    struct aws_s3_vip *vip = vip_connection->owning_vip;
+    struct aws_s3_client *client = vip->owning_client;
+
+    if (aws_atomic_load_int(&vip->active) == 1) {
+        s_s3_client_open_vip_connection(client, vip_connection);
+    } else {
+        aws_s3_vip_connection_destroy(client, vip_connection);
+    }
 }

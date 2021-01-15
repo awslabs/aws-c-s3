@@ -14,10 +14,8 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
-#include <aws/http/connection_manager.h>
 
 struct aws_http_connection;
-struct aws_http_connection_manager;
 
 typedef void(aws_s3_client_acquire_http_connection_callback)(
     struct aws_http_connection *http_connection,
@@ -44,9 +42,6 @@ struct aws_s3_vip {
     /* S3 Client that owns this vip. */
     struct aws_s3_client *owning_client;
 
-    /* Connection manager shared by all VIP connections. */
-    struct aws_http_connection_manager *http_connection_manager;
-
     /* Address this VIP represents. */
     struct aws_string *host_address;
 
@@ -62,9 +57,6 @@ struct aws_s3_vip {
          * up until this counter is 0.*/
         uint32_t num_vip_connections;
 
-        /* Whether or not the connection manager is allocated. If the connection manager is NULL, but this is true, the
-         * shutdown callback for the connection manager has not yet been called. */
-        uint32_t http_connection_manager_active;
     } synced_data;
 };
 
@@ -103,11 +95,6 @@ struct aws_s3_client_vtable {
     void (*push_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
     void (*remove_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
-    void (*acquire_http_connection)(
-        struct aws_s3_client *client,
-        struct aws_s3_vip_connection *vip_connection,
-        aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
 
     int (*add_vips)(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
 
@@ -261,9 +248,7 @@ void aws_s3_client_stream_response_body(
     struct aws_linked_list *requests);
 
 /* Used to atomically update client state during clean-up and check for finishing shutdown. */
-void aws_s3_client_check_for_shutdown(
-    struct aws_s3_client *client,
-    s3_client_update_synced_data_state_fn *update_fn);
+void aws_s3_client_check_for_shutdown(struct aws_s3_client *client, s3_client_update_synced_data_state_fn *update_fn);
 
 /* Schedule task for processing work. (Calls the corresponding vtable function.) */
 void aws_s3_client_schedule_process_work_synced(struct aws_s3_client *client);
@@ -310,6 +295,12 @@ void aws_s3_client_remove_vips(struct aws_s3_client *client, const struct aws_ar
 
 AWS_S3_API
 void aws_s3_client_remove_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+AWS_S3_API
+void aws_s3_client_open_vip_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+
+AWS_S3_API
+void aws_s3_client_close_vip_connection(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
 AWS_S3_API
 void aws_s3_client_lock_synced_data(struct aws_s3_client *client);

@@ -446,6 +446,7 @@ int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
+
     if (vtable->prepare_request(meta_request, client, vip_connection, !vip_connection->is_retry)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not prepare request %p", (void *)meta_request, (void *)request);

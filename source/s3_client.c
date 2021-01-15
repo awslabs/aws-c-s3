@@ -16,7 +16,6 @@
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/http/connection.h>
-#include <aws/http/connection_manager.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -41,14 +40,8 @@ struct aws_s3_meta_request_work {
     enum aws_s3_meta_request_work_op op;
 };
 
-static const uint32_t s_s3_max_request_count_per_connection = 100;
-
-
 /* TODO Provide analysis on origins of this value. */
 static const double s_throughput_per_vip_gbps = 4.0;
-
-/* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
-static const uint8_t s_max_request_jitter_range = 50;
 
 /* TODO Provide more information on these values. */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
@@ -72,18 +65,6 @@ static void s_s3_client_schedule_meta_request_work(
     enum aws_s3_meta_request_work_op op);
 
 static void s_s3_client_process_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
-
-/* Handles acquiring an HTTP connection for the caller, given the vip_connection reference.  (Calls the corresponding
- * virtual function to do so.) */
-static void s_s3_client_acquire_http_connection(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
-
-/* Callback which handles the HTTP connection retrieved by acquire_http_connection. */
-static void s_s3_client_on_acquire_http_connection(
-    struct aws_http_connection *http_connection,
-    int error_code,
-    void *user_data);
 
 /* Default implementation for scheduling processing of work. */
 static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_client *client);
@@ -111,17 +92,10 @@ static void s_s3_client_remove_meta_request_default(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request);
 
-/* Default remove-meta-request function to be used in the client vtable. */
-static void s_s3_client_acquire_http_connection_default(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
-
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory_default,
     .push_meta_request = s_s3_client_push_meta_request_default,
     .remove_meta_request = s_s3_client_remove_meta_request_default,
-    .acquire_http_connection = s_s3_client_acquire_http_connection_default,
     .add_vips = aws_s3_client_add_vips_default,
     .remove_vips = aws_s3_client_remove_vips_default,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
@@ -374,9 +348,7 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_s3_client_unlock_synced_data(client);
 }
 
-void aws_s3_client_check_for_shutdown(
-    struct aws_s3_client *client,
-    s3_client_update_synced_data_state_fn *update_fn) {
+void aws_s3_client_check_for_shutdown(struct aws_s3_client *client, s3_client_update_synced_data_state_fn *update_fn) {
     (void)client;
 
     bool finish_destroy = false;
@@ -933,6 +905,8 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections_updates);
         struct aws_s3_vip_connection *vip_connection = AWS_CONTAINER_OF(node, struct aws_s3_vip_connection, node);
 
+        /*
+        TODO
         size_t owning_vip_active = aws_atomic_load_int(&vip_connection->owning_vip->active);
 
         if (!owning_vip_active &&
@@ -942,6 +916,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             aws_s3_vip_connection_destroy(client, vip_connection);
             continue;
         }
+        */
 
         AWS_ASSERT(vip_connection->request == NULL);
 
@@ -1095,7 +1070,13 @@ static void s_s3_client_acquired_retry_token(
 
     vip_connection->retry_token = token;
 
+    /* 
+    TODO
     s_s3_client_acquire_http_connection(client, vip_connection);
+    */
+
+    /* TODO */
+    // aws_s3_meta_request_make_request(meta_request, client, vip_connection);
 
     return;
 
@@ -1103,154 +1084,6 @@ error_clean_up:
 
     aws_s3_client_notify_connection_finished(
         client, vip_connection, error_code, AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED);
-}
-
-static void s_s3_client_acquire_http_connection(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
-
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(client->vtable);
-    AWS_PRECONDITION(client->vtable->acquire_http_connection);
-
-    client->vtable->acquire_http_connection(client, vip_connection, s_s3_client_on_acquire_http_connection);
-}
-
-/* Handles getting an HTTP connection for the caller, given the vip_connection reference. */
-static void s_s3_client_acquire_http_connection_default(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(vip_connection);
-
-    struct aws_http_connection **http_connection = &vip_connection->http_connection;
-    uint32_t *connection_request_count = &vip_connection->request_count;
-
-    struct aws_http_connection_manager *http_connection_manager = vip_connection->owning_vip->http_connection_manager;
-
-    /* If we have a cached connection, see if we still want to use it. */
-    if (*http_connection != NULL) {
-
-        /* If we're at the max request count, set us up to get a new connection.  Also close the original connection
-         * so that the connection manager doesn't reuse it.*/
-        /* TODO maybe find a more visible way of preventing the
-         * connection from going back into the pool. */
-        if (*connection_request_count >= vip_connection->max_request_count) {
-            aws_http_connection_close(*http_connection);
-
-            /* TODO handle possible error here? */
-            aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
-
-            *http_connection = NULL;
-            *connection_request_count = 0;
-
-            AWS_LOGF_INFO(
-                AWS_LS_S3_CLIENT, "id=%p VIP Connection %p hit request limit.", (void *)client, (void *)vip_connection);
-
-        } else if (!aws_http_connection_is_open(*http_connection)) {
-            AWS_LOGF_INFO(
-                AWS_LS_S3_CLIENT,
-                "id=%p VIP Connection %p being released because it is not open.",
-                (void *)client,
-                (void *)vip_connection);
-
-            /* If our connection is closed for some reason, also get rid of it.*/
-            aws_http_connection_manager_release_connection(http_connection_manager, *http_connection);
-
-            *http_connection = NULL;
-            *connection_request_count = 0;
-        }
-    }
-
-    if (*http_connection != NULL) {
-        on_connection_acquired_callback(*http_connection, AWS_ERROR_SUCCESS, vip_connection);
-    } else {
-        aws_http_connection_manager_acquire_connection(
-            http_connection_manager, on_connection_acquired_callback, vip_connection);
-    }
-}
-
-static void s_s3_client_on_acquire_http_connection(
-    struct aws_http_connection *incoming_http_connection,
-    int error_code,
-    void *user_data) {
-
-    struct aws_s3_vip_connection *vip_connection = user_data;
-    AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->owning_vip);
-
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
-    AWS_PRECONDITION(client);
-
-    struct aws_s3_request *request = vip_connection->request;
-    AWS_PRECONDITION(request);
-
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
-    if (error_code != AWS_ERROR_SUCCESS) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_VIP_CONNECTION,
-            "id=%p: Could not acquire connection due to error code %d (%s)",
-            (void *)vip_connection,
-            error_code,
-            aws_error_str(error_code));
-
-        goto error_clean_up;
-    }
-
-    struct aws_http_connection_manager *http_connection_manager = vip_connection->owning_vip->http_connection_manager;
-    AWS_ASSERT(http_connection_manager);
-
-    struct aws_http_connection **current_http_connection = &vip_connection->http_connection;
-
-    /* If our cached connection is not equal to the one we just received, switch to the received one. */
-    if (*current_http_connection != incoming_http_connection) {
-
-        if (*current_http_connection != NULL) {
-            aws_http_connection_manager_release_connection(http_connection_manager, *current_http_connection);
-            *current_http_connection = NULL;
-        }
-
-        AWS_ASSERT(s_s3_max_request_count_per_connection > s_max_request_jitter_range);
-
-        uint8_t jitter_value = 0;
-        if (aws_device_random_u8(&jitter_value)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
-        }
-
-        jitter_value %= s_max_request_jitter_range;
-
-        *current_http_connection = incoming_http_connection;
-        vip_connection->request_count = 0;
-        vip_connection->max_request_count = s_s3_max_request_count_per_connection - (uint32_t)jitter_value;
-
-        AWS_LOGF_INFO(
-            AWS_LS_S3_CLIENT,
-            "id=%p Incoming connection has changed on VIP Connection %p.  Resetting local request count.",
-            (void *)client,
-            (void *)vip_connection);
-    } else {
-        ++vip_connection->request_count;
-
-        AWS_LOGF_INFO(
-            AWS_LS_S3_CLIENT,
-            "id=%p Incoming connection has NOT changed on VIP Connection %p.  Increasing local request count. %d",
-            (void *)client,
-            (void *)vip_connection,
-            vip_connection->request_count);
-    }
-
-    aws_s3_meta_request_make_request(meta_request, client, vip_connection);
-
-    return;
-
-error_clean_up:
-
-    aws_s3_client_notify_connection_finished(
-        client, vip_connection, error_code, AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY);
 }
 
 /* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
@@ -1357,18 +1190,41 @@ reset_vip_connection:
 
         if (vip_connection->http_connection != NULL) {
             aws_http_connection_close(vip_connection->http_connection);
+            ++vip_connection->request_count;
         }
     }
 
     /* Get rid of the attached request. */
     aws_s3_request_release(vip_connection->request);
     vip_connection->request = NULL;
+    ++vip_connection->request_count;
 
-    /* Throw this VIP Connection structure back into the update list. */
-    aws_s3_client_lock_synced_data(client);
-    aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
-    aws_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+    if (vip_connection->http_connection == NULL) {
+
+        aws_s3_client_close_vip_connection(client, vip_connection);
+
+    } else if (vip_connection->request_count >= vip_connection->max_request_count) {
+
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT, "id=%p VIP Connection %p hit request limit.", (void *)client, (void *)vip_connection);
+
+        aws_s3_client_close_vip_connection(client, vip_connection);
+
+    } else if (!aws_http_connection_is_open(vip_connection->http_connection)) {
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p VIP Connection %p being released because it is not open.",
+            (void *)client,
+            (void *)vip_connection);
+
+        aws_s3_client_close_vip_connection(client, vip_connection);
+    } else {
+        /* Throw this VIP Connection structure back into the update list. */
+        aws_s3_client_lock_synced_data(client);
+        aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
+        aws_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
 }
 
 static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_code, void *user_data) {
