@@ -1763,7 +1763,7 @@ static void s_s3_client_on_acquire_http_connection(
         s_s3_client_conn_opened(client);
 
         uint32_t max_request_count =
-            10 + aws_atomic_fetch_add(&client->jitter, 37) % s_s3_max_request_count_per_connection;
+            10 + aws_atomic_fetch_add(&client->jitter, 37) % (s_s3_max_request_count_per_connection - 10);
 
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
