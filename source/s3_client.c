@@ -41,23 +41,31 @@ struct aws_s3_meta_request_work {
     enum aws_s3_meta_request_work_op op;
 };
 
+/* This is an S3 service limit */
 static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
 
-/* TODO Provide analysis on origins of this value. */
+/* Observed eyeball average of throughput per connection */
 static const double s_throughput_per_vip_gbps = 5.0;
+/* Number of connections to open to a given VIP at a time */
 static const uint32_t s_num_connections_per_vip = 10;
+/* Max number of connections to open, avg per second */
 static const uint32_t s_max_conns_to_open_a_second = 24;
 
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
-/* TODO Provide more information on these values. */
+/* Part sizes are most efficient within the service with boundaries divisible by 8/16 */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
 static const size_t s_default_max_part_size = 32 * 1024 * 1024;
+/* this is the minimum bandwidth available to performant EC2 instances
+ * because this number affects how much memory is allocated, we don't want
+ * the default too high
+ */
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 
+/* S3 allows us using a vended VIP for up to 5 minutes */
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
