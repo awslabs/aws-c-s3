@@ -349,6 +349,7 @@ static int s_s3_auto_ranged_put_next_request(
                 if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
                     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
                     aws_s3_request_release(request);
+                    request = NULL;
                     result = AWS_OP_ERR;
                     goto after_unlock;
                 }
