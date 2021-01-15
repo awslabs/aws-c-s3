@@ -204,12 +204,20 @@ static void s_s3_auto_ranged_put_finish(
     AWS_PRECONDITION(auto_ranged_put);
 
     bool not_active = false;
-    bool cancelling = false;
+    bool canceling = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
     if (meta_request->synced_data.state != AWS_S3_META_REQUEST_STATE_ACTIVE) {
         not_active = true;
+
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Request is not active anymore, finish call with error %d (%s) will be ignored.",
+            (void *)&auto_ranged_put->base,
+            options->error_code,
+            aws_error_str(options->error_code));
+
         goto unlock;
     }
 
@@ -218,7 +226,7 @@ static void s_s3_auto_ranged_put_finish(
         goto unlock;
     }
 
-    /* If the complete message has already been sent, then cancelling is not possible. */
+    /* If the complete message has already been sent, then canceling is not possible. */
     if (auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE) {
         goto unlock;
     }
@@ -228,7 +236,13 @@ static void s_s3_auto_ranged_put_finish(
     AWS_ASSERT(auto_ranged_put->synced_data.cached_finish_options == NULL);
     auto_ranged_put->synced_data.cached_finish_options = s_copy_finish_options(meta_request->allocator, options);
 
-    cancelling = true;
+    canceling = true;
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Canceling multipart put request due to error %d (%s), abort request will be sent.",
+        (void *)&auto_ranged_put->base,
+        options->error_code,
+        aws_error_str(options->error_code));
 
 unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -238,8 +252,8 @@ unlock:
         return;
     }
 
-    /* If cancelling, we may have an abort message to send, so re-push the meta request to the client for processing. */
-    if (cancelling) {
+    /* If canceling, we may have an abort message to send, so re-push the meta request to the client for processing. */
+    if (canceling) {
         aws_s3_meta_request_push_to_client(meta_request);
     } else {
         aws_s3_meta_request_finish_default(meta_request, options);
@@ -794,7 +808,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
         bool notify_work_available = false;
 
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-        bool cancelling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELING;
+        bool canceling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELING;
 
         /* TODO This part is confusing/unclear and should be slightly refactored. This function can get called on
          * success OR failure of the request.  This really only works because we're currently assuming that the meta
@@ -803,7 +817,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
          * now.*/
         ++auto_ranged_put->synced_data.num_parts_completed;
 
-        if (cancelling) {
+        if (canceling) {
             /* Request is canceling, if all sent parts completed, we can send abort now */
             if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
                 auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE;
