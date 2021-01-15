@@ -265,7 +265,8 @@ static void s_s3_meta_request_default_notify_request_destroyed(
     AWS_PRECONDITION(meta_request_default);
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-    bool finish = request->request_was_sent && meta_request_default->synced_data.state == AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
+    bool finish = request->request_was_sent &&
+                  meta_request_default->synced_data.state == AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (finish) {
