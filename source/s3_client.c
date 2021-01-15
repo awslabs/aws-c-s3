@@ -45,9 +45,9 @@ static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 4.0;
+static const double s_throughput_per_vip_gbps = 5.0;
 static const uint32_t s_num_connections_per_vip = 10;
-static const uint32_t s_max_conns_to_open_a_second = 15;
+static const uint32_t s_max_conns_to_open_a_second = 32;
 
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
@@ -1763,11 +1763,7 @@ static void s_s3_client_on_acquire_http_connection(
         s_s3_client_conn_opened(client);
 
         uint32_t max_request_count =
-            10 + (aws_atomic_fetch_add(&client->jitter, 37) + 37) % s_s3_max_request_count_per_connection;
-
-        if (max_request_count < 10) {
-            max_request_count = 10;
-        }
+            10 + aws_atomic_fetch_add(&client->jitter, 37) % s_s3_max_request_count_per_connection;
 
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
