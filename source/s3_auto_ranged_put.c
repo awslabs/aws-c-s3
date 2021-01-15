@@ -763,7 +763,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
         if (cancelling) {
             /* Request is canceling, if all sent parts completed, we can send abort now */
             if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
-                auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE;
+                auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
                 notify_work_available = true;
             }
         } else if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.total_num_parts) {
