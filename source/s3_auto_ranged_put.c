@@ -351,7 +351,6 @@ static int s_s3_auto_ranged_put_next_request(
                 request->part_number = auto_ranged_put->threaded_next_request_data.next_part_number;
 
                 ++auto_ranged_put->threaded_next_request_data.next_part_number;
-                ++auto_ranged_put->synced_data.num_parts_sent;
             }
 
             break;
@@ -402,13 +401,17 @@ static int s_s3_auto_ranged_put_next_request(
         return AWS_OP_SUCCESS;
     }
 
-    if (request != NULL) {
+    if (request != NULL && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 
-        if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
-            aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+        if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
             aws_s3_request_release(request);
             return AWS_OP_ERR;
         }
+
+        /* Now we know that we're going to return request, increment our counter that it has been sent.*/
+        s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+        ++auto_ranged_put->synced_data.num_parts_sent;
+        s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
@@ -741,6 +744,8 @@ static int s_s3_auto_ranged_put_stream_complete(
     return AWS_OP_SUCCESS;
 }
 
+/* TODO: make this callback into a notify_request_finished function, and move all stream complete logic (which currently
+ * only happens on success) into here. */
 static void s_s3_auto_ranged_put_notify_request_destroyed(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
@@ -751,8 +756,16 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
+    if (!request->request_was_sent) {
+        return;
+    }
+
     if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
 
+        /* Any time an create multipart upload request has finished, be it success or failure, advance to the sending
+         * parts state, which will immediately cancel if there has been failure with the create. */
+        /* TODO branch on the success/failure of the request here and go to a different state that makes this logic more
+         * clear.*/
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
         auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS;
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
@@ -766,6 +779,11 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
         bool cancelling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELING;
 
+        /* TODO This part is confusing/unclear and should be slightly refactored. This function can get called on
+         * success OR failure of the request.  This really only works because we're currently assuming that the meta
+         * request will fail entirely when a request completely fails (initiating a cancel), and that that logic will
+         * happen before this function is called.  All of that is client detail, which makes this a bit hacky right
+         * now.*/
         ++auto_ranged_put->synced_data.num_parts_completed;
 
         if (cancelling) {
