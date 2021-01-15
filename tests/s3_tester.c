@@ -914,6 +914,7 @@ int aws_s3_tester_send_meta_request_with_options(
     AWS_ZERO_STRUCT(input_stream_buffer);
 
     struct aws_input_stream *input_stream = NULL;
+    FILE *invalid_file = fopen("./", "r");
 
     if (meta_request_options.message == NULL) {
         struct aws_string *host_name =
@@ -948,7 +949,7 @@ int aws_s3_tester_send_meta_request_with_options(
             aws_s3_create_test_buffer(allocator, object_size_bytes, &input_stream_buffer);
 
             struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffer);
-            FILE *invalid_file = fopen("./", "r");
+
             if (options->put_options.invalid_input_stream) {
                 input_stream = aws_input_stream_new_from_open_file(allocator, invalid_file);
             } else {
@@ -1078,6 +1079,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     aws_input_stream_destroy(input_stream);
     input_stream = NULL;
+    fclose(invalid_file);
 
     aws_byte_buf_clean_up(&input_stream_buffer);
 
