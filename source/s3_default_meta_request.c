@@ -160,20 +160,12 @@ static int s_s3_meta_request_default_next_request(
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     struct aws_s3_request *request = NULL;
-
-    bool create_request = false;
+    int result = AWS_OP_SUCCESS;
 
     s_s3_meta_request_default_lock_synced_data(meta_request_default);
 
     /* We only have one request to potentially create, which is for the original message as-is. */
     if (meta_request_default->synced_data.state == AWS_S3_META_REQUEST_DEFAULT_STATE_START) {
-        create_request = true;
-        meta_request_default->synced_data.state = AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
-    }
-
-    s_s3_meta_request_default_unlock_synced_data(meta_request_default);
-
-    if (create_request) {
         uint32_t request_flags = AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS;
 
         if (meta_request_default->is_get_request) {
@@ -186,15 +178,31 @@ static int s_s3_meta_request_default_next_request(
 
         if (meta_request_default->content_length > 0) {
             aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
+
+            if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+                result = AWS_OP_ERR;
+                goto unlock;
+            }
         }
+
+        meta_request_default->synced_data.state = AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
     }
 
-    *out_request = request;
+unlock:
+    s_s3_meta_request_default_unlock_synced_data(meta_request_default);
 
-    return AWS_OP_SUCCESS;
+    if (result == AWS_OP_SUCCESS) {
+        *out_request = request;
+    } else {
+        aws_s3_request_release(request);
+        request = NULL;
+        *out_request = NULL;
+    }
+
+    return result;
 }
 
 /* Given a request, prepare it for sending based on its description. */
@@ -207,21 +215,13 @@ static int s_s3_meta_request_default_prepare_request(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
     (void)client;
+    (void)is_initial_prepare;
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
-    AWS_PRECONDITION(meta_request_default);
-
     struct aws_http_message *message = aws_s3_message_util_copy_http_message(
         meta_request->allocator, meta_request->initial_request_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
-
-    if (is_initial_prepare && meta_request_default->content_length > 0) {
-        if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-            goto read_body_failed;
-        }
-    }
 
     aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
 
@@ -233,10 +233,6 @@ static int s_s3_meta_request_default_prepare_request(
         AWS_LS_S3_META_REQUEST, "id=%p: Meta Request prepared request %p", (void *)meta_request, (void *)request);
 
     return AWS_OP_SUCCESS;
-
-read_body_failed:
-    aws_http_message_release(message);
-    return AWS_OP_ERR;
 }
 
 static int s_s3_meta_request_default_header_block_done(
@@ -275,5 +271,14 @@ static void s_s3_meta_request_default_notify_request_destroyed(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
 
-    aws_s3_meta_request_finish(meta_request, NULL, request->send_data.response_status, AWS_ERROR_SUCCESS);
+    struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
+    AWS_PRECONDITION(meta_request_default);
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    bool finish = meta_request_default->synced_data.state == AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    if (finish) {
+        aws_s3_meta_request_finish(meta_request, NULL, request->send_data.response_status, AWS_ERROR_SUCCESS);
+    }
 }

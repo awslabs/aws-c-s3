@@ -345,12 +345,13 @@ static int s_s3_auto_ranged_put_next_request(
                 aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
                 request->part_number = auto_ranged_put->threaded_next_request_data.next_part_number;
                 ++auto_ranged_put->threaded_next_request_data.next_part_number;
-
+                ++auto_ranged_put->synced_data.num_parts_sent;
                 if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+                    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
                     aws_s3_request_release(request);
+                    request = NULL;
                     result = AWS_OP_ERR;
-                } else {
-                    ++auto_ranged_put->synced_data.num_parts_sent;
+                    goto after_unlock;
                 }
             }
 
@@ -399,14 +400,14 @@ static int s_s3_auto_ranged_put_next_request(
 
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
+after_unlock:
     if (request != NULL) {
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Returning request %p for part %d of %d",
+            "id=%p: Returning request %p for part %d",
             (void *)meta_request,
             (void *)request,
-            request->part_number,
-            auto_ranged_put->synced_data.total_num_parts);
+            request->part_number);
     }
 
     *out_request = request;
@@ -770,14 +771,14 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
             notify_work_available = true;
         }
 
-        s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: %d out of %d parts have completed.",
             (void *)meta_request,
             auto_ranged_put->synced_data.num_parts_completed,
             auto_ranged_put->synced_data.total_num_parts);
+
+        s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         if (notify_work_available) {
             aws_s3_meta_request_push_to_client(meta_request);

@@ -1267,6 +1267,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
     aws_linked_list_swap_contents(&vip_connections_updates, &client->synced_data.pending_vip_connection_updates);
 
+    /* TODO aws_sub_u32_checked */
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
 
@@ -1401,6 +1402,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             /* At this point, the vip connection owns the only existing ref count to the request.*/
             vip_connection->request = request;
             vip_connection->is_retry = false;
+            request->client_data.in_flight = true;
             ++client->threaded_data.num_requests_in_flight;
             s_s3_client_process_request(client, vip_connection);
         }
@@ -1833,11 +1835,16 @@ error_clean_up:
 }
 
 /* Called by aws_s3_request when it has finished being destroyed */
-void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client) {
-    aws_s3_client_lock_synced_data(client);
-    ++client->synced_data.pending_request_count;
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(request);
+
+    if (request->client_data.in_flight) {
+        aws_s3_client_lock_synced_data(client);
+        ++client->synced_data.pending_request_count;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
 }
 
 struct s3_streaming_body_payload {

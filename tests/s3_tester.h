@@ -130,6 +130,9 @@ struct aws_s3_tester_meta_request_options {
     /* Optional. If NULL, a client will be created. */
     struct aws_s3_client *client;
 
+    /* Optional. Bucket for this request. If NULL, g_test_bucket_name will be used. */
+    struct aws_byte_cursor *bucket_name;
+
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
 
@@ -150,7 +153,10 @@ struct aws_s3_tester_meta_request_options {
     struct {
         uint32_t object_size_mb;
         bool ensure_multipart;
-        bool invalid;
+        bool invalid_request;
+        bool invalid_input_stream;
+        /* manually overwrite the content length for some invalid input stream */
+        size_t content_length;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
@@ -338,6 +344,8 @@ int aws_s3_meta_request_prepare_request_empty(
     struct aws_s3_vip_connection *vip_connection,
     bool is_initial_prepare);
 /****************************************/
+
+struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 

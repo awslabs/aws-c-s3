@@ -108,6 +108,10 @@ struct aws_s3_request {
         int response_status;
 
     } send_data;
+
+    struct {
+        bool in_flight;
+    } client_data;
 };
 
 /* Options for finishing the meta request. */
