@@ -1426,6 +1426,69 @@ static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocat
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_different_endpoints, s_test_s3_different_endpoints)
+static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options;
+
+    AWS_ZERO_STRUCT(client_options);
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    {
+        struct aws_s3_meta_request_test_results meta_request_test_results;
+        AWS_ZERO_STRUCT(meta_request_test_results);
+
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .get_options =
+                {
+                    .object_path = g_s3_path_get_object_test_1MB,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    }
+
+    {
+        struct aws_s3_meta_request_test_results meta_request_test_results;
+        AWS_ZERO_STRUCT(meta_request_test_results);
+
+        struct aws_byte_cursor bucket_without_file = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff");
+
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+            .bucket_name = &bucket_without_file,
+            .get_options =
+                {
+                    .object_path = g_s3_path_get_object_test_1MB,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+        ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_INVALID_ARGUMENT);
+
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    }
+
+    aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_object_clamp_part_size, s_test_s3_put_object_clamp_part_size)
 static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
