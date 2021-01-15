@@ -1,7 +1,6 @@
 ## AWS C S3
 
-C99 library implementation of AWS client-side S3 support.
-
+C99 library implementation for communicating with the S3 service, designed for maximizing throughput on high bandwidth EC2 instances.
 
 ## License
 
