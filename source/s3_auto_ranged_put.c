@@ -401,9 +401,8 @@ static int s_s3_auto_ranged_put_next_request(
 
         if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
             aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-
             aws_s3_request_release(request);
-            goto error_result;
+            return AWS_OP_ERR;
         }
 
         AWS_LOGF_DEBUG(
@@ -416,9 +415,6 @@ static int s_s3_auto_ranged_put_next_request(
 
     *out_request = request;
     return AWS_OP_SUCCESS;
-
-error_result:
-    return AWS_OP_ERR;
 }
 
 /* Given a request, prepare it for sending based on its description. */
