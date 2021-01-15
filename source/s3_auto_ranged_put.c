@@ -421,7 +421,7 @@ static int s_s3_auto_ranged_put_next_request(
 
         if (no_longer_active) {
             aws_s3_request_release(request);
-            return AWS_OP_ERR;
+            return AWS_OP_SUCCESS;
         }
 
         AWS_LOGF_DEBUG(
