@@ -251,7 +251,7 @@ void aws_s3_client_notify_connection_finished(
     int error_code,
     enum aws_s3_vip_connection_finish_code finish_code);
 
-void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client);
+void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request);
 
 void aws_s3_client_stream_response_body(
     struct aws_s3_client *client,

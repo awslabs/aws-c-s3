@@ -381,7 +381,7 @@ static void s_s3_request_destroy(void *user_data) {
         struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
 
         if (client != NULL) {
-            aws_s3_client_notify_request_destroyed(client);
+            aws_s3_client_notify_request_destroyed(client, request);
             aws_s3_client_release(client);
             client = NULL;
         }
