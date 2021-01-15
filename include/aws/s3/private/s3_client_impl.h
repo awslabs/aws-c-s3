@@ -170,6 +170,8 @@ struct aws_s3_client {
 
     struct aws_atomic_var num_unexpected_close;
 
+    struct aws_atomic_var jitter;
+
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
