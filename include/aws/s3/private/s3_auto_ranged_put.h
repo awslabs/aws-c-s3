@@ -48,6 +48,9 @@ struct aws_s3_auto_ranged_put {
 
         struct aws_http_headers *needed_response_headers;
         struct aws_s3_meta_request_finish_options *cached_finish_options;
+
+        bool create_multipart_upload_successful;
+        
     } synced_data;
 };
 

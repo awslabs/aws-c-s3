@@ -321,20 +321,17 @@ static int s_s3_auto_ranged_put_next_request(
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
 
             if (canceling) {
+                if (!auto_ranged_put->synced_data.create_multipart_upload_successful) {
+                    finish_canceling = true;
+                } else if (
+                    auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
 
-                if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
-
-                    if (auto_ranged_put->upload_id == NULL) {
-                        finish_canceling = true;
-                    } else {
-                        request = aws_s3_request_new(
-                            meta_request,
-                            AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
-                            0,
-                            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-                        auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
-                    }
-
+                    request = aws_s3_request_new(
+                        meta_request,
+                        AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
+                        0,
+                        AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                    auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
                 } else {
                     auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
                 }
@@ -676,6 +673,9 @@ static int s_s3_auto_ranged_put_stream_complete(
 
             /* Store the multipart upload id and set that we are ready for sending parts. */
             auto_ranged_put->upload_id = upload_id;
+            s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+            auto_ranged_put->synced_data.create_multipart_upload_successful = true;
+            s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
