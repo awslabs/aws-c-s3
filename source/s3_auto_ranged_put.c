@@ -316,11 +316,6 @@ static int s_s3_auto_ranged_put_next_request(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE: {
-
-            /* If we are canceling, and we're just waiting for the create to finish, jump straight to finishing the
-             * cancel. */
-            finish_canceling = canceling;
-
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
@@ -328,12 +323,18 @@ static int s_s3_auto_ranged_put_next_request(
             if (canceling) {
 
                 if (auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.num_parts_sent) {
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
-                        0,
-                        AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-                    auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+
+                    if (auto_ranged_put->upload_id == NULL) {
+                        finish_canceling = true;
+                    } else {
+                        request = aws_s3_request_new(
+                            meta_request,
+                            AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
+                            0,
+                            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                        auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL;
+                    }
+
                 } else {
                     auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
                 }
@@ -672,13 +673,6 @@ static int s_s3_auto_ranged_put_stream_complete(
 
             /* Store the multipart upload id and set that we are ready for sending parts. */
             auto_ranged_put->upload_id = upload_id;
-
-            s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-            auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS;
-            s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-
-            /* Create Multipart Upload finished successfully, so now we should have parts to send. */
-            aws_s3_meta_request_push_to_client(meta_request);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
@@ -757,7 +751,15 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
+
+        s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
+        auto_ranged_put->synced_data.state = AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS;
+        s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+        aws_s3_meta_request_push_to_client(meta_request);
+
+    } else if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
 
         bool notify_work_available = false;
 
