@@ -384,9 +384,6 @@ static int s_s3_auto_ranged_put_next_request(
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE: {
             break;
         }
-        case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_SINGLE_REQUEST: {
-            break;
-        }
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CANCEL:
             break;
 
