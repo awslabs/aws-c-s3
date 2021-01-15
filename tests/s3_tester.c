@@ -919,9 +919,9 @@ int aws_s3_tester_send_meta_request_with_options(
     FILE *invalid_file = NULL;
 
 #ifdef _WIN32
-    fopen_s(&invalid_file, "./file_doesnt_exist", "r");
+    fopen_s(&invalid_file, "./", "r");
 #else
-    invalid_file = fopen("./file_doesnt_exist", "r");
+    invalid_file = fopen("./", "r");
 #endif
 
     if (meta_request_options.message == NULL) {
