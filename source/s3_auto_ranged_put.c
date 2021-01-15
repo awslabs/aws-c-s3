@@ -770,14 +770,14 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
             notify_work_available = true;
         }
 
-        s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: %d out of %d parts have completed.",
             (void *)meta_request,
             auto_ranged_put->synced_data.num_parts_completed,
             auto_ranged_put->synced_data.total_num_parts);
+
+        s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
         if (notify_work_available) {
             aws_s3_meta_request_push_to_client(meta_request);
