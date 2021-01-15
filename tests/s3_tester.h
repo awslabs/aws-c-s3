@@ -345,6 +345,8 @@ int aws_s3_meta_request_prepare_request_empty(
     bool is_initial_prepare);
 /****************************************/
 
+struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
+
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 
 extern const struct aws_byte_cursor g_test_body_content_type;

@@ -1198,7 +1198,7 @@ static int s_test_s3_put_object_fail_headers_callback(struct aws_allocator *allo
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -1224,7 +1224,7 @@ static int s_test_s3_put_object_fail_body_callback(struct aws_allocator *allocat
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL));
 
     return 0;
 }
@@ -1247,7 +1247,7 @@ static int s_test_s3_get_object_fail_headers_callback(struct aws_allocator *allo
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -1273,7 +1273,7 @@ static int s_test_s3_get_object_fail_body_callback(struct aws_allocator *allocat
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -1303,7 +1303,7 @@ static int s_test_s3_default_fail_headers_callback(struct aws_allocator *allocat
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -1333,7 +1333,7 @@ static int s_test_s3_default_fail_body_callback(struct aws_allocator *allocator,
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -1359,7 +1359,7 @@ static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *alloc
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
     ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -1388,9 +1388,8 @@ static int s_test_s3_put_single_part_fail_object_inputstream_fail_reading(struct
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
 
-    /* TODO: The invalid input will trigger retry. But the error code should still be the one from input stream */
     ASSERT_TRUE(meta_request_test_results.finished_error_code != AWS_ERROR_SUCCESS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -1417,7 +1416,7 @@ static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocat
             },
     };
 
-    aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
 
     ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_IO_STREAM_READ_FAILED);
 
