@@ -220,9 +220,6 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
-    AWS_PRECONDITION(meta_request_default);
-
     struct aws_http_message *message = aws_s3_message_util_copy_http_message(
         meta_request->allocator, meta_request->initial_request_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
 
