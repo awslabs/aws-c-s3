@@ -406,10 +406,23 @@ static int s_s3_auto_ranged_put_next_request(
             return AWS_OP_ERR;
         }
 
+        bool no_longer_active = false;
+
         /* Now we know that we're going to return the request, increment our counter that it has been sent.*/
+        /* TODO having to do this active state check here is awkward. Basically, we need to cover the case that failure
+         * happened in between reading the request and needing to increment the synced_data.num_parts_sent variable. */
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
-        ++auto_ranged_put->synced_data.num_parts_sent;
+        if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE) {
+            ++auto_ranged_put->synced_data.num_parts_sent;
+        } else {
+            no_longer_active = true;
+        }
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+
+        if (no_longer_active) {
+            aws_s3_request_release(request);
+            return AWS_OP_ERR;
+        }
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
