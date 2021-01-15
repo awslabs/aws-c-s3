@@ -914,7 +914,13 @@ int aws_s3_tester_send_meta_request_with_options(
     AWS_ZERO_STRUCT(input_stream_buffer);
 
     struct aws_input_stream *input_stream = NULL;
-    FILE *invalid_file = fopen("./", "r");
+    FILE *invalid_file = NULL;
+
+#ifdef _WIN32
+    fopen_s(&invalid_file, "./", "r");
+#else
+    invalid_file = fopen("./", "r");
+#endif
 
     if (meta_request_options.message == NULL) {
         struct aws_string *host_name =
