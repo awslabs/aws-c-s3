@@ -299,7 +299,8 @@ static int s_s3_auto_ranged_put_next_request(
         case AWS_S3_AUTO_RANGED_PUT_STATE_START: {
 
             if (canceling) {
-                /* If we are canceling, then at this point, we haven't sent anything yet, so go ahead and cancel. */
+                /* If we are canceling, then at this point, we haven't sent anything yet, so go ahead and finish
+                 * canceling. */
                 finish_canceling = true;
             } else {
                 /* Setup for a create-multipart upload */
@@ -405,7 +406,7 @@ static int s_s3_auto_ranged_put_next_request(
             return AWS_OP_ERR;
         }
 
-        /* Now we know that we're going to return request, increment our counter that it has been sent.*/
+        /* Now we know that we're going to return the request, increment our counter that it has been sent.*/
         s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
         ++auto_ranged_put->synced_data.num_parts_sent;
         s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
@@ -673,6 +674,9 @@ static int s_s3_auto_ranged_put_stream_complete(
 
             /* Store the multipart upload id and set that we are ready for sending parts. */
             auto_ranged_put->upload_id = upload_id;
+
+            /* Record success of the create multipart upload. Wait until the request cleans up entirely for advancing
+             * the state. */
             s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
             auto_ranged_put->synced_data.create_multipart_upload_successful = true;
             s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
@@ -762,7 +766,7 @@ static void s_s3_auto_ranged_put_notify_request_destroyed(
 
     if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
 
-        /* Any time an create multipart upload request has finished, be it success or failure, advance to the sending
+        /* Any time a create multipart upload request has finished, be it success or failure, advance to the sending
          * parts state, which will immediately cancel if there has been failure with the create. */
         /* TODO branch on the success/failure of the request here and go to a different state that makes this logic more
          * clear.*/
