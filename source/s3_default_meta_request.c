@@ -160,7 +160,6 @@ static int s_s3_meta_request_default_next_request(
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     struct aws_s3_request *request = NULL;
-    int result = AWS_OP_SUCCESS;
 
     s_s3_meta_request_default_lock_synced_data(meta_request_default);
 
@@ -173,36 +172,27 @@ static int s_s3_meta_request_default_next_request(
         }
 
         const uint32_t part_number = 1;
-
         request = aws_s3_request_new(meta_request, 0, part_number, request_flags);
-
-        if (meta_request_default->content_length > 0) {
-            aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
-
-            if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-                result = AWS_OP_ERR;
-                goto unlock;
-            }
-        }
-
         meta_request_default->synced_data.state = AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
     }
 
-unlock:
     s_s3_meta_request_default_unlock_synced_data(meta_request_default);
 
-    if (result == AWS_OP_SUCCESS) {
-        *out_request = request;
-    } else {
-        aws_s3_request_release(request);
-        request = NULL;
-        *out_request = NULL;
+    if (meta_request_default->content_length > 0) {
+        aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
+
+        if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+            aws_s3_request_release(request);
+            request = NULL;
+            return AWS_OP_ERR;
+        }
     }
 
-    return result;
+    *out_request = request;
+    return AWS_OP_SUCCESS;
 }
 
 /* Given a request, prepare it for sending based on its description. */

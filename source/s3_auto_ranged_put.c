@@ -290,8 +290,6 @@ static int s_s3_auto_ranged_put_next_request(
     struct aws_s3_request *request = NULL;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    int result = AWS_OP_SUCCESS;
-
     s_s3_auto_ranged_put_lock_synced_data(auto_ranged_put);
     bool cancelling = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_CANCELING;
 
@@ -300,9 +298,8 @@ static int s_s3_auto_ranged_put_next_request(
 
             if (cancelling) {
                 s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-
                 s_s3_auto_ranged_put_cancel_finished(meta_request);
-                return result;
+                return AWS_OP_SUCCESS;
             }
 
             /* Setup for a create-multipart upload */
@@ -317,6 +314,12 @@ static int s_s3_auto_ranged_put_next_request(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_CREATE: {
+            if (cancelling) {
+                s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
+                s_s3_auto_ranged_put_cancel_finished(meta_request);
+                return AWS_OP_SUCCESS;
+            }
+
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS: {
@@ -344,15 +347,9 @@ static int s_s3_auto_ranged_put_next_request(
 
                 aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
                 request->part_number = auto_ranged_put->threaded_next_request_data.next_part_number;
+
                 ++auto_ranged_put->threaded_next_request_data.next_part_number;
                 ++auto_ranged_put->synced_data.num_parts_sent;
-                if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-                    s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
-                    aws_s3_request_release(request);
-                    request = NULL;
-                    result = AWS_OP_ERR;
-                    goto after_unlock;
-                }
             }
 
             break;
@@ -400,8 +397,15 @@ static int s_s3_auto_ranged_put_next_request(
 
     s_s3_auto_ranged_put_unlock_synced_data(auto_ranged_put);
 
-after_unlock:
     if (request != NULL) {
+
+        if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
+            aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+
+            aws_s3_request_release(request);
+            goto error_result;
+        }
+
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Returning request %p for part %d",
@@ -411,8 +415,10 @@ after_unlock:
     }
 
     *out_request = request;
+    return AWS_OP_SUCCESS;
 
-    return result;
+error_result:
+    return AWS_OP_ERR;
 }
 
 /* Given a request, prepare it for sending based on its description. */
