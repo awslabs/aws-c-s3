@@ -239,6 +239,8 @@ struct aws_s3_client {
     } threaded_data;
 };
 
+typedef void(s3_client_update_synced_data_state_fn)(struct aws_s3_client *client);
+
 void aws_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
 void aws_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
@@ -257,6 +259,16 @@ void aws_s3_client_stream_response_body(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
     struct aws_linked_list *requests);
+
+/* Used to atomically update client state during clean-up and check for finishing shutdown. */
+void aws_s3_client_check_for_shutdown(
+    struct aws_s3_client *client,
+    s3_client_update_synced_data_state_fn *update_fn);
+
+/* Schedule task for processing work. (Calls the corresponding vtable function.) */
+void aws_s3_client_schedule_process_work_synced(struct aws_s3_client *client);
+
+int aws_s3_client_start_resolving_addresses(struct aws_s3_client *client);
 
 AWS_EXTERN_C_BEGIN
 
@@ -289,15 +301,23 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
 AWS_S3_API
 int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
 
+AWS_S3_API
+int aws_s3_client_add_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
 /* Removes vips associated with each of the given host addresses. */
 AWS_S3_API
 void aws_s3_client_remove_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+AWS_S3_API
+void aws_s3_client_remove_vips_default(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
 
 AWS_S3_API
 void aws_s3_client_lock_synced_data(struct aws_s3_client *client);
 
 AWS_S3_API
 void aws_s3_client_unlock_synced_data(struct aws_s3_client *client);
+
+extern const uint32_t g_num_connections_per_vip;
 
 AWS_EXTERN_C_END
 
