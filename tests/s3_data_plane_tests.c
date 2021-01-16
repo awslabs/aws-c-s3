@@ -1011,7 +1011,7 @@ static int s_s3_next_request_cancel_send_complete(
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    bool call_cancel = auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE;
+    bool call_cancel = auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE;
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
@@ -1057,7 +1057,7 @@ static int s_s3_next_request_cancel_waiting_waiting_for_complete(
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    bool call_cancel = auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE;
+    bool call_cancel = auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE;
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
