@@ -203,13 +203,13 @@ static void s_s3_auto_ranged_put_finish(
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     AWS_PRECONDITION(auto_ranged_put);
 
-    bool not_active = false;
+    bool ignore_finish = false;
     bool canceling = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
     if (meta_request->synced_data.state != AWS_S3_META_REQUEST_STATE_ACTIVE) {
-        not_active = true;
+        ignore_finish = true;
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
@@ -228,6 +228,15 @@ static void s_s3_auto_ranged_put_finish(
 
     /* If the complete message has already been sent, then canceling is not possible. */
     if (auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_COMPLETE) {
+        ignore_finish = true;
+
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Complete Request has been sent, finish call with error %d (%s) will be ignored.",
+            (void *)&auto_ranged_put->base,
+            options->error_code,
+            aws_error_str(options->error_code));
+
         goto unlock;
     }
 
@@ -248,7 +257,7 @@ unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     /* If meta request is not in the active state, then it's already being cancelled or finished. */
-    if (not_active) {
+    if (ignore_finish) {
         return;
     }
 
