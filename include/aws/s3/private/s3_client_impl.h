@@ -42,6 +42,9 @@ struct aws_s3_vip {
     /* S3 Client that owns this vip. */
     struct aws_s3_client *owning_client;
 
+    /* Name of the host being connected to for this VIP. */
+    struct aws_string *host_name;
+
     /* Address this VIP represents. */
     struct aws_string *host_address;
 

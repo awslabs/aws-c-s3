@@ -11,7 +11,6 @@
 #include <aws/common/assert.h>
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
-#include <aws/common/device_random.h>
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -1101,6 +1100,8 @@ void aws_s3_client_notify_connection_finished(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->initial_request_message);
+
+    /* ++vip_connection->request_count; TODO */
 
     /* If we're trying to setup a retry... */
     if (finish_code == AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY) {

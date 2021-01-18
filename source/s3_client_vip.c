@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_util.h"
 
 #include <aws/common/assert.h>
+#include <aws/common/device_random.h>
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>
@@ -37,9 +38,6 @@ const uint32_t g_num_connections_per_vip = 10;
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 
 typedef void(s3_client_vip_update_synced_data_state_fn)(struct aws_s3_vip *vip);
-
-/* Callback for when the vip's connection manager has shut down. */
-static void s_s3_vip_http_connection_manager_shutdown_callback(void *user_data);
 
 /* Used to atomically update vip state during clean-up and check for finishing shutdown. */
 static void s_s3_vip_check_for_shutdown(struct aws_s3_vip *vip, s3_client_vip_update_synced_data_state_fn *update_fn);
@@ -118,7 +116,7 @@ struct aws_s3_vip *aws_s3_vip_new(
     struct aws_s3_vip *vip = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_vip));
     vip->owning_client = client;
 
-    /* Copy over the host address. */
+    vip->host_name = aws_string_new_from_array(client->allocator, server_name->ptr, server_name->len);
     vip->host_address = aws_string_new_from_array(client->allocator, host_address->ptr, host_address->len);
 
     vip->shutdown_callback = shutdown_callback;
@@ -651,7 +649,6 @@ void aws_s3_client_open_vip_connection(struct aws_s3_client *client, struct aws_
         .allocator = client->allocator,
         .bootstrap = client->client_bootstrap,
         .host_name = aws_byte_cursor_from_string(vip->host_address),
-        .port = 0,
         .socket_options = &socket_options,
         .initial_window_size = SIZE_MAX,
         .user_data = vip_connection,
@@ -684,10 +681,11 @@ void aws_s3_client_open_vip_connection(struct aws_s3_client *client, struct aws_
             connection_tls_options->server_name = NULL;
         }
 
-        aws_tls_connection_options_set_server_name(
-            connection_tls_options, client->allocator, (struct aws_byte_cursor *)server_name);
+        struct aws_byte_cursor host_name = aws_byte_cursor_from_string(vip->host_name);
 
-        connection_options.tls_connection_options = connection_tls_options;
+        aws_tls_connection_options_set_server_name(connection_tls_options, client->allocator, &host_name);
+
+        connection_options.tls_options = connection_tls_options;
         connection_options.port = s_https_port;
     } else {
         connection_options.port = s_http_port;
@@ -742,8 +740,6 @@ static void s_s3_client_on_vip_connection_setup(
     vip_connection->request_count = 0;
     vip_connection->max_request_count = s_s3_max_request_count_per_connection - (uint32_t)jitter_value;
 
-    /* ++vip_connection->request_count; TODO */
-
     aws_s3_client_lock_synced_data(client);
     aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
     aws_s3_client_schedule_process_work_synced(client);
@@ -754,6 +750,7 @@ static void s_s3_client_on_vip_connection_shutdown(
     struct aws_http_connection *connection,
     int error_code,
     void *user_data) {
+    (void)connection;
 
     if (error_code != AWS_ERROR_SUCCESS) {
         /* TODO */
@@ -766,7 +763,7 @@ static void s_s3_client_on_vip_connection_shutdown(
     struct aws_s3_client *client = vip->owning_client;
 
     if (aws_atomic_load_int(&vip->active) == 1) {
-        s_s3_client_open_vip_connection(client, vip_connection);
+        aws_s3_client_open_vip_connection(client, vip_connection);
     } else {
         aws_s3_vip_connection_destroy(client, vip_connection);
     }
