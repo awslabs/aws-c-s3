@@ -117,15 +117,12 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_s3_auto_ranged_put *auto_ranged_put =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
-    struct aws_http_headers *initial_request_headers =
-        aws_http_message_get_headers(options->message);
-
     if (aws_s3_meta_request_init_base(
             allocator,
             client,
             part_size,
             client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
-                aws_http_headers_has(initial_request_headers, g_content_md5_header_name),
+                aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
