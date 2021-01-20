@@ -141,6 +141,7 @@ int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -171,6 +172,7 @@ int aws_s3_meta_request_init_base(
     aws_ref_count_init(&meta_request->internal_ref_count, meta_request, s_s3_meta_request_finish_destroy);
 
     *((uint64_t *)&meta_request->part_size) = part_size;
+    *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
 
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);

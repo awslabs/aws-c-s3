@@ -80,6 +80,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     uint64_t content_length,
+    bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
@@ -114,6 +115,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
             allocator,
             client,
             0,
+            should_compute_content_md5,
             options,
             meta_request_default,
             &s_s3_meta_request_default_vtable,
@@ -216,11 +218,7 @@ static int s_s3_meta_request_default_prepare_request(
         aws_s3_meta_request_read_body(meta_request, &request->request_body);
     }
 
-    struct aws_http_headers *initial_request_headers =
-        aws_http_message_get_headers(meta_request->initial_request_message);
-
-    if (client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
-        !aws_http_headers_has(initial_request_headers, g_content_md5_header_name)) {
+    if (meta_request->should_compute_content_md5) {
         aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
     }
 

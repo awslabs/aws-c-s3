@@ -868,7 +868,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
 
         if (content_length < client->part_size) {
-            return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
+            return aws_s3_meta_request_default_new(
+                client->allocator,
+                client,
+                content_length,
+                client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
+                    !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
+                options);
         }
 
         uint64_t part_size_uint64 = content_length / g_s3_max_num_upload_parts;
@@ -909,7 +915,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
         return aws_s3_meta_request_auto_ranged_put_new(client->allocator, client, part_size, num_parts, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-        return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
+        return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
     } else {
         AWS_FATAL_ASSERT(false);
     }

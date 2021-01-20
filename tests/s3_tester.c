@@ -502,6 +502,7 @@ struct aws_s3_meta_request *aws_s3_tester_meta_request_new(
         tester->allocator,
         client,
         0,
+        false,
         &options,
         empty_meta_request,
         &s_s3_empty_meta_request_vtable,
