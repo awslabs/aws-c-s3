@@ -268,6 +268,10 @@ static void s_s3_auto_ranged_put_next_request(
 
         /* If we made it here, and the abort-multipart-upload message hasn't been sent yet, then do so now. */
         if (!auto_ranged_put->synced_data.abort_multipart_upload_sent) {
+            if (auto_ranged_put->upload_id == NULL) {
+                goto no_work_remaining;
+            }
+
             if (out_request == NULL) {
                 goto has_work_remaining;
             }
