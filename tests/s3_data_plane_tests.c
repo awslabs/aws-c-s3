@@ -498,7 +498,20 @@ AWS_TEST_CASE(test_s3_put_object_tls_enabled, s_test_s3_put_object_tls_enabled)
 static int s_test_s3_put_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0));
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .put_options =
+            {
+                .ensure_multipart = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL));
 
     return 0;
 }
@@ -755,8 +768,8 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_error_response, s_test_s3_error_response)
-static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_error_missing_file, s_test_s3_error_missing_file)
+static int s_test_s3_error_missing_file(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     const struct aws_byte_cursor test_object_path =
@@ -909,19 +922,19 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
     return 0;
 }
 
-static int s_s3_next_request_cancel_in_the_middle(
+static void s_s3_next_request_cancel_in_the_middle(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request **out_request) {
+    struct aws_s3_request **out_request,
+    uint32_t flags) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_request);
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    (void)auto_ranged_put;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    bool call_cancel = auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE ||
-                       auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS ||
-                       auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
+    bool call_cancel = auto_ranged_put->synced_data.create_multipart_upload_completed != 0;
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
@@ -934,7 +947,7 @@ static int s_s3_next_request_cancel_in_the_middle(
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    return original_meta_request_vtable->next_request(meta_request, out_request);
+    original_meta_request_vtable->next_request(meta_request, out_request, flags);
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_next_request(
@@ -1141,7 +1154,7 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_ENDPOINT);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

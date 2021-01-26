@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/common/system_info.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -489,8 +490,6 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 }
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
-    .push_meta_request = aws_s3_client_push_meta_request_empty,
-    .remove_meta_request = aws_s3_client_remove_meta_request_empty,
     .acquire_http_connection = aws_s3_client_acquire_http_connection_empty,
 };
 
@@ -521,10 +520,6 @@ static struct aws_s3_meta_request_vtable s_s3_empty_meta_request_vtable = {
     .prepare_request = aws_s3_meta_request_prepare_request_empty,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
-    .incoming_headers = NULL,
-    .incoming_headers_block_done = NULL,
-    .incoming_body = NULL,
-    .stream_complete = NULL,
     .destroy = s_s3_empty_meta_request_destroy,
 };
 
@@ -1362,16 +1357,6 @@ int aws_s3_tester_validate_put_object_results(
     return AWS_OP_SUCCESS;
 }
 
-void aws_s3_client_push_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
-    (void)client;
-    (void)meta_request;
-}
-
-void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
-    (void)client;
-    (void)meta_request;
-}
-
 void aws_s3_client_acquire_http_connection_empty(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
@@ -1381,12 +1366,12 @@ void aws_s3_client_acquire_http_connection_empty(
     (void)callback;
 }
 
-int aws_s3_meta_request_next_request_empty(
+void aws_s3_meta_request_next_request_empty(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request **out_request) {
+    struct aws_s3_request **out_request,
+    uint32_t flags) {
     (void)meta_request;
     (void)out_request;
-    return AWS_OP_ERR;
 }
 
 int aws_s3_meta_request_prepare_request_empty(
