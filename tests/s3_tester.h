@@ -335,6 +335,11 @@ void aws_s3_meta_request_next_request_empty(
     struct aws_s3_request **out_request,
     uint32_t flags);
 
+int aws_s3_meta_request_finished_request_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code);
+
 int aws_s3_meta_request_prepare_request_empty(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_client *client,

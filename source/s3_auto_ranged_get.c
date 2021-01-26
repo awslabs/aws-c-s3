@@ -135,8 +135,7 @@ static void s_s3_auto_ranged_get_next_request(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                 1,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY |
-                    AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY);
+                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY);
 
             ++auto_ranged_get->synced_data.num_parts_requested;
             goto has_work_remaining;
@@ -158,7 +157,7 @@ static void s_s3_auto_ranged_get_next_request(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                 auto_ranged_get->synced_data.num_parts_requested + 1,
-                AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY | AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY);
+                AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY);
 
             ++auto_ranged_get->synced_data.num_parts_requested;
             goto has_work_remaining;
@@ -274,10 +273,6 @@ static int s_s3_auto_ranged_get_request_finished(
     (void)request;
     (void)error_code;
 
-    if (aws_s3_meta_request_finished_request_default(meta_request, request, error_code)) {
-        return AWS_OP_ERR;
-    }
-
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
 
     AWS_ASSERT(request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART);
@@ -373,6 +368,8 @@ static int s_s3_auto_ranged_get_request_finished(
             AWS_ASSERT(num_parts > 0);
             auto_ranged_get->synced_data.total_num_parts = num_parts;
         }
+
+        aws_s3_meta_request_stream_response_body_synced(meta_request, request);
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,

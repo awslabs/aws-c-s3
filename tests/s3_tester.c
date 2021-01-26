@@ -514,10 +514,11 @@ static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_req
     aws_mem_release(meta_request->allocator, meta_request->impl);
 }
 
-static struct aws_s3_meta_request_vtable s_s3_empty_meta_request_vtable = {
+static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
     .next_request = aws_s3_meta_request_next_request_empty,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = aws_s3_meta_request_prepare_request_empty,
+    .finished_request = aws_s3_meta_request_finished_request_empty,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .destroy = s_s3_empty_meta_request_destroy,
@@ -545,7 +546,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         0,
         &options,
         empty_meta_request,
-        &s_s3_empty_meta_request_vtable,
+        &s_s3_mock_meta_request_vtable,
         &empty_meta_request->base);
 
     aws_http_message_release(dummy_http_message);
@@ -1373,6 +1374,16 @@ void aws_s3_meta_request_next_request_empty(
     (void)meta_request;
     (void)out_request;
     (void)flags;
+}
+
+int aws_s3_meta_request_finished_request_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code) {
+    (void)meta_request;
+    (void)request;
+    (void)error_code;
+    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_meta_request_prepare_request_empty(
