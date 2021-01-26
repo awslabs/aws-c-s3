@@ -128,6 +128,7 @@ int aws_s3_meta_request_init_base(
     AWS_ASSERT(vtable->destroy);
     AWS_ASSERT(vtable->sign_request);
     AWS_ASSERT(vtable->init_signing_date_time);
+    AWS_ASSERT(vtable->finished_request);
     AWS_ASSERT(vtable->send_request_finish);
 
     meta_request->allocator = allocator;
@@ -834,64 +835,44 @@ int aws_s3_meta_request_finished_request(
     return meta_request->vtable->finished_request(meta_request, request, error_code);
 }
 
-int aws_s3_meta_request_finished_request_default(
+void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request,
-    int error_code) {
+    struct aws_s3_request *request) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
+    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(request->part_number > 0);
 
-    /* If this request body is not meant to be streamed to the caller, then just return now. */
-    if (!request->stream_response_body) {
-        return AWS_OP_SUCCESS;
+    struct aws_linked_list streaming_requests;
+    aws_linked_list_init(&streaming_requests);
+
+    if (aws_s3_meta_request_is_finishing_synced(meta_request)) {
+        return;
     }
 
-    AWS_ASSERT(request->part_number > 0);
+    struct aws_s3_client *client = meta_request->synced_data.client;
+    AWS_ASSERT(client != NULL);
 
-    if (error_code == AWS_ERROR_SUCCESS) {
-        struct aws_linked_list streaming_requests;
-        aws_linked_list_init(&streaming_requests);
+    /* Push it into the priority queue. */
+    aws_s3_meta_request_body_streaming_push_synced(meta_request, request);
 
-        aws_s3_meta_request_lock_synced_data(meta_request);
+    /* Grab the next request that can be streamed back to the caller. */
+    struct aws_s3_request *next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
+    uint32_t num_streaming_requests = 0;
 
-        if (aws_s3_meta_request_is_finishing_synced(meta_request)) {
-            goto unlock;
-        }
-
-        struct aws_s3_client *client = meta_request->synced_data.client;
-        AWS_ASSERT(client != NULL);
-
-        /* Push it into the priority queue. */
-        aws_s3_meta_request_body_streaming_push_synced(meta_request, request);
-
-        /* Grab the next request that can be streamed back to the caller. */
-        struct aws_s3_request *next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
-        uint32_t num_streaming_requests = 0;
-
-        /* Grab any additional requests that could be streamed to the caller. */
-        while (next_streaming_request != NULL) {
-            aws_linked_list_push_back(&streaming_requests, &next_streaming_request->node);
-            ++num_streaming_requests;
-            next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
-        }
-
-        if (!aws_linked_list_empty(&streaming_requests)) {
-            aws_s3_client_stream_response_body(
-                client, meta_request, &streaming_requests, s_s3_meta_request_streaming_body_callback, meta_request);
-
-            meta_request->synced_data.num_parts_delivery_sent += num_streaming_requests;
-        }
-
-    unlock:
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-    } else {
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        ++meta_request->synced_data.num_parts_delivery_completed;
-        ++meta_request->synced_data.num_parts_delivery_failed;
-        aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* Grab any additional requests that could be streamed to the caller. */
+    while (next_streaming_request != NULL) {
+        aws_linked_list_push_back(&streaming_requests, &next_streaming_request->node);
+        ++num_streaming_requests;
+        next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
     }
 
-    return AWS_OP_SUCCESS;
+    if (!aws_linked_list_empty(&streaming_requests)) {
+        aws_s3_client_stream_response_body(
+            client, meta_request, &streaming_requests, s_s3_meta_request_streaming_body_callback, meta_request);
+
+        meta_request->synced_data.num_parts_delivery_sent += num_streaming_requests;
+    }
 }
 
 static void s_s3_meta_request_delivered_requests(

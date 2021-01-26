@@ -234,10 +234,9 @@ int aws_s3_meta_request_finished_request(
     int error_code);
 
 AWS_S3_API
-int aws_s3_meta_request_finished_request_default(
+void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request,
-    int error_code);
+    struct aws_s3_request *request);
 
 AWS_S3_API
 void aws_s3_meta_request_delivered_requests_default(

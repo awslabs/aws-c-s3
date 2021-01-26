@@ -142,11 +142,7 @@ static void s_s3_meta_request_default_next_request(
                 goto has_work_remaining;
             }
 
-            request = aws_s3_request_new(
-                meta_request,
-                0,
-                1,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY);
+            request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
@@ -280,10 +276,6 @@ static int s_s3_meta_request_default_request_finished(
     AWS_PRECONDITION(meta_request->impl);
     AWS_PRECONDITION(request);
 
-    if (aws_s3_meta_request_finished_request_default(meta_request, request, error_code)) {
-        return AWS_OP_ERR;
-    }
-
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
@@ -302,7 +294,9 @@ static int s_s3_meta_request_default_request_finished(
     meta_request_default->synced_data.request_completed = true;
     meta_request_default->synced_data.request_error_code = error_code;
 
-    if (error_code != AWS_ERROR_SUCCESS) {
+    if (error_code == AWS_ERROR_SUCCESS) {
+        aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+    } else {
         aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
     }
 

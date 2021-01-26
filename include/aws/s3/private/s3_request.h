@@ -17,8 +17,7 @@ struct aws_s3_meta_request;
 
 enum aws_s3_request_desc_flags {
     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY = 0x00000002,
-    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x0000004,
+    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x0000002,
 };
 
 /* Represents a single request made to S3. */
@@ -53,9 +52,6 @@ struct aws_s3_request {
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
     uint32_t record_response_headers : 1;
-
-    /* When true, the response body will be streamed back to the caller. */
-    uint32_t stream_response_body : 1;
 
     /* When true, the response body buffer will be allocated in the size of a part. */
     uint32_t part_size_response_body : 1;
