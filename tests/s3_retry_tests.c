@@ -365,3 +365,90 @@ static int s_test_s3_meta_request_send_request_finish_fail(struct aws_allocator 
 
     return 0;
 }
+
+static int s_finished_request_remove_upload_id(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+    (void)error_code;
+
+    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
+        aws_byte_buf_reset(&request->send_data.response_body, false);
+    }
+
+    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    ASSERT_TRUE(tester != NULL);
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+
+    return original_meta_request_vtable->finished_request(meta_request, request, error_code);
+}
+
+static struct aws_s3_meta_request *s_meta_request_factory_patch_finished_request(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->finished_request = s_finished_request_remove_upload_id;
+
+    return meta_request;
+}
+
+AWS_TEST_CASE(test_s3_auto_range_put_missing_upload_id, s_test_s3_auto_range_put_missing_upload_id)
+static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_finished_request;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .ensure_multipart = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_MISSING_UPLOAD_ID);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
