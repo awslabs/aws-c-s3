@@ -274,7 +274,7 @@ static int s_s3_auto_ranged_get_request_finished(
     (void)request;
     (void)error_code;
 
-    if (!aws_s3_meta_request_finished_request_default(meta_request, request, error_code)) {
+    if (aws_s3_meta_request_finished_request_default(meta_request, request, error_code)) {
         return AWS_OP_ERR;
     }
 

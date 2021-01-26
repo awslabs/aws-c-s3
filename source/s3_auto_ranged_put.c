@@ -436,7 +436,7 @@ static int s_s3_auto_ranged_put_request_finished(
     AWS_PRECONDITION(meta_request->impl);
     AWS_PRECONDITION(request);
 
-    if (!aws_s3_meta_request_finished_request_default(meta_request, request, error_code)) {
+    if (aws_s3_meta_request_finished_request_default(meta_request, request, error_code)) {
         return AWS_OP_ERR;
     }
 
