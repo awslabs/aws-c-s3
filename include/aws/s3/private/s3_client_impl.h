@@ -100,10 +100,6 @@ struct aws_s3_client_vtable {
     struct aws_s3_meta_request *(
         *meta_request_factory)(struct aws_s3_client *client, const struct aws_s3_meta_request_options *options);
 
-    void (*push_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
-    void (*remove_meta_request)(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
     void (*acquire_http_connection)(
         struct aws_s3_client *client,
         struct aws_s3_vip_connection *vip_connection,
@@ -230,18 +226,11 @@ struct aws_s3_client {
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
 
-        /* Next meta request that the work_task will start with on its next update. */
-        struct aws_s3_meta_request *next_meta_request;
-
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
 
     } threaded_data;
 };
-
-void aws_s3_client_push_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
-
-void aws_s3_client_remove_meta_request(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request);
 
 int aws_s3_client_make_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
@@ -253,10 +242,18 @@ void aws_s3_client_notify_connection_finished(
 
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request);
 
+typedef void(aws_s3_client_stream_response_body_callback_fn)(
+    int error_code,
+    uint32_t num_failed,
+    uint32_t num_successful,
+    void *user_data);
+
 void aws_s3_client_stream_response_body(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
-    struct aws_linked_list *requests);
+    struct aws_linked_list *requests,
+    aws_s3_client_stream_response_body_callback_fn callback,
+    void *user_data);
 
 AWS_EXTERN_C_BEGIN
 
