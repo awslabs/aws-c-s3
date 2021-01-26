@@ -1327,6 +1327,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
             if (request == NULL) {
                 s_s3_client_remove_meta_request_threaded(client, current_meta_request);
+                current_meta_request_index = 0;
                 current_meta_request = NULL;
             } else {
                 ++current_meta_request_index;
@@ -1335,6 +1336,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             if ((current_meta_request_index + 1) < max_meta_requests_process_depth) {
                 current_meta_request = next_meta_request;
             } else {
+                current_meta_request_index = 0;
                 current_meta_request = NULL;
             }
         }
