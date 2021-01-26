@@ -1369,6 +1369,7 @@ void aws_s3_meta_request_next_request_empty(
     uint32_t flags) {
     (void)meta_request;
     (void)out_request;
+    (void)flags;
 }
 
 int aws_s3_meta_request_prepare_request_empty(
