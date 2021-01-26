@@ -29,7 +29,7 @@ static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_vip_connection *vip_connection,
     bool is_initial_prepare);
 
-static int s_s3_auto_ranged_get_request_finished(
+static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);
@@ -262,7 +262,7 @@ message_alloc_failed:
     return AWS_OP_ERR;
 }
 
-static int s_s3_auto_ranged_get_request_finished(
+static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
@@ -289,8 +289,9 @@ static int s_s3_auto_ranged_get_request_finished(
                 "id=%p Could not find content range header for request %p",
                 (void *)meta_request,
                 (void *)request);
-            aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
-            return AWS_OP_ERR;
+
+            error_code = AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER;
+            goto error_encountered;
         }
 
         uint64_t range_start = 0;
@@ -316,8 +317,8 @@ static int s_s3_auto_ranged_get_request_finished(
 
         if (total_object_size == 0) {
             AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Get Object has invalid content range.", (void *)meta_request);
-            aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
-            return AWS_OP_ERR;
+            error_code = AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER;
+            goto error_encountered;
         }
 
         num_parts = (uint32_t)(total_object_size / meta_request->part_size);
@@ -357,6 +358,8 @@ static int s_s3_auto_ranged_get_request_finished(
         }
     }
 
+error_encountered:
+
     aws_s3_meta_request_lock_synced_data(meta_request);
 
     ++auto_ranged_get->synced_data.num_parts_completed;
@@ -384,6 +387,4 @@ static int s_s3_auto_ranged_get_request_finished(
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    return AWS_OP_SUCCESS;
 }
