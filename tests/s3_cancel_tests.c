@@ -22,6 +22,10 @@ enum s3_next_request_cancel_type {
     S3_NEXT_REQUEST_CANCEL_TYPE_MPD_ONE_PART_COMPLETED,
 };
 
+struct s3_cancel_test_user_data {
+    enum s3_next_request_cancel_type type;
+};
+
 static void s_s3_next_request_cancel_test(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request **out_request,
@@ -31,7 +35,7 @@ static void s_s3_next_request_cancel_test(
 
     struct aws_s3_meta_request_test_results *results = meta_request->user_data;
     struct aws_s3_tester *tester = results->tester;
-    enum s3_next_request_cancel_type type = (enum s3_next_request_cancel_type)tester->user_data;
+    struct s3_cancel_test_user_data *cancel_test_user_data = tester->user_data;
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
@@ -40,12 +44,12 @@ static void s_s3_next_request_cancel_test(
     bool block_next_request = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-    switch (type) {
+    switch (cancel_test_user_data->type) {
         case S3_NEXT_REQUEST_CANCEL_TYPE_MPU_CREATE_NOT_SENT:
-            call_cancel = !auto_ranged_put->synced_data.create_multipart_upload_sent;
+            call_cancel = auto_ranged_put->synced_data.create_multipart_upload_sent != 0;
             break;
         case S3_NEXT_REQUEST_CANCEL_TYPE_MPU_CREATE_COMPLETED:
-            call_cancel = auto_ranged_put->synced_data.create_multipart_upload_completed;
+            call_cancel = auto_ranged_put->synced_data.create_multipart_upload_completed != 0;
             break;
         case S3_NEXT_REQUEST_CANCEL_TYPE_MPU_ONE_PART_COMPLETED:
             call_cancel = auto_ranged_put->synced_data.num_parts_completed == 1;
@@ -108,7 +112,12 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_next_r
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    tester.user_data = (void *)cancel_type;
+
+    struct s3_cancel_test_user_data test_user_data = {
+        .type = cancel_type,
+    };
+
+    tester.user_data = &test_user_data;
 
     struct aws_s3_client *client = NULL;
     struct aws_s3_tester_client_options client_options = {
