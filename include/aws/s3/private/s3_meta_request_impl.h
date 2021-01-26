@@ -60,7 +60,7 @@ struct aws_s3_meta_request_vtable {
         int error_code);
 
     /* Called when the request is done being sent, and will not be retried/sent again. */
-    int (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
+    void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
 
     /* Called when response bodies have either been delivered or failed to have been delivered to the caller. */
     void (*delivered_requests)(
@@ -228,7 +228,7 @@ void aws_s3_meta_request_send_request_finish_default(
     int error_code);
 
 AWS_S3_API
-int aws_s3_meta_request_finished_request(
+void aws_s3_meta_request_finished_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);

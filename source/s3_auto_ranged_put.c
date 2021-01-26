@@ -32,7 +32,7 @@ static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_vip_connection *vip_connection,
     bool is_initial_prepare);
 
-static int s_s3_auto_ranged_put_request_finished(
+static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);
@@ -433,7 +433,7 @@ message_create_failed:
     return AWS_OP_ERR;
 }
 
-static int s_s3_auto_ranged_put_request_finished(
+static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
@@ -521,7 +521,6 @@ static int s_s3_auto_ranged_put_request_finished(
                         (void *)meta_request,
                         (void *)request);
 
-                    aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
                     error_code = AWS_ERROR_S3_MISSING_UPLOAD_ID;
                 } else {
                     /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up later,
@@ -642,6 +641,4 @@ static int s_s3_auto_ranged_put_request_finished(
             break;
         }
     }
-
-    return error_code == AWS_ERROR_SUCCESS ? AWS_OP_SUCCESS : AWS_OP_ERR;
 }

@@ -366,12 +366,10 @@ static int s_test_s3_meta_request_send_request_finish_fail(struct aws_allocator 
     return 0;
 }
 
-static int s_finished_request_remove_upload_id(
+static void s_finished_request_remove_upload_id(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(request);
     (void)error_code;
 
     if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD) {
@@ -379,10 +377,7 @@ static int s_finished_request_remove_upload_id(
     }
 
     struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
-    ASSERT_TRUE(client != NULL);
-
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
-    ASSERT_TRUE(tester != NULL);
 
     aws_s3_client_release(client);
     client = NULL;
@@ -390,7 +385,7 @@ static int s_finished_request_remove_upload_id(
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    return original_meta_request_vtable->finished_request(meta_request, request, error_code);
+    original_meta_request_vtable->finished_request(meta_request, request, error_code);
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_finished_request(

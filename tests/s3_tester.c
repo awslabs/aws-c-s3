@@ -1373,14 +1373,13 @@ void aws_s3_meta_request_next_request_empty(
     (void)flags;
 }
 
-int aws_s3_meta_request_finished_request_empty(
+void aws_s3_meta_request_finished_request_empty(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
     (void)meta_request;
     (void)request;
     (void)error_code;
-    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_meta_request_prepare_request_empty(

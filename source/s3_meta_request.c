@@ -824,7 +824,7 @@ static void s_s3_meta_request_streaming_body_callback(
     s_s3_meta_request_delivered_requests(meta_request, error_code, num_failed, num_successful);
 }
 
-int aws_s3_meta_request_finished_request(
+void aws_s3_meta_request_finished_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
@@ -832,7 +832,7 @@ int aws_s3_meta_request_finished_request(
     AWS_PRECONDITION(meta_request->vtable);
     AWS_PRECONDITION(meta_request->vtable->finished_request);
 
-    return meta_request->vtable->finished_request(meta_request, request, error_code);
+    meta_request->vtable->finished_request(meta_request, request, error_code);
 }
 
 void aws_s3_meta_request_stream_response_body_synced(
