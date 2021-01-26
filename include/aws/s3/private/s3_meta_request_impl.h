@@ -199,12 +199,16 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
 AWS_S3_API
 struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
 
+/* Called by the client to retrieve the next request and update the meta request's internal state. out_request is
+ * optional, and can be NULL if just desiring to update internal state. */
+/* TODO possible rename to something more generic like "aws_s3_meta_request_update"*/
 AWS_S3_API
 void aws_s3_meta_request_next_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request **out_request,
     uint32_t flags);
 
+/* Called by the client to process the request attached to the given vip connection. */
 AWS_S3_API
 int aws_s3_meta_request_make_request(
     struct aws_s3_meta_request *meta_request,
@@ -221,12 +225,15 @@ int aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection);
 
+/* Default implementation for when a request finishes a particular send. Will be invoked for each send of the request.
+ */
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code);
 
+/* Called by the client when a request is completely finished and not doing any further retries. */
 AWS_S3_API
 void aws_s3_meta_request_finished_request(
     struct aws_s3_meta_request *meta_request,
