@@ -24,7 +24,7 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_vip_connection *vip_connection,
     bool is_initial_prepare);
 
-static int s_s3_meta_request_default_request_finished(
+static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);
@@ -268,7 +268,7 @@ static int s_s3_meta_request_default_prepare_request(
     return AWS_OP_SUCCESS;
 }
 
-static int s_s3_meta_request_default_request_finished(
+static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
@@ -301,6 +301,4 @@ static int s_s3_meta_request_default_request_finished(
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    return error_code == AWS_ERROR_SUCCESS ? AWS_OP_SUCCESS : AWS_OP_ERR;
 }

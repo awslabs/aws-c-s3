@@ -1714,14 +1714,7 @@ reset_vip_connection:
         }
     }
 
-    if (aws_s3_meta_request_finished_request(meta_request, request, error_code)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "id=%p Meta request finished-request call returned error %d (%s)",
-            (void *)client,
-            aws_last_error(),
-            aws_error_str(aws_last_error()));
-    }
+    aws_s3_meta_request_finished_request(meta_request, request, error_code);
 
     /* Grab a reference to the meta request since we got it from the request, and we want to use after we release the
      * request.*/
