@@ -566,6 +566,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     }
 
     bool endpoint_matches = false;
+    bool resolve_endpoint = false;
 
     aws_s3_client_lock_synced_data(client);
 
@@ -574,6 +575,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         client->synced_data.endpoint =
             aws_string_new_from_array(client->allocator, host_header_value.ptr, host_header_value.len);
         endpoint_matches = true;
+        resolve_endpoint = true;
     } else {
         struct aws_byte_cursor synced_endpoint_byte_cursor = aws_byte_cursor_from_string(client->synced_data.endpoint);
         endpoint_matches = aws_byte_cursor_eq_ignore_case(&synced_endpoint_byte_cursor, &host_header_value);
@@ -591,7 +593,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    if (s_s3_client_start_resolving_addresses(client)) {
+    if (resolve_endpoint && s_s3_client_start_resolving_addresses(client)) {
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not start resolving endpoint for meta request.", (void *)client);
         return NULL;
     }
