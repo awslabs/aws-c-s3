@@ -345,6 +345,8 @@ static void s_s3_client_check_for_shutdown(
 
     bool finish_destroy = false;
 
+    struct aws_http_connection_manager *connection_manager = NULL;
+
     aws_s3_client_lock_synced_data(client);
 
     if (update_fn != NULL) {
@@ -376,7 +378,7 @@ static void s_s3_client_check_for_shutdown(
 
     if (client->synced_data.connection_manager_active) {
         if (client->connection_manager != NULL) {
-            aws_http_connection_manager_release(client->connection_manager);
+            connection_manager = client->connection_manager;
             client->connection_manager = NULL;
         }
 
@@ -388,6 +390,11 @@ static void s_s3_client_check_for_shutdown(
 
 unlock:
     aws_s3_client_unlock_synced_data(client);
+
+    if (connection_manager != NULL) {
+        aws_http_connection_manager_release(connection_manager);
+        connection_manager = NULL;
+    }
 
     if (finish_destroy) {
         s_s3_client_finish_destroy(client);
