@@ -419,9 +419,8 @@ int aws_s3_meta_request_sign_request_default(
     AWS_PRECONDITION(meta_request)
 
     AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->owning_vip);
 
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
+    struct aws_s3_client *client = vip_connection->owning_client;
     AWS_PRECONDITION(client);
 
     struct aws_s3_request *request = vip_connection->request;
@@ -495,7 +494,7 @@ static void s_s3_meta_request_request_on_signed(
     struct aws_s3_vip_connection *vip_connection = user_data;
     AWS_PRECONDITION(vip_connection);
 
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
+    struct aws_s3_client *client = vip_connection->owning_client;
     AWS_PRECONDITION(client);
 
     struct aws_s3_request *request = vip_connection->request;
@@ -740,9 +739,8 @@ void aws_s3_meta_request_send_request_finish_default(
     struct aws_http_stream *stream,
     int error_code) {
     AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->owning_vip);
 
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
+    struct aws_s3_client *client = vip_connection->owning_client;
     AWS_PRECONDITION(client);
 
     struct aws_s3_request *request = vip_connection->request;

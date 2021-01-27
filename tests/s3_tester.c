@@ -490,7 +490,7 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 }
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
-    .acquire_http_connection = aws_s3_client_acquire_http_connection_empty,
+    .on_acquire_http_connection = aws_s3_on_client_acquire_http_connection_empty,
 };
 
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester) {
@@ -1358,13 +1358,13 @@ int aws_s3_tester_validate_put_object_results(
     return AWS_OP_SUCCESS;
 }
 
-void aws_s3_client_acquire_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
-    (void)client;
-    (void)vip_connection;
-    (void)callback;
+void aws_s3_on_client_acquire_http_connection_empty(
+    struct aws_http_connection *connection,
+    int error_code,
+    void *user_data) {
+    (void)connection;
+    (void)error_code;
+    (void)user_data;
 }
 
 void aws_s3_meta_request_next_request_empty(

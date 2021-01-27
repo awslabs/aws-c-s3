@@ -18,15 +18,32 @@
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
-static void s_s3_client_acquire_http_connection_exceed_retries(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
-    AWS_ASSERT(callback);
-    (void)client;
-    (void)vip_connection;
+static void s_s3_client_on_acquire_http_connection_exceed_retries(
+    struct aws_http_connection *connection,
+    int error_code,
+    void *user_data) {
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_client *client = vip_connection->owning_client;
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    AWS_ASSERT(error_code == AWS_ERROR_SUCCESS);
+    AWS_ASSERT(connection != NULL);
+
     aws_raise_error(AWS_ERROR_UNKNOWN);
-    callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
+    error_code = AWS_ERROR_UNKNOWN;
+    aws_http_connection_manager_release_connection(client->connection_manager, connection);
+    connection = NULL;
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    original_client_vtable->on_acquire_http_connection(connection, error_code, user_data);
 }
 
 AWS_TEST_CASE(test_s3_client_exceed_retries, s_test_s3_client_exceed_retries)
@@ -46,7 +63,7 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_exceed_retries;
+    patched_client_vtable->on_acquire_http_connection = s_s3_client_on_acquire_http_connection_exceed_retries;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
     AWS_ZERO_STRUCT(meta_request_test_results);
@@ -65,26 +82,34 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
     return 0;
 }
 
-static void s_s3_client_acquire_http_connection_fail_first(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
-    AWS_ASSERT(callback);
-    AWS_ASSERT(client);
+static void s_s3_client_on_acquire_http_connection_fail_first(
+    struct aws_http_connection *connection,
+    int error_code,
+    void *user_data) {
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_client *client = vip_connection->owning_client;
+    AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
     AWS_ASSERT(tester != NULL);
 
     if (aws_s3_tester_inc_counter1(tester) == 1) {
+        AWS_ASSERT(error_code == AWS_ERROR_SUCCESS);
+        AWS_ASSERT(connection != NULL);
+
         aws_raise_error(AWS_ERROR_UNKNOWN);
-        callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
-        return;
+        error_code = AWS_ERROR_UNKNOWN;
+        aws_http_connection_manager_release_connection(client->connection_manager, connection);
+        connection = NULL;
     }
 
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
 
-    original_client_vtable->acquire_http_connection(client, vip_connection, callback);
+    original_client_vtable->on_acquire_http_connection(connection, error_code, user_data);
 }
 
 AWS_TEST_CASE(test_s3_client_acquire_connection_fail, s_test_s3_client_acquire_connection_fail)
@@ -103,7 +128,7 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_first;
+    patched_client_vtable->on_acquire_http_connection = s_s3_client_on_acquire_http_connection_fail_first;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
         &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
