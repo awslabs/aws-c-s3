@@ -321,6 +321,44 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_put_object_with_part_remainder, s_test_s3_put_object_with_part_remainder)
+static int s_test_s3_put_object_with_part_remainder(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .put_options =
+            {
+                /* Object size meant to be one megabyte larger than the part size of the client. */
+                .object_size_mb = 6,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_get_object_multiple, s_test_s3_get_object_multiple)
 static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1524,43 +1562,6 @@ static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator,
     aws_s3_client_release(client);
     client = NULL;
 
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_put_object_uneven_content_length, s_test_s3_put_object_uneven_content_length)
-static int s_test_s3_put_object_uneven_content_length(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_tester_client_options client_options = {
-        .part_size = 5 * 1024 * 1024,
-    };
-
-    struct aws_s3_client *client = NULL;
-    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
-
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
-
-    struct aws_s3_tester_meta_request_options options = {
-        .allocator = allocator,
-        .client = client,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .put_options =
-            {
-                .object_size_mb = 6,
-            },
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
     return 0;
