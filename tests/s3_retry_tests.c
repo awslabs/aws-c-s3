@@ -32,13 +32,15 @@ static void s_s3_client_on_acquire_http_connection_exceed_retries(
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
     AWS_ASSERT(tester != NULL);
 
-    AWS_ASSERT(error_code == AWS_ERROR_SUCCESS);
-    AWS_ASSERT(connection != NULL);
+    if (error_code == AWS_ERROR_SUCCESS) {
+        aws_raise_error(AWS_ERROR_UNKNOWN);
+        error_code = AWS_ERROR_UNKNOWN;
 
-    aws_raise_error(AWS_ERROR_UNKNOWN);
-    error_code = AWS_ERROR_UNKNOWN;
-    aws_http_connection_manager_release_connection(client->connection_manager, connection);
-    connection = NULL;
+        if (connection != NULL) {
+            aws_http_connection_manager_release_connection(client->connection_manager, connection);
+            connection = NULL;
+        }
+    }
 
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
