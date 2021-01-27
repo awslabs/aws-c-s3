@@ -126,7 +126,7 @@ struct aws_s3_meta_request_options {
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 };
 
-/* Final result details of a meta request.
+/* Result details of a meta request.
  *
  * If error_code is AWS_ERROR_SUCCESS, then response_status will match the response_status passed earlier by the header
  * callback and error_response_headers and error_response_body will be NULL.
