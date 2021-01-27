@@ -1251,7 +1251,10 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
             aws_s3_meta_request_next_request(
                 meta_request, NULL, AWS_S3_META_REQUEST_NEXT_REQUEST_FLAG_NO_ENDPOINT_CONNECTIONS);
-            s_s3_client_remove_meta_request_threaded(client, meta_request);
+
+            if (aws_s3_meta_request_is_finished(meta_request)) {
+                s_s3_client_remove_meta_request_threaded(client, meta_request);
+            }
         }
     }
 
@@ -1267,6 +1270,8 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     const uint32_t max_requests_in_flight =
         client->ideal_vip_count * s_num_connections_per_vip * max_requests_multiplier;
 
+    struct aws_s3_meta_request *current_meta_request = NULL;
+
     while (!aws_linked_list_empty(&vip_connections_updates)) {
 
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&vip_connections_updates);
@@ -1274,7 +1279,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
         size_t owning_vip_active = aws_atomic_load_int(&vip_connection->owning_vip->active);
 
-        /* If the owning vip isn't active, and the client is either also inactive, or the connnection is dead, clean it
+        /* If the owning vip isn't active, and the client is either also inactive, or the connection is dead, clean it
          * up. */
         if (!owning_vip_active &&
             (!client_active || (vip_connection->http_connection == NULL ||
@@ -1294,7 +1299,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             continue;
         }
 
-        struct aws_s3_meta_request *current_meta_request = NULL;
         struct aws_s3_request *request = NULL;
 
         uint32_t current_meta_request_index = 0;
@@ -1326,8 +1330,14 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             aws_s3_meta_request_next_request(current_meta_request, &request, 0);
 
             if (request == NULL) {
-                s_s3_client_remove_meta_request_threaded(client, current_meta_request);
-                current_meta_request = NULL;
+                if (aws_s3_meta_request_is_finished(current_meta_request)) {
+                    s_s3_client_remove_meta_request_threaded(client, current_meta_request);
+                }
+
+                if (next_meta_request == NULL) {
+                    break;
+                }
+
             } else {
                 ++current_meta_request_index;
             }
@@ -1727,7 +1737,6 @@ reset_vip_connection:
 
     /* Throw this VIP Connection structure back into the update list. */
     aws_s3_client_lock_synced_data(client);
-    s_s3_client_push_meta_request_synced(client, meta_request, true);
     aws_linked_list_push_back(&client->synced_data.pending_vip_connection_updates, &vip_connection->node);
     s_s3_client_schedule_process_work_synced(client);
     aws_s3_client_unlock_synced_data(client);
@@ -1899,7 +1908,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
     }
 
     aws_s3_client_lock_synced_data(client);
-    s_s3_client_push_meta_request_synced(client, payload->meta_request, true);
+    s_s3_client_schedule_process_work_synced(client);
     aws_s3_client_unlock_synced_data(client);
 
     aws_s3_meta_request_release(payload->meta_request);
