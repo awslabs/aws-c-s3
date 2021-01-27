@@ -25,7 +25,7 @@ static int s_aws_s3_test_input_stream_read(struct aws_input_stream *stream, stru
 
     struct aws_s3_test_input_stream_impl *test_input_stream = stream->impl;
 
-    if (dest->capacity > (test_input_stream->length-test_input_stream->position)) {
+    if (dest->capacity > (test_input_stream->length - test_input_stream->position)) {
         aws_raise_error(AWS_IO_STREAM_READ_FAILED);
         return AWS_OP_ERR;
     }

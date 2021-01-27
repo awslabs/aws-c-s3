@@ -1559,7 +1559,7 @@ static int s_test_s3_put_object_uneven_content_length(struct aws_allocator *allo
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-    
+
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
