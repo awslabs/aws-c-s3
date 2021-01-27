@@ -60,6 +60,7 @@ add_test_case(test_s3_bad_endpoint)
 add_test_case(test_s3_put_object_clamp_part_size)
 add_test_case(test_s3_replace_quote_entities)
 add_test_case(test_s3_different_endpoints)
+add_test_case(test_s3_put_object_uneven_content_length)
 
 add_test_case(test_get_existing_compute_platform_info)
 add_test_case(test_get_nonexistent_compute_platform_info)

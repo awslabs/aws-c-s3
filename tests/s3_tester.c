@@ -952,15 +952,12 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_TRUE(object_size_bytes > client->part_size);
             }
 
-            aws_s3_create_test_buffer(allocator, object_size_bytes, &input_stream_buffer);
-
-            struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffer);
-
             if (options->put_options.invalid_input_stream) {
                 input_stream = aws_s3_bad_input_stream_new(allocator, object_size_bytes);
             } else {
-                input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+                input_stream = aws_s3_test_input_stream_new(allocator, object_size_bytes);
             }
+
             char object_path_buffer[128] = "";
             switch (options->sse_type) {
                 case AWS_S3_TESTER_SSE_NONE:

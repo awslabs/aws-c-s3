@@ -123,6 +123,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    size_t content_length,
     uint32_t num_parts,
     const struct aws_s3_meta_request_options *options) {
 
@@ -155,6 +156,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         goto error_clean_up;
     }
 
+    auto_ranged_put->content_length = content_length;
     auto_ranged_put->synced_data.total_num_parts = num_parts;
     auto_ranged_put->threaded_next_request_data.next_part_number = 1;
 
@@ -345,8 +347,19 @@ static int s_s3_auto_ranged_put_next_request(
                     0,
                     AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
-                aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
                 request->part_number = auto_ranged_put->threaded_next_request_data.next_part_number;
+
+                size_t request_body_size = meta_request->part_size;
+
+                if (request->part_number == auto_ranged_put->synced_data.total_num_parts) {
+                    size_t content_remainder = auto_ranged_put->content_length % meta_request->part_size;
+
+                    if (content_remainder > 0) {
+                        request_body_size = content_remainder;
+                    }
+                }
+
+                aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
                 ++auto_ranged_put->threaded_next_request_data.next_part_number;
             }

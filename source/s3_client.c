@@ -1087,7 +1087,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             ++num_parts;
         }
 
-        return aws_s3_meta_request_auto_ranged_put_new(client->allocator, client, part_size, num_parts, options);
+        return aws_s3_meta_request_auto_ranged_put_new(client->allocator, client, part_size, content_length, num_parts, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
     } else {
