@@ -1492,7 +1492,10 @@ static void s_s3_client_on_host_resolver_address_resolved(
         client->synced_data.invalid_endpoint = true;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
+        return;
     }
+
+    struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
 
     uint32_t max_num_connections = client->ideal_vip_count * s_num_connections_per_vip;
 
@@ -1508,7 +1511,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
     manager_options.bootstrap = client->client_bootstrap;
     manager_options.initial_window_size = SIZE_MAX;
     manager_options.socket_options = &socket_options;
-    manager_options.host = aws_byte_cursor_from_string(host_name);
+    manager_options.host = host_name_cursor;
     manager_options.max_connections = max_num_connections;
     manager_options.shutdown_complete_callback = s_s3_client_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
@@ -1517,6 +1520,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
     AWS_ZERO_STRUCT(proxy_uri);
     struct aws_http_proxy_options *proxy_options = NULL;
     struct aws_tls_connection_options *proxy_tls_options = NULL;
+    struct aws_tls_connection_options *manager_tls_options = NULL;
 
     if (s_s3_client_get_proxy_uri(client, &proxy_uri) == AWS_OP_SUCCESS) {
         proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
@@ -1527,13 +1531,30 @@ static void s_s3_client_on_host_resolver_address_resolved(
     }
 
     if (client->tls_connection_options != NULL) {
-        manager_options.tls_connection_options = client->tls_connection_options;
+        manager_tls_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+        aws_tls_connection_options_copy(manager_tls_options, client->tls_connection_options);
+
+        /* TODO fix this in the actual aws_tls_connection_options_set_server_name function. */
+        if (manager_tls_options->server_name != NULL) {
+            aws_string_destroy(manager_tls_options->server_name);
+            manager_tls_options->server_name = NULL;
+        }
+
+        aws_tls_connection_options_set_server_name(manager_tls_options, client->allocator, &host_name_cursor);
+
+        manager_options.tls_connection_options = manager_tls_options;
         manager_options.port = s_https_port;
     } else {
         manager_options.port = s_http_port;
     }
 
     client->connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
+
+    if (manager_tls_options != NULL) {
+        aws_tls_connection_options_clean_up(manager_tls_options);
+        aws_mem_release(client->allocator, manager_tls_options);
+        manager_tls_options = NULL;
+    }
 
     if (proxy_tls_options != NULL) {
         aws_tls_connection_options_clean_up(proxy_tls_options);
