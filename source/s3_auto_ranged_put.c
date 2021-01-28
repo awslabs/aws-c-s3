@@ -353,7 +353,8 @@ static int s_s3_auto_ranged_put_next_request(
 
                 /* Last part--adjust size to match remaining content length. */
                 if (request->part_number == auto_ranged_put->synced_data.total_num_parts) {
-                    size_t content_remainder = (size_t)(auto_ranged_put->content_length % meta_request->part_size);
+                    size_t content_remainder =
+                        (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
 
                     if (content_remainder > 0) {
                         request_body_size = content_remainder;
