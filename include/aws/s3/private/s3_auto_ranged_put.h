@@ -33,7 +33,7 @@ struct aws_s3_auto_ranged_put {
     /* Useable after the Create Multipart Upload request succeeds. */
     struct aws_string *upload_id;
 
-    size_t content_length;
+    uint64_t content_length;
 
     struct {
         /* Only meant for use in the next_request function, which is never called concurrently. */

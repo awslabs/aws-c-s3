@@ -123,7 +123,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
-    size_t content_length,
+    uint64_t content_length,
     uint32_t num_parts,
     const struct aws_s3_meta_request_options *options) {
 
@@ -351,8 +351,9 @@ static int s_s3_auto_ranged_put_next_request(
 
                 size_t request_body_size = meta_request->part_size;
 
+                /* Last part--adjust size to match remaining content length. */
                 if (request->part_number == auto_ranged_put->synced_data.total_num_parts) {
-                    size_t content_remainder = auto_ranged_put->content_length % meta_request->part_size;
+                    size_t content_remainder = (size_t)(auto_ranged_put->content_length % meta_request->part_size);
 
                     if (content_remainder > 0) {
                         request_body_size = content_remainder;
