@@ -1082,7 +1082,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             s_s3_client_process_request(client, vip_connection);
 
             if (s_enable_connection_padding && client->threaded_data.num_outstanding_secondary_connections <
-                                                   (s_num_connections_per_vip * client->ideal_vip_count)) {
+                                                   (s_num_connections_per_vip * client->ideal_vip_count * 2)) {
                 ++client->threaded_data.num_outstanding_secondary_connections;
 
                 aws_http_connection_manager_acquire_connection(
@@ -1667,7 +1667,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
 
     struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
 
-    uint32_t max_num_connections = client->ideal_vip_count * s_num_connections_per_vip * 2;
+    uint32_t max_num_connections = client->ideal_vip_count * s_num_connections_per_vip * 3;
 
     /* Try to set up the connection manager. */
     struct aws_socket_options socket_options;
@@ -1759,8 +1759,8 @@ static void s_s3_client_on_host_resolver_address_resolved(
 
         client->synced_data.connection_manager_active = true;
         client->synced_data.connection_manager = connection_manager;
-        client->synced_data.num_connections = max_num_connections;
-        client->synced_data.num_idle_connections = client->ideal_vip_count * s_num_connections_per_vip;
+        client->synced_data.num_idle_connections = client->synced_data.num_connections =
+            client->ideal_vip_count * s_num_connections_per_vip;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
