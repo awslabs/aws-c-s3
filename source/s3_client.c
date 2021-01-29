@@ -45,6 +45,13 @@ static const uint32_t s_connection_timeout_ms = 3000;
 static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
 
+/* Max number of connections to open, avg per second */
+/*
+static const bool s_max_conn_open_rate_enabled = false;
+static const uint32_t s_max_conn_open_count = 24;
+static const uint64_t s_max_conn_open_rate = 1000;
+*/
+
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
@@ -80,6 +87,11 @@ static void s_s3_client_process_request(struct aws_s3_client *client, struct aws
 /* Callback which handles the HTTP connection retrieved by acquire_http_connection. */
 static void s_s3_client_on_acquire_http_connection(
     struct aws_http_connection *http_connection,
+    int error_code,
+    void *user_data);
+
+static void s_s3_client_on_acquire_secondary_http_connection(
+    struct aws_http_connection *incoming_http_connection,
     int error_code,
     void *user_data);
 
@@ -291,6 +303,12 @@ struct aws_s3_client *aws_s3_client_new(
         client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
     }
 
+    /*
+        aws_array_list_init_dynamic(
+            &client->threaded_data.open_conn_timestamps_millis, client->allocator, s_max_conn_open_count,
+       sizeof(uint64_t));
+    */
+
     /* Initialize shutdown options and tracking. */
     client->shutdown_callback = client_config->shutdown_callback;
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
@@ -372,14 +390,10 @@ static void s_s3_client_check_for_shutdown(
         goto unlock;
     }
 
-    if (client->synced_data.num_idle_connections < client->synced_data.num_connections) {
-        goto unlock;
-    }
-
     if (client->synced_data.connection_manager_active) {
-        if (client->connection_manager != NULL) {
-            connection_manager = client->connection_manager;
-            client->connection_manager = NULL;
+        if (client->synced_data.connection_manager != NULL) {
+            connection_manager = client->synced_data.connection_manager;
+            client->synced_data.connection_manager = NULL;
         }
 
         goto unlock;
@@ -412,7 +426,9 @@ static void s_s3_client_finish_destroy(void *user_data) {
 
     aws_string_destroy(client->synced_data.endpoint);
     client->synced_data.endpoint = NULL;
-
+    /*
+        aws_array_list_clean_up(&client->threaded_data.open_conn_timestamps_millis);
+    */
     if (client->tls_connection_options) {
         aws_tls_connection_options_clean_up(client->tls_connection_options);
         aws_mem_release(client->allocator, client->tls_connection_options);
@@ -843,6 +859,8 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     struct aws_linked_list meta_request_work_list;
     aws_linked_list_init(&meta_request_work_list);
 
+    struct aws_http_connection_manager *connection_manager = NULL;
+
     /*******************/
     /* Step 1: Move everything into thread local memory. */
     /*******************/
@@ -855,6 +873,12 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
 
+    connection_manager = client->synced_data.connection_manager;
+
+    if (connection_manager != NULL) {
+        aws_http_connection_manager_acquire(connection_manager);
+    }
+
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
 
     num_idle_connections = client->synced_data.num_idle_connections;
@@ -863,6 +887,10 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* TODO aws_sub_u32_checked */
     client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
     client->synced_data.pending_request_count = 0;
+
+    client->threaded_data.num_outstanding_secondary_connections -=
+        client->synced_data.num_outstanding_secondary_connections;
+    client->synced_data.num_outstanding_secondary_connections = 0;
 
     aws_s3_client_unlock_synced_data(client);
 
@@ -916,8 +944,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /*******************/
     /* Step 3: Go through all VIP connections, cleaning up old ones, and assigning requests where possible. */
     /*******************/
-
-    if (!client_active) {
+    if (!client_active || connection_manager == NULL) {
         goto check_for_shutdown;
     }
 
@@ -927,6 +954,57 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         client->ideal_vip_count * s_num_connections_per_vip * max_requests_multiplier;
 
     struct aws_s3_meta_request *current_meta_request = NULL;
+
+    /*
+        uint32_t num_allowed_new_connections = 0;
+
+        struct aws_http_connection_manager_snapshot snapshot;
+        aws_http_connection_manager_get_snapshot(connection_manager, &snapshot);
+        uint32_t num_open_connections = snapshot.open_connection_count + snapshot.pending_acquisition_count;
+
+        if (s_max_conn_open_rate_enabled) {
+            struct aws_date_time current_timestamp;
+            aws_date_time_init_now(&current_timestamp);
+            size_t current_timestamp_millis = aws_date_time_as_millis(&current_timestamp);
+
+            uint32_t i = 0;
+
+            while (i < aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis)) {
+                uint64_t timestamp_i = 0;
+                aws_array_list_get_at(&client->threaded_data.open_conn_timestamps_millis, &timestamp_i, i);
+
+                uint64_t timestamp_delta = current_timestamp_millis - timestamp_i;
+
+                if (timestamp_delta >= s_max_conn_open_rate) {
+                    uint64_t last_timestamp = 0;
+
+                    aws_array_list_get_at(
+                        &client->threaded_data.open_conn_timestamps_millis,
+                        &last_timestamp,
+                        aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis) - 1);
+
+                    aws_array_list_set_at(&client->threaded_data.open_conn_timestamps_millis, &last_timestamp, i);
+
+                    aws_array_list_pop_back(&client->threaded_data.open_conn_timestamps_millis);
+                } else {
+                    ++i;
+                }
+            }
+
+            num_allowed_new_connections =
+                s_max_conn_open_count - aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis);
+        } else {
+            num_allowed_new_connections = max_meta_requests_process_depth - num_idle_connections;
+        }
+
+        uint32_t num_idle_connections_in_pool = snapshot.idle_connection_count;
+        uint32_t num_allowed_connections = num_idle_connections_in_pool + num_allowed_new_connections;
+        uint32_t num_connections_used = 0;
+
+        if (num_allowed_connections > max_meta_requests_process_depth) {
+            num_allowed_connections = max_meta_requests_process_depth;
+        }
+    */
 
     while (num_idle_connections > 0 && !aws_linked_list_empty(&client->threaded_data.meta_requests) &&
            client->threaded_data.num_requests_in_flight < max_requests_in_flight) {
@@ -980,17 +1058,66 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             ++client->threaded_data.num_requests_in_flight;
             --num_idle_connections;
 
+            /*
+                        if (s_max_conn_open_rate_enabled && num_connections_used > num_idle_connections_in_pool) {
+                            struct aws_date_time current_timestamp;
+                            aws_date_time_init_now(&current_timestamp);
+                            size_t current_timestamp_millis = aws_date_time_as_millis(&current_timestamp);
+
+                            aws_array_list_push_back(&client->threaded_data.open_conn_timestamps_millis,
+               &current_timestamp_millis);
+                        }
+            */
             struct aws_s3_vip_connection *vip_connection =
                 aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_vip_connection));
+
+            aws_http_connection_manager_acquire(connection_manager);
+            vip_connection->http_connection_manager = connection_manager;
 
             vip_connection->owning_client = client;
             vip_connection->request = request;
 
             s_s3_client_process_request(client, vip_connection);
+
+            if (client->threaded_data.num_outstanding_secondary_connections <
+                (s_num_connections_per_vip * client->ideal_vip_count)) {
+                ++client->threaded_data.num_outstanding_secondary_connections;
+
+                aws_http_connection_manager_acquire_connection(
+                    vip_connection->http_connection_manager, s_s3_client_on_acquire_secondary_http_connection, client);
+            }
         }
     }
 
+    /*
+    {
+        struct aws_http_connection_manager_snapshot snapshot;
+        aws_http_connection_manager_get_snapshot(connection_manager, &snapshot);
+
+        uint32_t desired_num_open_connections = 2*client_threaded_data.num_active_connections;
+        uint32_t current_num_open_connections = snapshot.open_connection_count + snapshot.pending_acquisition_count;
+
+        for (uint32_t i = current_num_open_connections; i < desired_num_open_connections; ++i) {
+            struct aws_s3_vip_connection *vip_connection =
+                aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_vip_connection));
+
+            aws_http_connection_manager_acquire(connection_manager);
+            vip_connection->http_connection_manager = connection_manager;
+            vip_connection->owning_client = client;
+            vip_connection->request = NULL;
+
+            s_s3_client_process_request(client, vip_connection);
+
+            ++client_threaded_data.num_active_connections;
+        }
+    }*/
+
 check_for_shutdown:
+
+    if (connection_manager != NULL) {
+        aws_http_connection_manager_release(connection_manager);
+        connection_manager = NULL;
+    }
 
     s_s3_client_check_for_shutdown(client, s_s3_client_reset_work_task_in_progress_synced, &num_idle_connections);
 }
@@ -1086,8 +1213,10 @@ static void s_s3_client_acquired_retry_token(
 
     vip_connection->retry_token = token;
 
+    AWS_ASSERT(vip_connection->http_connection_manager != NULL);
+
     aws_http_connection_manager_acquire_connection(
-        client->connection_manager, s_s3_client_on_acquire_http_connection, vip_connection);
+        vip_connection->http_connection_manager, s_s3_client_on_acquire_http_connection, vip_connection);
 
     return;
 
@@ -1148,6 +1277,38 @@ static void s_s3_client_on_acquire_http_connection_default(
     aws_s3_meta_request_make_request(meta_request, client, vip_connection);
 }
 
+static void s_s3_client_on_acquire_secondary_http_connection(
+    struct aws_http_connection *incoming_http_connection,
+    int error_code,
+    void *user_data) {
+
+    struct aws_s3_client *client = user_data;
+    AWS_PRECONDITION(client);
+
+    if (error_code == AWS_ERROR_SUCCESS) {
+        aws_s3_client_lock_synced_data(client);
+        struct aws_http_connection_manager *connection_manager = client->synced_data.connection_manager;
+
+        AWS_ASSERT(connection_manager != NULL);
+
+        if (connection_manager != NULL) {
+            aws_http_connection_manager_acquire(connection_manager);
+        }
+
+        aws_s3_client_unlock_synced_data(client);
+
+        if (connection_manager != NULL) {
+            aws_http_connection_manager_release_connection(connection_manager, incoming_http_connection);
+
+            aws_http_connection_manager_release(connection_manager);
+        }
+    }
+
+    aws_s3_client_lock_synced_data(client);
+    ++client->synced_data.num_outstanding_secondary_connections;
+    aws_s3_client_unlock_synced_data(client);
+}
+
 /* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
@@ -1161,7 +1322,6 @@ void aws_s3_client_notify_connection_finished(
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
-
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->initial_request_message);
 
@@ -1170,7 +1330,8 @@ void aws_s3_client_notify_connection_finished(
             aws_http_connection_close(vip_connection->http_connection);
         }
 
-        aws_http_connection_manager_release_connection(client->connection_manager, vip_connection->http_connection);
+        aws_http_connection_manager_release_connection(
+            vip_connection->http_connection_manager, vip_connection->http_connection);
         vip_connection->http_connection = NULL;
     }
 
@@ -1260,11 +1421,18 @@ reset_vip_connection:
      * request.*/
     aws_s3_meta_request_acquire(meta_request);
 
-    /* Get rid of the attached request. */
-    aws_s3_request_release(vip_connection->request);
-    vip_connection->request = NULL;
+    {
+        /* Get rid of the attached request. */
+        aws_s3_request_release(vip_connection->request);
+        vip_connection->request = NULL;
 
-    aws_mem_release(client->sba_allocator, vip_connection);
+        if (vip_connection->http_connection_manager != NULL) {
+            aws_http_connection_manager_release(vip_connection->http_connection_manager);
+            vip_connection->http_connection_manager = NULL;
+        }
+
+        aws_mem_release(client->sba_allocator, vip_connection);
+    }
 
     aws_s3_client_lock_synced_data(client);
     ++client->synced_data.num_idle_connections;
@@ -1497,7 +1665,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
 
     struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
 
-    uint32_t max_num_connections = client->ideal_vip_count * s_num_connections_per_vip;
+    uint32_t max_num_connections = client->ideal_vip_count * s_num_connections_per_vip * 2;
 
     /* Try to set up the connection manager. */
     struct aws_socket_options socket_options;
@@ -1521,6 +1689,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
     struct aws_http_proxy_options *proxy_options = NULL;
     struct aws_tls_connection_options *proxy_tls_options = NULL;
     struct aws_tls_connection_options *manager_tls_options = NULL;
+    struct aws_http_connection_manager *connection_manager = NULL;
 
     if (s_s3_client_get_proxy_uri(client, &proxy_uri) == AWS_OP_SUCCESS) {
         proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
@@ -1548,7 +1717,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
         manager_options.port = s_http_port;
     }
 
-    client->connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
+    connection_manager = aws_http_connection_manager_new(client->allocator, &manager_options);
 
     if (manager_tls_options != NULL) {
         aws_tls_connection_options_clean_up(manager_tls_options);
@@ -1569,7 +1738,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
 
     aws_uri_clean_up(&proxy_uri);
 
-    if (client->connection_manager == NULL) {
+    if (connection_manager == NULL) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Could not set up connection manager for endpoint '%s' due to error %d (%s)",
@@ -1587,6 +1756,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
         AWS_ASSERT(client->synced_data.num_connections == 0);
 
         client->synced_data.connection_manager_active = true;
+        client->synced_data.connection_manager = connection_manager;
         client->synced_data.num_connections = max_num_connections;
         client->synced_data.num_idle_connections = max_num_connections;
         s_s3_client_schedule_process_work_synced(client);

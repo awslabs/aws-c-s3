@@ -31,6 +31,8 @@ enum aws_s3_vip_connection_finish_code {
 struct aws_s3_vip_connection {
     struct aws_s3_client *owning_client;
 
+    struct aws_http_connection_manager *http_connection_manager;
+
     struct aws_http_connection *http_connection;
 
     /* Request currently being processed on the VIP connection. */
@@ -104,8 +106,6 @@ struct aws_s3_client {
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
 
-    struct aws_http_connection_manager *connection_manager;
-
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
@@ -115,6 +115,8 @@ struct aws_s3_client {
 
         /* Endpoint to use for the bucket. */
         struct aws_string *endpoint;
+
+        struct aws_http_connection_manager *connection_manager;
 
         /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_request_work;
@@ -128,6 +130,8 @@ struct aws_s3_client {
         uint32_t num_connections;
 
         uint32_t num_idle_connections;
+
+        uint32_t num_outstanding_secondary_connections;
 
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t active : 1;
@@ -159,6 +163,10 @@ struct aws_s3_client {
 
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
+
+        uint32_t num_outstanding_secondary_connections;
+
+        struct aws_array_list open_conn_timestamps_millis;
 
     } threaded_data;
 };
