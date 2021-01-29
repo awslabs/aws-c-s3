@@ -44,6 +44,7 @@ static const uint32_t s_connection_timeout_ms = 3000;
 /* TODO Provide analysis on origins of this value. */
 static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
+static const uint32_t s_num_connection_buffers = 4;
 
 /* Max number of connections to open, avg per second */
 /*
@@ -1082,7 +1083,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             s_s3_client_process_request(client, vip_connection);
 
             if (s_enable_connection_padding && client->threaded_data.num_outstanding_secondary_connections <
-                                                   (s_num_connections_per_vip * client->ideal_vip_count * 2)) {
+                                                   (s_num_connections_per_vip * client->ideal_vip_count * (s_num_connection_buffers-1))) {
                 ++client->threaded_data.num_outstanding_secondary_connections;
 
                 aws_http_connection_manager_acquire_connection(
@@ -1667,8 +1668,6 @@ static void s_s3_client_on_host_resolver_address_resolved(
 
     struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
 
-    uint32_t max_num_connections = client->ideal_vip_count * s_num_connections_per_vip * 3;
-
     /* Try to set up the connection manager. */
     struct aws_socket_options socket_options;
     AWS_ZERO_STRUCT(socket_options);
@@ -1682,7 +1681,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
     manager_options.initial_window_size = SIZE_MAX;
     manager_options.socket_options = &socket_options;
     manager_options.host = host_name_cursor;
-    manager_options.max_connections = max_num_connections;
+    manager_options.max_connections = client->ideal_vip_count * s_num_connections_per_vip * s_num_connection_buffers;
     manager_options.shutdown_complete_callback = s_s3_client_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
 
