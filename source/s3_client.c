@@ -1760,7 +1760,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
         client->synced_data.connection_manager_active = true;
         client->synced_data.connection_manager = connection_manager;
         client->synced_data.num_connections = max_num_connections;
-        client->synced_data.num_idle_connections = max_num_connections;
+        client->synced_data.num_idle_connections = client->ideal_vip_count * s_num_connections_per_vip;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
