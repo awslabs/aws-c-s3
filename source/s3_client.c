@@ -61,6 +61,8 @@ static const size_t s_default_max_part_size = 32 * 1024 * 1024;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 
+static bool s_enable_connection_padding = false;
+
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
@@ -1079,8 +1081,8 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
             s_s3_client_process_request(client, vip_connection);
 
-            if (client->threaded_data.num_outstanding_secondary_connections <
-                (s_num_connections_per_vip * client->ideal_vip_count)) {
+            if (s_enable_connection_padding && client->threaded_data.num_outstanding_secondary_connections <
+                                                   (s_num_connections_per_vip * client->ideal_vip_count)) {
                 ++client->threaded_data.num_outstanding_secondary_connections;
 
                 aws_http_connection_manager_acquire_connection(
