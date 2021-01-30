@@ -1252,6 +1252,7 @@ static void s_s3_client_on_acquire_secondary_http_connection(
     }
 
     aws_s3_client_lock_synced_data(client);
+    s_s3_client_schedule_process_work_synced(client);
     ++client->synced_data.num_outstanding_secondary_connections;
     aws_s3_client_unlock_synced_data(client);
 }
