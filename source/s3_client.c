@@ -1021,8 +1021,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
             s_s3_client_process_request(client, vip_connection);
 
-            if (s_enable_connection_padding && client->threaded_data.num_outstanding_secondary_connections <
-                                                   (s_num_connections_per_vip * client->ideal_vip_count * (s_num_connection_buffers-1))) {
+            if (s_enable_connection_padding &&
+                client->threaded_data.num_outstanding_secondary_connections <
+                    (s_num_connections_per_vip * client->ideal_vip_count * (s_num_connection_buffers - 1))) {
                 ++client->threaded_data.num_outstanding_secondary_connections;
 
                 aws_http_connection_manager_acquire_connection(
