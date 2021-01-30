@@ -958,57 +958,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     struct aws_s3_meta_request *current_meta_request = NULL;
 
-    /*
-        uint32_t num_allowed_new_connections = 0;
-
-        struct aws_http_connection_manager_snapshot snapshot;
-        aws_http_connection_manager_get_snapshot(connection_manager, &snapshot);
-        uint32_t num_open_connections = snapshot.open_connection_count + snapshot.pending_acquisition_count;
-
-        if (s_max_conn_open_rate_enabled) {
-            struct aws_date_time current_timestamp;
-            aws_date_time_init_now(&current_timestamp);
-            size_t current_timestamp_millis = aws_date_time_as_millis(&current_timestamp);
-
-            uint32_t i = 0;
-
-            while (i < aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis)) {
-                uint64_t timestamp_i = 0;
-                aws_array_list_get_at(&client->threaded_data.open_conn_timestamps_millis, &timestamp_i, i);
-
-                uint64_t timestamp_delta = current_timestamp_millis - timestamp_i;
-
-                if (timestamp_delta >= s_max_conn_open_rate) {
-                    uint64_t last_timestamp = 0;
-
-                    aws_array_list_get_at(
-                        &client->threaded_data.open_conn_timestamps_millis,
-                        &last_timestamp,
-                        aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis) - 1);
-
-                    aws_array_list_set_at(&client->threaded_data.open_conn_timestamps_millis, &last_timestamp, i);
-
-                    aws_array_list_pop_back(&client->threaded_data.open_conn_timestamps_millis);
-                } else {
-                    ++i;
-                }
-            }
-
-            num_allowed_new_connections =
-                s_max_conn_open_count - aws_array_list_length(&client->threaded_data.open_conn_timestamps_millis);
-        } else {
-            num_allowed_new_connections = max_meta_requests_process_depth - num_idle_connections;
-        }
-
-        uint32_t num_idle_connections_in_pool = snapshot.idle_connection_count;
-        uint32_t num_allowed_connections = num_idle_connections_in_pool + num_allowed_new_connections;
-        uint32_t num_connections_used = 0;
-
-        if (num_allowed_connections > max_meta_requests_process_depth) {
-            num_allowed_connections = max_meta_requests_process_depth;
-        }
-    */
-
     while (num_idle_connections > 0 && !aws_linked_list_empty(&client->threaded_data.meta_requests) &&
            client->threaded_data.num_requests_in_flight < max_requests_in_flight) {
 
@@ -1061,16 +1010,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             ++client->threaded_data.num_requests_in_flight;
             --num_idle_connections;
 
-            /*
-                        if (s_max_conn_open_rate_enabled && num_connections_used > num_idle_connections_in_pool) {
-                            struct aws_date_time current_timestamp;
-                            aws_date_time_init_now(&current_timestamp);
-                            size_t current_timestamp_millis = aws_date_time_as_millis(&current_timestamp);
-
-                            aws_array_list_push_back(&client->threaded_data.open_conn_timestamps_millis,
-               &current_timestamp_millis);
-                        }
-            */
             struct aws_s3_vip_connection *vip_connection =
                 aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_vip_connection));
 
@@ -1091,29 +1030,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             }
         }
     }
-
-    /*
-    {
-        struct aws_http_connection_manager_snapshot snapshot;
-        aws_http_connection_manager_get_snapshot(connection_manager, &snapshot);
-
-        uint32_t desired_num_open_connections = 2*client_threaded_data.num_active_connections;
-        uint32_t current_num_open_connections = snapshot.open_connection_count + snapshot.pending_acquisition_count;
-
-        for (uint32_t i = current_num_open_connections; i < desired_num_open_connections; ++i) {
-            struct aws_s3_vip_connection *vip_connection =
-                aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_vip_connection));
-
-            aws_http_connection_manager_acquire(connection_manager);
-            vip_connection->http_connection_manager = connection_manager;
-            vip_connection->owning_client = client;
-            vip_connection->request = NULL;
-
-            s_s3_client_process_request(client, vip_connection);
-
-            ++client_threaded_data.num_active_connections;
-        }
-    }*/
 
 check_for_shutdown:
 
