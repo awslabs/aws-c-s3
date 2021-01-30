@@ -29,6 +29,8 @@ enum aws_s3_vip_connection_finish_code {
 
 /* Represents one connection on a particular VIP. */
 struct aws_s3_vip_connection {
+    struct aws_linked_list_node node;
+
     struct aws_s3_client *owning_client;
 
     struct aws_http_connection_manager *http_connection_manager;
@@ -121,15 +123,13 @@ struct aws_s3_client {
         /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_request_work;
 
+        struct aws_linked_list pending_connections;
+
         /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
 
         /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
         uint32_t pending_request_count;
-
-        uint32_t num_connections;
-
-        uint32_t num_idle_connections;
 
         uint32_t num_outstanding_secondary_connections;
 
@@ -160,6 +160,8 @@ struct aws_s3_client {
 
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
+
+        struct aws_linked_list connections;
 
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
