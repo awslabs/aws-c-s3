@@ -883,6 +883,12 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         client->synced_data.num_outstanding_secondary_connections;
     client->synced_data.num_outstanding_secondary_connections = 0;
 
+    struct aws_http_connection_manager *connection_manager = client->synced_data.connection_manager;
+
+    if (connection_manager != NULL) {
+        aws_http_connection_manager_acquire(connection_manager);
+    }
+
     aws_s3_client_unlock_synced_data(client);
 
     /*******************/
@@ -1024,21 +1030,28 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
             s_s3_client_process_request(client, vip_connection);
 
-            if (s_enable_connection_padding &&
-                client->threaded_data.num_outstanding_secondary_connections <
-                    (s_num_connections_per_vip * client->ideal_vip_count * (s_num_connection_buffers - 1))) {
-                ++client->threaded_data.num_outstanding_secondary_connections;
-
-                aws_http_connection_manager_acquire_connection(
-                    vip_connection->http_connection_manager, s_s3_client_on_acquire_secondary_http_connection, client);
-            }
         } else {
             aws_linked_list_push_front(&client->threaded_data.connections, &vip_connection->node);
             break;
         }
     }
 
+    if (s_enable_connection_padding && connection_manager != NULL) {
+        uint32_t buffer_space = s_num_connections_per_vip * client->ideal_vip_count * (s_num_connection_buffers - 1);
+
+        while (client->threaded_data.num_outstanding_secondary_connections < buffer_space) {
+            aws_http_connection_manager_acquire_connection(
+                connection_manager, s_s3_client_on_acquire_secondary_http_connection, client);
+            ++client->threaded_data.num_outstanding_secondary_connections;
+        }
+    }
+
 check_for_shutdown:
+
+    if (connection_manager != NULL) {
+        aws_http_connection_manager_release(connection_manager);
+        connection_manager = NULL;
+    }
 
     s_s3_client_check_for_shutdown(client, s_s3_client_reset_work_task_in_progress_synced, NULL);
 }
@@ -1120,7 +1133,8 @@ static void s_s3_client_acquired_retry_token(
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
-            "id=%p Client could not get retry token for vip connection %p processing request %p due to error %d (%s)",
+            "id=%p Client could not get retry token for vip connection %p processing request %p due to error %d "
+            "(%s)",
             (void *)client,
             (void *)vip_connection,
             (void *)request,
@@ -1346,8 +1360,8 @@ reset_vip_connection:
 
     aws_s3_meta_request_finished_request(meta_request, request, error_code);
 
-    /* Grab a reference to the meta request since we got it from the request, and we want to use after we release the
-     * request.*/
+    /* Grab a reference to the meta request since we got it from the request, and we want to use after we release
+     * the request.*/
     aws_s3_meta_request_acquire(meta_request);
 
     /* Get rid of the attached request. */
