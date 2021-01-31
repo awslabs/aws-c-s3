@@ -527,7 +527,7 @@ error_finish:
 static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->http_connection);
+    AWS_PRECONDITION(vip_connection->active_connection);
     (void)client;
 
     struct aws_s3_request *request = vip_connection->request;
@@ -548,7 +548,7 @@ static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct 
     options.on_response_body = s_s3_meta_request_incoming_body;
     options.on_complete = s_s3_meta_request_stream_complete;
 
-    struct aws_http_stream *stream = aws_http_connection_make_request(vip_connection->http_connection, &options);
+    struct aws_http_stream *stream = aws_http_connection_make_request(vip_connection->active_connection, &options);
 
     if (stream == NULL) {
         AWS_LOGF_ERROR(

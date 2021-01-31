@@ -16,6 +16,8 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/connection_manager.h>
 
+#define S3_NUM_HTTP_CONNECTIONS 2
+
 struct aws_http_connection;
 struct aws_http_connection_manager;
 
@@ -33,9 +35,17 @@ struct aws_s3_vip_connection {
 
     struct aws_s3_client *owning_client;
 
-    struct aws_http_connection_manager *http_connection_manager;
+    struct aws_http_connection_manager *connection_manager;
 
-    struct aws_http_connection *http_connection;
+    uint32_t num_connections;
+
+    uint32_t num_pending_acquisition_count;
+
+    struct aws_http_connection *connections[S3_NUM_HTTP_CONNECTIONS];
+
+    struct aws_http_connection *active_connection;
+
+    struct aws_atomic_var waiting_for_active_connection;
 
     /* Request currently being processed on the VIP connection. */
     struct aws_s3_request *request;
@@ -45,6 +55,12 @@ struct aws_s3_vip_connection {
 
     /* True if the connection is currently retrying to process the request. */
     bool is_retry;
+
+    struct {
+        struct aws_http_connection *new_connections[S3_NUM_HTTP_CONNECTIONS];
+
+        uint32_t num_new_connections;
+    } synced_data;
 };
 
 struct aws_s3_client_vtable {
@@ -131,8 +147,6 @@ struct aws_s3_client {
         /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
         uint32_t pending_request_count;
 
-        uint32_t num_outstanding_secondary_connections;
-
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t active : 1;
 
@@ -165,8 +179,6 @@ struct aws_s3_client {
 
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
-
-        uint32_t num_outstanding_secondary_connections;
 
         struct aws_array_list open_conn_timestamps_millis;
 

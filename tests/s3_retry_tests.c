@@ -37,7 +37,7 @@ static void s_s3_client_on_acquire_http_connection_exceed_retries(
         error_code = AWS_ERROR_UNKNOWN;
 
         if (connection != NULL) {
-            aws_http_connection_manager_release_connection(vip_connection->http_connection_manager, connection);
+            aws_http_connection_manager_release_connection(vip_connection->connection_manager, connection);
             connection = NULL;
         }
     }
@@ -104,7 +104,7 @@ static void s_s3_client_on_acquire_http_connection_fail_first(
 
         aws_raise_error(AWS_ERROR_UNKNOWN);
         error_code = AWS_ERROR_UNKNOWN;
-        aws_http_connection_manager_release_connection(vip_connection->http_connection_manager, connection);
+        aws_http_connection_manager_release_connection(vip_connection->connection_manager, connection);
         connection = NULL;
     }
 
