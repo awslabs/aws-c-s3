@@ -16,7 +16,7 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/connection_manager.h>
 
-#define S3_NUM_HTTP_CONNECTIONS 2
+#define S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION 2
 
 struct aws_http_connection;
 struct aws_http_connection_manager;
@@ -41,7 +41,7 @@ struct aws_s3_vip_connection {
 
     uint32_t num_pending_acquisition_count;
 
-    struct aws_http_connection *connections[S3_NUM_HTTP_CONNECTIONS];
+    struct aws_http_connection *connections[S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION];
 
     struct aws_http_connection *active_connection;
 
@@ -57,7 +57,7 @@ struct aws_s3_vip_connection {
     bool is_retry;
 
     struct {
-        struct aws_http_connection *new_connections[S3_NUM_HTTP_CONNECTIONS];
+        struct aws_http_connection *new_connections[S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION];
 
         uint32_t num_new_connections;
     } synced_data;

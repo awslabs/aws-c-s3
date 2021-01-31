@@ -44,7 +44,6 @@ static const uint32_t s_connection_timeout_ms = 3000;
 /* TODO Provide analysis on origins of this value. */
 static const double s_throughput_per_vip_gbps = 4.0;
 static const uint32_t s_num_connections_per_vip = 10;
-static const uint32_t s_num_connection_buffers = 4;
 
 /* Max number of connections to open, avg per second */
 /*
@@ -1183,7 +1182,7 @@ static void s_s3_client_acquired_retry_token(
     }
 
     uint32_t num_connections_to_acquire =
-        S3_NUM_HTTP_CONNECTIONS - (vip_connection->num_connections + vip_connection->num_pending_acquisition_count);
+        S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION - (vip_connection->num_connections + vip_connection->num_pending_acquisition_count);
 
     for (uint32_t i = 0; i < num_connections_to_acquire; ++i) {
         ++vip_connection->num_pending_acquisition_count;
@@ -1630,7 +1629,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
     manager_options.initial_window_size = SIZE_MAX;
     manager_options.socket_options = &socket_options;
     manager_options.host = host_name_cursor;
-    manager_options.max_connections = max_active_connections * s_num_connection_buffers;
+    manager_options.max_connections = max_active_connections * S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION;
     manager_options.shutdown_complete_callback = s_s3_client_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = client;
 
