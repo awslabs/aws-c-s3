@@ -14,7 +14,11 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
+#include <aws/io/socket.h>
+#include <aws/io/tls_channel_handler.h>
+#include <aws/io/uri.h>
 
 #define S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION 2
 
@@ -35,8 +39,6 @@ struct aws_s3_vip_connection {
     struct aws_linked_list_node node;
 
     struct aws_s3_client *owning_client;
-
-    struct aws_http_connection_manager *connection_manager;
 
     uint32_t num_connections;
 
@@ -137,8 +139,6 @@ struct aws_s3_client {
         /* Endpoint to use for the bucket. */
         struct aws_string *endpoint;
 
-        struct aws_http_connection_manager *connection_manager;
-
         /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_request_work;
 
@@ -149,6 +149,10 @@ struct aws_s3_client {
 
         /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
         uint32_t pending_request_count;
+
+        uint32_t num_vip_connections;
+
+        uint32_t num_http_connections;
 
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t active : 1;
@@ -162,8 +166,6 @@ struct aws_s3_client {
         /* Whether or not the body streaming ELG is allocated. If the body streaming ELG is NULL, but this is true, the
          * shutdown callback has not yet been called.*/
         uint32_t body_streaming_elg_allocated : 1;
-
-        uint32_t connection_manager_active : 1;
 
         /* True if the host resolver couldn't find the endpoint.*/
         uint32_t invalid_endpoint : 1;
@@ -183,9 +185,16 @@ struct aws_s3_client {
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
 
-        struct aws_array_list open_conn_timestamps_millis;
-
     } threaded_data;
+
+    struct {
+        struct aws_string *host_name;
+        struct aws_uri proxy_uri;
+        struct aws_socket_options connection_socket_options;
+        struct aws_http_client_connection_options connection_options;
+        struct aws_http_proxy_options connection_proxy_options;
+        struct aws_tls_connection_options connection_tls_options;
+    } resolved_host;
 };
 
 int aws_s3_client_make_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
