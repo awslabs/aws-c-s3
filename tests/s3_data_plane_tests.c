@@ -543,7 +543,6 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     struct aws_http_message *messages[2];
     struct aws_input_stream *input_streams[2];
     struct aws_byte_buf input_stream_buffers[2];
-    int object_size_mb[] = {1, 10};
     size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
 
     ASSERT_TRUE(
@@ -568,9 +567,9 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     for (size_t i = 0; i < num_meta_requests; ++i) {
         AWS_ZERO_STRUCT(meta_request_test_results[i]);
         char object_path_buffer[128] = "";
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_%uMB.txt", object_size_mb[i]);
+        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_10MB_%u.txt", i);
         AWS_ZERO_STRUCT(input_stream_buffers[i]);
-        aws_s3_create_test_buffer(allocator, object_size_mb[i] * 1024ULL * 1024ULL, &input_stream_buffers[i]);
+        aws_s3_create_test_buffer(allocator, 10 * 1024ULL * 1024ULL, &input_stream_buffers[i]);
         struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffers[i]);
         input_streams[i] = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
         struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
