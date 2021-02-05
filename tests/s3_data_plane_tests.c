@@ -403,6 +403,14 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_empty_object, s_test_s3_get_object_empty_default)
+static int s_test_s3_get_object_empty_default(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    return (s_test_s3_get_object_helper(
+        allocator, AWS_S3_TLS_ENABLED, 0, aws_byte_cursor_from_c_str("/get_object_test_0MB.txt")));
+}
+
 AWS_TEST_CASE(test_s3_get_object_sse_kms, s_test_s3_get_object_sse_kms)
 static int s_test_s3_get_object_sse_kms(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
