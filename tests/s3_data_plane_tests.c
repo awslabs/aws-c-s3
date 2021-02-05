@@ -589,7 +589,7 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
 
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
-        /* Trigger accelerating of our Get Object request. */
+        /* Trigger accelerating of our Put Object request. */
         meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
 
         ASSERT_TRUE(meta_requests[i] != NULL);
