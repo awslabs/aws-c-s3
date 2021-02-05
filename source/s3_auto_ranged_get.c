@@ -182,6 +182,31 @@ static void s_s3_auto_ranged_get_next_request(
         }
     }
 
+    /* One sepcial error case is an empty file download */
+    struct aws_s3_meta_request_result finish_result = meta_request->synced_data.finish_result;
+    if (finish_result.error_response_body && finish_result.error_response_headers) {
+        struct aws_byte_cursor content_type;
+        AWS_ZERO_STRUCT(content_type);
+        if (!aws_http_headers_get(
+                finish_result.error_response_headers, aws_byte_cursor_from_c_str("content-type"), &content_type)) {
+            /* Content type found */
+            if (aws_byte_cursor_eq_c_str_ignore_case(&content_type, "application/xml")) {
+                /* XML response */
+                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(finish_result.error_response_body);
+                struct aws_byte_cursor tag = aws_byte_cursor_from_c_str("ActualObjectSize");
+                struct aws_string *size = get_top_level_xml_tag_value(meta_request->allocator, &tag, &body_cursor);
+                if (aws_string_eq_c_str(size, "0")) {
+                    /* it's an empty file, clean up the stored request, and fake a successful result. Since, it's not
+                     * different to the result we will have by another request call to get the empty file */
+                    /* TODO: I think it may not worth to send another request, the error message has clearly shown the
+                     * file is empty. But, yeah resend the request without Range is the most correct way. So... */
+                    aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
+                    meta_request->synced_data.finish_result.response_status = AWS_S3_RESPONSE_STATUS_SUCCESS;
+                }
+            }
+        }
+    }
+
     goto no_work_remaining;
 
 has_work_remaining:
