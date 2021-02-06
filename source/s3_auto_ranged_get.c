@@ -196,13 +196,21 @@ static void s_s3_auto_ranged_get_next_request(
                 struct aws_byte_cursor tag = aws_byte_cursor_from_c_str("ActualObjectSize");
                 struct aws_string *size = get_top_level_xml_tag_value(meta_request->allocator, &tag, &body_cursor);
                 if (aws_string_eq_c_str(size, "0")) {
-                    /* it's an empty file, clean up the stored request, and fake a successful result. Since, it's not
-                     * different to the result we will have by another request call to get the empty file */
-                    /* TODO: I think it may not worth to send another request, the error message has clearly shown the
-                     * file is empty. But, yeah resend the request without Range is the most correct way. So... */
-                    aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
-                    meta_request->synced_data.finish_result.response_status = AWS_S3_RESPONSE_STATUS_SUCCESS;
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p Getting an empty file, create a new request without range header to fetch the empty "
+                        "file",
+                        (void *)meta_request);
+                    aws_s3_meta_request_reset_synced(meta_request);
+                    request = aws_s3_request_new(
+                        meta_request,
+                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_WITHOUT_RANGE,
+                        1,
+                        AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                    aws_string_destroy(size);
+                    goto has_work_remaining;
                 }
+                aws_string_destroy(size);
             }
         }
     }
@@ -255,11 +263,13 @@ static int s_s3_auto_ranged_get_prepare_request(
 
     struct aws_http_message *message = NULL;
 
-    AWS_ASSERT(request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART);
-
     /* Generate a new ranged get request based on the original message. */
     message = aws_s3_get_object_message_new(
-        meta_request->allocator, meta_request->initial_request_message, request->part_number, meta_request->part_size);
+        meta_request->allocator,
+        meta_request->initial_request_message,
+        request->part_number,
+        meta_request->part_size,
+        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_WITHOUT_RANGE);
 
     if (message == NULL) {
         AWS_LOGF_ERROR(
@@ -300,67 +310,70 @@ static void s_s3_auto_ranged_get_request_finished(
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
 
-    AWS_ASSERT(request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART);
-
     uint32_t num_parts = 0;
 
     if (error_code == AWS_ERROR_SUCCESS && request->part_number == 1) {
-        struct aws_byte_cursor content_range_header_value;
-
-        if (aws_http_headers_get(
-                request->send_data.response_headers, g_content_range_header_name, &content_range_header_value)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Could not find content range header for request %p",
-                (void *)meta_request,
-                (void *)request);
-
-            error_code = AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER;
-            goto error_encountered;
-        }
-
-        uint64_t range_start = 0;
-        uint64_t range_end = 0;
         uint64_t total_object_size = 0;
+        if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
+            struct aws_byte_cursor content_range_header_value;
 
-        /* The memory the byte cursor refers to should be valid, but if it's referring to a buffer that was
-         * previously used, the null terminating character may not be where we expect. We copy to a string to
-         * ensure that our null terminating character placement corresponds with the length. */
-        struct aws_string *content_range_header_value_str =
-            aws_string_new_from_cursor(meta_request->allocator, &content_range_header_value);
+            if (aws_http_headers_get(
+                    request->send_data.response_headers, g_content_range_header_name, &content_range_header_value)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Could not find content range header for request %p",
+                    (void *)meta_request,
+                    (void *)request);
 
-        /* Format of header is: "bytes StartByte-EndByte/TotalObjectSize" */
-        sscanf(
-            (const char *)content_range_header_value_str->bytes,
-            "bytes %" PRIu64 "-%" PRIu64 "/%" PRIu64,
-            &range_start,
-            &range_end,
-            &total_object_size);
+                error_code = AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER;
+                goto error_encountered;
+            }
 
-        aws_string_destroy(content_range_header_value_str);
-        content_range_header_value_str = NULL;
+            uint64_t range_start = 0;
+            uint64_t range_end = 0;
 
-        if (total_object_size == 0) {
-            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Get Object has invalid content range.", (void *)meta_request);
-            error_code = AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER;
-            goto error_encountered;
+            /* The memory the byte cursor refers to should be valid, but if it's referring to a buffer that was
+             * previously used, the null terminating character may not be where we expect. We copy to a string to
+             * ensure that our null terminating character placement corresponds with the length. */
+            struct aws_string *content_range_header_value_str =
+                aws_string_new_from_cursor(meta_request->allocator, &content_range_header_value);
+
+            /* Format of header is: "bytes StartByte-EndByte/TotalObjectSize" */
+            sscanf(
+                (const char *)content_range_header_value_str->bytes,
+                "bytes %" PRIu64 "-%" PRIu64 "/%" PRIu64,
+                &range_start,
+                &range_end,
+                &total_object_size);
+
+            aws_string_destroy(content_range_header_value_str);
+            content_range_header_value_str = NULL;
+
+            if (total_object_size == 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST, "id=%p Get Object has invalid content range.", (void *)meta_request);
+                error_code = AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER;
+                goto error_encountered;
+            }
+
+            num_parts = (uint32_t)(total_object_size / meta_request->part_size);
+
+            if (total_object_size % meta_request->part_size) {
+                ++num_parts;
+            }
+
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Object being requested is %" PRIu64 " bytes which will have %d parts based off of a %" PRIu64
+                " part size.",
+                (void *)meta_request,
+                total_object_size,
+                num_parts,
+                (uint64_t)meta_request->part_size);
+        } else {
+            num_parts = 1;
+            AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get empty file completed", (void *)meta_request);
         }
-
-        num_parts = (uint32_t)(total_object_size / meta_request->part_size);
-
-        if (total_object_size % meta_request->part_size) {
-            ++num_parts;
-        }
-
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Object being requested is %" PRIu64 " bytes which will have %d parts based off of a %" PRIu64
-            " part size.",
-            (void *)meta_request,
-            total_object_size,
-            num_parts,
-            (uint64_t)meta_request->part_size);
-
         if (meta_request->headers_callback != NULL) {
             struct aws_http_headers *response_headers = aws_http_headers_new(meta_request->allocator);
 

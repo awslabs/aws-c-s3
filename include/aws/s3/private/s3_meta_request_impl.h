@@ -264,6 +264,10 @@ void aws_s3_meta_request_set_fail_synced(
     struct aws_s3_request *failed_request,
     int error_code);
 
+/* Reset the request result. */
+AWS_S3_API
+void aws_s3_meta_request_reset_synced(struct aws_s3_meta_request *meta_request);
+
 /* Set that the meta request has failed. This is meant to be called sometime before aws_s3_meta_request_finish.
  * Subsequent calls this function or to aws_s3_meta_request_set_fail_synced will not overwrite the end result of the
  * meta request. */

@@ -182,6 +182,11 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
+void aws_s3_meta_request_reset_synced(struct aws_s3_meta_request *meta_request) {
+    aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
+    meta_request->synced_data.finish_result_set = false;
+}
+
 void aws_s3_meta_request_set_fail_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
