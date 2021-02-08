@@ -21,10 +21,11 @@ static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
 
 static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request *meta_request);
 
-static void s_s3_auto_ranged_put_next_request(
+static void s_s3_auto_ranged_put_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags);
+    enum aws_s3_meta_request_update_status *out_status);
 
 static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -38,7 +39,7 @@ static void s_s3_auto_ranged_put_request_finished(
     int error_code);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
-    .next_request = s_s3_auto_ranged_put_next_request,
+    .update = s_s3_auto_ranged_put_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
@@ -89,7 +90,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
 
     auto_ranged_put->content_length = content_length;
     auto_ranged_put->synced_data.total_num_parts = num_parts;
-    auto_ranged_put->threaded_next_request_data.next_part_number = 1;
+    auto_ranged_put->threaded_update_data.next_part_number = 1;
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
@@ -125,20 +126,21 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_put);
 }
 
-static void s_s3_auto_ranged_put_next_request(
+static void s_s3_auto_ranged_put_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags) {
+    enum aws_s3_meta_request_update_status *out_status) {
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_request *request = NULL;
-    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    enum aws_s3_meta_request_update_status status = AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING;
 
-    bool work_remaining = false;
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_NEXT_REQUEST_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
         /* If there isn't a connection, then fail the meta request now if it hasn't been already. */
         aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
     }
@@ -181,9 +183,9 @@ static void s_s3_auto_ranged_put_next_request(
                 meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
             aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
-            request->part_number = auto_ranged_put->threaded_next_request_data.next_part_number;
+            request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
-            ++auto_ranged_put->threaded_next_request_data.next_part_number;
+            ++auto_ranged_put->threaded_update_data.next_part_number;
             ++auto_ranged_put->synced_data.num_parts_sent;
 
             AWS_LOGF_DEBUG(
@@ -262,7 +264,7 @@ static void s_s3_auto_ranged_put_next_request(
 
         /* If there are no endpoint connections to send requests on, then we can't send an abort message, so there is no
          * work remaining. */
-        if ((flags & AWS_S3_META_REQUEST_NEXT_REQUEST_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
             goto no_work_remaining;
         }
 
@@ -299,17 +301,19 @@ static void s_s3_auto_ranged_put_next_request(
     }
 
 has_work_remaining:
-    work_remaining = true;
+    status = AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING;
 
 no_work_remaining:
 
-    if (!work_remaining) {
+    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
         aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
     }
 
+    *out_status = status;
+
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    if (work_remaining) {
+    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING) {
         if (request != NULL && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
             aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
 
@@ -321,14 +325,16 @@ no_work_remaining:
             aws_s3_request_release(request);
             request = NULL;
 
-            s_s3_auto_ranged_put_next_request(meta_request, out_request, flags);
-        } else {
+            s_s3_auto_ranged_put_update(meta_request, flags, out_request, out_status);
+        } else if (out_request != NULL) {
             *out_request = request;
         }
-    } else {
+    } else if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
         AWS_ASSERT(request == NULL);
 
         aws_s3_meta_request_finish(meta_request);
+    } else {
+        AWS_ASSERT(false);
     }
 }
 

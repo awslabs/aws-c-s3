@@ -123,7 +123,7 @@ int aws_s3_meta_request_init_base(
     meta_request->impl = impl;
     meta_request->vtable = vtable;
 
-    AWS_ASSERT(vtable->next_request);
+    AWS_ASSERT(vtable->update);
     AWS_ASSERT(vtable->prepare_request);
     AWS_ASSERT(vtable->destroy);
     AWS_ASSERT(vtable->sign_request);
@@ -316,15 +316,16 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     return (*request_a)->part_number > (*request_b)->part_number;
 }
 
-void aws_s3_meta_request_next_request(
+void aws_s3_meta_request_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags) {
+    enum aws_s3_meta_request_update_status *out_status) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
-    AWS_PRECONDITION(meta_request->vtable->next_request);
+    AWS_PRECONDITION(meta_request->vtable->update);
 
-    meta_request->vtable->next_request(meta_request, out_request, flags);
+    meta_request->vtable->update(meta_request, flags, out_request, out_status);
 }
 
 bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request) {
@@ -856,12 +857,16 @@ void aws_s3_meta_request_stream_response_body_synced(
     /* Push it into the priority queue. */
     aws_s3_meta_request_body_streaming_push_synced(meta_request, request);
 
+    aws_atomic_fetch_add(&client->stats.num_requests_queued_waiting, 1);
+
     /* Grab the next request that can be streamed back to the caller. */
     struct aws_s3_request *next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
     uint32_t num_streaming_requests = 0;
 
     /* Grab any additional requests that could be streamed to the caller. */
     while (next_streaming_request != NULL) {
+        aws_atomic_fetch_sub(&client->stats.num_requests_queued_waiting, 1);
+
         aws_linked_list_push_back(&streaming_requests, &next_streaming_request->node);
         ++num_streaming_requests;
         next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);

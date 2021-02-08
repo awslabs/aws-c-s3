@@ -13,10 +13,11 @@
 
 static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_request);
 
-static void s_s3_meta_request_default_next_request(
+static void s_s3_meta_request_default_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags);
+    enum aws_s3_meta_request_update_status *out_status);
 
 static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -30,7 +31,7 @@ static void s_s3_meta_request_default_request_finished(
     int error_code);
 
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
-    .next_request = s_s3_meta_request_default_next_request,
+    .update = s_s3_meta_request_default_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_meta_request_default_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
@@ -115,20 +116,21 @@ static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_r
 }
 
 /* Try to get the next request that should be processed. */
-static void s_s3_meta_request_default_next_request(
+static void s_s3_meta_request_default_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags) {
+    enum aws_s3_meta_request_update_status *out_status) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_request);
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     struct aws_s3_request *request = NULL;
-    bool work_remaining = false;
+    enum aws_s3_meta_request_update_status status = AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_NEXT_REQUEST_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
         if (!meta_request_default->synced_data.request_sent) {
             aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
         }
@@ -188,54 +190,64 @@ static void s_s3_meta_request_default_next_request(
     }
 
 has_work_remaining:
-    work_remaining = true;
+    status = AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING;
 
 no_work_remaining:
 
-    if (!work_remaining) {
+    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
         aws_s3_meta_request_set_success_synced(meta_request, meta_request_default->synced_data.cached_response_status);
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    if (work_remaining) {
+    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING) {
         if (request == NULL) {
-            return;
+            goto return_results;
         }
 
         /* If the request is not sending a body, then we can return the request now. */
         if (meta_request_default->content_length == 0) {
-            *out_request = request;
-            return;
+            goto return_results;
         }
 
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
         /* If reading the stream is successful, then we can return the request now. */
         if (!aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-            *out_request = request;
-            return;
+            goto return_results;
         }
 
-        /* In the event of stream read failure, first release the request. */
-        aws_s3_request_release(request);
-        request = NULL;
-
-        /* Record failure and rewind the "sent" state. */
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error_or_unknown());
-        meta_request_default->synced_data.request_sent = false;
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-
-        /* Call our function again, triggering the "work remaining" logic, and then finishing the meta request if
-         * possible. */
-        s_s3_meta_request_default_next_request(meta_request, out_request, flags);
-
-    } else {
+        goto rollback_and_reupdate;
+    } else if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
         AWS_ASSERT(request == NULL);
 
         aws_s3_meta_request_finish(meta_request);
+    } else {
+        AWS_ASSERT(false);
     }
+
+return_results:
+    *out_status = status;
+
+    if (out_request != NULL) {
+        *out_request = request;
+    }
+    return;
+
+rollback_and_reupdate:
+    /* In the event of stream read failure, first release the request. */
+    aws_s3_request_release(request);
+    request = NULL;
+
+    /* Record failure and rewind the "sent" state. */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error_or_unknown());
+    meta_request_default->synced_data.request_sent = false;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    /* Call our function again, triggering the "work remaining" logic, and then finishing the meta request if
+     * possible. */
+    s_s3_meta_request_default_update(meta_request, flags, out_request, out_status);
 }
 
 /* Given a request, prepare it for sending based on its description. */
