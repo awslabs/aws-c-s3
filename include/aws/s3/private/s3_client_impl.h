@@ -165,6 +165,20 @@ struct aws_s3_client {
     void *shutdown_callback_user_data;
 
     struct {
+        /* Number of requests being sent/received over network. */
+        struct aws_atomic_var num_requests_network_io;
+
+        /* Number of requests sitting in their meta request priority queue, waiting to be streamed. */
+        struct aws_atomic_var num_requests_queued_waiting;
+
+        /* Number of requests currently scheduled to be streamed or are actively being streamed. */
+        struct aws_atomic_var num_requests_streaming;
+
+        /* Number of allocated VIP connnections. */
+        struct aws_atomic_var num_allocated_vip_connections;
+    } stats;
+
+    struct {
         struct aws_mutex lock;
 
         /* Endpoint to use for the bucket. */

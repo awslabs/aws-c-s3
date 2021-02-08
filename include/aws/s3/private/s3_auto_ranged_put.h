@@ -24,9 +24,9 @@ struct aws_s3_auto_ranged_put {
     uint64_t content_length;
 
     struct {
-        /* Only meant for use in the next_request function, which is never called concurrently. */
+        /* Only meant for use in the update function, which is never called concurrently. */
         uint32_t next_part_number;
-    } threaded_next_request_data;
+    } threaded_update_data;
 
     struct {
         struct aws_array_list etag_list;

@@ -16,12 +16,15 @@
 #    pragma warning(disable : 4996)
 #endif
 
+const uint32_t s_conservative_max_requests_in_flight = 8;
+
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request);
 
-static void s_s3_auto_ranged_get_next_request(
+static void s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags);
+    enum aws_s3_meta_request_update_status *out_status);
 
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -35,7 +38,7 @@ static void s_s3_auto_ranged_get_request_finished(
     int error_code);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
-    .next_request = s_s3_auto_ranged_get_next_request,
+    .update = s_s3_auto_ranged_get_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_auto_ranged_get_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
@@ -99,19 +102,20 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 }
 
 /* Try to get the next request that should be processed. */
-static void s_s3_auto_ranged_get_next_request(
+static void s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags) {
+    enum aws_s3_meta_request_update_status *out_status) {
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     struct aws_s3_request *request = NULL;
-    bool work_remaining = false;
+    enum aws_s3_meta_request_update_status status = AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_NEXT_REQUEST_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
         /* If we have haven't already requested all of the parts, then we need to fail now. Note: total_num_parts is
          * populated until after we get the respones from the first request, so the initial num_parts_requested == 0
          * check is necessary. */
@@ -123,6 +127,16 @@ static void s_s3_auto_ranged_get_next_request(
     }
 
     if (!aws_s3_meta_request_is_finishing_synced(meta_request)) {
+
+        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
+            uint32_t num_requests_in_flight =
+                (auto_ranged_get->synced_data.num_parts_requested - auto_ranged_get->synced_data.num_parts_completed) +
+                (uint32_t)aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests);
+
+            if (num_requests_in_flight > s_conservative_max_requests_in_flight) {
+                goto has_work_remaining;
+            }
+        }
 
         /* If no parts have been requested, then we need to send an initial part request. */
         if (auto_ranged_get->synced_data.num_parts_requested == 0) {
@@ -185,7 +199,7 @@ static void s_s3_auto_ranged_get_next_request(
     goto no_work_remaining;
 
 has_work_remaining:
-    work_remaining = true;
+    status = AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING;
 
     if (request != NULL) {
         AWS_LOGF_DEBUG(
@@ -199,18 +213,22 @@ has_work_remaining:
 
 no_work_remaining:
 
-    if (!work_remaining) {
+    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
         aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    if (work_remaining) {
-        *out_request = request;
-    } else {
+    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
         AWS_ASSERT(request == NULL);
         aws_s3_meta_request_finish(meta_request);
     }
+
+    if (out_request != NULL) {
+        *out_request = request;
+    }
+
+    *out_status = status;
 }
 
 /* Given a request, prepare it for sending based on its description. */

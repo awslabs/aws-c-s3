@@ -515,7 +515,7 @@ static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_req
 }
 
 static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
-    .next_request = aws_s3_meta_request_next_request_empty,
+    .update = aws_s3_meta_request_update_empty,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = aws_s3_meta_request_prepare_request_empty,
     .finished_request = aws_s3_meta_request_finished_request_empty,
@@ -1364,13 +1364,15 @@ void aws_s3_client_acquire_http_connection_empty(
     (void)callback;
 }
 
-void aws_s3_meta_request_next_request_empty(
+void aws_s3_meta_request_update_empty(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request,
-    uint32_t flags) {
+    enum aws_s3_meta_request_update_status *out_status) {
     (void)meta_request;
     (void)out_request;
     (void)flags;
+    (void)out_status;
 }
 
 void aws_s3_meta_request_finished_request_empty(
