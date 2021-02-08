@@ -47,8 +47,6 @@ extern const struct aws_byte_cursor g_accept_ranges_header_name;
 extern const struct aws_byte_cursor g_acl_header_name;
 extern const struct aws_byte_cursor g_post_method;
 extern const struct aws_byte_cursor g_delete_method;
-extern const struct aws_byte_cursor g_application_xml_value;
-extern const struct aws_byte_cursor g_object_size_value;
 extern const uint32_t g_s3_max_num_upload_parts;
 
 AWS_S3_API

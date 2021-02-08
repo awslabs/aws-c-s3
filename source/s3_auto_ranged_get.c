@@ -16,6 +16,9 @@
 #    pragma warning(disable : 4996)
 #endif
 
+const struct aws_byte_cursor g_application_xml_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("application/xml");
+const struct aws_byte_cursor g_object_size_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ActualObjectSize");
+
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request);
 
 static void s_s3_auto_ranged_get_next_request(
@@ -215,7 +218,7 @@ static void s_s3_auto_ranged_get_next_request(
         aws_s3_meta_request_reset_synced(meta_request);
         request = aws_s3_request_new(
             meta_request,
-            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_WITHOUT_RANGE,
+            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
             1,
             AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
         goto has_work_remaining;
@@ -275,7 +278,7 @@ static int s_s3_auto_ranged_get_prepare_request(
         meta_request->initial_request_message,
         request->part_number,
         meta_request->part_size,
-        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_WITHOUT_RANGE);
+        request->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE);
 
     if (message == NULL) {
         AWS_LOGF_ERROR(

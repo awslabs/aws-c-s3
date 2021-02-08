@@ -34,7 +34,7 @@ struct aws_http_message *aws_s3_get_object_message_new(
     struct aws_http_message *base_message,
     uint32_t part_number,
     size_t part_size,
-    bool without_range) {
+    bool has_range) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
@@ -45,7 +45,7 @@ struct aws_http_message *aws_s3_get_object_message_new(
         return NULL;
     }
 
-    if (part_number > 0 && !without_range) {
+    if (part_number > 0 && has_range) {
         if (s_s3_message_util_add_content_range_header(part_number - 1, part_size, message)) {
             goto error_clean_up;
         }
