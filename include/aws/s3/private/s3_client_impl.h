@@ -20,6 +20,7 @@
 
 struct aws_http_connection;
 struct aws_http_connection_manager;
+struct aws_thread_scheduler;
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
@@ -123,6 +124,8 @@ struct aws_s3_client {
 
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
+
+    struct aws_thread_scheduler *process_work_scheduler;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;

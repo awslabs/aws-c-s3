@@ -18,6 +18,7 @@
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
+#include <aws/common/thread_scheduler.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
 #include <aws/http/request_response.h>
@@ -302,11 +303,18 @@ struct aws_s3_client *aws_s3_client_new(
         client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
     }
 
-    /*
-        aws_array_list_init_dynamic(
-            &client->threaded_data.open_conn_timestamps_millis, client->allocator, s_max_conn_open_count,
-       sizeof(uint64_t));
-    */
+    {
+        aws_task_init(
+            &client->synced_data.process_work_task,
+            s_s3_client_process_work_task,
+            client,
+            "s3_client_process_work_task");
+
+        struct aws_thread_options thread_scheduler_options;
+        AWS_ZERO_STRUCT(thread_scheduler_options);
+
+        client->process_work_scheduler = aws_thread_scheduler_new(client->allocator, &thread_scheduler_options);
+    }
 
     /* Initialize shutdown options and tracking. */
     client->shutdown_callback = client_config->shutdown_callback;
@@ -421,14 +429,15 @@ static void s_s3_client_finish_destroy(void *user_data) {
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
+    aws_thread_scheduler_release(client->process_work_scheduler);
+    client->process_work_scheduler = NULL;
+
     aws_string_destroy(client->region);
     client->region = NULL;
 
     aws_string_destroy(client->synced_data.endpoint);
     client->synced_data.endpoint = NULL;
-    /*
-        aws_array_list_clean_up(&client->threaded_data.open_conn_timestamps_millis);
-    */
+
     if (client->tls_connection_options) {
         aws_tls_connection_options_clean_up(client->tls_connection_options);
         aws_mem_release(client->allocator, client->tls_connection_options);
@@ -800,10 +809,7 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
         return;
     }
 
-    aws_task_init(
-        &client->synced_data.process_work_task, s_s3_client_process_work_task, client, "s3_client_process_work_task");
-
-    aws_event_loop_schedule_task_now(client->process_work_event_loop, &client->synced_data.process_work_task);
+    aws_thread_scheduler_schedule_now(client->process_work_scheduler, &client->synced_data.process_work_task);
 
     client->synced_data.process_work_task_scheduled = true;
 }
@@ -1182,7 +1188,8 @@ static void s_s3_client_acquired_retry_token(
     }
 
     uint32_t num_connections_to_acquire =
-        S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION - (vip_connection->num_connections + vip_connection->num_pending_acquisition_count);
+        S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION -
+        (vip_connection->num_connections + vip_connection->num_pending_acquisition_count);
 
     for (uint32_t i = 0; i < num_connections_to_acquire; ++i) {
         ++vip_connection->num_pending_acquisition_count;
