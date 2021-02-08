@@ -34,7 +34,7 @@ struct aws_http_message *aws_s3_get_object_message_new(
     struct aws_http_message *base_message,
     uint32_t part_number,
     size_t part_size,
-    uint8_t without_range) {
+    bool without_range) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 

@@ -98,6 +98,30 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
+/* Check the finish result of meta request, in case of the request failed because of downloading an empty file */
+static bool s_check_empty_file_download_error_synced(struct aws_s3_meta_request *meta_request) {
+    struct aws_s3_meta_request_result finish_result = meta_request->synced_data.finish_result;
+    if (finish_result.error_response_body && finish_result.error_response_headers) {
+        struct aws_byte_cursor content_type;
+        AWS_ZERO_STRUCT(content_type);
+        if (!aws_http_headers_get(finish_result.error_response_headers, g_content_type_header_name, &content_type)) {
+            /* Content type found */
+            if (aws_byte_cursor_eq_ignore_case(&content_type, &g_application_xml_value)) {
+                /* XML response */
+                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(finish_result.error_response_body);
+                struct aws_string *size =
+                    get_top_level_xml_tag_value(meta_request->allocator, &g_object_size_value, &body_cursor);
+                bool check_size = aws_string_eq_c_str(size, "0");
+                aws_string_destroy(size);
+                if (check_size) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 /* Try to get the next request that should be processed. */
 static void s_s3_auto_ranged_get_next_request(
     struct aws_s3_meta_request *meta_request,
@@ -182,37 +206,19 @@ static void s_s3_auto_ranged_get_next_request(
         }
     }
 
-    /* One sepcial error case is an empty file download */
-    struct aws_s3_meta_request_result finish_result = meta_request->synced_data.finish_result;
-    if (finish_result.error_response_body && finish_result.error_response_headers) {
-        struct aws_byte_cursor content_type;
-        AWS_ZERO_STRUCT(content_type);
-        if (!aws_http_headers_get(
-                finish_result.error_response_headers, aws_byte_cursor_from_c_str("content-type"), &content_type)) {
-            /* Content type found */
-            if (aws_byte_cursor_eq_c_str_ignore_case(&content_type, "application/xml")) {
-                /* XML response */
-                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(finish_result.error_response_body);
-                struct aws_byte_cursor tag = aws_byte_cursor_from_c_str("ActualObjectSize");
-                struct aws_string *size = get_top_level_xml_tag_value(meta_request->allocator, &tag, &body_cursor);
-                if (aws_string_eq_c_str(size, "0")) {
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Getting an empty file, create a new request without range header to fetch the empty "
-                        "file",
-                        (void *)meta_request);
-                    aws_s3_meta_request_reset_synced(meta_request);
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_WITHOUT_RANGE,
-                        1,
-                        AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-                    aws_string_destroy(size);
-                    goto has_work_remaining;
-                }
-                aws_string_destroy(size);
-            }
-        }
+    if (s_check_empty_file_download_error_synced(meta_request)) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Getting an empty file, create a new request without range header to fetch the empty "
+            "file",
+            (void *)meta_request);
+        aws_s3_meta_request_reset_synced(meta_request);
+        request = aws_s3_request_new(
+            meta_request,
+            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_WITHOUT_RANGE,
+            1,
+            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+        goto has_work_remaining;
     }
 
     goto no_work_remaining;
