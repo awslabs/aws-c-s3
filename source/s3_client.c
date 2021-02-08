@@ -852,6 +852,8 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
     client->vtable->process_work(client);
 }
 
+static void s_s3_client_process_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
 static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
@@ -1040,7 +1042,18 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             ++client->threaded_data.num_requests_in_flight;
             vip_connection->request = request;
 
-            s_s3_client_process_request(client, vip_connection);
+            struct aws_task *process_request_task = aws_mem_acquire(client->sba_allocator, sizeof(struct aws_task));
+            aws_task_init(
+                process_request_task,
+                s_s3_client_process_request_task,
+                vip_connection,
+                "s_s3_client_process_request_task");
+
+            struct aws_event_loop *event_loop =
+                aws_event_loop_group_get_next_loop(client->client_bootstrap->event_loop_group);
+
+            aws_event_loop_schedule_task_now(event_loop, process_request_task);
+
         } else {
             aws_linked_list_push_front(&client->threaded_data.connections, &vip_connection->node);
             break;
@@ -1052,6 +1065,21 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 check_for_shutdown:
 
     s_s3_client_check_for_shutdown(client, s_s3_client_reset_work_task_in_progress_synced, NULL);
+}
+
+static void s_s3_client_process_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+
+    /* Client keeps a reference to the event loop group; a 'canceled' status should not happen.*/
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+    (void)task_status;
+
+    struct aws_s3_vip_connection *vip_connection = arg;
+    AWS_ASSERT(vip_connection);
+
+    s_s3_client_process_request(vip_connection->owning_client, vip_connection);
+
+    aws_mem_release(vip_connection->owning_client->sba_allocator, task);
 }
 
 static void s_s3_client_acquired_retry_token(
