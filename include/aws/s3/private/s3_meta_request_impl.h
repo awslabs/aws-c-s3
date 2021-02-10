@@ -32,7 +32,12 @@ enum aws_s3_meta_request_state {
 };
 
 enum aws_s3_meta_request_update_flags {
+    /* There are no connections available. Meta request can wait for anything in progress to finish up, but shouldn't
+       expect that there will be any connections for issuing requests. */
     AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS = 0x00000001,
+
+    /* The client potentially has multiple meta requests that it can spread across connections, and the given meta
+       request can selectively not return a request if there is a performance reason to do so.*/
     AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE = 0x00000002,
 };
 
