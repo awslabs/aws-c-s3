@@ -58,6 +58,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    uint64_t content_length,
     uint32_t num_parts,
     const struct aws_s3_meta_request_options *options);
 
