@@ -43,7 +43,7 @@ static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 
 static const uint32_t s_s3_max_request_count_per_connection = 100;
 static const uint32_t s_connection_timeout_ms = 3000;
-static const uint32_t s_max_requests_multiplier = 16;
+static const uint32_t s_max_requests_multiplier = 4;
 
 /* TODO Provide analysis on origins of this value. */
 static const double s_throughput_per_vip_gbps = 5.0;
