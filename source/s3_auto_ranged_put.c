@@ -132,6 +132,7 @@ static void s_s3_auto_ranged_put_update(
     struct aws_s3_request **out_request,
     enum aws_s3_meta_request_update_status *out_status) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_status);
 
     struct aws_s3_request *request = NULL;
     enum aws_s3_meta_request_update_status status = AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING;
@@ -145,7 +146,7 @@ static void s_s3_auto_ranged_put_update(
         aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
     }
 
-    if (!aws_s3_meta_request_is_finishing_synced(meta_request)) {
+    if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
         /* If we haven't already sent a create-multipart-upload message, do so now. */
         if (!auto_ranged_put->synced_data.create_multipart_upload_sent) {

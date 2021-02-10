@@ -221,17 +221,17 @@ void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_req
         meta_request, &meta_request->synced_data.finish_result, NULL, response_status, AWS_ERROR_SUCCESS);
 }
 
-bool aws_s3_meta_request_is_finishing(struct aws_s3_meta_request *meta_request) {
+bool aws_s3_meta_request_has_finish_result(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-    bool is_finishing = aws_s3_meta_request_is_finishing_synced(meta_request);
+    bool is_finishing = aws_s3_meta_request_has_finish_result_synced(meta_request);
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     return is_finishing;
 }
 
-bool aws_s3_meta_request_is_finishing_synced(struct aws_s3_meta_request *meta_request) {
+bool aws_s3_meta_request_has_finish_result_synced(struct aws_s3_meta_request *meta_request) {
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
     AWS_PRECONDITION(meta_request);
 
@@ -781,7 +781,7 @@ void aws_s3_meta_request_send_request_finish_default(
 
     } else {
         aws_s3_meta_request_lock_synced_data(meta_request);
-        bool meta_request_finishing = aws_s3_meta_request_is_finishing_synced(meta_request);
+        bool meta_request_finishing = aws_s3_meta_request_has_finish_result_synced(meta_request);
         aws_s3_meta_request_unlock_synced_data(meta_request);
 
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already has
@@ -847,7 +847,7 @@ void aws_s3_meta_request_stream_response_body_synced(
     struct aws_linked_list streaming_requests;
     aws_linked_list_init(&streaming_requests);
 
-    if (aws_s3_meta_request_is_finishing_synced(meta_request)) {
+    if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
         return;
     }
 

@@ -43,7 +43,7 @@ enum aws_s3_meta_request_update_status {
 
 struct aws_s3_meta_request_vtable {
     /* Update the meta request.  out_request is optional and can be NULL. If not null, and a request can be returned, it
-     * should be passed back through this variable. out_status is guaranteed to be non-null and indicates if there is
+     * will be passed back into this variable. out_status is guaranteed to be non-null and indicates if there is
      * work remaining. */
     void (*update)(
         struct aws_s3_meta_request *meta_request,
@@ -80,7 +80,7 @@ struct aws_s3_meta_request_vtable {
         uint32_t num_failed,
         uint32_t num_successful);
 
-    /* Called when the meta request is completely finished. */
+    /* Called by the derived meta request when the meta request is completely finished. */
     void (*finish)(struct aws_s3_meta_request *meta_request);
 
     /* Handle de-allocation of the meta request. */
@@ -192,12 +192,14 @@ int aws_s3_meta_request_init_base(
 AWS_S3_API
 bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request);
 
-/* Retruns true if the meta request is in the "finished" state. */
+/* Returns true if the meta request is in the "finished" state. */
 AWS_S3_API
 bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request);
 
+/* Returns true if the meta request has a finish result, which indicates that the meta request has trying to finish or
+ * has already finished. */
 AWS_S3_API
-bool aws_s3_meta_request_is_finishing(struct aws_s3_meta_request *meta_request);
+bool aws_s3_meta_request_has_finish_result(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
 void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
@@ -251,11 +253,15 @@ void aws_s3_meta_request_finished_request(
     struct aws_s3_request *request,
     int error_code);
 
+/* Called to place the request in the meta request's priority queue for streaming back to the caller.  Once all requests
+ * with a part number less than the given request has been received, the given request and the previous requests will
+ * scheduled for streaming.  */
 AWS_S3_API
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
+/* Default implementation for handling what happens after request bodies have been delivered to the caller. */
 AWS_S3_API
 void aws_s3_meta_request_delivered_requests_default(
     struct aws_s3_meta_request *meta_request,
@@ -263,28 +269,30 @@ void aws_s3_meta_request_delivered_requests_default(
     uint32_t num_failed,
     uint32_t num_successful);
 
+/* Read from the meta request's input stream. Should always be done outside of any mutex, as reading from the stream
+ * could cause user code to call back into aws-c-s3.*/
 AWS_S3_API
 int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
 
-/* Set that the meta request has failed. This is meant to be called sometime before aws_s3_meta_request_finish.
- * Subsequent calls this function or to aws_s3_meta_request_set_success_synced will not overwrite the end result of the
- * meta request. */
+/* Set the meta request finish result as failed. This is meant to be called sometime before aws_s3_meta_request_finish.
+ * Subsequent calls to this function or to aws_s3_meta_request_set_success_synced will not overwrite the end result of
+ * the meta request. */
 AWS_S3_API
 void aws_s3_meta_request_set_fail_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
     int error_code);
 
-/* Set that the meta request has failed. This is meant to be called sometime before aws_s3_meta_request_finish.
- * Subsequent calls this function or to aws_s3_meta_request_set_fail_synced will not overwrite the end result of the
- * meta request. */
+/* Set the meta request finish result as successful. This is meant to be called sometime before
+ * aws_s3_meta_request_finish. Subsequent calls this function or to aws_s3_meta_request_set_fail_synced will not
+ * overwrite the end result of the meta request. */
 AWS_S3_API
 void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_request, int response_status);
 
-/* Returns true if either aws_s3_meta_request_set_fail_synced or aws_s3_meta_request_set_success_synced have been
- * called. */
+/* Returns true if the finish result has been set (ie: either aws_s3_meta_request_set_fail_synced or
+ * aws_s3_meta_request_set_success_synced have been called.) */
 AWS_S3_API
-bool aws_s3_meta_request_is_finishing_synced(struct aws_s3_meta_request *meta_request);
+bool aws_s3_meta_request_has_finish_result_synced(struct aws_s3_meta_request *meta_request);
 
 /* Virtual function called by the meta request derived type when it's completely finished and there is no other work to
  * be done. */
@@ -295,14 +303,20 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request);
 AWS_S3_API
 void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request);
 
+/* Pushes a request into the body streaming priority queue. Derived meta request types should not call this--they should
+ * instead call aws_s3_meta_request_stream_response_body_synced.*/
 AWS_S3_API
 void aws_s3_meta_request_body_streaming_push_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
+/* Pops the next available request from the body streaming priority queue. If the parts previous the next request in the
+ * priority queue have not been placed in the priority queue yet, the priority queue will remain the same, and NULL will
+ * be returned. (Should not be needed to be called by derived types.) */
 AWS_S3_API
 struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_s3_meta_request *meta_request);
 
+/* Sets up a meta request result structure. */
 AWS_S3_API
 void aws_s3_meta_request_result_setup(
     struct aws_s3_meta_request *meta_request,
@@ -311,6 +325,7 @@ void aws_s3_meta_request_result_setup(
     int response_status,
     int error_code);
 
+/* Cleans up a meta request result structure. */
 AWS_S3_API
 void aws_s3_meta_request_result_clean_up(
     struct aws_s3_meta_request *meta_request,

@@ -1909,7 +1909,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
 
         uint64_t range_start = (request->part_number - 1) * meta_request->part_size;
 
-        if (aws_s3_meta_request_is_finishing(meta_request)) {
+        if (aws_s3_meta_request_has_finish_result(meta_request)) {
             ++num_failed;
         } else {
             if (error_code == AWS_ERROR_SUCCESS && meta_request->body_callback &&
