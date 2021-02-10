@@ -1255,6 +1255,10 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             aws_s3_meta_request_update(
                 meta_request, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS, NULL, &status);
 
+            /* While no meta request should be spinning up new requests in this case, it is possible that there is
+             * something outside of network connectivity that a meta request is waiting for. (example: parts being
+             * streamed to the caller) This may require the work task function to be called multiple times before every
+             * meta request can be removed. */
             if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
                 s_s3_client_remove_meta_request_threaded(client, meta_request);
             }
@@ -1265,9 +1269,14 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* Step 3: Go through all VIP connections, cleaning up old ones, and assigning requests where possible. */
     /*******************/
 
+    /* We first assign requests to connections with the "conservative" flag. This will tell each meta request that
+     * connections can still potentially be shared between meta requests.  (ie: an individual meta request shouldn't
+     * necessarily try to issue as many requests as it can, unless it's known that that won't impact performance.) */
     s_s3_client_assign_requests_to_connections_threaded(
         client, client_active, AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE);
 
+    /* If we still have connections left over, then don't pass any flags, indicating to meta requests that any logic for
+     * better sharing connections between meta requests can now be ignored. */
     s_s3_client_assign_requests_to_connections_threaded(client, client_active, 0);
 
     if (s_log_client_stats) {

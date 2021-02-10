@@ -133,6 +133,10 @@ static void s_s3_auto_ranged_get_update(
                 (auto_ranged_get->synced_data.num_parts_requested - auto_ranged_get->synced_data.num_parts_completed) +
                 (uint32_t)aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests);
 
+            /* auto-ranged-gets make use of body streaming, which will hold onto response bodies if parts earlier in the
+             * file haven't arrived yet. This can potentially create a lot of backed up requests, causing us to hit our
+             * global request limit. To help mitigate this, when the "conservative" flag is passed in, we only allow
+             * the total amount of requests being sent/streamed to be inside of a set limit.  */
             if (num_requests_in_flight > s_conservative_max_requests_in_flight) {
                 goto has_work_remaining;
             }
