@@ -101,13 +101,13 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
-/* Try to get the next request that should be processed. */
 static void s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
     struct aws_s3_request **out_request,
     enum aws_s3_meta_request_update_status *out_status) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_status);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     struct aws_s3_request *request = NULL;
@@ -117,7 +117,7 @@ static void s_s3_auto_ranged_get_update(
 
     if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
         /* If we have haven't already requested all of the parts, then we need to fail now. Note: total_num_parts is
-         * populated until after we get the respones from the first request, so the initial num_parts_requested == 0
+         * not populated until after we get the respones from the first request, so the initial num_parts_requested == 0
          * check is necessary. */
         if (auto_ranged_get->synced_data.num_parts_requested == 0 ||
             (auto_ranged_get->synced_data.total_num_parts > 0 &&
@@ -126,7 +126,7 @@ static void s_s3_auto_ranged_get_update(
         }
     }
 
-    if (!aws_s3_meta_request_is_finishing_synced(meta_request)) {
+    if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
         if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
             uint32_t num_requests_in_flight =

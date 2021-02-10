@@ -136,7 +136,7 @@ static void s_s3_meta_request_default_update(
         }
     }
 
-    if (!aws_s3_meta_request_is_finishing_synced(meta_request)) {
+    if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
         /* If the request hasn't been sent, then create and send it now. */
         if (!meta_request_default->synced_data.request_sent) {
