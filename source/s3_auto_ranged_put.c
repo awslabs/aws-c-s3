@@ -182,8 +182,21 @@ static void s_s3_auto_ranged_put_update(
             request = aws_s3_request_new(
                 meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
-            aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request->part_size);
             request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
+
+            size_t request_body_size = meta_request->part_size;
+
+            /* Last part--adjust size to match remaining content length. */
+            if (request->part_number == auto_ranged_put->synced_data.total_num_parts) {
+                size_t content_remainder =
+                    (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+
+                if (content_remainder > 0) {
+                    request_body_size = content_remainder;
+                }
+            }
+
+            aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
             ++auto_ranged_put->threaded_update_data.next_part_number;
             ++auto_ranged_put->synced_data.num_parts_sent;
