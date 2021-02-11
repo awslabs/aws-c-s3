@@ -41,20 +41,11 @@ enum aws_s3_meta_request_update_flags {
     AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE = 0x00000002,
 };
 
-enum aws_s3_meta_request_update_status {
-    AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING,
-    AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING,
-};
-
 struct aws_s3_meta_request_vtable {
     /* Update the meta request.  out_request is optional and can be NULL. If not null, and a request can be returned, it
-     * will be passed back into this variable. out_status is guaranteed to be non-null and indicates if there is
-     * work remaining. */
-    void (*update)(
-        struct aws_s3_meta_request *meta_request,
-        uint32_t flags,
-        struct aws_s3_request **out_request,
-        enum aws_s3_meta_request_update_status *out_status);
+     * will be passed back into this variable. Returns true if there is there is any work in progress, false if there is
+     * not. */
+    bool (*update)(struct aws_s3_meta_request *meta_request, uint32_t flags, struct aws_s3_request **out_request);
 
     /* Given a request, prepare it for sending based on its description. Should call aws_s3_request_setup_send_data
      * before exitting. */
@@ -220,11 +211,10 @@ struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_requ
 /* Called by the client to retrieve the next request and update the meta request's internal state. out_request is
  * optional, and can be NULL if just desiring to update internal state. */
 AWS_S3_API
-void aws_s3_meta_request_update(
+bool aws_s3_meta_request_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status);
+    struct aws_s3_request **out_request);
 
 /* Called by the client to process the request attached to the given vip connection. */
 AWS_S3_API

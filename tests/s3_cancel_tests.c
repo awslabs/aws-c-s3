@@ -26,11 +26,10 @@ struct s3_cancel_test_user_data {
     enum s3_update_cancel_type type;
 };
 
-static void s_s3_update_cancel_test(
+static bool s_s3_update_cancel_test(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status) {
+    struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_request);
 
@@ -80,14 +79,14 @@ static void s_s3_update_cancel_test(
         aws_s3_meta_request_cancel(meta_request);
     }
 
-    if (!block_update) {
-        struct aws_s3_meta_request_vtable *original_meta_request_vtable =
-            aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
-
-        original_meta_request_vtable->update(meta_request, flags, out_request, out_status);
-    } else {
-        *out_status = AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING;
+    if (block_update) {
+        return true;
     }
+
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+
+    return original_meta_request_vtable->update(meta_request, flags, out_request);
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_update_cancel_test(
