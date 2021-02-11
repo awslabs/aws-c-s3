@@ -1389,7 +1389,7 @@ static void s_s3_client_assign_requests_to_connections_threaded(
         if (request == NULL) {
             aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &vip_connection->node);
         } else {
-            request->client_data.request_was_sent = true;
+            request->request_was_sent = true;
             ++client->threaded_data.num_requests_in_flight;
             vip_connection->request = request;
 
@@ -1828,7 +1828,7 @@ void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
-    if (request->client_data.request_was_sent) {
+    if (request->request_was_sent) {
         aws_s3_client_lock_synced_data(client);
         ++client->synced_data.pending_request_count;
         s_s3_client_schedule_process_work_synced(client);

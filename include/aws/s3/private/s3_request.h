@@ -56,12 +56,11 @@ struct aws_s3_request {
     /* When true, the response body buffer will be allocated in the size of a part. */
     uint32_t part_size_response_body : 1;
 
-    struct {
-        uint32_t request_was_sent : 1;
-    } client_data;
+    /* When true, this request has been sent at least once. */
+    uint32_t request_was_sent : 1;
 
-    /* Members of this structure will be repopulated each time the request is sent.  For example, If the request fails,
-     * and needs to be retried, then the members of this structure will be cleaned up and re-populated on the next send.
+    /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to
+     * be retried, then the members of this structure will be cleaned up and re-populated on the next send.
      */
     struct {
 
