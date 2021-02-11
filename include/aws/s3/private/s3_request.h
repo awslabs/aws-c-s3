@@ -62,6 +62,7 @@ struct aws_s3_request {
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to
      * be retried, then the members of this structure will be cleaned up and re-populated on the next send.
      */
+    /* TODO rename this anonymous structure to something more intuitive. (Maybe "attempt_data")*/
     struct {
 
         /* The HTTP message to send for this request. */
