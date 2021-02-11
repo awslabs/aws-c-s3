@@ -187,6 +187,7 @@ void aws_s3_meta_request_set_fail_synced(
     struct aws_s3_request *failed_request,
     int error_code) {
     AWS_PRECONDITION(meta_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     if (meta_request->synced_data.finish_result_set) {
         return;
@@ -210,6 +211,7 @@ void aws_s3_meta_request_set_fail_synced(
 
 void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_request, int response_status) {
     AWS_PRECONDITION(meta_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     if (meta_request->synced_data.finish_result_set) {
         return;
@@ -232,8 +234,8 @@ bool aws_s3_meta_request_has_finish_result(struct aws_s3_meta_request *meta_requ
 }
 
 bool aws_s3_meta_request_has_finish_result_synced(struct aws_s3_meta_request *meta_request) {
-    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
     AWS_PRECONDITION(meta_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     if (!meta_request->synced_data.finish_result_set) {
         return false;
