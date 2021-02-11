@@ -1251,16 +1251,14 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             struct aws_s3_meta_request *meta_request =
                 AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
-            enum aws_s3_meta_request_update_status status;
-
-            aws_s3_meta_request_update(
-                meta_request, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS, NULL, &status);
+            bool work_remaining =
+                aws_s3_meta_request_update(meta_request, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS, NULL);
 
             /* While no meta request should be spinning up new requests in this case, it is possible that there is
              * something outside of network connectivity that a meta request is waiting for. (example: parts being
              * streamed to the caller) This may require the work task function to be called multiple times before every
              * meta request can be removed. */
-            if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
+            if (!work_remaining) {
                 s_s3_client_remove_meta_request_threaded(client, meta_request);
             }
         }
@@ -1371,21 +1369,20 @@ static void s_s3_client_assign_requests_to_connections_threaded(
             struct aws_s3_meta_request *meta_request =
                 AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
-            enum aws_s3_meta_request_update_status status = AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING;
-
             /* Grab the next request from the meta request. */
-            aws_s3_meta_request_update(meta_request, meta_request_update_flags, &request, &status);
+            bool work_remaining = aws_s3_meta_request_update(meta_request, meta_request_update_flags, &request);
 
-            if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING) {
+            if (work_remaining) {
+                /* If there is work remaining, but we didn't get a request back, take it out of the list so that we
+                 * don't use it again during this function, with the intention of putting it back in the list before
+                 * this function ends. */
                 if (request == NULL) {
                     aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
                     aws_linked_list_push_back(
                         &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
                 }
-            } else if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
-                s_s3_client_remove_meta_request_threaded(client, meta_request);
             } else {
-                AWS_ASSERT(false);
+                s_s3_client_remove_meta_request_threaded(client, meta_request);
             }
         }
 

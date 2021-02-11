@@ -330,11 +330,10 @@ void aws_s3_client_acquire_http_connection_empty(
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *callback);
 
-void aws_s3_meta_request_update_empty(
+bool aws_s3_meta_request_update_empty(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status);
+    struct aws_s3_request **out_request);
 
 void aws_s3_meta_request_finished_request_empty(
     struct aws_s3_meta_request *meta_request,

@@ -316,16 +316,15 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     return (*request_a)->part_number > (*request_b)->part_number;
 }
 
-void aws_s3_meta_request_update(
+bool aws_s3_meta_request_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status) {
+    struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
     AWS_PRECONDITION(meta_request->vtable->update);
 
-    meta_request->vtable->update(meta_request, flags, out_request, out_status);
+    return meta_request->vtable->update(meta_request, flags, out_request);
 }
 
 bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request) {

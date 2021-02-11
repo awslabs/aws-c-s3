@@ -21,11 +21,10 @@ static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
 
 static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request *meta_request);
 
-static void s_s3_auto_ranged_put_update(
+static bool s_s3_auto_ranged_put_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status);
+    struct aws_s3_request **out_request);
 
 static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -126,16 +125,14 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_put);
 }
 
-static void s_s3_auto_ranged_put_update(
+static bool s_s3_auto_ranged_put_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status) {
+    struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(out_status);
 
     struct aws_s3_request *request = NULL;
-    enum aws_s3_meta_request_update_status status = AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING;
+    bool work_remaining = false;
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
@@ -315,19 +312,17 @@ static void s_s3_auto_ranged_put_update(
     }
 
 has_work_remaining:
-    status = AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING;
+    work_remaining = true;
 
 no_work_remaining:
 
-    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
+    if (!work_remaining) {
         aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
     }
 
-    *out_status = status;
-
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING) {
+    if (work_remaining) {
         if (request != NULL && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
             aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
 
@@ -339,17 +334,17 @@ no_work_remaining:
             aws_s3_request_release(request);
             request = NULL;
 
-            s_s3_auto_ranged_put_update(meta_request, flags, out_request, out_status);
+            return s_s3_auto_ranged_put_update(meta_request, flags, out_request);
         } else if (out_request != NULL) {
             *out_request = request;
         }
-    } else if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
+    } else {
         AWS_ASSERT(request == NULL);
 
         aws_s3_meta_request_finish(meta_request);
-    } else {
-        AWS_ASSERT(false);
     }
+
+    return work_remaining;
 }
 
 /* Given a request, prepare it for sending based on its description. */

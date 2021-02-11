@@ -20,11 +20,10 @@ const uint32_t s_conservative_max_requests_in_flight = 8;
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request);
 
-static void s_s3_auto_ranged_get_update(
+static bool s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status);
+    struct aws_s3_request **out_request);
 
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -101,17 +100,15 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
-static void s_s3_auto_ranged_get_update(
+static bool s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
-    struct aws_s3_request **out_request,
-    enum aws_s3_meta_request_update_status *out_status) {
+    struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(out_status);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     struct aws_s3_request *request = NULL;
-    enum aws_s3_meta_request_update_status status = AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING;
+    bool work_remaining = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
@@ -203,7 +200,7 @@ static void s_s3_auto_ranged_get_update(
     goto no_work_remaining;
 
 has_work_remaining:
-    status = AWS_S3_META_REQUEST_UPDATE_STATUS_WORK_REMAINING;
+    work_remaining = true;
 
     if (request != NULL) {
         AWS_LOGF_DEBUG(
@@ -217,13 +214,13 @@ has_work_remaining:
 
 no_work_remaining:
 
-    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
+    if (!work_remaining) {
         aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    if (status == AWS_S3_META_REQUEST_UPDATE_STATUS_NO_WORK_REMAINING) {
+    if (!work_remaining) {
         AWS_ASSERT(request == NULL);
         aws_s3_meta_request_finish(meta_request);
     }
@@ -232,7 +229,7 @@ no_work_remaining:
         *out_request = request;
     }
 
-    *out_status = status;
+    return work_remaining;
 }
 
 /* Given a request, prepare it for sending based on its description. */
