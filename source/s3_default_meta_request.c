@@ -1,3 +1,4 @@
+#include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
@@ -10,29 +11,11 @@
 #    pragma warning(disable : 4996)
 #endif
 
-enum aws_s3_meta_request_default_state {
-    AWS_S3_META_REQUEST_DEFAULT_STATE_START,
-    AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST,
-};
-
-struct aws_s3_meta_request_default {
-    struct aws_s3_meta_request base;
-
-    bool is_get_request;
-    size_t content_length;
-
-    struct {
-        enum aws_s3_meta_request_default_state state;
-    } synced_data;
-};
-
-static void s_s3_meta_request_default_lock_synced_data(struct aws_s3_meta_request_default *meta_request_default);
-static void s_s3_meta_request_default_unlock_synced_data(struct aws_s3_meta_request_default *meta_request_default);
-
 static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_request);
 
-static int s_s3_meta_request_default_next_request(
+static bool s_s3_meta_request_default_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request);
 
 static int s_s3_meta_request_default_prepare_request(
@@ -41,41 +24,22 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_vip_connection *vip_connection,
     bool is_initial_prepare);
 
-static int s_s3_meta_request_default_header_block_done(
-    struct aws_http_stream *stream,
-    enum aws_http_header_block header_block,
-    struct aws_s3_vip_connection *vip_connection);
-
-static void s_s3_meta_request_default_notify_request_destroyed(
+static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request);
+    struct aws_s3_request *request,
+    int error_code);
 
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
-    .next_request = s_s3_meta_request_default_next_request,
+    .update = s_s3_meta_request_default_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_meta_request_default_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
-    .incoming_headers = NULL,
-    .incoming_headers_block_done = s_s3_meta_request_default_header_block_done,
-    .incoming_body = NULL,
-    .stream_complete = NULL,
-    .notify_request_destroyed = s_s3_meta_request_default_notify_request_destroyed,
+    .finished_request = s_s3_meta_request_default_request_finished,
+    .delivered_requests = aws_s3_meta_request_delivered_requests_default,
     .destroy = s_s3_meta_request_default_destroy,
     .finish = aws_s3_meta_request_finish_default,
 };
-
-static void s_s3_meta_request_default_lock_synced_data(struct aws_s3_meta_request_default *meta_request_default) {
-    AWS_PRECONDITION(meta_request_default);
-
-    aws_mutex_lock(&meta_request_default->base.synced_data.lock);
-}
-
-static void s_s3_meta_request_default_unlock_synced_data(struct aws_s3_meta_request_default *meta_request_default) {
-    AWS_PRECONDITION(meta_request_default);
-
-    aws_mutex_unlock(&meta_request_default->base.synced_data.lock);
-}
 
 /* Allocate a new default meta request. */
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
@@ -92,7 +56,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     if (aws_http_message_get_request_method(options->message, &request_method)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create Default Meta request; could not get request method from message.");
+            "Could not create Default Meta Request; could not get request method from message.");
 
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
@@ -101,7 +65,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     if (content_length > SIZE_MAX) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create Default Meta request; content length of %" PRIu64 " bytes is too large for platform.",
+            "Could not create Default Meta Request; content length of %" PRIu64 " bytes is too large for platform.",
             content_length);
 
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -129,7 +93,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     }
 
     meta_request_default->content_length = (size_t)content_length;
-    meta_request_default->is_get_request = aws_byte_cursor_eq_ignore_case(&request_method, &aws_http_method_get);
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
 
@@ -152,47 +115,135 @@ static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_r
 }
 
 /* Try to get the next request that should be processed. */
-static int s_s3_meta_request_default_next_request(
+static bool s_s3_meta_request_default_update(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_request);
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     struct aws_s3_request *request = NULL;
+    bool work_remaining = false;
 
-    s_s3_meta_request_default_lock_synced_data(meta_request_default);
+    aws_s3_meta_request_lock_synced_data(meta_request);
 
-    /* We only have one request to potentially create, which is for the original message as-is. */
-    if (meta_request_default->synced_data.state == AWS_S3_META_REQUEST_DEFAULT_STATE_START) {
-        uint32_t request_flags = AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS;
-
-        if (meta_request_default->is_get_request) {
-            request_flags |= AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY;
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+        if (!meta_request_default->synced_data.request_sent) {
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
         }
-
-        const uint32_t part_number = 1;
-        request = aws_s3_request_new(meta_request, 0, part_number, request_flags);
-        meta_request_default->synced_data.state = AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
-
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST, "id=%p: Meta Request created request %p", (void *)meta_request, (void *)request);
     }
 
-    s_s3_meta_request_default_unlock_synced_data(meta_request_default);
+    if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
-    if (request != NULL && meta_request_default->content_length > 0) {
+        /* If the request hasn't been sent, then create and send it now. */
+        if (!meta_request_default->synced_data.request_sent) {
+            if (out_request == NULL) {
+                goto has_work_remaining;
+            }
+
+            request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Meta Request Default created request %p",
+                (void *)meta_request,
+                (void *)request);
+
+            meta_request_default->synced_data.request_sent = true;
+            goto has_work_remaining;
+        }
+
+        /* If the request hasn't been completed, then wait for it to be completed. */
+        if (!meta_request_default->synced_data.request_completed) {
+            goto has_work_remaining;
+        }
+
+        /* If delivery hasn't been attempted yet for the response body, wait for that to happen. */
+        if (meta_request->synced_data.num_parts_delivery_completed < 1) {
+            goto has_work_remaining;
+        }
+
+        goto no_work_remaining;
+
+    } else {
+
+        /* If we are canceling, and the request hasn't been sent yet, then there is nothing to wait for. */
+        if (!meta_request_default->synced_data.request_sent) {
+            goto no_work_remaining;
+        }
+
+        /* If the request hasn't been completed yet, then wait for that to happen. */
+        if (!meta_request_default->synced_data.request_completed) {
+            goto has_work_remaining;
+        }
+
+        /* If some parts are still being delievered to the caller, then wait for those to finish. */
+        if (meta_request->synced_data.num_parts_delivery_completed <
+            meta_request->synced_data.num_parts_delivery_sent) {
+            goto has_work_remaining;
+        }
+
+        goto no_work_remaining;
+    }
+
+has_work_remaining:
+    work_remaining = true;
+
+no_work_remaining:
+
+    if (!work_remaining) {
+        aws_s3_meta_request_set_success_synced(meta_request, meta_request_default->synced_data.cached_response_status);
+    }
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    if (work_remaining) {
+        if (request == NULL) {
+            goto return_results;
+        }
+
+        /* If the request is not sending a body, then we can return the request now. */
+        if (meta_request_default->content_length == 0) {
+            goto return_results;
+        }
+
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
-        if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-            aws_s3_request_release(request);
-            request = NULL;
-            return AWS_OP_ERR;
+        /* If reading the stream is successful, then we can return the request now. */
+        if (!aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+            goto return_results;
         }
+
+        goto rollback_and_re_update;
+    } else {
+        AWS_ASSERT(request == NULL);
+
+        aws_s3_meta_request_finish(meta_request);
     }
 
-    *out_request = request;
-    return AWS_OP_SUCCESS;
+return_results:
+
+    if (out_request != NULL) {
+        *out_request = request;
+    }
+
+    return work_remaining;
+
+rollback_and_re_update:
+    /* In the event of stream read failure, first release the request. */
+    aws_s3_request_release(request);
+    request = NULL;
+
+    /* Record failure and rewind the "sent" state. */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error_or_unknown());
+    meta_request_default->synced_data.request_sent = false;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    /* Call our function again, triggering the "work remaining" logic, and then finishing the meta request if
+     * possible. */
+    return s_s3_meta_request_default_update(meta_request, flags, out_request);
 }
 
 /* Given a request, prepare it for sending based on its description. */
@@ -225,51 +276,37 @@ static int s_s3_meta_request_default_prepare_request(
     return AWS_OP_SUCCESS;
 }
 
-static int s_s3_meta_request_default_header_block_done(
-    struct aws_http_stream *stream,
-    enum aws_http_header_block header_block,
-    struct aws_s3_vip_connection *vip_connection) {
-
-    (void)stream;
-    (void)header_block;
-
-    AWS_PRECONDITION(stream);
-    AWS_PRECONDITION(vip_connection);
-
-    struct aws_s3_request *request = vip_connection->request;
-    AWS_PRECONDITION(request);
-
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_ASSERT(meta_request);
-
-    if (meta_request->headers_callback != NULL && meta_request->headers_callback(
-                                                      meta_request,
-                                                      request->send_data.response_headers,
-                                                      request->send_data.response_status,
-                                                      meta_request->user_data)) {
-
-        aws_s3_meta_request_finish(meta_request, NULL, 0, aws_last_error_or_unknown());
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
-}
-
-static void s_s3_meta_request_default_notify_request_destroyed(
+static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request) {
+    struct aws_s3_request *request,
+    int error_code) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->impl);
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    bool finish = request->request_was_sent &&
-                  meta_request_default->synced_data.state == AWS_S3_META_REQUEST_DEFAULT_WAITING_FOR_REQUEST;
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL &&
+        meta_request->headers_callback(
+            meta_request,
+            request->send_data.response_headers,
+            request->send_data.response_status,
+            meta_request->user_data)) {
 
-    if (finish) {
-        aws_s3_meta_request_finish(meta_request, NULL, request->send_data.response_status, AWS_ERROR_SUCCESS);
+        error_code = aws_last_error_or_unknown();
     }
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    meta_request_default->synced_data.cached_response_status = request->send_data.response_status;
+    meta_request_default->synced_data.request_completed = true;
+    meta_request_default->synced_data.request_error_code = error_code;
+
+    if (error_code == AWS_ERROR_SUCCESS) {
+        aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+    } else {
+        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+    }
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 }

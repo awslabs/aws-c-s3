@@ -536,7 +536,20 @@ AWS_TEST_CASE(test_s3_put_object_tls_enabled, s_test_s3_put_object_tls_enabled)
 static int s_test_s3_put_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0));
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .put_options =
+            {
+                .ensure_multipart = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL));
 
     return 0;
 }
@@ -793,8 +806,8 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_error_response, s_test_s3_error_response)
-static int s_test_s3_error_response(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_error_missing_file, s_test_s3_error_missing_file)
+static int s_test_s3_error_missing_file(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     const struct aws_byte_cursor test_object_path =
@@ -947,204 +960,6 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
     return 0;
 }
 
-static int s_s3_next_request_cancel_in_the_middle(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request **out_request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(out_request);
-
-    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    bool call_cancel = auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SEND_COMPLETE ||
-                       auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_SENDING_PARTS ||
-                       auto_ranged_put->synced_data.state == AWS_S3_AUTO_RANGED_PUT_STATE_WAITING_FOR_PARTS;
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    if (call_cancel) {
-        aws_s3_meta_request_cancel(meta_request);
-    }
-
-    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
-    struct aws_s3_tester *tester = results->tester;
-    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
-        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
-
-    return original_meta_request_vtable->next_request(meta_request, out_request);
-}
-
-static struct aws_s3_meta_request *s_meta_request_factory_patch_next_request(
-    struct aws_s3_client *client,
-    const struct aws_s3_meta_request_options *options) {
-    AWS_ASSERT(client != NULL);
-
-    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
-    AWS_ASSERT(tester != NULL);
-
-    struct aws_s3_client_vtable *original_client_vtable =
-        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
-
-    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
-
-    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
-        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
-    patched_meta_request_vtable->next_request = s_s3_next_request_cancel_in_the_middle;
-
-    return meta_request;
-}
-
-AWS_TEST_CASE(
-    test_s3_cancel_multipart_upload_during_parts_upload,
-    s_test_s3_cancel_multipart_upload_during_parts_upload)
-static int s_test_s3_cancel_multipart_upload_during_parts_upload(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = 5 * 1024 * 1024,
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_next_request;
-
-    ASSERT_TRUE(client != NULL);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 10, 0, NULL));
-
-    aws_s3_client_release(client);
-    aws_s3_tester_clean_up(&tester);
-
-    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually
-     * ensure the abort succeed */
-    return 0;
-}
-
-/* TODO: instead of random, we should have some efforts to base on the request we made to test the cancel can happen
- * anytime by user. */
-AWS_TEST_CASE(test_s3_cancel_multipart_upload_random, s_test_s3_cancel_multipart_upload_random)
-static int s_test_s3_cancel_multipart_upload_random(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = 5 * 1024 * 1024,
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    ASSERT_TRUE(client != NULL);
-
-    ASSERT_SUCCESS(
-        aws_s3_tester_send_put_object_meta_request(&tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, NULL));
-
-    aws_s3_client_release(client);
-    aws_s3_tester_clean_up(&tester);
-
-    /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually
-     * ensure the abort succeed */
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_cancel_singlepart_upload_random, s_test_s3_cancel_singlepart_upload_random)
-static int s_test_s3_cancel_singlepart_upload_random(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = 150 * 1024 * 1024,
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    ASSERT_TRUE(client != NULL);
-
-    ASSERT_SUCCESS(
-        aws_s3_tester_send_put_object_meta_request(&tester, client, 100, AWS_S3_TESTER_SEND_META_REQUEST_CANCEL, NULL));
-
-    aws_s3_client_release(client);
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_cancel_multipart_download_random, s_test_s3_cancel_multipart_download_random)
-static int s_test_s3_cancel_multipart_download_random(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = 5 * 1024 * 1024,
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    ASSERT_TRUE(client != NULL);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        aws_byte_cursor_from_c_str("/get_object_test_10MB.txt"),
-        AWS_S3_TESTER_SEND_META_REQUEST_CANCEL,
-        NULL));
-
-    aws_s3_client_release(client);
-    aws_s3_tester_clean_up(&tester);
-
-    /* TODO: we may need to test a huge file, and cancel in the middle of transition, it's might be low priority */
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_cancel_singlepart_download_random, s_test_s3_cancel_singlepart_download_random)
-static int s_test_s3_cancel_singlepart_download_random(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = 15 * 1024 * 1024,
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    ASSERT_TRUE(client != NULL);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester,
-        client,
-        aws_byte_cursor_from_c_str("/get_object_test_10MB.txt"),
-        AWS_S3_TESTER_SEND_META_REQUEST_CANCEL,
-        NULL));
-
-    aws_s3_client_release(client);
-    aws_s3_tester_clean_up(&tester);
-
-    /* TODO: we may need to test a huge file, and cancel in the middle of transition, it's might be low priority */
-    return 0;
-}
-
 AWS_TEST_CASE(test_s3_bad_endpoint, s_test_s3_bad_endpoint)
 static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1179,7 +994,7 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_ENDPOINT);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

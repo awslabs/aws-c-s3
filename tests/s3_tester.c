@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/common/system_info.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -489,8 +490,6 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 }
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
-    .push_meta_request = aws_s3_client_push_meta_request_empty,
-    .remove_meta_request = aws_s3_client_remove_meta_request_empty,
     .acquire_http_connection = aws_s3_client_acquire_http_connection_empty,
 };
 
@@ -515,16 +514,13 @@ static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_req
     aws_mem_release(meta_request->allocator, meta_request->impl);
 }
 
-static struct aws_s3_meta_request_vtable s_s3_empty_meta_request_vtable = {
-    .next_request = aws_s3_meta_request_next_request_empty,
+static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
+    .update = aws_s3_meta_request_update_empty,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = aws_s3_meta_request_prepare_request_empty,
+    .finished_request = aws_s3_meta_request_finished_request_empty,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
-    .incoming_headers = NULL,
-    .incoming_headers_block_done = NULL,
-    .incoming_body = NULL,
-    .stream_complete = NULL,
     .destroy = s_s3_empty_meta_request_destroy,
 };
 
@@ -550,7 +546,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         0,
         &options,
         empty_meta_request,
-        &s_s3_empty_meta_request_vtable,
+        &s_s3_mock_meta_request_vtable,
         &empty_meta_request->base);
 
     aws_http_message_release(dummy_http_message);
@@ -1359,16 +1355,6 @@ int aws_s3_tester_validate_put_object_results(
     return AWS_OP_SUCCESS;
 }
 
-void aws_s3_client_push_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
-    (void)client;
-    (void)meta_request;
-}
-
-void aws_s3_client_remove_meta_request_empty(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
-    (void)client;
-    (void)meta_request;
-}
-
 void aws_s3_client_acquire_http_connection_empty(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
@@ -1378,12 +1364,23 @@ void aws_s3_client_acquire_http_connection_empty(
     (void)callback;
 }
 
-int aws_s3_meta_request_next_request_empty(
+bool aws_s3_meta_request_update_empty(
     struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
     struct aws_s3_request **out_request) {
     (void)meta_request;
     (void)out_request;
-    return AWS_OP_ERR;
+    (void)flags;
+    return false;
+}
+
+void aws_s3_meta_request_finished_request_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code) {
+    (void)meta_request;
+    (void)request;
+    (void)error_code;
 }
 
 int aws_s3_meta_request_prepare_request_empty(
