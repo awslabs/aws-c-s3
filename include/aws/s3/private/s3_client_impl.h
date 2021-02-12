@@ -16,13 +16,10 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/connection_manager.h>
 
+#define S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION 2
+
 struct aws_http_connection;
 struct aws_http_connection_manager;
-
-typedef void(aws_s3_client_acquire_http_connection_callback)(
-    struct aws_http_connection *http_connection,
-    int error_code,
-    void *user_data);
 
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
@@ -32,58 +29,23 @@ enum aws_s3_vip_connection_finish_code {
     AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY,
 };
 
-typedef void(aws_s3_vip_shutdown_callback_fn)(void *user_data);
-
-/* Represents one Virtual IP (VIP) in S3, including a connection manager that points directly at that VIP. */
-struct aws_s3_vip {
-    struct aws_linked_list_node node;
-
-    /* True if this VIP is in use. */
-    struct aws_atomic_var active;
-
-    /* S3 Client that owns this vip. */
-    struct aws_s3_client *owning_client;
-
-    /* Connection manager shared by all VIP connections. */
-    struct aws_http_connection_manager *http_connection_manager;
-
-    /* Address this VIP represents. */
-    struct aws_string *host_address;
-
-    /* Callback used when this vip has completely shutdown, which happens when all associated connections and the
-     * connection manager are shutdown. */
-    aws_s3_vip_shutdown_callback_fn *shutdown_callback;
-
-    /* User data for the shutdown callback. */
-    void *shutdown_user_data;
-
-    struct {
-        /* How many aws_s3_vip_connection structures are allocated for this vip. This structure will not finish cleaning
-         * up until this counter is 0.*/
-        uint32_t num_vip_connections;
-
-        /* Whether or not the connection manager is allocated. If the connection manager is NULL, but this is true, the
-         * shutdown callback for the connection manager has not yet been called. */
-        uint32_t http_connection_manager_active;
-    } synced_data;
-};
-
 /* Represents one connection on a particular VIP. */
 struct aws_s3_vip_connection {
-
     struct aws_linked_list_node node;
 
-    /* The VIP that this connection belongs to. */
-    struct aws_s3_vip *owning_vip;
+    struct aws_s3_client *owning_client;
 
-    /* The underlying, currently in-use HTTP connection. */
-    struct aws_http_connection *http_connection;
+    struct aws_http_connection_manager *connection_manager;
 
-    /* Number of requests we have made on this particular connection. Important for the request service limit. */
-    uint32_t request_count;
+    uint32_t num_connections;
 
-    /* Maximum number of requests this connection will do before using a different connection. */
-    uint32_t max_request_count;
+    uint32_t num_pending_acquisition_count;
+
+    struct aws_http_connection *connections[S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION];
+
+    struct aws_http_connection *active_connection;
+
+    struct aws_atomic_var waiting_for_active_connection;
 
     /* Request currently being processed on the VIP connection. */
     struct aws_s3_request *request;
@@ -91,10 +53,14 @@ struct aws_s3_vip_connection {
     /* Current retry token for the request. If it has never been retried, this will be NULL. */
     struct aws_retry_token *retry_token;
 
+    struct {
+        struct aws_http_connection *new_connections[S3_NUM_HTTP_CONNECTIONS_PER_S3_CONNECTION];
+
+        uint32_t num_new_connections;
+    } synced_data;
+
     /* True if the connection is currently retrying to process the request. */
     uint32_t is_retry : 1;
-
-    uint32_t is_active : 1;
 };
 
 struct aws_s3_client_vtable {
@@ -102,18 +68,14 @@ struct aws_s3_client_vtable {
     struct aws_s3_meta_request *(
         *meta_request_factory)(struct aws_s3_client *client, const struct aws_s3_meta_request_options *options);
 
-    void (*acquire_http_connection)(
-        struct aws_s3_client *client,
-        struct aws_s3_vip_connection *vip_connection,
-        aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
-
-    int (*add_vips)(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
-
-    void (*remove_vips)(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
-
     void (*schedule_process_work_synced)(struct aws_s3_client *client);
 
     void (*process_work)(struct aws_s3_client *client);
+
+    void (*on_acquire_http_connection)(
+        struct aws_http_connection *incoming_http_connection,
+        int error_code,
+        void *user_data);
 };
 
 /* Represents the state of the S3 client. */
@@ -186,29 +148,18 @@ struct aws_s3_client {
         /* Endpoint to use for the bucket. */
         struct aws_string *endpoint;
 
-        /* How many vips are being actively used. */
-        uint32_t active_vip_count;
-
-        /* How many vips are allocated. (This number includes vips that are in the process of cleaning up) */
-        uint32_t allocated_vip_count;
-
-        /* Linked list of active VIP's. */
-        struct aws_linked_list vips;
-
-        /* VIP Connections that need added or updated in the work event loop. */
-        struct aws_linked_list pending_vip_connection_updates;
+        struct aws_http_connection_manager *connection_manager;
 
         /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_request_work;
+
+        struct aws_linked_list pending_connections;
 
         /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
 
         /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
         uint32_t pending_request_count;
-
-        /* Host listener to get new IP addresses. */
-        struct aws_host_listener *host_listener;
 
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t active : 1;
@@ -223,30 +174,25 @@ struct aws_s3_client {
          * shutdown callback has not yet been called.*/
         uint32_t body_streaming_elg_allocated : 1;
 
-        /* Whether or not the host listener is allocated. If the host listener is NULL, but this is true, the shutdown
-         * callback for the listener has not yet been called. */
-        uint32_t host_listener_allocated : 1;
-
-        /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
-        uint32_t finish_destroy : 1;
+        uint32_t connection_manager_active : 1;
 
         /* True if the host resolver couldn't find the endpoint.*/
         uint32_t invalid_endpoint : 1;
 
+        /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
+        uint32_t finish_destroy : 1;
+
     } synced_data;
 
     struct {
-        /* List of all VIP Connections for each VIP. */
-        struct aws_linked_list idle_vip_connections;
 
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
 
+        struct aws_linked_list connections;
+
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
-
-        /* Number of current active aws_s3_vip_connections. */
-        uint32_t num_active_vip_connections;
 
     } threaded_data;
 };
@@ -278,36 +224,6 @@ AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
 void aws_s3_set_dns_ttl(size_t ttl);
-
-AWS_S3_API
-uint32_t aws_s3_client_get_max_allocated_vip_count(struct aws_s3_client *client);
-
-AWS_S3_API
-struct aws_s3_vip *aws_s3_vip_new(
-    struct aws_s3_client *client,
-    const struct aws_byte_cursor *host_address,
-    const struct aws_byte_cursor *server_name,
-    uint32_t num_vip_connections,
-    struct aws_linked_list *out_vip_connections_list,
-    aws_s3_vip_shutdown_callback_fn *shutdown_callback,
-    void *shutdown_user_data);
-
-AWS_S3_API
-void aws_s3_vip_start_destroy(struct aws_s3_vip *vip);
-
-AWS_S3_API
-struct aws_s3_vip *aws_s3_find_vip(const struct aws_linked_list *vip_list, const struct aws_byte_cursor *host_address);
-
-AWS_S3_API
-void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
-
-/* Sets up vips for each of the given host addresses as long as they are not already in use by other vip structures. */
-AWS_S3_API
-int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
-
-/* Removes vips associated with each of the given host addresses. */
-AWS_S3_API
-void aws_s3_client_remove_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
 
 AWS_S3_API
 void aws_s3_client_lock_synced_data(struct aws_s3_client *client);
