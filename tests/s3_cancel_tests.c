@@ -241,6 +241,9 @@ static int s_one_part_incoming_callback(
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     void *user_data) {
+    (void)body;
+    (void)range_start;
+    (void)user_data;
 
     aws_s3_meta_request_cancel(meta_request);
 
