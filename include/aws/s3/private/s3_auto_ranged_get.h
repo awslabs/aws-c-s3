@@ -10,6 +10,7 @@
 
 enum aws_s3_auto_ranged_get_request_type {
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
+    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
 };
 
 struct aws_s3_auto_ranged_get {

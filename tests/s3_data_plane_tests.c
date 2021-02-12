@@ -441,6 +441,14 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_empty_object, s_test_s3_get_object_empty_default)
+static int s_test_s3_get_object_empty_default(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    return (s_test_s3_get_object_helper(
+        allocator, AWS_S3_TLS_ENABLED, 0, aws_byte_cursor_from_c_str("/get_object_test_0MB.txt")));
+}
+
 AWS_TEST_CASE(test_s3_get_object_sse_kms, s_test_s3_get_object_sse_kms)
 static int s_test_s3_get_object_sse_kms(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -572,6 +580,103 @@ static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocat
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_put_object_multiple, s_test_s3_put_object_multiple)
+static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request *meta_requests[2];
+    struct aws_s3_meta_request_test_results meta_request_test_results[2];
+    struct aws_http_message *messages[2];
+    struct aws_input_stream *input_streams[2];
+    struct aws_byte_buf input_stream_buffers[2];
+    size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
+
+    ASSERT_TRUE(
+        num_meta_requests == (sizeof(meta_request_test_results) / sizeof(struct aws_s3_meta_request_test_results)));
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        AWS_ZERO_STRUCT(meta_request_test_results[i]);
+        char object_path_buffer[128] = "";
+        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_10MB_%zu.txt", i);
+        AWS_ZERO_STRUCT(input_stream_buffers[i]);
+        aws_s3_create_test_buffer(allocator, 10 * 1024ULL * 1024ULL, &input_stream_buffers[i]);
+        struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffers[i]);
+        input_streams[i] = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+        struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
+        messages[i] = aws_s3_test_put_object_request_new(
+            allocator,
+            aws_byte_cursor_from_string(host_name),
+            test_object_path,
+            g_test_body_content_type,
+            input_streams[i],
+            0);
+    }
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        struct aws_s3_meta_request_options options;
+        AWS_ZERO_STRUCT(options);
+        options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+        options.message = messages[i];
+
+        ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
+
+        /* Trigger accelerating of our Put Object request. */
+        meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
+
+        ASSERT_TRUE(meta_requests[i] != NULL);
+    }
+
+    /* Wait for the request to finish. */
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+
+    aws_s3_tester_lock_synced_data(&tester);
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        aws_s3_meta_request_release(meta_requests[i]);
+        meta_requests[i] = NULL;
+    }
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
+    }
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        aws_http_message_release(messages[i]);
+        aws_input_stream_destroy(input_streams[i]);
+        aws_byte_buf_clean_up(&input_stream_buffers[i]);
+    }
+
+    aws_string_destroy(host_name);
+    host_name = NULL;
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_object_less_than_part_size, s_test_s3_put_object_less_than_part_size)
 static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -592,6 +697,35 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
         &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_empty_object, s_test_s3_put_object_empty_object)
+static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 20 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+        &tester, client, 0, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
