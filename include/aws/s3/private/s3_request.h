@@ -50,15 +50,6 @@ struct aws_s3_request {
      * be more contextual, like "first part" instead of just "part".) */
     int request_tag;
 
-    /* When true, response headers from the request will be stored in the request's response_headers variable. */
-    uint32_t record_response_headers : 1;
-
-    /* When true, the response body buffer will be allocated in the size of a part. */
-    uint32_t part_size_response_body : 1;
-
-    /* When true, this request has been sent at least once. */
-    uint32_t request_was_sent : 1;
-
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to
      * be retried, then the members of this structure will be cleaned up and re-populated on the next send.
      */
@@ -82,6 +73,15 @@ struct aws_s3_request {
         int response_status;
 
     } send_data;
+
+    /* When true, response headers from the request will be stored in the request's response_headers variable. */
+    uint32_t record_response_headers : 1;
+
+    /* When true, the response body buffer will be allocated in the size of a part. */
+    uint32_t part_size_response_body : 1;
+
+    /* When true, this request has been sent at least once. */
+    uint32_t request_was_sent : 1;
 };
 
 AWS_EXTERN_C_BEGIN
