@@ -49,6 +49,9 @@ static const uint32_t s_max_requests_multiplier = 4;
 static const double s_throughput_per_vip_gbps = 5.0;
 static const uint32_t s_num_connections_per_vip = 10;
 
+/* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
+static const uint8_t s_max_request_jitter_range = 50;
+
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
@@ -1299,14 +1302,15 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT,
             "CLIENT-STATS-LOGGING Requests-in-flight(approx/exact):%d/%d  Requests-network:%d  Requests-waiting:%d  "
-            "Requests-streaming:%d  Idle-connections:%d  Allocated-connections:%d",
+            "Requests-streaming:%d  Idle-connections:%d  Allocated-connections:%d  Active-connections:%d",
             total_approx_requests,
             client->threaded_data.num_requests_in_flight,
             num_requests_network_io,
             num_requests_queued_waiting,
             num_requests_streaming,
             num_idle_connections,
-            num_allocated_connections);
+            num_allocated_connections,
+            client->threaded_data.num_active_vip_connections);
     }
 
     s_s3_client_check_for_shutdown(client, s_s3_client_reset_work_task_in_progress_synced);
@@ -1344,18 +1348,18 @@ static void s_s3_client_assign_requests_to_connections_threaded(
                                 !aws_http_connection_is_open(vip_connection->http_connection) ||
                                 vip_connection->request_count >= s_s3_max_request_count_per_connection))) {
             aws_s3_vip_connection_destroy(client, vip_connection);
+            --client->threaded_data.num_active_vip_connections;
             continue;
         }
 
         AWS_ASSERT(vip_connection->request == NULL);
 
-        uint32_t num_requests_network_io = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_io);
-
-        /* If we don't have any meta requests or how many requests we have in flight is over the maximum allowed, put
-         * the vip connection into the idle list. */
+        /* If we don't have any meta requests, or this connection is not already active and we are at capacity for
+         * active vip connections, throw this vip connection back in the idle list and continue. */
         if (aws_linked_list_empty(&client->threaded_data.meta_requests) ||
             client->threaded_data.num_requests_in_flight >= max_requests_in_flight ||
-            num_requests_network_io >= max_num_active_connections) {
+            (!vip_connection->is_active &&
+             client->threaded_data.num_active_vip_connections >= max_num_active_connections)) {
             aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &vip_connection->node);
             continue;
         }
@@ -1391,6 +1395,11 @@ static void s_s3_client_assign_requests_to_connections_threaded(
             request->request_was_sent = true;
             ++client->threaded_data.num_requests_in_flight;
             vip_connection->request = request;
+
+            if (!vip_connection->is_active) {
+                vip_connection->is_active = true;
+                ++client->threaded_data.num_active_vip_connections;
+            }
 
             aws_atomic_fetch_add(&client->stats.num_requests_network_io, 1);
 
@@ -1613,9 +1622,19 @@ static void s_s3_client_on_acquire_http_connection(
             *current_http_connection = NULL;
         }
 
+        AWS_ASSERT(s_s3_max_request_count_per_connection > s_max_request_jitter_range);
+
+        uint8_t jitter_value = 0;
+        if (aws_device_random_u8(&jitter_value)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT, "id=%p Could not get random value for request count jitter.", (void *)client);
+        }
+
+        jitter_value %= s_max_request_jitter_range;
+
         *current_http_connection = incoming_http_connection;
         vip_connection->request_count = 0;
-        vip_connection->max_request_count = s_s3_max_request_count_per_connection;
+        vip_connection->max_request_count = s_s3_max_request_count_per_connection - (uint32_t)jitter_value;
 
         AWS_LOGF_INFO(
             AWS_LS_S3_CLIENT,
