@@ -213,9 +213,17 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
+    aws_mutex_init(&client->synced_data.lock);
+
+    aws_linked_list_init(&client->synced_data.vips);
+    aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
+    aws_linked_list_init(&client->synced_data.pending_meta_request_work);
+
+    aws_linked_list_init(&client->threaded_data.idle_vip_connections);
+    aws_linked_list_init(&client->threaded_data.meta_requests);
+
     /* Store our client bootstrap. */
-    client->client_bootstrap = client_config->client_bootstrap;
-    aws_client_bootstrap_acquire(client_config->client_bootstrap);
+    client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
 
     struct aws_event_loop_group *event_loop_group = client_config->client_bootstrap->event_loop_group;
     aws_event_loop_group_acquire(event_loop_group);
@@ -308,15 +316,6 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->signing_config) {
         client->cached_signing_config = aws_cached_signing_config_new(client->allocator, client_config->signing_config);
     }
-
-    aws_mutex_init(&client->synced_data.lock);
-
-    aws_linked_list_init(&client->synced_data.vips);
-    aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
-    aws_linked_list_init(&client->synced_data.pending_meta_request_work);
-
-    aws_linked_list_init(&client->threaded_data.idle_vip_connections);
-    aws_linked_list_init(&client->threaded_data.meta_requests);
 
     client->synced_data.active = true;
 
