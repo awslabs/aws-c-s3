@@ -235,3 +235,40 @@ static int s_test_s3_cancel_mpd_one_part_sent(struct aws_allocator *allocator, v
 
     return 0;
 }
+
+static int s_one_part_incoming_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+
+    aws_s3_meta_request_cancel(meta_request);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_body_callback, s_test_s3_cancel_mpd_body_callback)
+static int s_test_s3_cancel_mpd_body_callback(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .body_callback = s_one_part_incoming_callback,
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_10MB,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_CANCELED);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}

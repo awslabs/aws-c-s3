@@ -358,5 +358,6 @@ extern const struct aws_byte_cursor g_test_s3_region;
 extern const struct aws_byte_cursor g_test_bucket_name;
 extern const struct aws_byte_cursor g_test_public_bucket_name;
 extern const struct aws_byte_cursor g_s3_path_get_object_test_1MB;
+extern const struct aws_byte_cursor g_s3_path_get_object_test_10MB;
 
 #endif /* AWS_S3_TESTER_H */

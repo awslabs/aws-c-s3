@@ -21,6 +21,7 @@ add_net_test_case(test_s3_cancel_mpu_one_part_completed)
 add_net_test_case(test_s3_cancel_mpu_all_parts_completed)
 add_net_test_case(test_s3_cancel_mpd_nothing_sent)
 add_net_test_case(test_s3_cancel_mpd_one_part_sent)
+add_net_test_case(test_s3_cancel_mpd_body_callback)
 
 add_net_test_case(test_s3_vip_create_destroy)
 add_net_test_case(test_s3_client_add_remove_vips)
