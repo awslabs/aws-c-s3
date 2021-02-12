@@ -5,7 +5,7 @@ file(GLOB TEST_SRC "*.c")
 file(GLOB TEST_HDRS "*.h")
 file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
-add_test_case(test_s3_client_create_destroy)
+add_net_test_case(test_s3_client_create_destroy)
 add_test_case(test_s3_request_create_destroy)
 
 add_net_test_case(test_s3_client_exceed_retries)
@@ -16,8 +16,8 @@ add_net_test_case(test_s3_meta_request_sign_request_fail)
 add_net_test_case(test_s3_meta_request_send_request_finish_fail)
 add_net_test_case(test_s3_auto_range_put_missing_upload_id)
 
-add_test_case(test_s3_vip_create_destroy)
-add_test_case(test_s3_client_add_remove_vips)
+add_net_test_case(test_s3_vip_create_destroy)
+add_net_test_case(test_s3_client_add_remove_vips)
 add_net_test_case(test_s3_client_resolve_vips)
 
 add_net_test_case(test_s3_get_object_tls_disabled)
