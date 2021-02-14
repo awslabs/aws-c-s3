@@ -15,6 +15,7 @@ enum aws_s3_auto_ranged_get_request_type {
 struct aws_s3_auto_ranged_get {
     struct aws_s3_meta_request base;
 
+    /* Members to only be used when the mutex in the base type is locked. */
     struct {
         uint32_t total_num_parts;
 

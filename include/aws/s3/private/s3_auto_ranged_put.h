@@ -23,11 +23,12 @@ struct aws_s3_auto_ranged_put {
 
     uint64_t content_length;
 
+    /* Only meant for use in the update function, which is never called concurrently. */
     struct {
-        /* Only meant for use in the update function, which is never called concurrently. */
         uint32_t next_part_number;
     } threaded_update_data;
 
+    /* Members to only be used when the mutex in the base type is locked. */
     struct {
         struct aws_array_list etag_list;
 

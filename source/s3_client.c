@@ -202,9 +202,22 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
+    aws_mutex_init(&client->synced_data.lock);
+
+    aws_linked_list_init(&client->synced_data.vips);
+    aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
+    aws_linked_list_init(&client->synced_data.pending_meta_request_work);
+
+    aws_linked_list_init(&client->threaded_data.idle_vip_connections);
+    aws_linked_list_init(&client->threaded_data.meta_requests);
+
+    aws_atomic_init_int(&client->stats.num_requests_network_io, 0);
+    aws_atomic_init_int(&client->stats.num_requests_queued_waiting, 0);
+    aws_atomic_init_int(&client->stats.num_requests_streaming, 0);
+    aws_atomic_init_int(&client->stats.num_allocated_vip_connections, 0);
+
     /* Store our client bootstrap. */
-    client->client_bootstrap = client_config->client_bootstrap;
-    aws_client_bootstrap_acquire(client_config->client_bootstrap);
+    client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
 
     struct aws_event_loop_group *event_loop_group = client_config->client_bootstrap->event_loop_group;
     aws_event_loop_group_acquire(event_loop_group);
@@ -297,20 +310,6 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->signing_config) {
         client->cached_signing_config = aws_cached_signing_config_new(client->allocator, client_config->signing_config);
     }
-
-    aws_mutex_init(&client->synced_data.lock);
-
-    aws_linked_list_init(&client->synced_data.vips);
-    aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
-    aws_linked_list_init(&client->synced_data.pending_meta_request_work);
-
-    aws_linked_list_init(&client->threaded_data.idle_vip_connections);
-    aws_linked_list_init(&client->threaded_data.meta_requests);
-
-    aws_atomic_init_int(&client->stats.num_requests_network_io, 0);
-    aws_atomic_init_int(&client->stats.num_requests_queued_waiting, 0);
-    aws_atomic_init_int(&client->stats.num_requests_streaming, 0);
-    aws_atomic_init_int(&client->stats.num_allocated_vip_connections, 0);
 
     client->synced_data.active = true;
 
@@ -1300,14 +1299,15 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT,
             "CLIENT-STATS-LOGGING Requests-in-flight(approx/exact):%d/%d  Requests-network:%d  Requests-waiting:%d  "
-            "Requests-streaming:%d  Idle-connections:%d  Allocated-connections:%d",
+            "Requests-streaming:%d  Idle-connections:%d  Allocated-connections:%d  Active-connections:%d",
             total_approx_requests,
             client->threaded_data.num_requests_in_flight,
             num_requests_network_io,
             num_requests_queued_waiting,
             num_requests_streaming,
             num_idle_connections,
-            num_allocated_connections);
+            num_allocated_connections,
+            client->threaded_data.num_active_vip_connections);
     }
 
     s_s3_client_check_for_shutdown(client, s_s3_client_reset_work_task_in_progress_synced);
@@ -1345,18 +1345,18 @@ static void s_s3_client_assign_requests_to_connections_threaded(
                                 !aws_http_connection_is_open(vip_connection->http_connection) ||
                                 vip_connection->request_count >= s_s3_max_request_count_per_connection))) {
             aws_s3_vip_connection_destroy(client, vip_connection);
+            --client->threaded_data.num_active_vip_connections;
             continue;
         }
 
         AWS_ASSERT(vip_connection->request == NULL);
 
-        uint32_t num_requests_network_io = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_io);
-
-        /* If we don't have any meta requests or how many requests we have in flight is over the maximum allowed, put
-         * the vip connection into the idle list. */
+        /* If we don't have any meta requests, or this connection is not already active and we are at capacity for
+         * active vip connections, throw this vip connection back in the idle list and continue. */
         if (aws_linked_list_empty(&client->threaded_data.meta_requests) ||
             client->threaded_data.num_requests_in_flight >= max_requests_in_flight ||
-            num_requests_network_io >= max_num_active_connections) {
+            (!vip_connection->is_active &&
+             client->threaded_data.num_active_vip_connections >= max_num_active_connections)) {
             aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &vip_connection->node);
             continue;
         }
@@ -1392,6 +1392,11 @@ static void s_s3_client_assign_requests_to_connections_threaded(
             request->request_was_sent = true;
             ++client->threaded_data.num_requests_in_flight;
             vip_connection->request = request;
+
+            if (!vip_connection->is_active) {
+                vip_connection->is_active = true;
+                ++client->threaded_data.num_active_vip_connections;
+            }
 
             aws_atomic_fetch_add(&client->stats.num_requests_network_io, 1);
 

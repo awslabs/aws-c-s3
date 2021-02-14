@@ -92,7 +92,9 @@ struct aws_s3_vip_connection {
     struct aws_retry_token *retry_token;
 
     /* True if the connection is currently retrying to process the request. */
-    bool is_retry;
+    uint32_t is_retry : 1;
+
+    uint32_t is_active : 1;
 };
 
 struct aws_s3_client_vtable {
@@ -242,6 +244,9 @@ struct aws_s3_client {
 
         /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
         uint32_t num_requests_in_flight;
+
+        /* Number of current active aws_s3_vip_connections. */
+        uint32_t num_active_vip_connections;
 
     } threaded_data;
 };
