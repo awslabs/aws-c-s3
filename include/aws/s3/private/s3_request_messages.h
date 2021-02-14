@@ -7,6 +7,7 @@
  */
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 struct aws_allocator;
@@ -30,7 +31,8 @@ struct aws_http_message *aws_s3_get_object_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     uint32_t part_number,
-    size_t part_size);
+    size_t part_size,
+    bool has_range);
 
 /* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns a
  * body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and NULL,

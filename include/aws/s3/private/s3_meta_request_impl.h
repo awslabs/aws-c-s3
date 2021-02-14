@@ -284,6 +284,10 @@ void aws_s3_meta_request_set_fail_synced(
 AWS_S3_API
 void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_request, int response_status);
 
+/* Reset the request result. lock of meta_request should be held before calling this function */
+AWS_S3_API
+void aws_s3_meta_request_reset_synced(struct aws_s3_meta_request *meta_request);
+
 /* Returns true if the finish result has been set (ie: either aws_s3_meta_request_set_fail_synced or
  * aws_s3_meta_request_set_success_synced have been called.) */
 AWS_S3_API
