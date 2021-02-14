@@ -103,18 +103,19 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 }
 
 /* Check the finish result of meta request, in case of the request failed because of downloading an empty file */
-static bool s_check_empty_file_download_error_synced(struct aws_s3_meta_request *meta_request) {
-    struct aws_s3_meta_request_result finish_result = meta_request->synced_data.finish_result;
-    if (finish_result.error_response_body && finish_result.error_response_headers) {
+static bool s_check_empty_file_download_error_synced(struct aws_s3_request *failed_request) {
+    struct aws_http_headers *failed_headers = failed_request->send_data.response_headers;
+    struct aws_byte_buf failed_body = failed_request->send_data.response_body;
+    if (failed_headers && failed_body.capacity > 0) {
         struct aws_byte_cursor content_type;
         AWS_ZERO_STRUCT(content_type);
-        if (!aws_http_headers_get(finish_result.error_response_headers, g_content_type_header_name, &content_type)) {
+        if (!aws_http_headers_get(failed_headers, g_content_type_header_name, &content_type)) {
             /* Content type found */
             if (aws_byte_cursor_eq_ignore_case(&content_type, &g_application_xml_value)) {
                 /* XML response */
-                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(finish_result.error_response_body);
+                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&failed_body);
                 struct aws_string *size =
-                    get_top_level_xml_tag_value(meta_request->allocator, &g_object_size_value, &body_cursor);
+                    get_top_level_xml_tag_value(failed_request->allocator, &g_object_size_value, &body_cursor);
                 bool check_size = aws_string_eq_c_str(size, "0");
                 aws_string_destroy(size);
                 if (check_size) {
@@ -163,6 +164,22 @@ static bool s_s3_auto_ranged_get_update(
             if (num_requests_in_flight > s_conservative_max_requests_in_flight) {
                 goto has_work_remaining;
             }
+        }
+
+        if (auto_ranged_get->synced_data.get_without_range) {
+            if (out_request == NULL) {
+                goto has_work_remaining;
+            }
+            auto_ranged_get->synced_data.get_without_range = false;
+            /* Set to send a request without range to meet some special case, eg: empty file download */
+            request = aws_s3_request_new(
+                meta_request,
+                AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
+                1,
+                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+
+            ++auto_ranged_get->synced_data.num_parts_requested;
+            goto has_work_remaining;
         }
 
         /* If no parts have been requested, then we need to send an initial part request. */
@@ -221,21 +238,6 @@ static bool s_s3_auto_ranged_get_update(
             meta_request->synced_data.num_parts_delivery_sent) {
             goto has_work_remaining;
         }
-    }
-
-    if (s_check_empty_file_download_error_synced(meta_request)) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Getting an empty file, create a new request without range header to fetch the empty "
-            "file",
-            (void *)meta_request);
-        aws_s3_meta_request_reset_synced(meta_request);
-        request = aws_s3_request_new(
-            meta_request,
-            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
-            1,
-            AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-        goto has_work_remaining;
     }
 
     goto no_work_remaining;
@@ -398,7 +400,7 @@ static void s_s3_auto_ranged_get_request_finished(
                 num_parts,
                 (uint64_t)meta_request->part_size);
         } else {
-            num_parts = 1;
+            num_parts = 2;
             AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get empty file completed", (void *)meta_request);
         }
         if (meta_request->headers_callback != NULL) {
@@ -446,9 +448,20 @@ error_encountered:
             (auto_ranged_get->synced_data.num_parts_successful + auto_ranged_get->synced_data.num_parts_failed),
             auto_ranged_get->synced_data.total_num_parts);
     } else {
-        ++auto_ranged_get->synced_data.num_parts_failed;
-
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        if (s_check_empty_file_download_error_synced(request)) {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Getting an empty file, create a new request without range header to fetch the empty "
+                "file",
+                (void *)meta_request);
+            auto_ranged_get->synced_data.get_without_range = true;
+            ++meta_request->synced_data.num_parts_delivery_completed;
+            /* one for the first request with range in it, other for the next request without range */
+            auto_ranged_get->synced_data.total_num_parts = 2;
+        } else {
+            ++auto_ranged_get->synced_data.num_parts_failed;
+            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        }
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
