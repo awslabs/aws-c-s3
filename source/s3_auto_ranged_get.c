@@ -189,9 +189,6 @@ static bool s_s3_auto_ranged_get_update(
         }
 
         if (auto_ranged_get->synced_data.get_without_range) {
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
             if (auto_ranged_get->synced_data.get_without_range_sent) {
                 if (auto_ranged_get->synced_data.get_without_range_completed) {
                     goto no_work_remaining;
@@ -199,7 +196,10 @@ static bool s_s3_auto_ranged_get_update(
                     goto has_work_remaining;
                 }
             }
-            /* Set to send a request without range to meet some special case, eg: empty file download */
+            if (out_request == NULL) {
+                goto has_work_remaining;
+            }
+
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
@@ -474,7 +474,7 @@ error_encountered:
                 aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             }
         }
-    } else {
+    } else if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE) {
         AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get empty file completed", (void *)meta_request);
         auto_ranged_get->synced_data.get_without_range_completed = true;
         if (error_code != AWS_ERROR_SUCCESS) {
