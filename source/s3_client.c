@@ -49,6 +49,7 @@ static const uint32_t s_max_requests_multiplier = 4;
 static const double s_throughput_per_vip_gbps = 5.0;
 static const uint32_t s_num_connections_per_vip = 10;
 
+/* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 

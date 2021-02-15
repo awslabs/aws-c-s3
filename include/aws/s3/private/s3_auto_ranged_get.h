@@ -28,6 +28,8 @@ struct aws_s3_auto_ranged_get {
         size_t total_object_size;
 
         uint32_t get_without_range : 1;
+        uint32_t get_without_range_sent : 1;
+        uint32_t get_without_range_completed : 1;
     } synced_data;
 };
 
