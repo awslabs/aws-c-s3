@@ -242,9 +242,9 @@ static bool s_s3_auto_ranged_get_update(
         if (auto_ranged_get->synced_data.get_without_range) {
             if (auto_ranged_get->synced_data.get_without_range_sent &&
                 !auto_ranged_get->synced_data.get_without_range_completed) {
-                goto no_work_remaining;
-            } else {
                 goto has_work_remaining;
+            } else {
+                goto no_work_remaining;
             }
         }
 
@@ -414,9 +414,6 @@ static void s_s3_auto_ranged_get_request_finished(
                 total_object_size,
                 num_parts,
                 (uint64_t)meta_request->part_size);
-        } else {
-            num_parts = 2;
-            AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get empty file completed", (void *)meta_request);
         }
 
         if (meta_request->headers_callback != NULL) {
@@ -445,9 +442,8 @@ error_encountered:
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    ++auto_ranged_get->synced_data.num_parts_completed;
-
     if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
+        ++auto_ranged_get->synced_data.num_parts_completed;
 
         if (error_code == AWS_ERROR_SUCCESS) {
             ++auto_ranged_get->synced_data.num_parts_successful;
@@ -479,11 +475,10 @@ error_encountered:
             }
         }
     } else {
+        AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get empty file completed", (void *)meta_request);
         auto_ranged_get->synced_data.get_without_range_completed = true;
         if (error_code != AWS_ERROR_SUCCESS) {
             aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-        } else {
-            aws_s3_meta_request_stream_response_body_synced(meta_request, request);
         }
     }
 
