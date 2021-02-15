@@ -987,11 +987,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     meta_request->synced_data.client = NULL;
 
     /* Clean out the pending-stream-to-caller priority queue*/
-    struct aws_s3_request *request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
+    while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
+        struct aws_s3_request *request = NULL;
+        aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
+        AWS_FATAL_ASSERT(request != NULL);
 
-    while (request != NULL) {
         aws_linked_list_push_back(&release_request_list, &request->node);
-        request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
     }
 
     finish_result = meta_request->synced_data.finish_result;
