@@ -462,6 +462,7 @@ error_encountered:
                 (auto_ranged_get->synced_data.num_parts_successful + auto_ranged_get->synced_data.num_parts_failed),
                 auto_ranged_get->synced_data.total_num_parts);
         } else {
+            ++auto_ranged_get->synced_data.num_parts_failed;
             if (s_check_empty_file_download_error(request)) {
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,
@@ -470,7 +471,6 @@ error_encountered:
                     (void *)meta_request);
                 auto_ranged_get->synced_data.get_without_range = true;
             } else {
-                ++auto_ranged_get->synced_data.num_parts_failed;
                 aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             }
         }
