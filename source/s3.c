@@ -126,6 +126,7 @@ void aws_s3_library_clean_up(void) {
     }
 
     s_library_initialized = false;
+    aws_thread_join_all_managed();
 
     aws_hash_table_clean_up(&s_compute_platform_info_table);
     aws_unregister_log_subject_info_list(&s_s3_log_subject_list);
