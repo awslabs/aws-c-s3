@@ -470,12 +470,10 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     aws_event_loop_group_release(tester->el_group);
     tester->el_group = NULL;
 
+    aws_s3_library_clean_up();
+
     aws_condition_variable_clean_up(&tester->signal);
     aws_mutex_clean_up(&tester->synced_data.lock);
-
-    aws_global_thread_creator_shutdown_wait_for(10);
-
-    aws_s3_library_clean_up();
 }
 
 void aws_s3_tester_lock_synced_data(struct aws_s3_tester *tester) {
