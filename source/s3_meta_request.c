@@ -23,15 +23,15 @@ static const size_t s_default_body_streaming_priority_queue_size = 16;
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static void s_s3_meta_request_destroy(void *user_data);
 
-static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
-
 static void s_s3_meta_request_init_signing_date_time(
     struct aws_s3_meta_request *meta_request,
     struct aws_date_time *date_time);
 
-static int s_s3_meta_request_sign_request(
+static void s_s3_meta_request_sign_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data);
 
 static void s_s3_meta_request_request_on_signed(
     struct aws_signing_result *signing_result,
@@ -69,26 +69,6 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-static struct aws_allocator *s_s3_meta_request_get_client_sba_allocator_default(
-    struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->client);
-    AWS_PRECONDITION(meta_request->client->sba_allocator);
-
-    return meta_request->client->sba_allocator;
-}
-
-struct aws_allocator *aws_s3_meta_request_get_client_sba_allocator(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
-
-    if (meta_request->vtable->get_client_sba_allocator) {
-        return meta_request->vtable->get_client_sba_allocator(meta_request);
-    }
-
-    return s_s3_meta_request_get_client_sba_allocator_default(meta_request);
-}
-
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -117,6 +97,7 @@ int aws_s3_meta_request_init_base(
     AWS_ASSERT(vtable->send_request_finish);
 
     meta_request->allocator = allocator;
+    meta_request->type = options->type;
 
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
@@ -345,39 +326,126 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
     return is_finished;
 }
 
-int aws_s3_meta_request_make_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(vip_connection);
+static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-    struct aws_s3_request *request = vip_connection->request;
+static void s_s3_prepare_request_payload_callback_destroy(
+    struct aws_s3_prepare_request_payload *payload,
+    int error_code) {
+    AWS_PRECONDITION(payload);
+    AWS_PRECONDITION(payload->request);
+
+    struct aws_s3_meta_request *meta_request = payload->request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
+
+    struct aws_allocator *sba_allocator = client->sba_allocator;
+    AWS_PRECONDITION(sba_allocator);
+
+    aws_s3_meta_request_acquire(meta_request);
+
+    if (payload->callback != NULL) {
+        payload->callback(meta_request, payload->request, error_code, payload->user_data);
+    }
+
+    AWS_ASSERT(sba_allocator);
+
+    aws_mem_release(sba_allocator, payload);
+    aws_s3_meta_request_release(meta_request);
+}
+
+static void s_s3_meta_request_schedule_prepare_request_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
+
+void aws_s3_meta_request_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable);
+
+    if (meta_request->vtable->schedule_prepare_request) {
+        meta_request->vtable->schedule_prepare_request(meta_request, request, callback, user_data);
+    } else {
+        s_s3_meta_request_schedule_prepare_request_default(meta_request, request, callback, user_data);
+    }
+}
+
+static void s_s3_meta_request_schedule_prepare_request_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
+
+    struct aws_allocator *sba_allocator = client->sba_allocator;
+    AWS_PRECONDITION(sba_allocator);
+
+    struct aws_s3_prepare_request_payload *payload =
+        aws_mem_calloc(sba_allocator, 1, sizeof(struct aws_s3_prepare_request_payload));
+
+    payload->request = request;
+    payload->callback = callback;
+    payload->user_data = user_data;
+
+    aws_task_init(
+        &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
+    aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
+}
+
+static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    (void)task_status;
+
+    struct aws_s3_prepare_request_payload *payload = arg;
+    AWS_PRECONDITION(payload);
+
+    struct aws_s3_request *request = payload->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
 
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
-    if (vtable->prepare_request(meta_request, client, vip_connection, !vip_connection->is_retry)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "id=%p Could not prepare request %p", (void *)meta_request, (void *)request);
+    /* Client owns this event loop group. A cancel should not be possible. */
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
-        goto call_finished_callback;
+    int prepare_result = vtable->prepare_request(meta_request, request);
+
+    ++request->num_times_prepared;
+
+    if (prepare_result == AWS_OP_ERR) {
+        int error_code = aws_last_error_or_unknown();
+
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not prepare request %p due to error %d (%s).",
+            (void *)meta_request,
+            (void *)request,
+            error_code,
+            aws_error_str(error_code));
+
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+
+        s_s3_prepare_request_payload_callback_destroy(payload, error_code);
+        return;
     }
 
     /* Sign the newly created message. */
-    if (s_s3_meta_request_sign_request(meta_request, vip_connection)) {
-        goto call_finished_callback;
-    }
-
-    return AWS_OP_SUCCESS;
-
-call_finished_callback:
-
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
-
-    return AWS_OP_ERR;
+    s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);
 }
 
 static void s_s3_meta_request_init_signing_date_time(
@@ -400,30 +468,30 @@ void aws_s3_meta_request_init_signing_date_time_default(
     aws_date_time_init_now(date_time);
 }
 
-static int s_s3_meta_request_sign_request(
+static void s_s3_meta_request_sign_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
     AWS_PRECONDITION(meta_request->vtable->send_request_finish);
 
-    return meta_request->vtable->sign_request(meta_request, vip_connection);
+    meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
 
 /* Handles signing a message for the caller. */
-int aws_s3_meta_request_sign_request_default(
+void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection) {
-    AWS_PRECONDITION(meta_request)
-
-    AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->owning_vip);
-
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
-    AWS_PRECONDITION(client);
-
-    struct aws_s3_request *request = vip_connection->request;
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
+    AWS_PRECONDITION(on_signing_complete);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_ASSERT(client);
 
     struct aws_signing_config_aws signing_config;
 
@@ -438,13 +506,12 @@ int aws_s3_meta_request_sign_request_default(
             (void *)meta_request,
             (void *)request);
 
-        s_s3_meta_request_request_on_signed(NULL, AWS_ERROR_SUCCESS, vip_connection);
-        return AWS_OP_SUCCESS;
+        on_signing_complete(NULL, AWS_ERROR_SUCCESS, user_data);
+        return;
     }
 
     s_s3_meta_request_init_signing_date_time(meta_request, &signing_config.date);
 
-    int result = AWS_OP_ERR;
     request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
 
     AWS_LOGF_DEBUG(
@@ -462,26 +529,23 @@ int aws_s3_meta_request_sign_request_default(
             (void *)meta_request,
             (void *)request);
 
-        goto done;
+        on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
+        return;
     }
 
     if (aws_sign_request_aws(
             meta_request->allocator,
             request->send_data.signable,
             (struct aws_signing_config_base *)&signing_config,
-            s_s3_meta_request_request_on_signed,
-            vip_connection)) {
+            on_signing_complete,
+            user_data)) {
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p: Could not sign request %p", (void *)meta_request, (void *)request);
 
-        goto done;
+        on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
+        return;
     }
-
-    result = AWS_OP_SUCCESS;
-
-done:
-    return result;
 }
 
 /* Handle the signing result, getting an HTTP connection for the request if signing succeeded. */
@@ -490,50 +554,46 @@ static void s_s3_meta_request_request_on_signed(
     int error_code,
     void *user_data) {
 
-    struct aws_s3_vip_connection *vip_connection = user_data;
-    AWS_PRECONDITION(vip_connection);
+    struct aws_s3_prepare_request_payload *payload = user_data;
+    AWS_PRECONDITION(payload);
 
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
-    AWS_PRECONDITION(client);
-
-    struct aws_s3_request *request = vip_connection->request;
+    struct aws_s3_request *request = payload->request;
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
     if (error_code != AWS_ERROR_SUCCESS) {
-        goto error_finish;
+        goto finish;
     }
 
     if (signing_result != NULL &&
         aws_apply_signing_result_to_http_request(request->send_data.message, meta_request->allocator, signing_result)) {
-        goto error_finish;
+
+        error_code = aws_last_error_or_unknown();
+        goto finish;
     }
 
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_META_REQUEST, "id=%p Getting HTTP connection for request %p", (void *)meta_request, (void *)request);
+finish:
 
-    s_s3_meta_request_send_request(client, vip_connection);
+    if (error_code != AWS_ERROR_SUCCESS) {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
 
-    return;
-
-error_finish:
-
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
+    s_s3_prepare_request_payload_callback_destroy(payload, error_code);
 }
 
-static void s_s3_meta_request_send_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
-    AWS_PRECONDITION(client);
+void aws_s3_meta_request_send_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(vip_connection);
     AWS_PRECONDITION(vip_connection->http_connection);
-    (void)client;
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
-
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
 
     /* Now that we have a signed request and a connection, go ahead and issue the request. */
     struct aws_http_make_request_options options;

@@ -97,6 +97,10 @@ struct aws_s3_vip_connection {
     /* True if the connection is currently retrying to process the request. */
     uint32_t is_retry : 1;
 
+    /* True if the connection has sent at least one request. */
+    uint32_t is_warm : 1;
+
+    /* True if the connection is currently sending a request. */
     uint32_t is_active : 1;
 };
 
@@ -121,6 +125,9 @@ struct aws_s3_client_vtable {
     void (*schedule_process_work_synced)(struct aws_s3_client *client);
 
     void (*process_work)(struct aws_s3_client *client);
+
+    void (
+        *setup_vip_connection_retry_token)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 };
 
 /* Represents the state of the S3 client. */
@@ -174,6 +181,11 @@ struct aws_s3_client {
     void *shutdown_callback_user_data;
 
     struct {
+        /* Number of overall requests currently being processed by the client. */
+        struct aws_atomic_var num_requests_in_flight;
+
+        /* Number of requests currently being prepared. */
+        struct aws_atomic_var num_requests_being_prepared;
 
         /* Number of requests being sent/received over network. */
         struct aws_atomic_var num_requests_network_io;
@@ -186,6 +198,12 @@ struct aws_s3_client {
 
         /* Number of allocated VIP connnections. */
         struct aws_atomic_var num_allocated_vip_connections;
+
+        /* Number of aws_s3_vip_connections currently processing requests. */
+        struct aws_atomic_var num_active_vip_connections;
+
+        /* Number of aws_s3_vip_connections that have already processed one request. */
+        struct aws_atomic_var num_warm_vip_connections;
     } stats;
 
     struct {
@@ -209,11 +227,11 @@ struct aws_s3_client {
         /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_request_work;
 
+        /* Requests that are prepared and ready to be put in the threaded_data request queue. */
+        struct aws_linked_list pending_requests;
+
         /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
-
-        /* Counter for number of requests that have been finished/released, allowing us to create new requests. */
-        uint32_t pending_request_count;
 
         /* Host listener to get new IP addresses. */
         struct aws_host_listener *host_listener;
@@ -254,19 +272,17 @@ struct aws_s3_client {
         /* List of all VIP Connections for each VIP. */
         struct aws_linked_list idle_vip_connections;
 
+        /* Queue of prepared requests that are waiting to be assigned to a VIP connection. */
+        struct aws_linked_list request_queue;
+
         /* Client list of on going meta requests. */
         struct aws_linked_list meta_requests;
 
-        /* Number of requests being processed, either still being sent/received or being streamed to the caller. */
-        uint32_t num_requests_in_flight;
-
-        /* Number of current active aws_s3_vip_connections. */
-        uint32_t num_active_vip_connections;
+        /* Number of requests in the request_queue linked_list. */
+        uint32_t request_queue_size;
 
     } threaded_data;
 };
-
-int aws_s3_client_make_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
@@ -280,6 +296,15 @@ AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
 void aws_s3_set_dns_ttl(size_t ttl);
+
+AWS_S3_API
+uint32_t aws_s3_client_get_max_requests_prepare(struct aws_s3_client *client);
+
+AWS_S3_API
+uint32_t aws_s3_client_get_max_active_connections(struct aws_s3_client *client, uint32_t num_connections_per_vip);
+
+AWS_S3_API
+uint32_t aws_s3_client_get_max_requests_in_flight(struct aws_s3_client *client);
 
 AWS_S3_API
 uint32_t aws_s3_client_get_max_allocated_vip_count(struct aws_s3_client *client);
@@ -301,6 +326,27 @@ AWS_S3_API
 struct aws_s3_vip *aws_s3_find_vip(const struct aws_linked_list *vip_list, const struct aws_byte_cursor *host_address);
 
 AWS_S3_API
+void aws_s3_client_set_vip_connection_warm(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_warm);
+
+AWS_S3_API
+void aws_s3_client_set_vip_connection_active(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_active);
+
+AWS_S3_API
+void aws_s3_client_queue_request(struct aws_s3_client *client, struct aws_s3_request *request);
+
+AWS_S3_API
+struct aws_s3_request *aws_s3_client_dequeue_request(struct aws_s3_client *client);
+
+AWS_S3_API
+void aws_s3_client_queue_requests(struct aws_s3_client *client, struct aws_linked_list *request_list, bool queue_front);
+
+AWS_S3_API
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
 /* Sets up vips for each of the given host addresses as long as they are not already in use by other vip structures. */
@@ -313,6 +359,12 @@ void aws_s3_client_remove_vips(struct aws_s3_client *client, const struct aws_ar
 
 AWS_S3_API
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client);
+
+AWS_S3_API
+void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, uint32_t meta_request_update_flags);
+
+AWS_S3_API
+void aws_s3_client_update_connections_threaded(struct aws_s3_client *client, bool client_active);
 
 AWS_S3_API
 void aws_s3_client_lock_synced_data(struct aws_s3_client *client);
