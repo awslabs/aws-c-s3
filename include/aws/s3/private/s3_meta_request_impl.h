@@ -42,6 +42,8 @@ enum aws_s3_meta_request_update_flags {
 };
 
 struct aws_s3_meta_request_vtable {
+    uint32_t (*get_num_conns_per_vip)(struct aws_s3_meta_request *meta_request);
+
     /* Update the meta request.  out_request is optional and can be NULL. If not null, and a request can be returned, it
      * will be passed back into this variable. Returns true if there is there is any work in progress, false if there is
      * not. */
@@ -174,6 +176,9 @@ int aws_s3_meta_request_init_base(
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
     struct aws_s3_meta_request *base_type);
+
+AWS_S3_API
+uint32_t aws_s3_meta_request_get_num_conns_per_vip(struct aws_s3_meta_request *meta_request);
 
 /* Returns true if the meta request is still in the "active" state. */
 AWS_S3_API
