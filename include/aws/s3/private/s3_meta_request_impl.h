@@ -104,6 +104,10 @@ struct aws_s3_meta_request {
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
+    /* Client that created this meta request which also processes this request.  After the meta request is finished,
+     * this reference is removed. */
+    struct aws_s3_client *client;
+
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
 
@@ -115,10 +119,6 @@ struct aws_s3_meta_request {
 
     struct {
         struct aws_mutex lock;
-
-        /* Client that created this meta request which also processes this request.  After the meta request is finished,
-         * this reference is removed. */
-        struct aws_s3_client *client;
 
         /* Priority queue for pending streaming requests.  We use a priority queue to keep parts in order so that we
          * can stream them to the caller in order. */
@@ -202,11 +202,6 @@ void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_reque
 
 AWS_S3_API
 void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request);
-
-/* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
- * this function, it is necessary to release that reference. */
-AWS_S3_API
-struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
 
 /* Called by the client to retrieve the next request and update the meta request's internal state. out_request is
  * optional, and can be NULL if just desiring to update internal state. */
