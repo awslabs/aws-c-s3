@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/auth/signing.h>
 #include <aws/common/atomics.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/mutex.h>
@@ -41,26 +42,43 @@ enum aws_s3_meta_request_update_flags {
     AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE = 0x00000002,
 };
 
-struct aws_s3_meta_request_vtable {
-    struct aws_allocator *(*get_client_sba_allocator)(struct aws_s3_meta_request *meta_request);
+typedef void(aws_s3_meta_request_prepare_request_callback_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code,
+    void *user_data);
 
+struct aws_s3_prepare_request_payload {
+    struct aws_s3_request *request;
+    aws_s3_meta_request_prepare_request_callback_fn *callback;
+    void *user_data;
+    struct aws_task task;
+};
+
+struct aws_s3_meta_request_vtable {
     /* Update the meta request.  out_request is optional and can be NULL. If not null, and a request can be returned, it
      * will be passed back into this variable. Returns true if there is there is any work in progress, false if there is
      * not. */
     bool (*update)(struct aws_s3_meta_request *meta_request, uint32_t flags, struct aws_s3_request **out_request);
 
-    /* Given a request, prepare it for sending based on its description. Should call aws_s3_request_setup_send_data
-     * before exitting. */
-    int (*prepare_request)(
+    void (*schedule_prepare_request)(
         struct aws_s3_meta_request *meta_request,
-        struct aws_s3_client *client,
-        struct aws_s3_vip_connection *vip_connection,
-        bool is_initial_prepare);
+        struct aws_s3_request *request,
+        aws_s3_meta_request_prepare_request_callback_fn *callback,
+        void *user_data);
+
+    /* Given a request, prepare it for sending (ie: creating the correct HTTP message, reading from a stream (if
+     * necessary), signing it, computing hashes, etc.) */
+    int (*prepare_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
     void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
 
     /* Sign the request on the given VIP Connection. */
-    int (*sign_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_vip_connection *vip_connection);
+    void (*sign_request)(
+        struct aws_s3_meta_request *meta_request,
+        struct aws_s3_request *request,
+        aws_signing_complete_fn *on_signing_complete,
+        void *user_data);
 
     /* Called when any sending of the request is finished, including for each retry. */
     void (*send_request_finish)(
@@ -116,6 +134,8 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 
+    enum aws_s3_meta_request_type type;
+
     struct {
         struct aws_mutex lock;
 
@@ -166,9 +186,6 @@ struct aws_s3_meta_request {
 
 AWS_EXTERN_C_BEGIN
 
-AWS_S3_API
-struct aws_allocator *aws_s3_meta_request_get_client_sba_allocator(struct aws_s3_meta_request *meta_request);
-
 /* Initialize the base meta request structure. */
 AWS_S3_API
 int aws_s3_meta_request_init_base(
@@ -207,11 +224,16 @@ bool aws_s3_meta_request_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-/* Called by the client to process the request attached to the given vip connection. */
 AWS_S3_API
-int aws_s3_meta_request_make_request(
+void aws_s3_meta_request_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
+
+AWS_S3_API
+void aws_s3_meta_request_send_request(
+    struct aws_s3_meta_request *meta_request,
     struct aws_s3_vip_connection *vip_connection);
 
 AWS_S3_API
@@ -220,9 +242,11 @@ void aws_s3_meta_request_init_signing_date_time_default(
     struct aws_date_time *date_time);
 
 AWS_S3_API
-int aws_s3_meta_request_sign_request_default(
+void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data);
 
 /* Default implementation for when a request finishes a particular send. Will be invoked for each send of the request.
  */

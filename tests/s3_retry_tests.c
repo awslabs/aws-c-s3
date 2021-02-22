@@ -114,12 +114,11 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
     return 0;
 }
 
-static int s_s3_fail_first_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare) {
+static int s_s3_fail_first_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
 
+    AWS_ASSERT(request != NULL);
+
+    struct aws_s3_client *client = meta_request->client;
     AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
@@ -133,7 +132,7 @@ static int s_s3_fail_first_prepare_request(
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    return original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare);
+    return original_meta_request_vtable->prepare_request(meta_request, request);
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_prepare_request(
@@ -175,8 +174,7 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_prepare_request;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -186,26 +184,18 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     return 0;
 }
 
-static int s_s3_meta_request_sign_request_fail_first(
+static void s_s3_meta_request_sign_request_fail(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection) {
-    AWS_ASSERT(meta_request != NULL);
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
+    (void)meta_request;
+    (void)request;
 
-    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
-    AWS_ASSERT(results != NULL);
+    AWS_ASSERT(on_signing_complete != NULL);
 
-    struct aws_s3_tester *tester = results->tester;
-    AWS_ASSERT(tester != NULL);
-
-    if (aws_s3_tester_inc_counter1(tester) == 0) {
-        aws_raise_error(AWS_ERROR_UNKNOWN);
-        return AWS_OP_ERR;
-    }
-
-    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
-        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
-
-    return original_meta_request_vtable->sign_request(meta_request, vip_connection);
+    aws_raise_error(AWS_ERROR_UNKNOWN);
+    on_signing_complete(NULL, AWS_ERROR_UNKNOWN, user_data);
 }
 
 static struct aws_s3_meta_request *s_s3_meta_request_factory_sign_request(
@@ -223,7 +213,7 @@ static struct aws_s3_meta_request *s_s3_meta_request_factory_sign_request(
 
     struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
-    patched_meta_request_vtable->sign_request = s_s3_meta_request_sign_request_fail_first;
+    patched_meta_request_vtable->sign_request = s_s3_meta_request_sign_request_fail;
 
     return meta_request;
 }
@@ -235,19 +225,32 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config;
-    AWS_ZERO_STRUCT(client_config);
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_s3_meta_request_factory_sign_request;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
 
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
@@ -256,24 +259,19 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
 
 static int s_s3_meta_request_prepare_request_fail_first(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare) {
+    struct aws_s3_request *request) {
     AWS_ASSERT(meta_request);
-    AWS_ASSERT(client);
-    AWS_ASSERT(vip_connection);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
     AWS_ASSERT(tester != NULL);
 
-    struct aws_s3_request *request = vip_connection->request;
-    AWS_ASSERT(request);
-
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    int result =
-        original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare);
+    int result = original_meta_request_vtable->prepare_request(meta_request, request);
 
     if (result != AWS_OP_SUCCESS) {
         return result;

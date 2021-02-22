@@ -45,6 +45,10 @@ struct aws_s3_request {
      */
     uint32_t part_number;
 
+    /* Number of times aws_s3_meta_request_prepare has been called for a request. During the first call to the virtual
+     * prepare function, this will be 0.*/
+    uint32_t num_times_prepared;
+
     /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
      * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
      * be more contextual, like "first part" instead of just "part".) */
@@ -80,8 +84,8 @@ struct aws_s3_request {
     /* When true, the response body buffer will be allocated in the size of a part. */
     uint32_t part_size_response_body : 1;
 
-    /* When true, this request has been sent at least once. */
-    uint32_t request_was_sent : 1;
+    /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
+    uint32_t tracked_by_client : 1;
 };
 
 AWS_EXTERN_C_BEGIN
