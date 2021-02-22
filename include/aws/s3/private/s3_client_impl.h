@@ -213,6 +213,8 @@ struct aws_s3_client {
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t active : 1;
 
+        uint32_t waiting_for_first_callback : 1;
+
         /* Whether or not work processing is currently scheduled. */
         uint32_t process_work_task_scheduled : 1;
 

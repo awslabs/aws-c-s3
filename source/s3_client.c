@@ -273,6 +273,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+
         if (client->tls_connection_options == NULL) {
             goto on_error;
         }
@@ -425,7 +426,8 @@ static void s_s3_client_check_for_shutdown(
     /* This flag should never be set twice. If it was, that means a double-free could occur.*/
     AWS_ASSERT(!client->synced_data.finish_destroy);
 
-    finish_destroy = client->synced_data.active == false && client->synced_data.allocated_vip_count == 0 &&
+    finish_destroy = client->synced_data.active == false && client->synced_data.waiting_for_first_callback == false &&
+                     client->synced_data.allocated_vip_count == 0 &&
                      client->synced_data.host_listener_allocated == false &&
                      client->synced_data.body_streaming_elg_allocated == false &&
                      client->synced_data.process_work_task_scheduled == false &&
@@ -1986,6 +1988,14 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
     aws_s3_client_release(client);
 }
 
+static void s_s3_client_clear_waiting_for_first_callback(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+
+    client->synced_data.waiting_for_first_callback = false;
+}
+
 static void s_s3_client_on_host_resolver_address_resolved(
     struct aws_host_resolver *resolver,
     const struct aws_string *host_name,
@@ -2028,6 +2038,8 @@ static void s_s3_client_on_host_resolver_address_resolved(
                 aws_error_str(last_error_code));
         }
     }
+
+    s_s3_client_check_for_shutdown(client, s_s3_client_clear_waiting_for_first_callback);
 }
 
 int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
@@ -2273,6 +2285,7 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
 
     client->synced_data.host_listener = host_listener;
     client->synced_data.host_listener_allocated = true;
+    client->synced_data.waiting_for_first_callback = true;
 
 unlock:
     aws_s3_client_unlock_synced_data(client);
