@@ -25,8 +25,6 @@ struct aws_s3_auto_ranged_get {
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
 
-        size_t total_object_size;
-
         uint32_t get_without_range : 1;
         uint32_t get_without_range_sent : 1;
         uint32_t get_without_range_completed : 1;
