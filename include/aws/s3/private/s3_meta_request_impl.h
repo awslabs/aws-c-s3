@@ -69,13 +69,6 @@ struct aws_s3_meta_request_vtable {
     /* Called when the request is done being sent, and will not be retried/sent again. */
     void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
 
-    /* Called when response bodies have either been delivered or failed to have been delivered to the caller. */
-    void (*delivered_requests)(
-        struct aws_s3_meta_request *meta_request,
-        int error_code,
-        uint32_t num_failed,
-        uint32_t num_successful);
-
     /* Called by the derived meta request when the meta request is completely finished. */
     void (*finish)(struct aws_s3_meta_request *meta_request);
 
@@ -107,6 +100,8 @@ struct aws_s3_meta_request {
     /* Client that created this meta request which also processes this request.  After the meta request is finished,
      * this reference is removed. */
     struct aws_s3_client *client;
+
+    struct aws_event_loop *io_event_loop;
 
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
@@ -151,12 +146,6 @@ struct aws_s3_meta_request {
         uint32_t finish_result_set : 1;
 
     } synced_data;
-
-    /* Anything in this structure should only ever be accessed by the client. */
-    struct {
-        /* Event loop to be used for streaming the response bodies for this meta request.*/
-        struct aws_event_loop *body_streaming_event_loop;
-    } client_data;
 
     /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */
     struct {
@@ -250,14 +239,6 @@ AWS_S3_API
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
-
-/* Default implementation for handling what happens after request bodies have been delivered to the caller. */
-AWS_S3_API
-void aws_s3_meta_request_delivered_requests_default(
-    struct aws_s3_meta_request *meta_request,
-    int error_code,
-    uint32_t num_failed,
-    uint32_t num_successful);
 
 /* Read from the meta request's input stream. Should always be done outside of any mutex, as reading from the stream
  * could cause user code to call back into aws-c-s3.*/
