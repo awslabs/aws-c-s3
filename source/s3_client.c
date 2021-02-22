@@ -1995,6 +1995,14 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
     aws_s3_client_release(client);
 }
 
+static void s_s3_client_clear_waiting_for_first_callback(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+
+    client->synced_data.waiting_for_first_callback = false;
+}
+
 static void s_s3_client_on_host_resolver_address_resolved(
     struct aws_host_resolver *resolver,
     const struct aws_string *host_name,
