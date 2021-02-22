@@ -925,7 +925,6 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
         }
 
         aws_atomic_fetch_sub(&client->stats.num_requests_streaming, 1);
-
         aws_s3_request_release(request);
     }
 
