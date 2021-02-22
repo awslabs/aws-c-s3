@@ -22,6 +22,8 @@ const struct aws_byte_cursor g_object_size_value = AWS_BYTE_CUR_INIT_FROM_STRING
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request);
 
+static uint32_t s_s3_auto_ranged_get_get_num_conns_per_vip(struct aws_s3_meta_request *meta_request);
+
 static bool s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
@@ -39,6 +41,7 @@ static void s_s3_auto_ranged_get_request_finished(
     int error_code);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
+    .get_num_conns_per_vip = s_s3_auto_ranged_get_get_num_conns_per_vip,
     .update = s_s3_auto_ranged_get_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_auto_ranged_get_prepare_request,
@@ -125,6 +128,12 @@ static bool s_check_empty_file_download_error(struct aws_s3_request *failed_requ
         }
     }
     return false;
+}
+
+static uint32_t s_s3_auto_ranged_get_get_num_conns_per_vip(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    (void)meta_request;
+    return 10;
 }
 
 static bool s_s3_auto_ranged_get_update(
