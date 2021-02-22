@@ -39,7 +39,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     aws_http_message_acquire(message);
 }
 
-void s_s3_request_clean_up_send_data_message(struct aws_s3_request *request) {
+static void s_s3_request_clean_up_send_data_message(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
 
     struct aws_http_message *message = request->send_data.message;
@@ -98,12 +98,10 @@ static void s_s3_request_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
     if (meta_request != NULL) {
-        struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
+        struct aws_s3_client *client = meta_request->client;
 
         if (client != NULL) {
             aws_s3_client_notify_request_destroyed(client, request);
-            aws_s3_client_release(client);
-            client = NULL;
         }
     }
 

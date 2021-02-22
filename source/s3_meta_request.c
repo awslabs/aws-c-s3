@@ -81,29 +81,6 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_client *client = NULL;
-
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    client = meta_request->synced_data.client;
-
-    if (client != NULL) {
-        aws_s3_client_acquire(client);
-    } else {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request trying to get reference to client but client is null.",
-            (void *)meta_request);
-    }
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    return client;
-}
-
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -159,10 +136,10 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_request *),
         s_s3_request_priority_queue_pred);
 
-    /* Client is currently optional to allow spining up a meta_request without a client in a test. */
+    /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
     if (client != NULL) {
         aws_s3_client_acquire(client);
-        meta_request->synced_data.client = client;
+        meta_request->client = client;
     }
 
     meta_request->synced_data.next_streaming_part = 1;
@@ -293,7 +270,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
-    aws_s3_client_release(meta_request->synced_data.client);
+    aws_s3_client_release(meta_request->client);
 
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
@@ -852,7 +829,7 @@ void aws_s3_meta_request_stream_response_body_synced(
         return;
     }
 
-    struct aws_s3_client *client = meta_request->synced_data.client;
+    struct aws_s3_client *client = meta_request->client;
     AWS_ASSERT(client != NULL);
 
     /* Push it into the priority queue. */
@@ -966,7 +943,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     AWS_PRECONDITION(meta_request);
 
     bool already_finished = false;
-    struct aws_s3_client *client = NULL;
     struct aws_linked_list release_request_list;
     aws_linked_list_init(&release_request_list);
 
@@ -981,10 +957,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     }
 
     meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
-
-    /* Get rid of our client reference. Release it outside of the lock. */
-    client = meta_request->synced_data.client;
-    meta_request->synced_data.client = NULL;
 
     /* Clean out the pending-stream-to-caller priority queue*/
     while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
@@ -1012,7 +984,8 @@ unlock:
         aws_s3_request_release(release_request);
     }
 
-    aws_s3_client_release(client);
+    aws_s3_client_release(meta_request->client);
+    meta_request->client = NULL;
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
