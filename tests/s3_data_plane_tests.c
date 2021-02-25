@@ -160,7 +160,10 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     struct aws_s3_client mock_client;
     AWS_ZERO_STRUCT(mock_client);
     mock_client.vtable = &g_aws_s3_client_mock_vtable;
-    aws_ref_count_init(&mock_client.ref_count, &mock_client, (aws_simple_completion_callback *)s_s3_client_test_body_streaming_start_destroy);
+    aws_ref_count_init(
+        &mock_client.ref_count,
+        &mock_client,
+        (aws_simple_completion_callback *)s_s3_client_test_body_streaming_start_destroy);
     mock_client.sba_allocator = aws_small_block_allocator_new(allocator, false);
 
     struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new(&tester);
