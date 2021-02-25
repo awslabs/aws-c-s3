@@ -66,6 +66,9 @@ struct aws_s3_meta_request_vtable {
         struct aws_http_stream *stream,
         int error_code);
 
+    /* Called when a body streaming task is finished. If not specified, the default implementation will be used. */
+    void (*body_streaming_task_finished)(struct aws_s3_meta_request *meta_request);
+
     /* Called when the request is done being sent, and will not be retried/sent again. */
     void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
 
@@ -82,6 +85,9 @@ struct aws_s3_meta_request_vtable {
  */
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
+
+    /* Small block allocator used for small allocations. */
+    struct aws_allocator *sba_allocator;
 
     struct aws_ref_count ref_count;
 
@@ -104,6 +110,10 @@ struct aws_s3_meta_request {
     /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc..
      * After the meta request is finished, this will be reset along with the client reference.*/
     struct aws_event_loop *io_event_loop;
+
+    /* Stats structure to be updated accordingly by the meta request. Can be null. Only valid until meta request is
+     * finished.*/
+    struct aws_s3_stats *stats;
 
     /* User data to be passed to each customer specified callback.*/
     void *user_data;

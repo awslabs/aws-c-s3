@@ -98,6 +98,8 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
 
+    meta_request->sba_allocator = aws_small_block_allocator_new(allocator, true);
+
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
@@ -844,7 +846,10 @@ void aws_s3_meta_request_stream_response_body_synced(
 
     /* Grab any additional requests that could be streamed to the caller. */
     while (next_streaming_request != NULL) {
-        aws_atomic_fetch_sub(&client->stats.num_requests_stream_queued_waiting, 1);
+
+        if (stats != NULL) {
+            aws_atomic_fetch_sub(&stats->num_requests_stream_queued_waiting, 1);
+        }
 
         aws_linked_list_push_back(&streaming_requests, &next_streaming_request->node);
         ++num_streaming_requests;
@@ -860,7 +865,7 @@ void aws_s3_meta_request_stream_response_body_synced(
     meta_request->synced_data.num_parts_delivery_sent += num_streaming_requests;
 
     struct s3_stream_response_body_payload *payload =
-        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_stream_response_body_payload));
+        aws_mem_calloc(meta_request->sba_allocator, 1, sizeof(struct s3_stream_response_body_payload));
 
     aws_s3_meta_request_acquire(meta_request);
     payload->meta_request = meta_request;
@@ -924,7 +929,10 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
             }
         }
 
-        aws_atomic_fetch_sub(&client->stats.num_requests_streaming, 1);
+        if (meta_request->stats != NULL) {
+            aws_atomic_fetch_sub(&meta_request->stats->num_requests_streaming, 1);
+        }
+
         aws_s3_request_release(request);
     }
 
