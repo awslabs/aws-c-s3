@@ -67,7 +67,11 @@ AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
+<<<<<<< HEAD
 /* Called by s_s3_client_process_work_default when all shutdown criteria has been met. */
+=======
+/* Called by s_s3_client_check_for_shutdown when all shutdown criteria has been met. */
+>>>>>>> Simplifying shutdown setup
 static void s_s3_client_finish_destroy(void *user_data);
 
 /* Called when the body streaming elg shutdown has completed. */
