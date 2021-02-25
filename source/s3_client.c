@@ -1885,15 +1885,6 @@ void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct
     }
 }
 
-/* Called by aws_s3_request when it has finished being destroyed */
-static void s_s3_client_clear_waiting_for_first_host_resolve_callback(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
-
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
-
-    client->synced_data.waiting_for_first_host_resolve_callback = false;
-}
-
 static void s_s3_client_on_host_resolver_address_resolved(
     struct aws_host_resolver *resolver,
     const struct aws_string *host_name,
