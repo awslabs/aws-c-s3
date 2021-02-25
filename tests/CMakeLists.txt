@@ -7,6 +7,7 @@ file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
 add_net_test_case(test_s3_client_create_destroy)
 add_test_case(test_s3_request_create_destroy)
+add_test_case(test_s3_meta_request_body_streaming)
 
 add_net_test_case(test_s3_client_exceed_retries)
 add_net_test_case(test_s3_client_acquire_connection_fail)
