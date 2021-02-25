@@ -506,10 +506,16 @@ struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_test
     return message;
 }
 
-static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_request) {
+static void s_s3_mock_meta_request_destroy(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_mem_release(meta_request->allocator, meta_request->impl);
+}
+
+static void s_s3_mock_meta_request_body_streaming_task_finished(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    (void)meta_request;
 }
 
 static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
@@ -519,7 +525,8 @@ static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
     .finished_request = aws_s3_meta_request_finished_request_empty,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
-    .destroy = s_s3_empty_meta_request_destroy,
+    .body_streaming_task_finished = s_s3_mock_meta_request_body_streaming_task_finished,
+    .destroy = s_s3_mock_meta_request_destroy,
 };
 
 struct aws_s3_empty_meta_request {
