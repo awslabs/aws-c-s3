@@ -939,13 +939,15 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
     meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
+    aws_mem_release(client->sba_allocator, payload);
+    payload = NULL;
+
     if (meta_request->vtable->body_streaming_task_finished) {
         meta_request->vtable->body_streaming_task_finished(meta_request);
     } else {
         s_s3_meta_request_body_streaming_task_finished_default(meta_request);
     }
 
-    aws_mem_release(client->sba_allocator, payload);
     aws_s3_meta_request_release(meta_request);
 }
 
