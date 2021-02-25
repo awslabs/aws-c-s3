@@ -554,12 +554,6 @@ static void s_s3_mock_meta_request_destroy(struct aws_s3_meta_request *meta_requ
     aws_mem_release(meta_request->allocator, meta_request->impl);
 }
 
-static void s_s3_mock_meta_request_body_streaming_task_finished(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    (void)meta_request;
-}
-
 static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
     .update = aws_s3_meta_request_update_empty,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,

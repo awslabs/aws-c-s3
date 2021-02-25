@@ -237,7 +237,6 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     aws_s3_client_release(mock_client);
     aws_event_loop_group_release(event_loop_group);
     aws_byte_buf_clean_up(&response_body_source_buffer);
-    aws_small_block_allocator_destroy(mock_client.sba_allocator);
     aws_s3_tester_clean_up(&tester);
 
     return 0;
