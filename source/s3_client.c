@@ -1250,6 +1250,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         (void *)client);
     s_s3_client_assign_requests_to_connections_threaded(client, client_active, 0);
 
+    /*******************/
+    /* Step 4: Log client stats. */
+    /*******************/
     {
         uint32_t num_idle_connections = 0;
 
@@ -1283,7 +1286,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             client->threaded_data.num_active_vip_connections);
     }
 
-    /* Check for client shutdown.*/
+    /*******************/
+    /* Step 5: Check for client shutdown. */
+    /*******************/
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.process_work_task_in_progress = false;
