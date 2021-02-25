@@ -373,6 +373,8 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_s3_client_lock_synced_data(client);
 
     client->synced_data.active = false;
+
+    /* Prevent the client from cleaning up inbetween the mutex unlock/re-lock below.*/
     client->synced_data.start_destroy = true;
 
     /* Grab the host listener from the synced_data so that we can remove it outside of the lock. */
@@ -402,6 +404,9 @@ static void s_s3_client_start_destroy(void *user_data) {
 
     aws_s3_client_lock_synced_data(client);
     client->synced_data.start_destroy = false;
+
+    /* Schedule the work task to clean up outstanding connections and also to trigger the s_s3_client_check_for_shutdown
+     * function when the task is finished. The latter will call the s_s3_client_finish_destroy function if possible.  */
     s_s3_client_schedule_process_work_synced(client);
     aws_s3_client_unlock_synced_data(client);
 }
