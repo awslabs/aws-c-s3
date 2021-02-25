@@ -99,6 +99,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
 
 struct s3_test_body_streaming_user_data {
     struct aws_s3_tester *tester;
+    struct aws_allocator *sba_allocator;
     uint64_t expected_range_start;
     uint64_t received_body_size;
 };
@@ -162,6 +163,7 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     aws_s3_client_acquire(mock_client);
     meta_request->client = mock_client;
     meta_request->user_data = &body_streaming_user_data;
+    meta_request->vtable->get_client_sba_allocator = s_s3_test_body_streaming_get_client_sba_allocator;
     *((size_t *)&meta_request->part_size) = request_response_body_size;
     meta_request->body_callback = s_s3_meta_request_test_body_streaming_callback;
     meta_request->io_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
