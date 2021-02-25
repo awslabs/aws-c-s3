@@ -294,17 +294,6 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     return (*request_a)->part_number > (*request_b)->part_number;
 }
 
-uint32_t aws_s3_meta_request_get_num_conns_per_vip(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
-
-    if (meta_request->vtable->get_num_conns_per_vip) {
-        return meta_request->vtable->get_num_conns_per_vip(meta_request);
-    }
-
-    return 0;
-}
-
 bool aws_s3_meta_request_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
