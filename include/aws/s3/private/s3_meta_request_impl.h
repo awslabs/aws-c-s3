@@ -42,6 +42,8 @@ enum aws_s3_meta_request_update_flags {
 };
 
 struct aws_s3_meta_request_vtable {
+    struct aws_allocator *(*get_client_sba_allocator)(struct aws_s3_meta_request *meta_request);
+
     /* Update the meta request.  out_request is optional and can be NULL. If not null, and a request can be returned, it
      * will be passed back into this variable. Returns true if there is there is any work in progress, false if there is
      * not. */
@@ -163,6 +165,9 @@ struct aws_s3_meta_request {
 };
 
 AWS_EXTERN_C_BEGIN
+
+AWS_S3_API
+struct aws_allocator *aws_s3_meta_request_get_client_sba_allocator(struct aws_s3_meta_request *meta_request);
 
 /* Initialize the base meta request structure. */
 AWS_S3_API

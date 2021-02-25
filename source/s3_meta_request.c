@@ -69,6 +69,26 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
+static struct aws_allocator *s_s3_meta_request_get_client_sba_allocator_default(
+    struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->client);
+    AWS_PRECONDITION(meta_request->client->sba_allocator);
+
+    return meta_request->client->sba_allocator;
+}
+
+struct aws_allocator *aws_s3_meta_request_get_client_sba_allocator(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable);
+
+    if (meta_request->vtable->get_client_sba_allocator) {
+        return meta_request->vtable->get_client_sba_allocator(meta_request);
+    }
+
+    return s_s3_meta_request_get_client_sba_allocator_default(meta_request);
+}
+
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
