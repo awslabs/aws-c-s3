@@ -831,10 +831,6 @@ void aws_s3_meta_request_stream_response_body_synced(
     struct aws_linked_list streaming_requests;
     aws_linked_list_init(&streaming_requests);
 
-    if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
-        return;
-    }
-
     /* Push it into the priority queue. */
     s_s3_meta_request_body_streaming_push_synced(meta_request, request);
 
