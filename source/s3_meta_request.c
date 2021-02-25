@@ -818,8 +818,6 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
 
 static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-static void s_s3_meta_request_body_streaming_task_finished_default(struct aws_s3_meta_request *meta_request);
-
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
@@ -942,22 +940,8 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
     aws_mem_release(client->sba_allocator, payload);
     payload = NULL;
 
-    if (meta_request->vtable->body_streaming_task_finished) {
-        meta_request->vtable->body_streaming_task_finished(meta_request);
-    } else {
-        s_s3_meta_request_body_streaming_task_finished_default(meta_request);
-    }
-
-    aws_s3_meta_request_release(meta_request);
-}
-
-static void s_s3_meta_request_body_streaming_task_finished_default(struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_client *client = meta_request->client;
-    AWS_PRECONDITION(client);
-
     aws_s3_client_schedule_process_work(client);
+    aws_s3_meta_request_release(meta_request);
 }
 
 static void s_s3_meta_request_body_streaming_push_synced(

@@ -66,9 +66,6 @@ struct aws_s3_meta_request_vtable {
         struct aws_http_stream *stream,
         int error_code);
 
-    /* Called when a body streaming task is finished. If not specified, the default implementation will be used. */
-    void (*body_streaming_task_finished)(struct aws_s3_meta_request *meta_request);
-
     /* Called when the request is done being sent, and will not be retried/sent again. */
     void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
 

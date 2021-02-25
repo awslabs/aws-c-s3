@@ -233,6 +233,8 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester);
 
+struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_allocator *allocator);
+
 /* Create a new meta request for testing meta request functionality in isolation. test_results and client are optional.
  * If client is not specified, a new mock client will be created for the meta request. */
 struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester);
@@ -325,11 +327,6 @@ int aws_s3_tester_validate_put_object_results(
 
 /*****************************************/
 /* Used for mocking functions in vtables */
-void aws_s3_client_acquire_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback);
-
 bool aws_s3_meta_request_update_empty(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,

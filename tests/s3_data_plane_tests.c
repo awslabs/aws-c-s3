@@ -103,10 +103,6 @@ struct s3_test_body_streaming_user_data {
     uint64_t received_body_size;
 };
 
-static void s_s3_client_test_body_streaming_start_destroy(void *user_data) {
-    (void)user_data;
-}
-
 static int s_s3_meta_request_test_body_streaming_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -157,20 +153,14 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
         .tester = &tester,
     };
 
-    struct aws_s3_client mock_client;
-    AWS_ZERO_STRUCT(mock_client);
-    mock_client.vtable = &g_aws_s3_client_mock_vtable;
-    aws_ref_count_init(
-        &mock_client.ref_count,
-        &mock_client,
-        (aws_simple_completion_callback *)s_s3_client_test_body_streaming_start_destroy);
-    mock_client.sba_allocator = aws_small_block_allocator_new(allocator, false);
+    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(allocator);
 
     struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     ASSERT_TRUE(meta_request != NULL);
 
     struct aws_event_loop_group *event_loop_group = aws_event_loop_group_new_default(allocator, 0, NULL);
-    meta_request->client = &mock_client;
+    aws_s3_client_acquire(mock_client);
+    meta_request->client = mock_client;
     meta_request->user_data = &body_streaming_user_data;
     *((size_t *)&meta_request->part_size) = request_response_body_size;
     meta_request->body_callback = s_s3_meta_request_test_body_streaming_callback;
@@ -244,9 +234,9 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     ASSERT_TRUE(body_streaming_user_data.received_body_size == (request_response_body_size * part_range1_end));
 
     aws_s3_meta_request_release(meta_request);
+    aws_s3_client_release(mock_client);
     aws_event_loop_group_release(event_loop_group);
     aws_byte_buf_clean_up(&response_body_source_buffer);
-    aws_small_block_allocator_destroy(mock_client.sba_allocator);
     aws_s3_tester_clean_up(&tester);
 
     return 0;
