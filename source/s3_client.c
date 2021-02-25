@@ -375,7 +375,7 @@ static void s_s3_client_start_destroy(void *user_data) {
     client->synced_data.active = false;
 
     /* Prevent the client from cleaning up inbetween the mutex unlock/re-lock below.*/
-    client->synced_data.start_destroy = true;
+    client->synced_data.start_destroy_executing = true;
 
     /* Grab the host listener from the synced_data so that we can remove it outside of the lock. */
     host_listener = client->synced_data.host_listener;
@@ -403,7 +403,7 @@ static void s_s3_client_start_destroy(void *user_data) {
     client->body_streaming_elg = NULL;
 
     aws_s3_client_lock_synced_data(client);
-    client->synced_data.start_destroy = false;
+    client->synced_data.start_destroy_executing = false;
 
     /* Schedule the work task to clean up outstanding connections and also to trigger the s_s3_client_check_for_shutdown
      * function when the task is finished. The latter will call the s_s3_client_finish_destroy function if possible.  */
@@ -427,24 +427,25 @@ static void s_s3_client_check_for_shutdown(
     /* This flag should never be set twice. If it was, that means a double-free could occur.*/
     AWS_ASSERT(!client->synced_data.finish_destroy);
 
-    finish_destroy = client->synced_data.active == false &&
-                     client->synced_data.waiting_for_first_host_resolve_callback == false &&
-                     client->synced_data.start_destroy == false && client->synced_data.allocated_vip_count == 0 &&
-                     client->synced_data.host_listener_allocated == false &&
-                     client->synced_data.body_streaming_elg_allocated == false &&
-                     client->synced_data.process_work_task_scheduled == false &&
-                     client->synced_data.process_work_task_in_progress == false;
+    finish_destroy =
+        client->synced_data.active == false && client->synced_data.waiting_for_first_host_resolve_callback == false &&
+        client->synced_data.start_destroy_executing == false && client->synced_data.allocated_vip_count == 0 &&
+        client->synced_data.host_listener_allocated == false &&
+        client->synced_data.body_streaming_elg_allocated == false &&
+        client->synced_data.process_work_task_scheduled == false &&
+        client->synced_data.process_work_task_in_progress == false;
 
     client->synced_data.finish_destroy = finish_destroy;
 
     if (!client->synced_data.active) {
         AWS_LOGF_DEBUG(
             AWS_LS_S3_CLIENT,
-            "id=%p Client shutdown progress: waiting_for_first_host_resolve_callback=%d  allocated_vip_count=%d  "
-            "host_listener_allocated=%d  body_streaming_elg_allocated=%d  process_work_task_scheduled=%d  "
-            "process_work_task_in_progress=%d  finish_destroy=%d",
+            "id=%p Client shutdown progress: waiting_for_first_host_resolve_callback=%d  starting_destroy_executing=%d "
+            " allocated_vip_count=%d  host_listener_allocated=%d  body_streaming_elg_allocated=%d  "
+            "process_work_task_scheduled=%d  process_work_task_in_progress=%d  finish_destroy=%d",
             (void *)client,
             (int)client->synced_data.waiting_for_first_host_resolve_callback,
+            (int)client->synced_data.start_destroy_executing,
             (int)client->synced_data.allocated_vip_count,
             (int)client->synced_data.host_listener_allocated,
             (int)client->synced_data.body_streaming_elg_allocated,
@@ -2007,7 +2008,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
 }
 
 /* Called by aws_s3_request when it has finished being destroyed */
-static void s_s3_client_clear_waiting_for_first_host_resolve_callback(struct aws_s3_client *client) {
+static void s_s3_client_clear_waiting_for_first_host_resolve_callback_synced(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
@@ -2058,7 +2059,7 @@ static void s_s3_client_on_host_resolver_address_resolved(
         }
     }
 
-    s_s3_client_check_for_shutdown(client, s_s3_client_clear_waiting_for_first_host_resolve_callback);
+    s_s3_client_check_for_shutdown(client, s_s3_client_clear_waiting_for_first_host_resolve_callback_synced);
 }
 
 int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {

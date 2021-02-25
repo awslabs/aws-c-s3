@@ -214,7 +214,7 @@ struct aws_s3_client {
         uint32_t active : 1;
 
         /* True if the start_destroy function is still executing, which blocks shutdown from completing. */
-        uint32_t start_destroy : 1;
+        uint32_t start_destroy_executing : 1;
 
         /* True if the client has called aws_host_resolver_resolve_host but hasn't received a callback yet. There isn't
          * a way to cancel this first callback, so this will block shutdown from completing. */
