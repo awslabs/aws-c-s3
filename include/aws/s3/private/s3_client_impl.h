@@ -116,20 +116,6 @@ struct aws_s3_client_vtable {
     void (*process_work)(struct aws_s3_client *client);
 };
 
-struct aws_s3_stats {
-    /* Number of requests being sent/received over network. */
-    struct aws_atomic_var num_requests_network_io;
-
-    /* Number of requests sitting in their meta request priority queue, waiting to be streamed. */
-    struct aws_atomic_var num_requests_stream_queued_waiting;
-
-    /* Number of requests currently scheduled to be streamed or are actively being streamed. */
-    struct aws_atomic_var num_requests_streaming;
-
-    /* Number of allocated VIP connnections. */
-    struct aws_atomic_var num_allocated_vip_connections;
-};
-
 /* Represents the state of the S3 client. */
 struct aws_s3_client {
     struct aws_allocator *allocator;
@@ -180,7 +166,20 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    struct aws_s3_stats stats;
+    struct {
+
+        /* Number of requests being sent/received over network. */
+        struct aws_atomic_var num_requests_network_io;
+
+        /* Number of requests sitting in their meta request priority queue, waiting to be streamed. */
+        struct aws_atomic_var num_requests_stream_queued_waiting;
+
+        /* Number of requests currently scheduled to be streamed or are actively being streamed. */
+        struct aws_atomic_var num_requests_streaming;
+
+        /* Number of allocated VIP connnections. */
+        struct aws_atomic_var num_allocated_vip_connections;
+    } stats;
 
     struct {
         struct aws_mutex lock;
