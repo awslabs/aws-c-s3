@@ -910,8 +910,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
-
     aws_s3_client_lock_synced_data(client);
     s_s3_client_push_meta_request_synced(client, meta_request);
     s_s3_client_schedule_process_work_synced(client);

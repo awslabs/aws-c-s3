@@ -66,6 +66,9 @@ struct aws_s3_meta_request_vtable {
         struct aws_http_stream *stream,
         int error_code);
 
+    /* Called when a body streaming task is finished. If not specified, the default implementation will be used. */
+    void (*body_streaming_task_finished)(struct aws_s3_meta_request *meta_request);
+
     /* Called when the request is done being sent, and will not be retried/sent again. */
     void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
 
@@ -83,6 +86,9 @@ struct aws_s3_meta_request_vtable {
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
 
+    /* Small block allocator used for small allocations. */
+    struct aws_allocator *sba_allocator;
+
     struct aws_ref_count ref_count;
 
     void *impl;
@@ -97,11 +103,17 @@ struct aws_s3_meta_request {
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
-    /* Client that created this meta request which also processes this request.  After the meta request is finished,
-     * this reference is removed. */
+    /* Client that created this meta request which also processes this request. After the meta request is finished, this
+     * reference is removed.*/
     struct aws_s3_client *client;
 
+    /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc..
+     * After the meta request is finished, this will be reset along with the client reference.*/
     struct aws_event_loop *io_event_loop;
+
+    /* Stats structure to be updated accordingly by the meta request. Can be null. Only valid until meta request is
+     * finished.*/
+    struct aws_s3_stats *stats;
 
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
@@ -273,19 +285,6 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request);
 /* Default implementation of the meta request finish functino. */
 AWS_S3_API
 void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request);
-
-/* Pushes a request into the body streaming priority queue. Derived meta request types should not call this--they should
- * instead call aws_s3_meta_request_stream_response_body_synced.*/
-AWS_S3_API
-void aws_s3_meta_request_body_streaming_push_synced(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request);
-
-/* Pops the next available request from the body streaming priority queue. If the parts previous the next request in the
- * priority queue have not been placed in the priority queue yet, the priority queue will remain the same, and NULL will
- * be returned. (Should not be needed to be called by derived types.) */
-AWS_S3_API
-struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_s3_meta_request *meta_request);
 
 /* Sets up a meta request result structure. */
 AWS_S3_API

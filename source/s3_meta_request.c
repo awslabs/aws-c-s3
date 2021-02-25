@@ -98,6 +98,8 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
 
+    meta_request->sba_allocator = aws_small_block_allocator_new(allocator, true);
+
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
@@ -128,6 +130,8 @@ int aws_s3_meta_request_init_base(
     if (client != NULL) {
         aws_s3_client_acquire(client);
         meta_request->client = client;
+        meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        meta_request->stats = &client->stats;
     }
 
     meta_request->synced_data.next_streaming_part = 1;
@@ -264,11 +268,24 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
+    struct aws_allocator *sba_allocator = meta_request->sba_allocator;
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", (void *)meta_request);
+
     meta_request->vtable->destroy(meta_request);
+    meta_request = NULL;
+
+    aws_small_block_allocator_destroy(sba_allocator);
+    sba_allocator = NULL;
+
+    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Calling meta request shutdown callback.", (void *)meta_request);
 
     if (shutdown_callback != NULL) {
         shutdown_callback(meta_request_user_data);
     }
+
+    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Meta request clean up finished.", (void *)meta_request);
 }
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
@@ -795,7 +812,21 @@ struct s3_stream_response_body_payload {
     struct aws_task task;
 };
 
-static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+/* Pushes a request into the body streaming priority queue. Derived meta request types should not call this--they should
+ * instead call aws_s3_meta_request_stream_response_body_synced.*/
+static void s_s3_meta_request_body_streaming_push_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request);
+
+/* Pops the next available request from the body streaming priority queue. If the parts previous the next request in the
+ * priority queue have not been placed in the priority queue yet, the priority queue will remain the same, and NULL will
+ * be returned. (Should not be needed to be called by derived types.) */
+static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
+    struct aws_s3_meta_request *meta_request);
+
+static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
+static void s_s3_meta_request_body_streaming_task_finished_default(struct aws_s3_meta_request *meta_request);
 
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
@@ -812,36 +843,43 @@ void aws_s3_meta_request_stream_response_body_synced(
         return;
     }
 
-    struct aws_s3_client *client = meta_request->client;
-    AWS_ASSERT(client != NULL);
-
     /* Push it into the priority queue. */
-    aws_s3_meta_request_body_streaming_push_synced(meta_request, request);
+    s_s3_meta_request_body_streaming_push_synced(meta_request, request);
 
-    aws_atomic_fetch_add(&client->stats.num_requests_stream_queued_waiting, 1);
+    struct aws_s3_stats *stats = meta_request->stats;
+
+    if (stats != NULL) {
+        aws_atomic_fetch_add(&stats->num_requests_stream_queued_waiting, 1);
+    }
 
     /* Grab the next request that can be streamed back to the caller. */
-    struct aws_s3_request *next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
+    struct aws_s3_request *next_streaming_request = s_s3_meta_request_body_streaming_pop_next_synced(meta_request);
     uint32_t num_streaming_requests = 0;
 
     /* Grab any additional requests that could be streamed to the caller. */
     while (next_streaming_request != NULL) {
-        aws_atomic_fetch_sub(&client->stats.num_requests_stream_queued_waiting, 1);
+
+        if (stats != NULL) {
+            aws_atomic_fetch_sub(&stats->num_requests_stream_queued_waiting, 1);
+        }
 
         aws_linked_list_push_back(&streaming_requests, &next_streaming_request->node);
         ++num_streaming_requests;
-        next_streaming_request = aws_s3_meta_request_body_streaming_pop_synced(meta_request);
+        next_streaming_request = s_s3_meta_request_body_streaming_pop_next_synced(meta_request);
     }
 
     if (aws_linked_list_empty(&streaming_requests)) {
         return;
     }
 
-    aws_atomic_fetch_add(&client->stats.num_requests_streaming, num_streaming_requests);
+    if (stats != NULL) {
+        aws_atomic_fetch_add(&stats->num_requests_streaming, num_streaming_requests);
+    }
+
     meta_request->synced_data.num_parts_delivery_sent += num_streaming_requests;
 
     struct s3_stream_response_body_payload *payload =
-        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_stream_response_body_payload));
+        aws_mem_calloc(meta_request->sba_allocator, 1, sizeof(struct s3_stream_response_body_payload));
 
     aws_s3_meta_request_acquire(meta_request);
     payload->meta_request = meta_request;
@@ -849,11 +887,12 @@ void aws_s3_meta_request_stream_response_body_synced(
     aws_linked_list_init(&payload->requests);
     aws_linked_list_swap_contents(&payload->requests, &streaming_requests);
 
-    aws_task_init(&payload->task, s_s3_client_body_streaming_task, payload, "s3_client_body_streaming_task");
+    aws_task_init(
+        &payload->task, s_s3_meta_request_body_streaming_task, payload, "s_s3_meta_request_body_streaming_task");
     aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
 }
 
-static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     (void)task_status;
 
@@ -862,9 +901,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
 
     struct aws_s3_meta_request *meta_request = payload->meta_request;
     AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_client *client = meta_request->client;
-    AWS_ASSERT(client != NULL);
+    AWS_PRECONDITION(meta_request->vtable);
 
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
@@ -903,7 +940,10 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
             }
         }
 
-        aws_atomic_fetch_sub(&client->stats.num_requests_streaming, 1);
+        if (meta_request->stats != NULL) {
+            aws_atomic_fetch_sub(&meta_request->stats->num_requests_streaming, 1);
+        }
+
         aws_s3_request_release(request);
     }
 
@@ -917,13 +957,26 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
     meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    aws_s3_client_schedule_process_work(client);
+    if (meta_request->vtable->body_streaming_task_finished) {
+        meta_request->vtable->body_streaming_task_finished(meta_request);
+    } else {
+        s_s3_meta_request_body_streaming_task_finished_default(meta_request);
+    }
 
-    aws_s3_meta_request_release(payload->meta_request);
-    aws_mem_release(client->sba_allocator, payload);
+    aws_mem_release(meta_request->sba_allocator, payload);
+    aws_s3_meta_request_release(meta_request);
 }
 
-void aws_s3_meta_request_body_streaming_push_synced(
+static void s_s3_meta_request_body_streaming_task_finished_default(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
+
+    aws_s3_client_schedule_process_work(client);
+}
+
+static void s_s3_meta_request_body_streaming_push_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
@@ -937,7 +990,8 @@ void aws_s3_meta_request_body_streaming_push_synced(
     aws_priority_queue_push(&meta_request->synced_data.pending_body_streaming_requests, &request);
 }
 
-struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_s3_meta_request *meta_request) {
+static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
+    struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
@@ -1016,9 +1070,6 @@ unlock:
         aws_s3_request_release(release_request);
     }
 
-    aws_s3_client_release(meta_request->client);
-    meta_request->client = NULL;
-
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Meta request finished with error code %d (%s)",
@@ -1026,16 +1077,16 @@ unlock:
         finish_result.error_code,
         aws_error_str(finish_result.error_code));
 
-    /* Grab a reference to the meta request before the finish callback to guarantee the meta request is around for
-     * the clean up call after.*/
-    aws_s3_meta_request_acquire(meta_request);
-
     if (meta_request->finish_callback != NULL) {
         meta_request->finish_callback(meta_request, &finish_result, meta_request->user_data);
     }
 
     aws_s3_meta_request_result_clean_up(meta_request, &finish_result);
-    aws_s3_meta_request_release(meta_request);
+
+    aws_s3_client_release(meta_request->client);
+    meta_request->client = NULL;
+    meta_request->io_event_loop = NULL;
+    meta_request->stats = NULL;
 }
 
 int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer) {
