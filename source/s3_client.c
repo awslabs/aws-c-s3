@@ -1996,7 +1996,7 @@ static void s_s3_client_body_streaming_task(struct aws_task *task, void *arg, en
 }
 
 /* Called by aws_s3_request when it has finished being destroyed */
-static void s_s3_client_clear_waiting_for_first_host_resolve_callback(struct aws_s3_client *client) {
+static void s_s3_client_clear_waiting_for_first_host_resolve_callback_synced(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
