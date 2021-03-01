@@ -1199,6 +1199,10 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /*******************/
     /* Step 1: Move everything into thread local memory. */
     /*******************/
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT,
+        "id=%p s_s3_client_process_work_default - Moving relevant synced_data into threaded_data.",
+        (void *)client);
     aws_s3_client_lock_synced_data(client);
 
     client_active = client->synced_data.active != 0;
@@ -1221,6 +1225,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /*******************/
     /* Step 2: Process any meta request work. */
     /*******************/
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT, "id=%p s_s3_client_process_work_default - Processing any new meta requests.", (void *)client);
+
     while (!aws_linked_list_empty(&meta_request_work_list)) {
         struct aws_linked_list_node *node = aws_linked_list_pop_back(&meta_request_work_list);
         struct aws_s3_meta_request_work *meta_request_work =
@@ -1247,6 +1254,11 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* If we have an invalid endpoint, then finish up all of the meta requests. */
     /* TODO once we have multiple bucket support, this will should only stop meta requests attached to bad endpoints. */
     if (invalid_endpoint) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p s_s3_client_process_work_default - Updating meta requests with 'no-endpoint-connections' flag.",
+            (void *)client);
+
         while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
             struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
             struct aws_s3_meta_request *meta_request =
@@ -1272,11 +1284,19 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* We first assign requests to connections with the "conservative" flag. This will tell each meta request that
      * connections can still potentially be shared between meta requests.  (ie: an individual meta request shouldn't
      * necessarily try to issue as many requests as it can, unless it's known that that won't impact performance.) */
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT,
+        "id=%p s_s3_client_process_work_default - Updating meta requests and connections with 'conservative' flag.",
+        (void *)client);
     s_s3_client_assign_requests_to_connections_threaded(
         client, client_active, AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE);
 
     /* If we still have connections left over, then don't pass any flags, indicating to meta requests that any logic for
      * better sharing connections between meta requests can now be ignored. */
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT,
+        "id=%p s_s3_client_process_work_default - Updating meta requests and connections without 'conservative' flag.",
+        (void *)client);
     s_s3_client_assign_requests_to_connections_threaded(client, client_active, 0);
 
     {
@@ -1300,8 +1320,8 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
-            "CLIENT-STATS-LOGGING Requests-in-flight(approx/exact):%d/%d  Requests-network:%d  Requests-waiting:%d  "
-            "Requests-streaming:%d  Idle-connections:%d  Allocated-connections:%d  Active-connections:%d",
+            "Requests-in-flight(approx/exact):%d/%d  Requests-network:%d  Requests-waiting:%d  Requests-streaming:%d  "
+            "Idle-connections:%d  Allocated-connections:%d  Active-connections:%d",
             total_approx_requests,
             client->threaded_data.num_requests_in_flight,
             num_requests_network_io,
