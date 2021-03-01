@@ -36,6 +36,10 @@ static struct aws_error_info_list s_error_list = {
 static struct aws_log_subject_info s_s3_log_subject_infos[] = {
     DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_GENERAL, "S3General", "Subject for aws-c-s3 logging that defies categorization."),
     DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_CLIENT, "S3Client", "Subject for aws-c-s3 logging from an aws_s3_client."),
+    DEFINE_LOG_SUBJECT_INFO(
+        AWS_LS_S3_CLIENT_STATS,
+        "S3ClientStats",
+        "Subject for aws-c-s3 logging for stats tracked by an aws_s3_client."),
     DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_REQUEST, "S3Request", "Subject for aws-c-s3 logging from an aws_s3_request."),
     DEFINE_LOG_SUBJECT_INFO(
         AWS_LS_S3_META_REQUEST,

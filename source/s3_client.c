@@ -38,7 +38,6 @@ struct aws_s3_meta_request_work {
     struct aws_s3_meta_request *meta_request;
 };
 
-static const bool s_log_client_stats = false;
 static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 
 static const uint32_t s_s3_max_request_count_per_connection = 100;
@@ -1280,7 +1279,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
      * better sharing connections between meta requests can now be ignored. */
     s_s3_client_assign_requests_to_connections_threaded(client, client_active, 0);
 
-    if (s_log_client_stats) {
+    {
         uint32_t num_idle_connections = 0;
 
         for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.idle_vip_connections);
@@ -1300,7 +1299,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
         AWS_LOGF(
             s_log_level_client_stats,
-            AWS_LS_S3_CLIENT,
+            AWS_LS_S3_CLIENT_STATS,
             "CLIENT-STATS-LOGGING Requests-in-flight(approx/exact):%d/%d  Requests-network:%d  Requests-waiting:%d  "
             "Requests-streaming:%d  Idle-connections:%d  Allocated-connections:%d  Active-connections:%d",
             total_approx_requests,
