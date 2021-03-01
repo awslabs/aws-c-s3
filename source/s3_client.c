@@ -793,7 +793,7 @@ void aws_s3_client_set_vip_connection_warm(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
 
-    if (vip_connection->is_warm == is_warm) {
+    if ((bool)vip_connection->is_warm == is_warm) {
         return;
     }
 
@@ -813,7 +813,7 @@ void aws_s3_client_set_vip_connection_active(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
 
-    if (vip_connection->is_active == is_active) {
+    if ((bool)vip_connection->is_active == is_active) {
         return;
     }
 
@@ -1513,8 +1513,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, u
     const uint32_t max_requests_in_flight = aws_s3_client_get_max_requests_in_flight(client);
     const uint32_t max_requests_prepare = aws_s3_client_get_max_requests_prepare(client);
 
-    uint32_t num_requests_being_prepared = aws_atomic_load_int(&client->stats.num_requests_being_prepared);
-    uint32_t num_requests_in_flight = aws_atomic_load_int(&client->stats.num_requests_in_flight);
+    uint32_t num_requests_being_prepared = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_being_prepared);
+    uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     struct aws_linked_list meta_requests_work_remaining;
     aws_linked_list_init(&meta_requests_work_remaining);
