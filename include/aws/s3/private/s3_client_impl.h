@@ -111,6 +111,10 @@ struct aws_s3_client_vtable {
 
     void (*remove_vips)(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
 
+    bool (*http_connection_is_open)(const struct aws_http_connection *http_connection);
+
+    void (*vip_connection_destroy)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+
     void (*schedule_process_work_synced)(struct aws_s3_client *client);
 
     void (*process_work)(struct aws_s3_client *client);

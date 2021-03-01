@@ -136,11 +136,17 @@ static void s_s3_client_acquire_http_connection_default(
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
 
+static void s_s3_vip_connection_destroy_default(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection);
+
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory_default,
     .acquire_http_connection = s_s3_client_acquire_http_connection_default,
     .add_vips = s_s3_client_add_vips_default,
     .remove_vips = s_s3_client_remove_vips_default,
+    .http_connection_is_open = aws_http_connection_is_open,
+    .vip_connection_destroy = s_s3_vip_connection_destroy_default,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
 };
@@ -759,12 +765,17 @@ static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
 
 /* Destroy a VIP Connection structure. */
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->vip_connection_destroy);
 
-    if (client == NULL) {
-        AWS_ASSERT(vip_connection == NULL);
-        return;
-    }
+    client->vtable->vip_connection_destroy(client, vip_connection);
+}
 
+/* Destroy a VIP Connection structure. */
+static void s_s3_vip_connection_destroy_default(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection) {
     if (vip_connection == NULL) {
         return;
     }
