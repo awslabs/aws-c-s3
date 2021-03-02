@@ -67,7 +67,7 @@ AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
-/* Called by s_s3_client_check_for_shutdown when all shutdown criteria has been met. */
+/* Called by s_s3_client_process_work_default when all shutdown criteria has been met. */
 static void s_s3_client_finish_destroy(void *user_data);
 
 /* Called when the body streaming elg shutdown has completed. */
@@ -398,8 +398,8 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_s3_client_lock_synced_data(client);
     client->synced_data.start_destroy_executing = false;
 
-    /* Schedule the work task to clean up outstanding connections and also to trigger the s_s3_client_check_for_shutdown
-     * function when the task is finished. The latter will call the s_s3_client_finish_destroy function if possible.  */
+    /* Schedule the work task to clean up outstanding connections and also to call s_s3_client_finish_destroy function
+     * if everything cleaning up asynchronously has finished.  */
     s_s3_client_schedule_process_work_synced(client);
     aws_s3_client_unlock_synced_data(client);
 }
