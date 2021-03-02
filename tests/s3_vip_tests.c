@@ -74,6 +74,7 @@ static int s_test_s3_client_set_vip_connection_warm(struct aws_allocator *alloca
 
 AWS_TEST_CASE(test_s3_client_set_vip_connection_active, s_test_s3_client_set_vip_connection_active)
 static int s_test_s3_client_set_vip_connection_active(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
