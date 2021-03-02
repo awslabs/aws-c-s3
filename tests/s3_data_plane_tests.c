@@ -299,6 +299,8 @@ static int s_test_s3_client_queue_request(struct aws_allocator *allocator, void 
 
 AWS_TEST_CASE(test_s3_client_queue_requests, s_test_s3_client_queue_requests)
 static int s_test_s3_client_queue_requests(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
 
