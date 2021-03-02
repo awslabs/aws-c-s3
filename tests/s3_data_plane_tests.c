@@ -245,6 +245,8 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
 
 AWS_TEST_CASE(test_s3_client_queue_request, s_test_s3_client_queue_request)
 static int s_test_s3_client_queue_request(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
 
