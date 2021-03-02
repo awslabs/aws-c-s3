@@ -1371,6 +1371,7 @@ static void s_s3_client_assign_requests_to_connections_threaded(
                     1,
                     &client->threaded_data.num_active_vip_connections);
                 AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+                (void)sub_result;
 
                 vip_connection->is_active = false;
             }
