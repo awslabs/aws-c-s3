@@ -67,14 +67,7 @@ AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
-typedef void(s3_client_update_synced_data_state_fn)(struct aws_s3_client *client);
-
-/* Used to atomically update client state during clean-up and check for finishing shutdown. */
-static void s_s3_client_check_for_shutdown(
-    struct aws_s3_client *client,
-    s3_client_update_synced_data_state_fn *update_fn);
-
-/* Called by s_s3_client_check_for_shutdown when all shutdown criteria has been met. */
+/* Called by s_s3_client_process_work_default when all shutdown criteria has been met. */
 static void s_s3_client_finish_destroy(void *user_data);
 
 /* Called when the body streaming elg shutdown has completed. */
@@ -273,6 +266,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
+
         if (client->tls_connection_options == NULL) {
             goto on_error;
         }
@@ -358,17 +352,11 @@ void aws_s3_client_release(struct aws_s3_client *client) {
     aws_ref_count_release(&client->ref_count);
 }
 
-static void s_s3_client_reset_active_synced(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
-    client->synced_data.active = false;
-}
-
 static void s_s3_client_start_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client starting destruction..", (void *)client);
+    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client starting destruction.", (void *)client);
 
     struct aws_linked_list local_vip_list;
     aws_linked_list_init(&local_vip_list);
@@ -376,6 +364,11 @@ static void s_s3_client_start_destroy(void *user_data) {
     struct aws_host_listener *host_listener = NULL;
 
     aws_s3_client_lock_synced_data(client);
+
+    client->synced_data.active = false;
+
+    /* Prevent the client from cleaning up inbetween the mutex unlock/re-lock below.*/
+    client->synced_data.start_destroy_executing = true;
 
     /* Grab the host listener from the synced_data so that we can remove it outside of the lock. */
     host_listener = client->synced_data.host_listener;
@@ -402,42 +395,13 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
 
-    s_s3_client_check_for_shutdown(client, s_s3_client_reset_active_synced);
-
     aws_s3_client_lock_synced_data(client);
+    client->synced_data.start_destroy_executing = false;
+
+    /* Schedule the work task to clean up outstanding connections and also to call s_s3_client_finish_destroy function
+     * if everything cleaning up asynchronously has finished.  */
     s_s3_client_schedule_process_work_synced(client);
     aws_s3_client_unlock_synced_data(client);
-}
-
-static void s_s3_client_check_for_shutdown(
-    struct aws_s3_client *client,
-    s3_client_update_synced_data_state_fn *update_fn) {
-    (void)client;
-
-    bool finish_destroy = false;
-
-    aws_s3_client_lock_synced_data(client);
-
-    if (update_fn != NULL) {
-        update_fn(client);
-    }
-
-    /* This flag should never be set twice. If it was, that means a double-free could occur.*/
-    AWS_ASSERT(!client->synced_data.finish_destroy);
-
-    finish_destroy = client->synced_data.active == false && client->synced_data.allocated_vip_count == 0 &&
-                     client->synced_data.host_listener_allocated == false &&
-                     client->synced_data.body_streaming_elg_allocated == false &&
-                     client->synced_data.process_work_task_scheduled == false &&
-                     client->synced_data.process_work_task_in_progress == false;
-
-    client->synced_data.finish_destroy = finish_destroy;
-
-    aws_s3_client_unlock_synced_data(client);
-
-    if (finish_destroy) {
-        s_s3_client_finish_destroy(client);
-    }
 }
 
 static void s_s3_client_finish_destroy(void *user_data) {
@@ -486,20 +450,16 @@ static void s_s3_client_finish_destroy(void *user_data) {
     }
 }
 
-static void s_s3_client_set_body_streaming_elg_shutdown_synced(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
-
-    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client body streaming ELG shutdown.", (void *)client);
-
-    client->synced_data.body_streaming_elg_allocated = false;
-}
-
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    s_s3_client_check_for_shutdown(client, s_s3_client_set_body_streaming_elg_shutdown_synced);
+    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client body streaming ELG shutdown.", (void *)client);
+
+    aws_s3_client_lock_synced_data(client);
+    client->synced_data.body_streaming_elg_allocated = false;
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 static int s_s3_client_get_proxy_uri(struct aws_s3_client *client, struct aws_uri *proxy_uri) {
@@ -753,7 +713,7 @@ unlock:
     }
 }
 
-static void s_s3_vip_set_conn_manager_shutdown(struct aws_s3_vip *vip) {
+static void s_s3_vip_set_conn_manager_shutdown_synced(struct aws_s3_vip *vip) {
     AWS_PRECONDITION(vip);
     AWS_PRECONDITION(vip->owning_client);
     ASSERT_SYNCED_DATA_LOCK_HELD(vip->owning_client);
@@ -769,7 +729,7 @@ static void s_s3_vip_http_connection_manager_shutdown_callback(void *user_data) 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT, "id=%p VIP %p Connection manager shutdown", (void *)vip->owning_client, (void *)vip);
 
-    s_s3_vip_check_for_shutdown(vip, s_s3_vip_set_conn_manager_shutdown);
+    s_s3_vip_check_for_shutdown(vip, s_s3_vip_set_conn_manager_shutdown_synced);
 }
 
 static void s_s3_vip_finish_destroy(void *user_data) {
@@ -1099,17 +1059,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     return NULL;
 }
 
-static void s_s3_client_sub_vip_count_synced(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
-    --client->synced_data.allocated_vip_count;
-}
-
 static void s_s3_client_vip_shutdown_callback(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_client *client = user_data;
 
-    s_s3_client_check_for_shutdown(client, s_s3_client_sub_vip_count_synced);
+    aws_s3_client_lock_synced_data(client);
+    --client->synced_data.allocated_vip_count;
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 static void s_s3_client_push_meta_request_synced(
@@ -1162,12 +1119,6 @@ static void s_s3_client_remove_meta_request_threaded(
     aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
     meta_request->client_process_work_threaded_data.scheduled = false;
     aws_s3_meta_request_release(meta_request);
-}
-
-static void s_s3_client_reset_work_task_in_progress_synced(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
-    client->synced_data.process_work_task_in_progress = false;
 }
 
 /* Task function for trying to find a request that can be processed. */
@@ -1299,6 +1250,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         (void *)client);
     s_s3_client_assign_requests_to_connections_threaded(client, client_active, 0);
 
+    /*******************/
+    /* Step 4: Log client stats. */
+    /*******************/
     {
         uint32_t num_idle_connections = 0;
 
@@ -1332,7 +1286,51 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             client->threaded_data.num_active_vip_connections);
     }
 
-    s_s3_client_check_for_shutdown(client, s_s3_client_reset_work_task_in_progress_synced);
+    /*******************/
+    /* Step 5: Check for client shutdown. */
+    /*******************/
+    {
+        aws_s3_client_lock_synced_data(client);
+        client->synced_data.process_work_task_in_progress = false;
+
+        /* This flag should never be set twice. If it was, that means a double-free could occur.*/
+        AWS_ASSERT(!client->synced_data.finish_destroy);
+
+        bool finish_destroy = client->synced_data.active == false &&
+                              client->synced_data.waiting_for_first_host_resolve_callback == false &&
+                              client->synced_data.start_destroy_executing == false &&
+                              client->synced_data.allocated_vip_count == 0 &&
+                              client->synced_data.host_listener_allocated == false &&
+                              client->synced_data.body_streaming_elg_allocated == false &&
+                              client->synced_data.process_work_task_scheduled == false &&
+                              client->synced_data.process_work_task_in_progress == false;
+
+        client->synced_data.finish_destroy = finish_destroy;
+
+        if (!client->synced_data.active) {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p Client shutdown progress: waiting_for_first_host_resolve_callback=%d  "
+                "starting_destroy_executing=%d "
+                " allocated_vip_count=%d  host_listener_allocated=%d  body_streaming_elg_allocated=%d  "
+                "process_work_task_scheduled=%d  process_work_task_in_progress=%d  finish_destroy=%d",
+                (void *)client,
+                (int)client->synced_data.waiting_for_first_host_resolve_callback,
+                (int)client->synced_data.start_destroy_executing,
+                (int)client->synced_data.allocated_vip_count,
+                (int)client->synced_data.host_listener_allocated,
+                (int)client->synced_data.body_streaming_elg_allocated,
+                (int)client->synced_data.process_work_task_scheduled,
+                (int)client->synced_data.process_work_task_in_progress,
+                (int)client->synced_data.finish_destroy);
+        }
+
+        aws_s3_client_unlock_synced_data(client);
+
+        if (finish_destroy) {
+            s_s3_client_finish_destroy(client);
+        }
+    }
 }
 
 static void s_s3_client_assign_requests_to_connections_threaded(
@@ -2028,6 +2026,11 @@ static void s_s3_client_on_host_resolver_address_resolved(
                 aws_error_str(last_error_code));
         }
     }
+
+    aws_s3_client_lock_synced_data(client);
+    client->synced_data.waiting_for_first_host_resolve_callback = false;
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses) {
@@ -2214,20 +2217,14 @@ static void s_s3_client_host_listener_expired_address_callback(
     aws_s3_client_remove_vips(client, host_addresses);
 }
 
-static void s_s3_client_set_host_listener_shutdown_synced(struct aws_s3_client *client) {
-    AWS_PRECONDITION(client);
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
-
-    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p: Host listener finished shutdown.", (void *)client);
-
-    client->synced_data.host_listener_allocated = false;
-}
-
 static void s_s3_client_host_listener_shutdown_callback(void *user_data) {
     AWS_PRECONDITION(user_data);
     struct aws_s3_client *client = user_data;
 
-    s_s3_client_check_for_shutdown(client, s_s3_client_set_host_listener_shutdown_synced);
+    aws_s3_client_lock_synced_data(client);
+    client->synced_data.host_listener_allocated = false;
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
 }
 
 static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
@@ -2273,6 +2270,7 @@ static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client) {
 
     client->synced_data.host_listener = host_listener;
     client->synced_data.host_listener_allocated = true;
+    client->synced_data.waiting_for_first_host_resolve_callback = true;
 
 unlock:
     aws_s3_client_unlock_synced_data(client);
