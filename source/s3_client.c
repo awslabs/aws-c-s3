@@ -1364,8 +1364,19 @@ static void s_s3_client_assign_requests_to_connections_threaded(
             (!client_active || (vip_connection->http_connection == NULL ||
                                 !aws_http_connection_is_open(vip_connection->http_connection) ||
                                 vip_connection->request_count >= s_s3_max_request_count_per_connection))) {
+
+            if (vip_connection->is_active) {
+                int sub_result = aws_sub_u32_checked(
+                    client->threaded_data.num_active_vip_connections,
+                    1,
+                    &client->threaded_data.num_active_vip_connections);
+                AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+                (void)sub_result;
+
+                vip_connection->is_active = false;
+            }
+
             aws_s3_vip_connection_destroy(client, vip_connection);
-            --client->threaded_data.num_active_vip_connections;
             continue;
         }
 
