@@ -22,6 +22,7 @@
 
 AWS_TEST_CASE(test_s3_client_set_vip_connection_warm, s_test_s3_client_set_vip_connection_warm)
 static int s_test_s3_client_set_vip_connection_warm(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
