@@ -297,14 +297,11 @@ static void s_s3_meta_request_send_request_finish_fail_first(
     struct aws_http_stream *stream,
     int error_code) {
 
-    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(vip_connection->request->meta_request);
+    struct aws_s3_client *client = vip_connection->request->meta_request->client;
     AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
     AWS_ASSERT(tester != NULL);
-
-    aws_s3_client_release(client);
-    client = NULL;
 
     if (aws_s3_tester_inc_counter2(tester) == 1) {
         AWS_ASSERT(vip_connection->request->send_data.response_status == 404);
@@ -376,11 +373,8 @@ static void s_finished_request_remove_upload_id(
         aws_byte_buf_reset(&request->send_data.response_body, false);
     }
 
-    struct aws_s3_client *client = aws_s3_meta_request_acquire_client(meta_request);
+    struct aws_s3_client *client = meta_request->client;
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
-
-    aws_s3_client_release(client);
-    client = NULL;
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
