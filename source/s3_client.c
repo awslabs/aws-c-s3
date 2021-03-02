@@ -1519,8 +1519,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, u
     struct aws_linked_list meta_requests_work_remaining;
     aws_linked_list_init(&meta_requests_work_remaining);
 
-    /* While our number of prepared/queued requests is less than the max, and the total requests in flight is also∂∂∂∂
-     * less than the maximum, and we have meta requests to get requests from, then try to prepare requests for being
+    /* While our number of prepared/queued requests is less than the max, and the total requests in flight is also less
+     * than the maximum, and we have meta requests to get requests from, then try to prepare requests for being
      * queued. */
     while ((num_requests_being_prepared + client->threaded_data.request_queue_size) < max_requests_prepare &&
            num_requests_in_flight < max_requests_in_flight &&
