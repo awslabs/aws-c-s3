@@ -543,7 +543,6 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
     aws_atomic_init_int(&mock_client->stats.num_requests_network_io, 0);
     aws_atomic_init_int(&mock_client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&mock_client->stats.num_requests_streaming, 0);
-    aws_atomic_init_int(&mock_client->stats.num_requests_being_prepared, 0);
     aws_atomic_init_int(&mock_client->stats.num_requests_in_flight, 0);
     aws_atomic_init_int(&mock_client->stats.num_allocated_vip_connections, 0);
     aws_atomic_init_int(&mock_client->stats.num_active_vip_connections, 0);

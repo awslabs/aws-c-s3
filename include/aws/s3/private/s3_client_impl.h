@@ -184,9 +184,6 @@ struct aws_s3_client {
         /* Number of overall requests currently being processed by the client. */
         struct aws_atomic_var num_requests_in_flight;
 
-        /* Number of requests currently being prepared. */
-        struct aws_atomic_var num_requests_being_prepared;
-
         /* Number of requests being sent/received over network. */
         struct aws_atomic_var num_requests_network_io;
 
@@ -228,7 +225,7 @@ struct aws_s3_client {
         struct aws_linked_list pending_meta_request_work;
 
         /* Requests that are prepared and ready to be put in the threaded_data request queue. */
-        struct aws_linked_list pending_requests;
+        struct aws_linked_list prepared_requests;
 
         /* Task for processing requests from meta requests on vip connections. */
         struct aws_task process_work_task;
@@ -280,6 +277,9 @@ struct aws_s3_client {
 
         /* Number of requests in the request_queue linked_list. */
         uint32_t request_queue_size;
+
+        /* Number of requests currently being prepared. */
+        uint32_t num_requests_being_prepared;
 
     } threaded_data;
 };
@@ -338,13 +338,13 @@ void aws_s3_client_set_vip_connection_active(
     bool is_active);
 
 AWS_S3_API
-void aws_s3_client_queue_request(struct aws_s3_client *client, struct aws_s3_request *request);
+uint32_t aws_s3_client_queue_requests_threaded(
+    struct aws_s3_client *client,
+    struct aws_linked_list *request_list,
+    bool queue_front);
 
 AWS_S3_API
-struct aws_s3_request *aws_s3_client_dequeue_request(struct aws_s3_client *client);
-
-AWS_S3_API
-void aws_s3_client_queue_requests(struct aws_s3_client *client, struct aws_linked_list *request_list, bool queue_front);
+struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_client *client);
 
 AWS_S3_API
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
