@@ -1300,7 +1300,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         num_requests_queued,
         &client->threaded_data.num_requests_being_prepared);
 
-    AWS_ASSERT(sub_result != AWS_OP_SUCCESS);
+    AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
     (void)sub_result;
 
     aws_s3_client_unlock_synced_data(client);
