@@ -229,7 +229,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_linked_list_init(&client->synced_data.vips);
     aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
-    aws_linked_list_init(&client->synced_data.pending_requests);
+    aws_linked_list_init(&client->synced_data.prepared_requests);
 
     aws_linked_list_init(&client->threaded_data.idle_vip_connections);
     aws_linked_list_init(&client->threaded_data.meta_requests);
@@ -238,7 +238,6 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_requests_network_io, 0);
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming, 0);
-    aws_atomic_init_int(&client->stats.num_requests_being_prepared, 0);
     aws_atomic_init_int(&client->stats.num_requests_in_flight, 0);
     aws_atomic_init_int(&client->stats.num_allocated_vip_connections, 0);
     aws_atomic_init_int(&client->stats.num_active_vip_connections, 0);
@@ -826,16 +825,7 @@ void aws_s3_client_set_vip_connection_active(
     }
 }
 
-void aws_s3_client_queue_request(struct aws_s3_client *client, struct aws_s3_request *request) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(request);
-
-    aws_linked_list_push_back(&client->threaded_data.request_queue, &request->node);
-
-    ++client->threaded_data.request_queue_size;
-}
-
-void aws_s3_client_queue_requests(
+uint32_t aws_s3_client_queue_requests_threaded(
     struct aws_s3_client *client,
     struct aws_linked_list *request_list,
     bool queue_front) {
@@ -857,9 +847,10 @@ void aws_s3_client_queue_requests(
     }
 
     client->threaded_data.request_queue_size += request_list_size;
+    return request_list_size;
 }
 
-struct aws_s3_request *aws_s3_client_dequeue_request(struct aws_s3_client *client) {
+struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
     if (aws_linked_list_empty(&client->threaded_data.request_queue)) {
@@ -1301,7 +1292,16 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_move_all_back(
         &client->threaded_data.idle_vip_connections, &client->synced_data.pending_vip_connection_updates);
 
-    aws_s3_client_queue_requests(client, &client->synced_data.pending_requests, false);
+    uint32_t num_requests_queued =
+        aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
+
+    int sub_result = aws_sub_u32_checked(
+        client->threaded_data.num_requests_being_prepared,
+        num_requests_queued,
+        &client->threaded_data.num_requests_being_prepared);
+
+    AWS_ASSERT(sub_result != AWS_OP_SUCCESS);
+    (void)sub_result;
 
     aws_s3_client_unlock_synced_data(client);
 
@@ -1378,15 +1378,12 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         }
 
         uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
-
-        uint32_t num_requests_being_prepared =
-            (uint32_t)aws_atomic_load_int(&client->stats.num_requests_being_prepared);
         uint32_t num_requests_network_io = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_io);
         uint32_t num_requests_stream_queued_waiting =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting);
         uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming);
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
-                                         num_requests_streaming + num_requests_being_prepared +
+                                         num_requests_streaming + client->threaded_data.num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
 
         uint32_t num_allocated_connections =
@@ -1402,7 +1399,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             (void *)client,
             total_approx_requests,
             num_requests_in_flight,
-            num_requests_being_prepared,
+            client->threaded_data.num_requests_being_prepared,
             client->threaded_data.request_queue_size,
             num_requests_network_io,
             num_requests_stream_queued_waiting,
@@ -1474,7 +1471,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, u
 
         /* Make sure that the request queue is empty. */
         while (!aws_linked_list_empty(&client->threaded_data.request_queue)) {
-            struct aws_s3_request *request = aws_s3_client_dequeue_request(client);
+            struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
             aws_s3_meta_request_finished_request(request->meta_request, request, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
             aws_s3_request_release(request);
         }
@@ -1513,16 +1510,16 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, u
     const uint32_t max_requests_in_flight = aws_s3_client_get_max_requests_in_flight(client);
     const uint32_t max_requests_prepare = aws_s3_client_get_max_requests_prepare(client);
 
-    uint32_t num_requests_being_prepared = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_being_prepared);
-    uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
-
     struct aws_linked_list meta_requests_work_remaining;
     aws_linked_list_init(&meta_requests_work_remaining);
+
+    uint32_t num_requests_in_flight = aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     /* While our number of prepared/queued requests is less than the max, and the total requests in flight is also less
      * than the maximum, and we have meta requests to get requests from, then try to prepare requests for being
      * queued. */
-    while ((num_requests_being_prepared + client->threaded_data.request_queue_size) < max_requests_prepare &&
+    while ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) <
+               max_requests_prepare &&
            num_requests_in_flight < max_requests_in_flight &&
            !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 
@@ -1546,11 +1543,9 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, u
             } else {
                 request->tracked_by_client = true;
 
-                ++num_requests_being_prepared;
-                aws_atomic_fetch_add(&client->stats.num_requests_being_prepared, 1);
+                ++client->threaded_data.num_requests_being_prepared;
 
-                ++num_requests_in_flight;
-                aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1);
+                num_requests_in_flight = aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
 
                 aws_s3_meta_request_prepare_request(
                     meta_request, request, s_s3_client_prepare_callback_queue_request, client);
@@ -1584,10 +1579,8 @@ static void s_s3_client_prepare_callback_queue_request(
     aws_s3_client_lock_synced_data(client);
 
     if (error_code == AWS_ERROR_SUCCESS) {
-        aws_linked_list_push_back(&client->synced_data.pending_requests, &request->node);
+        aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
     }
-
-    aws_atomic_fetch_sub(&client->stats.num_requests_being_prepared, 1);
 
     s_s3_client_schedule_process_work_synced(client);
     aws_s3_client_unlock_synced_data(client);
@@ -1646,7 +1639,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client, boo
         struct aws_s3_vip_connection *vip_connection =
             AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, node);
 
-        struct aws_s3_request *request = aws_s3_client_dequeue_request(client);
+        struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
 
         uint32_t num_conns_per_vip = s_num_conns_per_vip_meta_request_look_up[request->meta_request->type];
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, num_conns_per_vip);
@@ -1682,7 +1675,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client, boo
         }
     }
 
-    aws_s3_client_queue_requests(client, &left_over_requests, true);
+    aws_s3_client_queue_requests_threaded(client, &left_over_requests, true);
 }
 
 static void s_s3_client_acquired_retry_token(
