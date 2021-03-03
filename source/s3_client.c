@@ -1513,7 +1513,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, u
     struct aws_linked_list meta_requests_work_remaining;
     aws_linked_list_init(&meta_requests_work_remaining);
 
-    uint32_t num_requests_in_flight = aws_atomic_load_int(&client->stats.num_requests_in_flight);
+    uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     /* While our number of prepared/queued requests is less than the max, and the total requests in flight is also less
      * than the maximum, and we have meta requests to get requests from, then try to prepare requests for being
@@ -1545,7 +1545,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, u
 
                 ++client->threaded_data.num_requests_being_prepared;
 
-                num_requests_in_flight = aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+                num_requests_in_flight = (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
 
                 aws_s3_meta_request_prepare_request(
                     meta_request, request, s_s3_client_prepare_callback_queue_request, client);
