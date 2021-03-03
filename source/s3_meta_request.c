@@ -328,7 +328,7 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
 
 static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-static void s_s3_prepare_request_payload_callback_destroy(
+static void s_s3_prepare_request_payload_callback_and_destroy(
     struct aws_s3_prepare_request_payload *payload,
     int error_code) {
     AWS_PRECONDITION(payload);
@@ -343,16 +343,16 @@ static void s_s3_prepare_request_payload_callback_destroy(
     struct aws_allocator *sba_allocator = client->sba_allocator;
     AWS_PRECONDITION(sba_allocator);
 
-    aws_s3_meta_request_acquire(meta_request);
+    /* Acquire a reference to the client pointer just be to safe, so that we know the callback won't trigger a clean up
+     * of the client and cause the sba_allocator to go away. */
+    aws_s3_client_acquire(client);
 
     if (payload->callback != NULL) {
         payload->callback(meta_request, payload->request, error_code, payload->user_data);
     }
 
-    AWS_ASSERT(sba_allocator);
-
     aws_mem_release(sba_allocator, payload);
-    aws_s3_meta_request_release(meta_request);
+    aws_s3_client_release(client);
 }
 
 static void s_s3_meta_request_schedule_prepare_request_default(
@@ -440,7 +440,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
         aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
         aws_s3_meta_request_unlock_synced_data(meta_request);
 
-        s_s3_prepare_request_payload_callback_destroy(payload, error_code);
+        s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
         return;
     }
 
@@ -582,7 +582,7 @@ finish:
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
 
-    s_s3_prepare_request_payload_callback_destroy(payload, error_code);
+    s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
 void aws_s3_meta_request_send_request(
