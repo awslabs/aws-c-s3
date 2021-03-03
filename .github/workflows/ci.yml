@@ -37,7 +37,7 @@ jobs:
         echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u awslabs --password-stdin
         export DOCKER_IMAGE=docker.pkg.github.com/awslabs/aws-crt-builder/aws-crt-${{ matrix.image }}:${{ env.BUILDER_VERSION }}
         docker pull $DOCKER_IMAGE
-        docker run --mount type=bind,source=$(pwd),target=/root/${{ env.PACKAGE_NAME }} --env GITHUB_REF --env AWS_ACCESS_KEY_ID --env AWS_SECRET_ACCESS_KEY --env AWS_DEFAULT_REGION $DOCKER_IMAGE build -p ${{ env.PACKAGE_NAME }} downstream
+        docker run --mount type=bind,source=$(pwd),target=/root/${{ env.PACKAGE_NAME }} --env GITHUB_REF --env AWS_ACCESS_KEY_ID --env AWS_SECRET_ACCESS_KEY --env AWS_DEFAULT_REGION $DOCKER_IMAGE --version=${BUILDER_VERSION} build -p ${{ env.PACKAGE_NAME }} downstream
   al2:
     runs-on: ubuntu-latest
     steps:
@@ -49,7 +49,7 @@ jobs:
         echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u awslabs --password-stdin
         export DOCKER_IMAGE=docker.pkg.github.com/awslabs/aws-crt-builder/aws-crt-al2-x64:${{ env.BUILDER_VERSION }}
         docker pull $DOCKER_IMAGE
-        docker run --mount type=bind,source=$(pwd),target=/root/${{ env.PACKAGE_NAME }} --env GITHUB_REF --env AWS_ACCESS_KEY_ID --env AWS_SECRET_ACCESS_KEY --env AWS_DEFAULT_REGION $DOCKER_IMAGE build -p ${{ env.PACKAGE_NAME }} downstream
+        docker run --mount type=bind,source=$(pwd),target=/root/${{ env.PACKAGE_NAME }} --env GITHUB_REF --env AWS_ACCESS_KEY_ID --env AWS_SECRET_ACCESS_KEY --env AWS_DEFAULT_REGION $DOCKER_IMAGE --version=${BUILDER_VERSION} build -p ${{ env.PACKAGE_NAME }} downstream
   clang-compat:
     runs-on: ubuntu-latest
     strategy:
@@ -64,7 +64,7 @@ jobs:
         echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u awslabs --password-stdin
         export DOCKER_IMAGE=docker.pkg.github.com/awslabs/aws-crt-builder/aws-crt-${{ env.LINUX_BASE_IMAGE }}:${{ env.BUILDER_VERSION }}
         docker pull $DOCKER_IMAGE
-        docker run --mount type=bind,source=$(pwd),target=/root/${{ env.PACKAGE_NAME }} --env GITHUB_REF --env AWS_ACCESS_KEY_ID --env AWS_SECRET_ACCESS_KEY --env AWS_DEFAULT_REGION  $DOCKER_IMAGE build -p ${{ env.PACKAGE_NAME }} --compiler=clang-${{ matrix.version }}
+        docker run --mount type=bind,source=$(pwd),target=/root/${{ env.PACKAGE_NAME }} --env GITHUB_REF --env AWS_ACCESS_KEY_ID --env AWS_SECRET_ACCESS_KEY --env AWS_DEFAULT_REGION $DOCKER_IMAGE --version=${BUILDER_VERSION} build -p ${{ env.PACKAGE_NAME }} --compiler=clang-${{ matrix.version }}
   gcc-compat:
     runs-on: ubuntu-latest
     strategy:
