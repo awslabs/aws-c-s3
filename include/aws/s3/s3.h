@@ -10,7 +10,7 @@
 #include <aws/io/logging.h>
 #include <aws/s3/exports.h>
 
-#define AWS_C_S3_PACKAGE_ID 9
+#define AWS_C_S3_PACKAGE_ID 14
 
 enum aws_s3_errors {
     AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER = AWS_ERROR_ENUM_BEGIN_RANGE(AWS_C_S3_PACKAGE_ID),
