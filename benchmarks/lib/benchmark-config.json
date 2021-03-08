@@ -1,0 +1,20 @@
+{
+    "projects": {
+        "aws-crt-java" : {
+            "shell_script" : "run_java_crt.sh"
+        }
+    },
+
+    "regions" : [
+        "eu-west-1"
+    ],
+
+    "instances": {
+        "c5n.18xlarge" : {
+            "throughput_gbps" : 100
+        },
+        "c5n.metal" : {
+            "throughput_gbps" : 100
+        }
+    }
+}
