@@ -8,86 +8,95 @@ import * as fs from 'fs';
 
 export class BenchmarksStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
-    // props = props ? props : {
-    //   env: {
-    //     account: 'XXXXXXXXXXX',
-    //     region: 'us-east-1'
-    //   }
-    // }
-
     super(scope, id, props);
 
-    const instanceType = this.node.tryGetContext('InstanceType') as string;
-    const downloads = this.node.tryGetContext('Downloads') as number
-    const uploads = this.node.tryGetContext('Uploads') as number
+    const user_name = this.node.tryGetContext('UserName') as string;
+    const project_name = this.node.tryGetContext('ProjectName') as string;
+    const branch_name = this.node.tryGetContext('BranchName') as string;
 
-    const s3BucketName = "aws-crt-canary-bucket" + ((this.region != 'us-west-2') ? '-' + this.region : '');
+    const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
+    const benchmark_config = JSON.parse(benchmark_config_json)
+    const project_config = benchmark_config.projects[project_name];
+    const local_run_project_sh = project_config.shell_script;
 
-    // Write out canary config
-    var canary_config = {
-      "ToolName": "S3Canary",
-      "InstanceType": instanceType,
-      "Region": this.region,
-      "BucketName": s3BucketName,
-      "DownloadObjectName": "crt-canary-obj-single-part-9223372036854775807",
-      "NumUpTransfers": uploads,
-      "NumUpConcurrentTransfers": uploads,
-      "NumDownTransfers": downloads,
-      "NumDownConcurrentTransfers": downloads,
-      "FileNameSuffixOffset": 0,
-      "MetricsPublishingEnabled": true,
-      "MeasureSinglePartTransfer": true
+    let region = 'unknown';
+
+    if (props != undefined && props.env != undefined && props.env.region != undefined) {
+      region = props.env.region;
     }
 
-    fs.writeFileSync(path.join(__dirname, 'canary.json'), JSON.stringify(canary_config));
-
-    // Make canary script and config available as assets
-    const canary_json = new assets.Asset(this, 'canary.json', {
-      path: path.join(__dirname, 'canary.json')
-    });
-    const canary_sh = new assets.Asset(this, 'canary.sh', {
-      path: path.join(__dirname, 'canary.sh')
+    const benchmark_sh = new assets.Asset(this, 'benchmark.sh', {
+      path: path.join(__dirname, 'benchmark.sh')
     });
 
-    const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', canary_sh.s3BucketName)
-
-    const s3bucket = s3.Bucket.fromBucketName(this, 'BenchmarkBucket', s3BucketName);
-
-    // Install canary script and config
-    const instanceUserData = ec2.UserData.forLinux();
-    const canary_sh_path = instanceUserData.addS3DownloadCommand({
-      bucket: assetBucket,
-      bucketKey: canary_sh.s3ObjectKey
+    const show_dashboard_sh = new assets.Asset(this, 'show_dashboard.sh', {
+      path: path.join(__dirname, 'show_dashboard.sh')
     });
-    const canary_json_path = instanceUserData.addS3DownloadCommand({
-      bucket: assetBucket,
-      bucketKey: canary_json.s3ObjectKey
-    })
-    instanceUserData.addExecuteFileCommand({
-      filePath: canary_sh_path,
-      arguments: canary_json_path
+
+    const run_project_sh = new assets.Asset(this, local_run_project_sh, {
+      path: path.join(__dirname, local_run_project_sh)
     });
+
+    const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', benchmark_sh.s3BucketName)
 
     const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
-      vpcId: 'vpc-d96a98a3'
+      vpcId: 'vpc-305f0856'
     });
+
     const security_group = new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc: vpc,
     });
+
     security_group.addIngressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(22),
       'SSH'
     );
-    const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient', {
-      instanceType: new ec2.InstanceType(instanceType),
-      vpc: vpc,
-      machineImage: ec2.MachineImage.latestAmazonLinux(),
-      userData: instanceUserData,
-      role: iam.Role.fromRoleArn(this, 'S3CanaryInstanceRole', 'arn:aws:iam::123124136734:role/S3CanaryEC2Role'),
-      keyName: 'aws-common-runtime-keys',
-      securityGroup: security_group
-    });
 
+    const canary_role = iam.Role.fromRoleArn(this, 'S3CanaryInstanceRole', 'arn:aws:iam::123124136734:role/S3CanaryEC2Role');
+
+    for (let instance_config_name in benchmark_config.instances) {
+      const instance_config = benchmark_config.instances[instance_config_name]
+      const instance_user_data = ec2.UserData.forLinux();
+
+      const benchmark_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: benchmark_sh.s3ObjectKey
+      });
+
+      const show_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: show_dashboard_sh.s3ObjectKey
+      });
+
+      const run_project_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: run_project_sh.s3ObjectKey
+      })
+
+      const benchmark_arguments = user_name + ' ' +
+        show_dashboard_sh_path + ' ' +
+        project_name + ' ' +
+        branch_name + ' ' +
+        instance_config.throughput_gbps + ' ' +
+        run_project_sh_path + ' ' +
+        instance_config_name + ' ' +
+        region + ' ';
+
+      instance_user_data.addExecuteFileCommand({
+        filePath: benchmark_sh_path,
+        arguments: benchmark_arguments
+      });
+
+      const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name, {
+        instanceType: new ec2.InstanceType(instance_config_name),
+        vpc: vpc,
+        machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
+        userData: instance_user_data,
+        role: canary_role,
+        keyName: 'aws-common-runtime-keys',
+        securityGroup: security_group
+      });
+    }
   }
 }
