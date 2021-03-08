@@ -1,13 +1,10 @@
 {
     "projects": {
         "aws-crt-java" : {
-            "shell_script" : "run_java_crt.sh"
+            "shell_script" : "run_java_crt.sh",
+            "branch": "aws-lc"
         }
     },
-
-    "regions" : [
-        "eu-west-1"
-    ],
 
     "instances": {
         "c5n.18xlarge" : {

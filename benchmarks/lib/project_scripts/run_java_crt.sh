@@ -18,7 +18,7 @@ if [ $1 = "SETUP" ]; then
 elif [ $1 = "RUN" ]; then
     cd aws-crt-java
 
-    mvn test -DforkCount=0 -Dtest="S3ClientTest#benchmarkS3Get" -Daws.crt.s3.benchmark=1 \
+    mvn test -DforkCount=0 -Dtest="S3ClientTest#benchmarkS3Put" -Daws.crt.s3.benchmark=1 \
         -Daws.crt.s3.benchmark.region=$REGION \
         -Daws.crt.s3.benchmark.gbps=$THROUGHPUT_GBPS \
         -Daws.crt.s3.benchmark.transfers=1600 \

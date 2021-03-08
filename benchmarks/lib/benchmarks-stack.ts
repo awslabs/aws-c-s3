@@ -12,11 +12,11 @@ export class BenchmarksStack extends cdk.Stack {
 
     const user_name = this.node.tryGetContext('UserName') as string;
     const project_name = this.node.tryGetContext('ProjectName') as string;
-    const branch_name = this.node.tryGetContext('BranchName') as string;
 
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
     const project_config = benchmark_config.projects[project_name];
+    const branch_name = project_config.branch_name;
     const local_run_project_sh = project_config.shell_script;
 
     let region = 'unknown';
@@ -25,19 +25,19 @@ export class BenchmarksStack extends cdk.Stack {
       region = props.env.region;
     }
 
-    const benchmark_sh = new assets.Asset(this, 'benchmark.sh', {
-      path: path.join(__dirname, 'benchmark.sh')
+    const init_instance_sh = new assets.Asset(this, 'init_instance.sh', {
+      path: path.join(__dirname, 'init_instance.sh')
     });
 
-    const show_dashboard_sh = new assets.Asset(this, 'show_dashboard.sh', {
-      path: path.join(__dirname, 'show_dashboard.sh')
+    const show_dashboard_sh = new assets.Asset(this, 'show_instance_dashboard.sh', {
+      path: path.join(__dirname, 'show_instance_dashboard.sh')
     });
 
     const run_project_sh = new assets.Asset(this, local_run_project_sh, {
       path: path.join(__dirname, local_run_project_sh)
     });
 
-    const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', benchmark_sh.s3BucketName)
+    const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
     const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
       vpcId: 'vpc-305f0856'
@@ -59,9 +59,9 @@ export class BenchmarksStack extends cdk.Stack {
       const instance_config = benchmark_config.instances[instance_config_name]
       const instance_user_data = ec2.UserData.forLinux();
 
-      const benchmark_sh_path = instance_user_data.addS3DownloadCommand({
+      const init_instance_sh_path = instance_user_data.addS3DownloadCommand({
         bucket: assetBucket,
-        bucketKey: benchmark_sh.s3ObjectKey
+        bucketKey: init_instance_sh.s3ObjectKey
       });
 
       const show_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
@@ -74,7 +74,7 @@ export class BenchmarksStack extends cdk.Stack {
         bucketKey: run_project_sh.s3ObjectKey
       })
 
-      const benchmark_arguments = user_name + ' ' +
+      const init_instance_arguments = user_name + ' ' +
         show_dashboard_sh_path + ' ' +
         project_name + ' ' +
         branch_name + ' ' +
@@ -84,8 +84,8 @@ export class BenchmarksStack extends cdk.Stack {
         region + ' ';
 
       instance_user_data.addExecuteFileCommand({
-        filePath: benchmark_sh_path,
-        arguments: benchmark_arguments
+        filePath: init_instance_sh_path,
+        arguments: init_instance_arguments
       });
 
       const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name, {

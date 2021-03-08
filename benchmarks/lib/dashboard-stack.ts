@@ -8,8 +8,6 @@ export class DashboardStack extends cdk.Stack {
     constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
 
-        const branch_name = this.node.tryGetContext('BranchName') as string;
-
         const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8');
         const benchmark_config = JSON.parse(benchmark_config_json);
 
@@ -32,26 +30,16 @@ export class DashboardStack extends cdk.Stack {
             widgets: [] as any
         };
 
-        let dashboard_header_widget = {
-            type: "text",
-            width : 24,
-            height : 1,
-            properties: {
-                markdown: "# Branch: " + branch_name,
-            }
-        };
-
-        dashboard_body.widgets.push(dashboard_header_widget);
-
         for (let project_name in benchmark_config.projects) {
             const project_config = benchmark_config.projects[project_name];
+            const branch_name = project_config.branch_name;
 
             let project_header_widget = {
                 type: "text",
                 width : 24,
                 height : 1,
                 properties: {
-                    markdown: "## Project: " + project_name,
+                    markdown: "## Project: " + project_name + "  Branch: " + branch_name
                 }
             };
 
@@ -132,7 +120,7 @@ export class DashboardStack extends cdk.Stack {
 
         const dashboard = new cloudwatch.CfnDashboard(this, id, {
             dashboardBody: JSON.stringify(dashboard_body),
-            dashboardName: id + "-" + branch_name
+            dashboardName: id
         });
     }
 }
