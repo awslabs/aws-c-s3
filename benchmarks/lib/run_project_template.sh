@@ -24,7 +24,6 @@ function publish_bw_metric() {
 
 export -f publish_bw_metric
 
-{PROJECT_SHELL_SCRIPT} 'SETUP'
 {PROJECT_SHELL_SCRIPT} 'RUN' > {RUN_PROJECT_LOG_FN} &
 
 stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \

@@ -12,7 +12,7 @@ function show_publish_metrics_log() {
 export -f show_publish_metrics_log
 
 function show_cloud_init_log() {
-    echo -n "" > $CLOUD_INITLOG_FN
+    echo -n "" > $CLOUD_INIT_LOG_FN
     tail -f $CLOUD_INIT_LOG_FN
 }
 
@@ -26,7 +26,6 @@ function show_benchmark_log() {
 export -f show_benchmark_log
 
 function show_bandwidth() {
-    sudo yum install bwm-ng
     bwm-ng -I eth0 -u bits
 }
 
