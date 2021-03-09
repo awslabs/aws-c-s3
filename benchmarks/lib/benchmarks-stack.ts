@@ -16,8 +16,7 @@ export class BenchmarksStack extends cdk.Stack {
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
     const project_config = benchmark_config.projects[project_name];
-    const branch_name = project_config.branch_name;
-    const local_run_project_sh = project_config.shell_script;
+    const branch_name = project_config.branch;
 
     let region = 'unknown';
 
@@ -29,12 +28,16 @@ export class BenchmarksStack extends cdk.Stack {
       path: path.join(__dirname, 'init_instance.sh')
     });
 
-    const show_dashboard_sh = new assets.Asset(this, 'show_instance_dashboard.sh', {
+    const show_instance_dashboard_sh = new assets.Asset(this, 'show_instance_dashboard.sh', {
       path: path.join(__dirname, 'show_instance_dashboard.sh')
     });
 
-    const run_project_sh = new assets.Asset(this, local_run_project_sh, {
-      path: path.join(__dirname, local_run_project_sh)
+    const run_project_template_sh = new assets.Asset(this, 'run_project_template.sh', {
+      path: path.join(__dirname, 'run_project_template.sh')
+    });
+
+    const project_shell_script_sh = new assets.Asset(this, project_config.shell_script, {
+      path: path.join(__dirname, project_config.shell_script)
     });
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
@@ -64,22 +67,28 @@ export class BenchmarksStack extends cdk.Stack {
         bucketKey: init_instance_sh.s3ObjectKey
       });
 
-      const show_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
+      const show_instance_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
         bucket: assetBucket,
-        bucketKey: show_dashboard_sh.s3ObjectKey
+        bucketKey: show_instance_dashboard_sh.s3ObjectKey
       });
 
-      const run_project_sh_path = instance_user_data.addS3DownloadCommand({
+      const run_project_template_sh_path = instance_user_data.addS3DownloadCommand({
         bucket: assetBucket,
-        bucketKey: run_project_sh.s3ObjectKey
+        bucketKey: run_project_template_sh.s3ObjectKey
+      });
+
+      const project_shell_script_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: project_shell_script_sh.s3ObjectKey
       })
 
       const init_instance_arguments = user_name + ' ' +
-        show_dashboard_sh_path + ' ' +
+        show_instance_dashboard_sh_path + ' ' +
+        run_project_template_sh_path + ' ' +
         project_name + ' ' +
         branch_name + ' ' +
         instance_config.throughput_gbps + ' ' +
-        run_project_sh_path + ' ' +
+        project_shell_script_sh_path + ' ' +
         instance_config_name + ' ' +
         region + ' ';
 

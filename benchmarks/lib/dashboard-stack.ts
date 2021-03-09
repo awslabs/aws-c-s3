@@ -32,14 +32,14 @@ export class DashboardStack extends cdk.Stack {
 
         for (let project_name in benchmark_config.projects) {
             const project_config = benchmark_config.projects[project_name];
-            const branch_name = project_config.branch_name;
+            const branch_name = project_config.branch;
 
             let project_header_widget = {
                 type: "text",
                 width : 24,
                 height : 1,
                 properties: {
-                    markdown: "## Project: " + project_name + "  Branch: " + branch_name
+                    markdown: "## " + project_name + " (" + branch_name + ")"
                 }
             };
 
