@@ -1814,7 +1814,14 @@ static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocato
             .client = client,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .default_type_options = {.mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET},
+            .default_type_options =
+                {
+                    .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                },
+            .get_options =
+                {
+                    .object_path = g_s3_path_get_object_test_1MB,
+                },
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
