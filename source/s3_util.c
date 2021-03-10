@@ -276,6 +276,8 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     AWS_ZERO_STRUCT(user_agent_buffer);
 
     if (!aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header)) {
+        /* If the header was found, then create a buffer with the total size we'll need, and append the curent user
+         * agent header with a trailing space. */
         aws_byte_buf_init(
             &user_agent_buffer,
             allocator,
@@ -288,16 +290,21 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
 
+        /* If the header was not found, then create a buffer with just the size of the user agent string that is about
+         * to be appended to the buffer. */
         aws_byte_buf_init(&user_agent_buffer, allocator, user_agent_product_version_length);
     }
 
+    /* Append the client's user-agent string. */
     {
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_product_name);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_s3_client_version);
     }
 
+    /* Apply the updated header. */
     aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&user_agent_buffer));
 
+    /* Clean up the scratch buffer. */
     aws_byte_buf_clean_up(&user_agent_buffer);
 }
