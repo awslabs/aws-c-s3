@@ -19,6 +19,7 @@
 struct aws_allocator;
 struct aws_http_stream;
 struct aws_http_headers;
+struct aws_http_message;
 struct aws_event_loop;
 
 enum aws_s3_response_status {
@@ -38,19 +39,27 @@ struct aws_cached_signing_config_aws {
     struct aws_signing_config_aws config;
 };
 
-AWS_EXTERN_C_BEGIN
-
 extern const struct aws_byte_cursor g_s3_service_name;
 extern const struct aws_byte_cursor g_range_header_name;
 extern const struct aws_byte_cursor g_content_range_header_name;
 extern const struct aws_byte_cursor g_accept_ranges_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_acl_header_name;
-
 extern const struct aws_byte_cursor g_post_method;
 extern const struct aws_byte_cursor g_delete_method;
 extern const uint32_t g_s3_max_num_upload_parts;
+
+AWS_EXTERN_C_BEGIN
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_s3_client_version;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_user_agent_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_user_agent_header_product_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_acl_header_name;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_host_header_name;
@@ -87,6 +96,9 @@ void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *
 
 /* TODO could be moved to aws-c-common. */
 int aws_last_error_or_unknown(void);
+
+AWS_S3_API
+void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message);
 
 AWS_EXTERN_C_END
 

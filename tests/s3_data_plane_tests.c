@@ -1569,3 +1569,181 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
 
     return 0;
 }
+
+static int s_get_expected_user_agent(struct aws_allocator *allocator, struct aws_byte_buf *dest) {
+    AWS_ASSERT(allocator);
+    AWS_ASSERT(dest);
+
+    const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+
+    ASSERT_SUCCESS(aws_byte_buf_init(dest, allocator, 32));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_product_name));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_s3_client_version));
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_add_user_agent_header, s_test_add_user_agent_header)
+static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+    const struct aws_byte_cursor single_space = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
+
+    struct aws_byte_buf expected_user_agent_value_buf;
+    s_get_expected_user_agent(allocator, &expected_user_agent_value_buf);
+
+    struct aws_byte_cursor expected_user_agent_value = aws_byte_cursor_from_buf(&expected_user_agent_value_buf);
+
+    {
+        struct aws_byte_cursor user_agent_value;
+        AWS_ZERO_STRUCT(user_agent_value);
+
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+        aws_s3_add_user_agent_header(allocator, message);
+
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+
+        ASSERT_TRUE(headers != NULL);
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+        ASSERT_TRUE(aws_byte_cursor_eq(&user_agent_value, &expected_user_agent_value));
+
+        aws_http_message_release(message);
+    }
+
+    {
+        const struct aws_byte_cursor dummy_agent_header_value =
+            AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_user_agent_product/dummy_user_agent_value");
+
+        struct aws_byte_buf total_expected_user_agent_value_buf;
+        aws_byte_buf_init(&total_expected_user_agent_value_buf, allocator, 64);
+        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &dummy_agent_header_value);
+        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &single_space);
+
+        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &g_user_agent_header_product_name);
+        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &forward_slash);
+        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &g_s3_client_version);
+
+        struct aws_byte_cursor total_expected_user_agent_value =
+            aws_byte_cursor_from_buf(&total_expected_user_agent_value_buf);
+
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        ASSERT_TRUE(headers != NULL);
+
+        ASSERT_SUCCESS(aws_http_headers_add(headers, g_user_agent_header_name, dummy_agent_header_value));
+
+        aws_s3_add_user_agent_header(allocator, message);
+
+        {
+            struct aws_byte_cursor user_agent_value;
+            AWS_ZERO_STRUCT(user_agent_value);
+            ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+            ASSERT_TRUE(aws_byte_cursor_eq(&user_agent_value, &total_expected_user_agent_value));
+        }
+
+        aws_byte_buf_clean_up(&total_expected_user_agent_value_buf);
+        aws_http_message_release(message);
+    }
+
+    aws_byte_buf_clean_up(&expected_user_agent_value_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+static int s_s3_test_user_agent_meta_request_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_initial_prepare) {
+
+    AWS_ASSERT(meta_request != NULL);
+
+    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
+    AWS_ASSERT(results != NULL);
+
+    struct aws_s3_tester *tester = results->tester;
+    AWS_ASSERT(tester != NULL);
+
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+
+    if (original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare)) {
+        return AWS_OP_ERR;
+    }
+
+    struct aws_byte_buf expected_user_agent_value_buf;
+    s_get_expected_user_agent(meta_request->allocator, &expected_user_agent_value_buf);
+
+    struct aws_byte_cursor expected_user_agent_value = aws_byte_cursor_from_buf(&expected_user_agent_value_buf);
+
+    struct aws_s3_request *request = vip_connection->request;
+    struct aws_http_message *message = request->send_data.message;
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+
+    struct aws_byte_cursor user_agent_value;
+    AWS_ZERO_STRUCT(user_agent_value);
+
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+
+    const char *find_result = strstr((const char*)user_agent_value.ptr, (const char*)expected_user_agent_value.ptr);
+
+    ASSERT_TRUE(find_result != NULL);
+    ASSERT_TRUE( find_result < (const char*)(user_agent_value.ptr+user_agent_value.len) );
+
+    aws_byte_buf_clean_up(&expected_user_agent_value_buf);
+    return AWS_OP_SUCCESS;
+}
+
+static struct aws_s3_meta_request *s_s3_meta_request_factory_override_prepare_request(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->prepare_request = s_s3_test_user_agent_meta_request_prepare_request;
+
+    return meta_request;
+}
+
+AWS_TEST_CASE(test_s3_meta_request_sending_user_agent, s_test_s3_meta_request_sending_user_agent)
+static int s_test_s3_meta_request_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_s3_meta_request_factory_override_prepare_request;
+
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
