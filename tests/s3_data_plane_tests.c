@@ -1722,25 +1722,103 @@ static struct aws_s3_meta_request *s_s3_meta_request_factory_override_prepare_re
     return meta_request;
 }
 
-AWS_TEST_CASE(test_s3_meta_request_sending_user_agent, s_test_s3_meta_request_sending_user_agent)
-static int s_test_s3_meta_request_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
+int s_s3_test_sending_user_agent_create_client(struct aws_s3_tester *tester, struct aws_s3_client **client) {
+    AWS_ASSERT(tester);
+
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(tester, &client_options, client));
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(tester, *client, NULL);
+    patched_client_vtable->meta_request_factory = s_s3_meta_request_factory_override_prepare_request;
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_auto_ranged_get_sending_user_agent, s_test_s3_auto_ranged_get_sending_user_agent)
+static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config;
-    AWS_ZERO_STRUCT(client_config);
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .get_options =
+                {
+                    .object_path = g_s3_path_get_object_test_1MB,
+                },
+        };
 
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->meta_request_factory = s_s3_meta_request_factory_override_prepare_request;
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_auto_ranged_put_sending_user_agent, s_test_s3_auto_ranged_put_sending_user_agent)
+static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .put_options =
+                {
+                    .ensure_multipart = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_default_sending_meta_request, s_test_s3_default_sending_meta_request)
+static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .default_type_options = {.mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET},
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
