@@ -135,9 +135,7 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
         struct aws_s3_meta_request_test_results meta_request_test_results;
         AWS_ZERO_STRUCT(meta_request_test_results);
 
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
+        struct aws_s3_tester_meta_request_options meta_request_test_options = {
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
             .put_options =
@@ -146,7 +144,14 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
                 },
         };
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+        struct aws_s3_tester_send_meta_requests_options options = {
+            .tester = &tester,
+            .client = client,
+            .num_meta_requests = 1,
+            .meta_request_test_options = &meta_request_test_options,
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, &meta_request_test_results));
         ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_CANCELED);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -159,9 +164,7 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
         struct aws_s3_meta_request_test_results meta_request_test_results;
         AWS_ZERO_STRUCT(meta_request_test_results);
 
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
+        struct aws_s3_tester_meta_request_options meta_request_test_options = {
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
             .get_options =
@@ -170,7 +173,14 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
                 },
         };
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+        struct aws_s3_tester_send_meta_requests_options options = {
+            .tester = &tester,
+            .client = client,
+            .num_meta_requests = 1,
+            .meta_request_test_options = &meta_request_test_options,
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, &meta_request_test_results));
         ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_CANCELED);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
