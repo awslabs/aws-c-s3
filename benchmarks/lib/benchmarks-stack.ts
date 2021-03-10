@@ -58,54 +58,65 @@ export class BenchmarksStack extends cdk.Stack {
 
     const canary_role = iam.Role.fromRoleArn(this, 'S3CanaryInstanceRole', 'arn:aws:iam::123124136734:role/S3CanaryEC2Role');
 
-    for (let instance_config_name in benchmark_config.instances) {
-      const instance_config = benchmark_config.instances[instance_config_name]
-      const instance_user_data = ec2.UserData.forLinux();
+    const project_run_commands = [
+      "DOWNLOAD_PERFORMANCE",
+      "UPLOAD_PERFORMANCE",
+    ];
 
-      const init_instance_sh_path = instance_user_data.addS3DownloadCommand({
-        bucket: assetBucket,
-        bucketKey: init_instance_sh.s3ObjectKey
-      });
+    for (let run_command_index in project_run_commands) {
+      const run_command = project_run_commands[run_command_index];
 
-      const show_instance_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
-        bucket: assetBucket,
-        bucketKey: show_instance_dashboard_sh.s3ObjectKey
-      });
+      for (let instance_config_name in benchmark_config.instances) {
+        const instance_config = benchmark_config.instances[instance_config_name]
+        const instance_user_data = ec2.UserData.forLinux();
 
-      const run_project_template_sh_path = instance_user_data.addS3DownloadCommand({
-        bucket: assetBucket,
-        bucketKey: run_project_template_sh.s3ObjectKey
-      });
+        const init_instance_sh_path = instance_user_data.addS3DownloadCommand({
+          bucket: assetBucket,
+          bucketKey: init_instance_sh.s3ObjectKey
+        });
 
-      const project_shell_script_sh_path = instance_user_data.addS3DownloadCommand({
-        bucket: assetBucket,
-        bucketKey: project_shell_script_sh.s3ObjectKey
-      })
+        const show_instance_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
+          bucket: assetBucket,
+          bucketKey: show_instance_dashboard_sh.s3ObjectKey
+        });
 
-      const init_instance_arguments = user_name + ' ' +
-        show_instance_dashboard_sh_path + ' ' +
-        run_project_template_sh_path + ' ' +
-        project_name + ' ' +
-        branch_name + ' ' +
-        instance_config.throughput_gbps + ' ' +
-        project_shell_script_sh_path + ' ' +
-        instance_config_name + ' ' +
-        region + ' ';
+        const run_project_template_sh_path = instance_user_data.addS3DownloadCommand({
+          bucket: assetBucket,
+          bucketKey: run_project_template_sh.s3ObjectKey
+        });
 
-      instance_user_data.addExecuteFileCommand({
-        filePath: init_instance_sh_path,
-        arguments: init_instance_arguments
-      });
+        const project_shell_script_sh_path = instance_user_data.addS3DownloadCommand({
+          bucket: assetBucket,
+          bucketKey: project_shell_script_sh.s3ObjectKey
+        })
 
-      const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name, {
-        instanceType: new ec2.InstanceType(instance_config_name),
-        vpc: vpc,
-        machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
-        userData: instance_user_data,
-        role: canary_role,
-        keyName: 'aws-common-runtime-keys',
-        securityGroup: security_group
-      });
+        const init_instance_arguments = user_name + ' ' +
+          show_instance_dashboard_sh_path + ' ' +
+          run_project_template_sh_path + ' ' +
+          project_name + ' ' +
+          branch_name + ' ' +
+          instance_config.throughput_gbps + ' ' +
+          project_shell_script_sh_path + ' ' +
+          instance_config_name + ' ' +
+          region + ' ' +
+          run_command;
+
+        instance_user_data.addExecuteFileCommand({
+          filePath: init_instance_sh_path,
+          arguments: init_instance_arguments
+        });
+
+        const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name + "_" + run_command, {
+          instanceType: new ec2.InstanceType(instance_config_name),
+          vpc: vpc,
+          machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
+          userData: instance_user_data,
+          role: canary_role,
+          keyName: 'aws-common-runtime-keys',
+          securityGroup: security_group
+        });
+      }
     }
+
   }
 }

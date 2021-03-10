@@ -15,15 +15,27 @@ if [ $1 = "SETUP" ]; then
     git submodule update
     mvn install -DskipTests
 
-elif [ $1 = "RUN" ]; then
+elif [ $1 = "DOWNLOAD_PERFORMANCE" ]; then
     cd aws-crt-java
 
-    mvn test -DforkCount=0 -Dtest="S3ClientTest#benchmarkS3Put" -Daws.crt.s3.benchmark=1 \
+    mvn test -DforkCount=0 -Dtest="S3ClientTest#benchmarkS3Get" -Daws.crt.s3.benchmark=1 \
         -Daws.crt.s3.benchmark.region=$REGION \
         -Daws.crt.s3.benchmark.gbps=$THROUGHPUT_GBPS \
         -Daws.crt.s3.benchmark.transfers=1600 \
         -Daws.crt.s3.benchmark.concurrent=1600 \
         -Daws.crt.s3.benchmark.object=crt-canary-obj-multipart \
+        -Daws.crt.s3.benchmark.threads=18 \
+        -Daws.crt.s3.benchmark.warmup=30 \
+        -Daws.crt.s3.benchmark.tls=true
+
+elif [ $1 = "UPLOAD_PERFORAMNCE" ]; then
+    cd aws-crt-java
+    
+    mvn test -DforkCount=0 -Dtest="S3ClientTest#benchmarkS3Put" -Daws.crt.s3.benchmark=1 \
+        -Daws.crt.s3.benchmark.region=$REGION \
+        -Daws.crt.s3.benchmark.gbps=$THROUGHPUT_GBPS \
+        -Daws.crt.s3.benchmark.transfers=1600 \
+        -Daws.crt.s3.benchmark.concurrent=1600 \
         -Daws.crt.s3.benchmark.threads=18 \
         -Daws.crt.s3.benchmark.warmup=30 \
         -Daws.crt.s3.benchmark.tls=true
