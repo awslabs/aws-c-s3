@@ -427,7 +427,8 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
         if (multipart_upload_ops) {
             if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "host") ||
                 aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-request-payer") ||
-                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-expected-bucket-owner")) {
+                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-expected-bucket-owner") ||
+                aws_byte_cursor_eq_ignore_case(&header.name, &g_user_agent_header_name)) {
                 if (aws_http_message_add_header(message, header)) {
                     goto error_clean_up;
                 }
