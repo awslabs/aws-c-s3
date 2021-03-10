@@ -16,6 +16,7 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/connection_manager.h>
 
+/* TODO automate this in the future to preven it from becoming out-of-sync. */
 #define AWS_S3_CLIENT_VERSION "0.1.x"
 
 struct aws_http_connection;
