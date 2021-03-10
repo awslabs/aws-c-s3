@@ -1693,10 +1693,10 @@ static int s_s3_test_user_agent_meta_request_prepare_request(
 
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
 
-    const char *find_result = strstr((const char*)user_agent_value.ptr, (const char*)expected_user_agent_value.ptr);
+    const char *find_result = strstr((const char *)user_agent_value.ptr, (const char *)expected_user_agent_value.ptr);
 
     ASSERT_TRUE(find_result != NULL);
-    ASSERT_TRUE( find_result < (const char*)(user_agent_value.ptr+user_agent_value.len) );
+    ASSERT_TRUE(find_result < (const char *)(user_agent_value.ptr + user_agent_value.len));
 
     aws_byte_buf_clean_up(&expected_user_agent_value_buf);
     return AWS_OP_SUCCESS;
