@@ -28,9 +28,9 @@ elif [ $1 = "DOWNLOAD_PERFORMANCE" ]; then
         -Daws.crt.s3.benchmark.warmup=30 \
         -Daws.crt.s3.benchmark.tls=true
 
-elif [ $1 = "UPLOAD_PERFORAMNCE" ]; then
+elif [ $1 = "UPLOAD_PERFORMANCE" ]; then
     cd aws-crt-java
-    
+
     mvn test -DforkCount=0 -Dtest="S3ClientTest#benchmarkS3Put" -Daws.crt.s3.benchmark=1 \
         -Daws.crt.s3.benchmark.region=$REGION \
         -Daws.crt.s3.benchmark.gbps=$THROUGHPUT_GBPS \

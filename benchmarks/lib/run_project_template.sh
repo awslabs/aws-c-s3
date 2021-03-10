@@ -14,8 +14,9 @@ export RUN_COMMAND={RUN_COMMAND}
 
 set -ex
 
-function publish_bw_metric() {
+function publish_bytes_in_metric() {
     set -ex
+
     aws cloudwatch put-metric-data \
         --no-cli-pager \
         --namespace S3Benchmark \
@@ -24,6 +25,11 @@ function publish_bw_metric() {
         --dimensions Project=$PROJECT_NAME,Branch=$BRANCH_NAME,InstanceType=$INSTANCE_TYPE \
         --storage-resolution 1 \
         --value $3 >> $PUBLISH_METRICS_LOG_FN
+}
+
+function publish_bytes_out_metric() {
+    set -ex
+
     aws cloudwatch put-metric-data \
         --no-cli-pager \
         --namespace S3Benchmark \
@@ -34,11 +40,19 @@ function publish_bw_metric() {
         --value $2 >> $PUBLISH_METRICS_LOG_FN
 }
 
-export -f publish_bw_metric
+export -f publish_bytes_in_metric
+export -f publish_bytes_out_metric
 
 $PROJECT_SHELL_SCRIPT "$RUN_COMMAND" > $RUN_PROJECT_LOG_FN &
 
-stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
-    | stdbuf -o0 grep -v total \
-    | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
-    | xargs -n3 -t -P 32 bash -c 'publish_bw_metric "$@"' _ &
+if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
+    stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
+        | stdbuf -o0 grep -v total \
+        | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
+        | xargs -n3 -t -P 32 bash -c 'publish_bytes_in_metric "$@"' _ &
+elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
+    stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
+        | stdbuf -o0 grep -v total \
+        | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
+        | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@"' _ &
+fi
