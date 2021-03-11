@@ -137,6 +137,7 @@ struct aws_s3_tester_meta_request_options {
     /* Get Object Meta Request specific options.*/
     struct {
         struct aws_byte_cursor object_path;
+        struct aws_input_stream *expected_contents;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -162,6 +163,8 @@ struct aws_s3_tester_send_meta_requests_options {
     size_t num_meta_requests;
 
     struct aws_s3_tester_meta_request_options *meta_request_test_options;
+
+    uint32_t dont_validate_puts : 1;
 };
 
 /* TODO Rename to something more generic such as "aws_s3_meta_request_test_data" */
@@ -170,6 +173,7 @@ struct aws_s3_meta_request_test_results {
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    struct aws_input_stream *expected_contents;
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
@@ -336,6 +340,10 @@ int aws_s3_tester_validate_put_object_results(
 struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
+
+void aws_s3_init_test_input_stream_look_up(struct aws_s3_tester *tester);
+
+void aws_s3_destroy_test_input_stream_look_up(struct aws_s3_tester *tester);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 

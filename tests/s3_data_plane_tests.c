@@ -3014,7 +3014,11 @@ static int s_test_s3_put_performance(struct aws_allocator *allocator, void *ctx)
     struct aws_s3_tester_meta_request_options meta_request_test_options_template = {
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .put_options = {.ensure_multipart = true, .object_size_mb = 5 * 1024},
+        .put_options =
+            {
+                .ensure_multipart = true,
+                .object_size_mb = 5 * 1024,
+            },
     };
 
     struct aws_s3_tester_meta_request_options meta_request_test_options[1600];
