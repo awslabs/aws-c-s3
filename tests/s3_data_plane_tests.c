@@ -2983,8 +2983,15 @@ static int s_test_s3_get_performance(struct aws_allocator *allocator, void *ctx)
     (void)ctx;
 
 #ifndef PERFORMANCE_TEST_LOGGING_ENABLED
-    struct aws_logger *logger = aws_logger_get();
-    aws_logger_set(NULL);
+    struct aws_logger_standard_options err_logger_options;
+    AWS_ZERO_STRUCT(err_logger_options);
+    err_logger_options.file = AWS_TESTING_REPORT_FD;
+    err_logger_options.level = AWS_LL_ERROR;
+    err_logger_options.filename = NULL;
+
+    struct aws_logger err_logger;
+    aws_logger_init_standard(&err_logger, aws_default_allocator(), &err_logger_options);
+    aws_logger_set(&err_logger);
 #endif
 
     struct aws_s3_tester tester;
@@ -3025,7 +3032,8 @@ static int s_test_s3_get_performance(struct aws_allocator *allocator, void *ctx)
     aws_s3_client_release(client);
 
 #ifndef PERFORMANCE_TEST_LOGGING_ENABLED
-    aws_logger_set(logger);
+    aws_logger_set(NULL);
+    aws_logger_clean_up(&err_logger);
 #endif
 
     aws_s3_tester_clean_up(&tester);
@@ -3038,8 +3046,15 @@ static int s_test_s3_put_performance(struct aws_allocator *allocator, void *ctx)
     (void)ctx;
 
 #ifndef PERFORMANCE_TEST_LOGGING_ENABLED
-    struct aws_logger *logger = aws_logger_get();
-    aws_logger_set(NULL);
+    struct aws_logger_standard_options err_logger_options;
+    AWS_ZERO_STRUCT(err_logger_options);
+    err_logger_options.file = AWS_TESTING_REPORT_FD;
+    err_logger_options.level = AWS_LL_ERROR;
+    err_logger_options.filename = NULL;
+
+    struct aws_logger err_logger;
+    aws_logger_init_standard(&err_logger, aws_default_allocator(), &err_logger_options);
+    aws_logger_set(&err_logger);
 #endif
 
     struct aws_s3_tester tester;
@@ -3086,7 +3101,8 @@ static int s_test_s3_put_performance(struct aws_allocator *allocator, void *ctx)
     aws_s3_client_release(client);
 
 #ifndef PERFORMANCE_TEST_LOGGING_ENABLED
-    aws_logger_set(logger);
+    aws_logger_set(NULL);
+    aws_logger_clean_up(&err_logger);
 #endif
 
     aws_s3_tester_clean_up(&tester);
