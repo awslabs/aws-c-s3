@@ -1,10 +1,30 @@
 include(AwsTestHarness)
 enable_testing()
 
-option(ENABLE_S3_NET_TESTS "Run S3 tests requiring internet connection and credentials" ON)
+option(ENABLE_S3_NET_TESTS "Run S3 tests requiring internet connection and credentials" OFF)
 option(ENABLE_S3_PERFORMANCE_TESTS "Run S3 performance tests" OFF)
+option(PERFORMANCE_TEST_LOGGING "Whether performance tests should log output" OFF)
+option(PERFORMANCE_TEST_VALIDATE_PUTS, "Whether put operations should be validated during performance tests" OFF)
 
-option(S3_TEST_BUCKET, "aws-crt-canary-bucket")
+set(S3_TEST_BUCKET "aws-crt-canary-bucket-eu-west-1" CACHE STRING "Name of the bucket to use for tests" )
+set(S3_TEST_REGION "eu-west-1" CACHE STRING "Name of the region to use for tests")
+set(PERFORMANCE_TEST_THROUGHPUT_TARGET_GBPS "100.0" CACHE STRING "Throughput target for performance tests")
+set(PERFORMANCE_TEST_NUM_TRANSFERS "1600" CACHE STRING "Number of transfers to do during performance tests")
+set(PERFORMANCE_TEST_UPLOAD_OBJECT_SIZE_MB "5120" CACHE STRING "Size of the object in megabytes to upload during performance tests")
+
+add_definitions(-DS3_TEST_BUCKET="${S3_TEST_BUCKET}")
+add_definitions(-DS3_TEST_REGION="${S3_TEST_REGION}")
+add_definitions(-DPERFORMANCE_TEST_THROUGHPUT_TARGET_GBPS=${PERFORMANCE_TEST_THROUGHPUT_TARGET_GBPS})
+add_definitions(-DPERFORMANCE_TEST_NUM_TRANSFERS=${PERFORMANCE_TEST_NUM_TRANSFERS})
+add_definitions(-DPERFORMANCE_TEST_UPLOAD_OBJECT_SIZE_MB=${PERFORMANCE_TEST_UPLOAD_OBJECT_SIZE_MB})
+
+if(PERFORMANCE_TEST_VALIDATE_PUTS)
+    add_definitions(-DPERFORMANCE_TEST_VALIDATE_PUTS)
+endif()
+
+if(PERFORMANCE_TEST_LOGGING)
+    add_definitions(-DPERFORMANCE_TEST_LOGGING_ENABLED)
+endif()
 
 macro(add_s3_net_test_case name)
     if (ENABLE_S3_NET_TESTS)

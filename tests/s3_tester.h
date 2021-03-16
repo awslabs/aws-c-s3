@@ -114,6 +114,7 @@ struct aws_s3_tester_client_options {
     enum aws_s3_client_tls_usage tls_usage;
     size_t part_size;
     size_t max_part_size;
+    double throughput_target_gbps;
     uint32_t setup_region : 1;
 };
 

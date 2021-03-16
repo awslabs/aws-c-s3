@@ -25,8 +25,8 @@
 #endif
 
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
-const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eu-west-1");
-const struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket-eu-west-1");
+const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(S3_TEST_REGION);
+const struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(S3_TEST_BUCKET);
 const struct aws_byte_cursor g_test_public_bucket_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff-us-west-2");
 const struct aws_byte_cursor g_s3_path_get_object_test_1MB =
@@ -989,6 +989,7 @@ int aws_s3_tester_client_new(
     struct aws_s3_client_config client_config = {
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
+        .throughput_target_gbps = options->throughput_target_gbps,
     };
 
     struct aws_tls_ctx_options tls_context_options;
@@ -1271,6 +1272,14 @@ int aws_s3_tester_send_meta_requests(
             struct aws_s3_tester_meta_request_options *original_put_options = NULL;
             aws_array_list_get_at(&validate_puts_list, &original_put_options, i);
 
+            uint64_t object_size_bytes = original_put_options->put_options.object_size_mb * 1024 * 1024;
+
+            if (original_put_options->put_options.ensure_multipart) {
+                if (object_size_bytes == 0) {
+                    object_size_bytes = client->part_size * 2;
+                }
+            }
+
             struct aws_http_message *message = original_put_options->message;
 
             struct aws_byte_cursor request_path;
@@ -1283,7 +1292,7 @@ int aws_s3_tester_send_meta_requests(
             validate_put_options->validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS;
             validate_put_options->get_options.object_path = request_path;
             validate_put_options->get_options.expected_contents =
-                aws_s3_test_input_stream_new(allocator, original_put_options->put_options.object_size_mb * 1024 * 1024);
+                aws_s3_test_input_stream_new(allocator, object_size_bytes);
         }
 
         struct aws_s3_tester_send_meta_requests_options options = {

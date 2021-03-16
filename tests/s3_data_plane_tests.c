@@ -2980,8 +2980,24 @@ static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocato
 
 AWS_TEST_CASE(test_s3_get_performance, s_test_s3_get_performance)
 static int s_test_s3_get_performance(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
-    struct aws_s3_tester_meta_request_options meta_request_test_options_template = {
+#ifndef PERFORMANCE_TEST_LOGGING_ENABLED
+    struct aws_logger *logger = aws_logger_get();
+    aws_logger_set(NULL);
+#endif
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options = {
+        .throughput_target_gbps = PERFORMANCE_TEST_THROUGHPUT_TARGET_GBPS,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    const struct aws_s3_tester_meta_request_options meta_request_test_options_template = {
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .get_options =
@@ -2990,7 +3006,7 @@ static int s_test_s3_get_performance(struct aws_allocator *allocator, void *ctx)
             },
     };
 
-    struct aws_s3_tester_meta_request_options meta_request_test_options[1600];
+    struct aws_s3_tester_meta_request_options meta_request_test_options[PERFORMANCE_TEST_NUM_TRANSFERS];
     const size_t num_meta_requests = sizeof(meta_request_test_options) / sizeof(meta_request_test_options[0]);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
@@ -2998,30 +3014,54 @@ static int s_test_s3_get_performance(struct aws_allocator *allocator, void *ctx)
     }
 
     struct aws_s3_tester_send_meta_requests_options options = {
-        .allocator = allocator,
+        .tester = &tester,
+        .client = client,
         .num_meta_requests = num_meta_requests,
         .meta_request_test_options = meta_request_test_options,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, NULL));
+
+    aws_s3_client_release(client);
+
+#ifndef PERFORMANCE_TEST_LOGGING_ENABLED
+    aws_logger_set(logger);
+#endif
+
+    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
 
 AWS_TEST_CASE(test_s3_put_performance, s_test_s3_put_performance)
 static int s_test_s3_put_performance(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+#ifndef PERFORMANCE_TEST_LOGGING_ENABLED
+    struct aws_logger *logger = aws_logger_get();
+    aws_logger_set(NULL);
+#endif
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options = {
+        .throughput_target_gbps = PERFORMANCE_TEST_THROUGHPUT_TARGET_GBPS,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     struct aws_s3_tester_meta_request_options meta_request_test_options_template = {
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .put_options =
             {
-                .ensure_multipart = true,
-                .object_size_mb = 5 * 1024,
+                .object_size_mb = PERFORMANCE_TEST_UPLOAD_OBJECT_SIZE_MB,
             },
     };
 
-    struct aws_s3_tester_meta_request_options meta_request_test_options[1600];
+    struct aws_s3_tester_meta_request_options meta_request_test_options[PERFORMANCE_TEST_NUM_TRANSFERS];
     const size_t num_meta_requests = sizeof(meta_request_test_options) / sizeof(meta_request_test_options[0]);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
@@ -3029,12 +3069,27 @@ static int s_test_s3_put_performance(struct aws_allocator *allocator, void *ctx)
     }
 
     struct aws_s3_tester_send_meta_requests_options options = {
-        .allocator = allocator,
+        .tester = &tester,
+        .client = client,
         .num_meta_requests = num_meta_requests,
         .meta_request_test_options = meta_request_test_options,
     };
 
+#ifdef PERFORMANCE_TEST_VALIDATE_PUTS
+    options.dont_validate_puts = false;
+#else
+    options.dont_validate_puts = true;
+#endif
+
     ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, NULL));
+
+    aws_s3_client_release(client);
+
+#ifndef PERFORMANCE_TEST_LOGGING_ENABLED
+    aws_logger_set(logger);
+#endif
+
+    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
