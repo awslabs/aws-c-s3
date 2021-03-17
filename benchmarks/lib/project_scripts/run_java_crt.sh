@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+cd $USER_DIR
+
 if [ $1 = "SETUP" ]; then
     sudo yum install java-1.8.0-devel -y
 

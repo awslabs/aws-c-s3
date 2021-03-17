@@ -32,7 +32,7 @@ function show_bandwidth() {
 export -f show_bandwidth
 
 function show_connection_count() {
-    while true; do echo $(date --rfc-3339=seconds) Connections: $(lsof -i TCP:https | wc -l); sleep 1; done
+    while true; do echo $(date --rfc-3339=seconds) Connections: $(sudo lsof -i TCP:https | wc -l); sleep 1; done
 }
 
 export -f show_connection_count

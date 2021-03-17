@@ -17,6 +17,34 @@ export SHOW_INSTANCE_DASHBOARD_USER_DEST=/home/$USER_NAME/show_instance_dashboar
 export PERF_SCRIPT_TEMP=/tmp/perf_script_temp.tmp
 export DOWNLOAD_PERF_SCRIPT=/home/$USER_NAME/download_performance.sh
 export UPLOAD_PERF_SCRIPT=/home/$USER_NAME/upload_performance.sh
+export USER_DIR=/home/$USER_NAME/
+
+function publish_bytes_in_metric() {
+
+    aws cloudwatch put-metric-data \
+        --no-cli-pager \
+        --namespace S3Benchmark \
+        --metric-name BytesIn \
+        --unit Bytes \
+        --dimensions Project=$PROJECT_NAME,Branch=$BRANCH_NAME,InstanceType=$INSTANCE_TYPE \
+        --storage-resolution 1 \
+        --value $3 >> $PUBLISH_METRICS_LOG_FN
+}
+
+function publish_bytes_out_metric() {
+
+    aws cloudwatch put-metric-data \
+        --no-cli-pager \
+        --namespace S3Benchmark \
+        --metric-name BytesOut \
+        --unit Bytes \
+        --dimensions Project=$PROJECT_NAME,Branch=$BRANCH_NAME,InstanceType=$INSTANCE_TYPE \
+        --storage-resolution 1 \
+        --value $2 >> $PUBLISH_METRICS_LOG_FN
+}
+
+export -f publish_bytes_in_metric
+export -f publish_bytes_out_metric
 
 sudo yum update -y
 sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
@@ -45,6 +73,8 @@ aws ec2 monitor-instances --instance-ids $INSTANCE_ID
 
 sudo sysctl kernel.perf_event_paranoid=0
 
+sudo mkdir /home/$USER_NAME/
+
 sudo chmod +x $PROJECT_SHELL_SCRIPT
 ${PROJECT_SHELL_SCRIPT} 'SETUP'
 
@@ -68,7 +98,17 @@ sudo chmod +x $DOWNLOAD_PERF_SCRIPT
 sudo chmod +x $UPLOAD_PERF_SCRIPT
 
 if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
+    stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
+        | stdbuf -o0 grep -v total \
+        | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
+        | xargs -n3 -t -P 32 bash -c 'publish_bytes_in_metric "$@"' _ &
+
     $DOWNLOAD_PERF_SCRIPT
 elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
+    stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
+        | stdbuf -o0 grep -v total \
+        | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
+        | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@"' _ &
+
     $UPLOAD_PERF_SCRIPT
 fi

@@ -6,7 +6,17 @@ import { BenchmarksStack } from '../lib/benchmarks-stack';
 import { DashboardStack } from '../lib/dashboard-stack';
 
 const app = new cdk.App();
+let benchmarks_stack_name = app.node.tryGetContext('StackName') as string;
+let dashboard_stack_name = app.node.tryGetContext('StackName') as string;
 
-new BenchmarksStack(app, 'BenchmarksStack', { env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
+if(benchmarks_stack_name == null) {
+    benchmarks_stack_name = 'BenchmarksStack';
+}
 
-new DashboardStack(app, 'DashboardStack', { env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
+if(dashboard_stack_name == null) {
+    dashboard_stack_name = 'DashboardStack';
+}
+
+new BenchmarksStack(app, benchmarks_stack_name, { env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
+
+new DashboardStack(app, dashboard_stack_name, { env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
