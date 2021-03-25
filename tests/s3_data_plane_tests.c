@@ -2666,9 +2666,7 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
 
 static int s_s3_test_user_agent_meta_request_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare) {
+    struct aws_s3_request *request) {
 
     AWS_ASSERT(meta_request != NULL);
 
@@ -2681,7 +2679,7 @@ static int s_s3_test_user_agent_meta_request_prepare_request(
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    if (original_meta_request_vtable->prepare_request(meta_request, client, vip_connection, is_initial_prepare)) {
+    if (original_meta_request_vtable->prepare_request(meta_request, request)) {
         return AWS_OP_ERR;
     }
 
@@ -2693,7 +2691,6 @@ static int s_s3_test_user_agent_meta_request_prepare_request(
 
     struct aws_byte_cursor expected_user_agent_value = aws_byte_cursor_from_buf(&expected_user_agent_value_buf);
 
-    struct aws_s3_request *request = vip_connection->request;
     struct aws_http_message *message = request->send_data.message;
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
 

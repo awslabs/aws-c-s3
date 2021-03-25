@@ -45,16 +45,17 @@ static const uint32_t s_connection_timeout_ms = 3000;
 static const uint32_t s_max_requests_multiplier = 4;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 5.0;
+static const double s_throughput_per_vip_gbps = 3.33;
 
 /* Preferred amount of active vip connections per meta request type. */
 static const uint32_t s_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE_MAX] = {
-    20, /* AWS_S3_META_REQUEST_TYPE_DEFAULT */
+    10, /* AWS_S3_META_REQUEST_TYPE_DEFAULT */
     10, /* AWS_S3_META_REQUEST_TYPE_GET_OBJECT */
-    20, /* AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
+    10, /* AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
 };
 
-static const uint32_t s_num_connections_per_vip = 20;
+/* Should be max of s_num_conns_per_vip_meta_request_look_up */
+static const uint32_t s_num_connections_per_vip = 10;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
 static const uint8_t s_max_request_jitter_range = 50;
@@ -135,6 +136,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
 
+static bool s_s3_client_http_connection_is_open(const struct aws_http_connection *connection);
+
 /* Default remove-meta-request function to be used in the client vtable. */
 static void s_s3_client_acquire_http_connection_default(
     struct aws_s3_client *client,
@@ -150,7 +153,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .acquire_http_connection = s_s3_client_acquire_http_connection_default,
     .add_vips = s_s3_client_add_vips_default,
     .remove_vips = s_s3_client_remove_vips_default,
-    .http_connection_is_open = aws_http_connection_is_open,
+    .http_connection_is_open = s_s3_client_http_connection_is_open,
     .vip_connection_destroy = s_s3_vip_connection_destroy_default,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
@@ -1589,6 +1592,7 @@ static void s_s3_client_prepare_callback_queue_request(
 void aws_s3_client_update_connections_threaded(struct aws_s3_client *client, bool client_active) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->http_connection_is_open);
 
     struct aws_linked_list vip_connections_updates;
     aws_linked_list_init(&vip_connections_updates);
@@ -1798,6 +1802,10 @@ error_clean_up:
         client, vip_connection, error_code, AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED);
 }
 
+static bool s_s3_client_http_connection_is_open(const struct aws_http_connection *connection) {
+    return aws_http_connection_is_open(connection);
+}
+
 static void s_s3_client_acquire_http_connection(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection) {
@@ -1815,6 +1823,8 @@ static void s_s3_client_acquire_http_connection_default(
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback) {
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->http_connection_is_open);
     AWS_PRECONDITION(vip_connection);
 
     struct aws_http_connection **http_connection = &vip_connection->http_connection;
@@ -1841,7 +1851,7 @@ static void s_s3_client_acquire_http_connection_default(
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT, "id=%p VIP Connection %p hit request limit.", (void *)client, (void *)vip_connection);
 
-        } else if (!aws_http_connection_is_open(*http_connection)) {
+        } else if (!client->vtable->http_connection_is_open(*http_connection)) {
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT,
                 "id=%p VIP Connection %p being released because it is not open.",
