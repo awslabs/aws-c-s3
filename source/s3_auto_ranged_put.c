@@ -44,7 +44,6 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_put_request_finished,
-    .delivered_requests = aws_s3_meta_request_delivered_requests_default,
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
 };

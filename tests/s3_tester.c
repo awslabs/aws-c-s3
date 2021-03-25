@@ -491,9 +491,47 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
     aws_mutex_unlock(&tester->synced_data.lock);
 }
 
+static void s_s3_client_acquire_http_connection_empty(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    aws_http_connection_manager_on_connection_setup_fn *callback) {
+    (void)client;
+    (void)vip_connection;
+    (void)callback;
+}
+
+static void s_s3_client_schedule_process_work_synced_empty(struct aws_s3_client *client) {
+    (void)client;
+}
+
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
-    .acquire_http_connection = aws_s3_client_acquire_http_connection_empty,
+    .acquire_http_connection = s_s3_client_acquire_http_connection_empty,
+    .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
 };
+
+static void s_s3_mock_client_start_destroy(void *user_data) {
+    struct aws_s3_client *client = user_data;
+    AWS_ASSERT(client);
+
+    aws_small_block_allocator_destroy(client->sba_allocator);
+
+    aws_mem_release(client->allocator, client);
+}
+
+struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_allocator *allocator) {
+    struct aws_s3_client *mock_client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
+
+    mock_client->allocator = allocator;
+    mock_client->vtable = &g_aws_s3_client_mock_vtable;
+
+    aws_ref_count_init(
+        &mock_client->ref_count, mock_client, (aws_simple_completion_callback *)s_s3_mock_client_start_destroy);
+
+    aws_mutex_init(&mock_client->synced_data.lock);
+
+    mock_client->sba_allocator = aws_small_block_allocator_new(allocator, false);
+    return mock_client;
+}
 
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
@@ -510,7 +548,7 @@ struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_test
     return message;
 }
 
-static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_request) {
+static void s_s3_mock_meta_request_destroy(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_mem_release(meta_request->allocator, meta_request->impl);
@@ -523,7 +561,7 @@ static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
     .finished_request = aws_s3_meta_request_finished_request_empty,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
-    .destroy = s_s3_empty_meta_request_destroy,
+    .destroy = s_s3_mock_meta_request_destroy,
 };
 
 struct aws_s3_empty_meta_request {
@@ -1355,15 +1393,6 @@ int aws_s3_tester_validate_put_object_results(
     }
 
     return AWS_OP_SUCCESS;
-}
-
-void aws_s3_client_acquire_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
-    (void)client;
-    (void)vip_connection;
-    (void)callback;
 }
 
 bool aws_s3_meta_request_update_empty(

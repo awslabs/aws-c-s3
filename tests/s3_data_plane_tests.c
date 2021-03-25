@@ -14,6 +14,7 @@
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
+#include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
@@ -91,6 +92,151 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     aws_http_message_release(request_message);
     aws_s3_meta_request_release(meta_request);
 
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+struct s3_test_body_streaming_user_data {
+    struct aws_s3_tester *tester;
+    uint64_t expected_range_start;
+    uint64_t received_body_size;
+};
+
+static int s_s3_meta_request_test_body_streaming_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+    (void)meta_request;
+    (void)body;
+    (void)range_start;
+
+    struct s3_test_body_streaming_user_data *body_streaming_user_data = user_data;
+
+    body_streaming_user_data->received_body_size += body->len;
+
+    ASSERT_TRUE(body_streaming_user_data->expected_range_start == range_start);
+    body_streaming_user_data->expected_range_start += body->len;
+
+    aws_s3_tester_inc_counter1(body_streaming_user_data->tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_meta_request_body_streaming, s_test_s3_meta_request_body_streaming)
+static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    const uint32_t part_range0_start = 1;
+    const uint32_t part_range0_end = part_range0_start + 4;
+
+    const uint32_t part_range1_start = part_range0_end + 1;
+    const uint32_t part_range1_end = part_range1_start + 4;
+
+    const size_t request_response_body_size = 16;
+
+    struct aws_byte_buf response_body_source_buffer;
+    aws_byte_buf_init(&response_body_source_buffer, allocator, request_response_body_size);
+
+    const struct aws_byte_cursor test_byte_cursor = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("0");
+
+    for (size_t i = 0; i < request_response_body_size; ++i) {
+        aws_byte_buf_append(&response_body_source_buffer, &test_byte_cursor);
+    }
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct s3_test_body_streaming_user_data body_streaming_user_data = {
+        .tester = &tester,
+    };
+
+    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(allocator);
+
+    struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new(&tester);
+    ASSERT_TRUE(meta_request != NULL);
+
+    struct aws_event_loop_group *event_loop_group = aws_event_loop_group_new_default(allocator, 0, NULL);
+    aws_s3_client_acquire(mock_client);
+    meta_request->client = mock_client;
+    meta_request->user_data = &body_streaming_user_data;
+    *((size_t *)&meta_request->part_size) = request_response_body_size;
+    meta_request->body_callback = s_s3_meta_request_test_body_streaming_callback;
+    meta_request->io_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
+
+    /* Queue the first range of parts in order. Each part should be flushed one-by-one. */
+    {
+        for (uint32_t part_number = part_range0_start; part_number <= part_range0_end; ++part_number) {
+            struct aws_s3_request *request = aws_s3_request_new(meta_request, 0, part_number, 0);
+            aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
+
+            aws_s3_tester_set_counter1_desired(&tester, part_number);
+
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+            ASSERT_TRUE(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
+
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+
+            aws_s3_tester_wait_for_counters(&tester);
+
+            aws_s3_request_release(request);
+        }
+    }
+
+    aws_s3_tester_set_counter1_desired(&tester, part_range1_end);
+
+    /* Queue parts for second range, but skip over the first part.*/
+    {
+        uint32_t num_parts_queued = 0;
+
+        ASSERT_TRUE(part_range1_start != part_range1_end);
+
+        for (uint32_t part_number = part_range1_start + 1; part_number <= part_range1_end; ++part_number) {
+            struct aws_s3_request *request = aws_s3_request_new(meta_request, 0, part_number, 0);
+            aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
+
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+
+            aws_s3_request_release(request);
+            ++num_parts_queued;
+        }
+
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        ASSERT_TRUE(
+            aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == num_parts_queued);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+
+    /* Stream the last part of the body, which should flush the priority queue. */
+    {
+        struct aws_s3_request *request = aws_s3_request_new(meta_request, 0, part_range1_start, 0);
+        aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
+
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        ASSERT_TRUE(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+
+        aws_s3_request_release(request);
+
+        aws_s3_tester_wait_for_counters(&tester);
+    }
+
+    ASSERT_TRUE(body_streaming_user_data.received_body_size == (request_response_body_size * part_range1_end));
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_client_release(mock_client);
+    aws_event_loop_group_release(event_loop_group);
+    aws_byte_buf_clean_up(&response_body_source_buffer);
     aws_s3_tester_clean_up(&tester);
 
     return 0;

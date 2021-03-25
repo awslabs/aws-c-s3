@@ -170,11 +170,12 @@ struct aws_s3_client {
     void *shutdown_callback_user_data;
 
     struct {
+
         /* Number of requests being sent/received over network. */
         struct aws_atomic_var num_requests_network_io;
 
         /* Number of requests sitting in their meta request priority queue, waiting to be streamed. */
-        struct aws_atomic_var num_requests_queued_waiting;
+        struct aws_atomic_var num_requests_stream_queued_waiting;
 
         /* Number of requests currently scheduled to be streamed or are actively being streamed. */
         struct aws_atomic_var num_requests_streaming;
@@ -271,19 +272,6 @@ void aws_s3_client_notify_connection_finished(
 
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request);
 
-typedef void(aws_s3_client_stream_response_body_callback_fn)(
-    int error_code,
-    uint32_t num_failed,
-    uint32_t num_successful,
-    void *user_data);
-
-void aws_s3_client_stream_response_body(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request,
-    struct aws_linked_list *requests,
-    aws_s3_client_stream_response_body_callback_fn callback,
-    void *user_data);
-
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
@@ -318,6 +306,9 @@ int aws_s3_client_add_vips(struct aws_s3_client *client, const struct aws_array_
 /* Removes vips associated with each of the given host addresses. */
 AWS_S3_API
 void aws_s3_client_remove_vips(struct aws_s3_client *client, const struct aws_array_list *host_addresses);
+
+AWS_S3_API
+void aws_s3_client_schedule_process_work(struct aws_s3_client *client);
 
 AWS_S3_API
 void aws_s3_client_lock_synced_data(struct aws_s3_client *client);
