@@ -45,7 +45,16 @@ static const uint32_t s_connection_timeout_ms = 3000;
 static const uint32_t s_max_requests_multiplier = 4;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 5.0;
+static const double s_throughput_per_vip_gbps = 3.33;
+
+/* Preferred amount of active vip connections per meta request type. */
+static const uint32_t s_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE_MAX] = {
+    10, /* AWS_S3_META_REQUEST_TYPE_DEFAULT */
+    10, /* AWS_S3_META_REQUEST_TYPE_GET_OBJECT */
+    10, /* AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
+};
+
+/* Should be max of s_num_conns_per_vip_meta_request_look_up */
 static const uint32_t s_num_connections_per_vip = 10;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
@@ -84,7 +93,9 @@ static void s_s3_vip_finish_destroy(void *user_data);
 /* Callback for when the vip's connection manager has shut down. */
 static void s_s3_vip_http_connection_manager_shutdown_callback(void *user_data);
 
-static void s_s3_client_process_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+static void s_s3_client_setup_vip_connection_retry_token(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection);
 
 /* Handles acquiring an HTTP connection for the caller, given the vip_connection reference.  (Calls the corresponding
  * virtual function to do so.) */
@@ -113,11 +124,6 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
-static void s_s3_client_assign_requests_to_connections_threaded(
-    struct aws_s3_client *client,
-    bool client_active,
-    uint32_t meta_request_update_flags);
-
 /* Ask the host resolver to start resolving addresses. */
 static int s_s3_client_start_resolving_addresses(struct aws_s3_client *client);
 
@@ -130,23 +136,50 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
 
+static bool s_s3_client_http_connection_is_open(const struct aws_http_connection *connection);
+
 /* Default remove-meta-request function to be used in the client vtable. */
 static void s_s3_client_acquire_http_connection_default(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
 
+static void s_s3_vip_connection_destroy_default(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection);
+
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory_default,
     .acquire_http_connection = s_s3_client_acquire_http_connection_default,
     .add_vips = s_s3_client_add_vips_default,
     .remove_vips = s_s3_client_remove_vips_default,
+    .http_connection_is_open = s_s3_client_http_connection_is_open,
+    .vip_connection_destroy = s_s3_vip_connection_destroy_default,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {
     s_dns_host_address_ttl_seconds = ttl;
+}
+
+uint32_t aws_s3_client_get_max_active_connections(struct aws_s3_client *client, uint32_t num_connections_per_vip) {
+    AWS_PRECONDITION(client);
+
+    if (num_connections_per_vip == 0) {
+        num_connections_per_vip = s_num_connections_per_vip;
+    }
+
+    return client->ideal_vip_count * num_connections_per_vip;
+}
+
+uint32_t aws_s3_client_get_max_requests_in_flight(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+    return aws_s3_client_get_max_active_connections(client, 0) * s_max_requests_multiplier;
+}
+
+uint32_t aws_s3_client_get_max_requests_prepare(struct aws_s3_client *client) {
+    return aws_s3_client_get_max_active_connections(client, 0);
 }
 
 uint32_t aws_s3_client_get_max_allocated_vip_count(struct aws_s3_client *client) {
@@ -199,14 +232,19 @@ struct aws_s3_client *aws_s3_client_new(
     aws_linked_list_init(&client->synced_data.vips);
     aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
+    aws_linked_list_init(&client->synced_data.prepared_requests);
 
     aws_linked_list_init(&client->threaded_data.idle_vip_connections);
     aws_linked_list_init(&client->threaded_data.meta_requests);
+    aws_linked_list_init(&client->threaded_data.request_queue);
 
     aws_atomic_init_int(&client->stats.num_requests_network_io, 0);
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming, 0);
+    aws_atomic_init_int(&client->stats.num_requests_in_flight, 0);
     aws_atomic_init_int(&client->stats.num_allocated_vip_connections, 0);
+    aws_atomic_init_int(&client->stats.num_active_vip_connections, 0);
+    aws_atomic_init_int(&client->stats.num_warm_vip_connections, 0);
 
     /* Store our client bootstrap. */
     client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
@@ -750,6 +788,86 @@ static void s_s3_vip_finish_destroy(void *user_data) {
     }
 }
 
+void aws_s3_client_set_vip_connection_warm(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_warm) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(vip_connection);
+
+    if ((bool)vip_connection->is_warm == is_warm) {
+        return;
+    }
+
+    vip_connection->is_warm = is_warm;
+
+    if (is_warm) {
+        aws_atomic_fetch_add(&client->stats.num_warm_vip_connections, 1);
+    } else {
+        aws_atomic_fetch_sub(&client->stats.num_warm_vip_connections, 1);
+    }
+}
+
+void aws_s3_client_set_vip_connection_active(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    bool is_active) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(vip_connection);
+
+    if ((bool)vip_connection->is_active == is_active) {
+        return;
+    }
+
+    vip_connection->is_active = is_active;
+
+    if (is_active) {
+        aws_atomic_fetch_add(&client->stats.num_active_vip_connections, 1);
+    } else {
+        aws_atomic_fetch_sub(&client->stats.num_active_vip_connections, 1);
+    }
+}
+
+uint32_t aws_s3_client_queue_requests_threaded(
+    struct aws_s3_client *client,
+    struct aws_linked_list *request_list,
+    bool queue_front) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(request_list);
+
+    uint32_t request_list_size = 0;
+
+    for (struct aws_linked_list_node *node = aws_linked_list_begin(request_list);
+         node != aws_linked_list_end(request_list);
+         node = aws_linked_list_next(node)) {
+        ++request_list_size;
+    }
+
+    if (queue_front) {
+        aws_linked_list_move_all_front(&client->threaded_data.request_queue, request_list);
+    } else {
+        aws_linked_list_move_all_back(&client->threaded_data.request_queue, request_list);
+    }
+
+    client->threaded_data.request_queue_size += request_list_size;
+    return request_list_size;
+}
+
+struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+
+    if (aws_linked_list_empty(&client->threaded_data.request_queue)) {
+        return NULL;
+    }
+
+    struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&client->threaded_data.request_queue);
+    struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
+
+    --client->threaded_data.request_queue_size;
+
+    return request;
+}
+
 static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
     AWS_PRECONDITION(vip);
     AWS_PRECONDITION(vip->owning_client);
@@ -757,14 +875,18 @@ static void s_s3_vip_sub_num_vip_connections_synced(struct aws_s3_vip *vip) {
     --vip->synced_data.num_vip_connections;
 }
 
-/* Destroy a VIP Connection structure. */
 void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->vip_connection_destroy);
 
-    if (client == NULL) {
-        AWS_ASSERT(vip_connection == NULL);
-        return;
-    }
+    client->vtable->vip_connection_destroy(client, vip_connection);
+}
 
+/* Destroy a VIP Connection structure. */
+static void s_s3_vip_connection_destroy_default(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection) {
     if (vip_connection == NULL) {
         return;
     }
@@ -776,6 +898,9 @@ void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_v
         "id=%p Destroying VIP Connection owned by vip %p.",
         (void *)vip_connection,
         (void *)owning_vip);
+
+    aws_s3_client_set_vip_connection_warm(client, vip_connection, false);
+    aws_s3_client_set_vip_connection_active(client, vip_connection, false);
 
     aws_atomic_fetch_sub(&owning_vip->owning_client->stats.num_allocated_vip_connections, 1);
 
@@ -1150,7 +1275,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_request_work_list);
 
     /*******************/
-    /* Step 1: Move everything into thread local memory. */
+    /* Step 1: Move relevant data into thread local memory. */
     /*******************/
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT,
@@ -1166,17 +1291,25 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     client->synced_data.process_work_task_in_progress = true;
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
+
     aws_linked_list_move_all_back(
         &client->threaded_data.idle_vip_connections, &client->synced_data.pending_vip_connection_updates);
 
-    /* TODO aws_sub_u32_checked */
-    client->threaded_data.num_requests_in_flight -= client->synced_data.pending_request_count;
-    client->synced_data.pending_request_count = 0;
+    uint32_t num_requests_queued =
+        aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
+
+    int sub_result = aws_sub_u32_checked(
+        client->threaded_data.num_requests_being_prepared,
+        num_requests_queued,
+        &client->threaded_data.num_requests_being_prepared);
+
+    AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+    (void)sub_result;
 
     aws_s3_client_unlock_synced_data(client);
 
     /*******************/
-    /* Step 2: Process any meta request work. */
+    /* Step 2: Push meta requests into the thread local list if they haven't already been scheduled. */
     /*******************/
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT, "id=%p s_s3_client_process_work_default - Processing any new meta requests.", (void *)client);
@@ -1204,53 +1337,36 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         aws_mem_release(client->sba_allocator, meta_request_work);
     }
 
-    /* If we have an invalid endpoint, then finish up all of the meta requests. */
-    /* TODO once we have multiple bucket support, this will should only stop meta requests attached to bad endpoints. */
-    if (invalid_endpoint) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT,
-            "id=%p s_s3_client_process_work_default - Updating meta requests with 'no-endpoint-connections' flag.",
-            (void *)client);
+    /*******************/
+    /* Step 3: Update relevant meta requests and connections. */
+    /*******************/
+    {
+        if (invalid_endpoint) {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT, "id=%p Updating meta requests with 'no-endpoint-connections' flag.", (void *)client);
+            aws_s3_client_update_meta_requests_threaded(
+                client, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS);
+        } else {
 
-        while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
-            struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
-            struct aws_s3_meta_request *meta_request =
-                AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
+            /* We first update meta requests with the "conservative" flag. This will tell each meta request that
+             * connections can still potentially be shared between meta requests.  (ie: an individual meta request
+             * shouldn't necessarily try to issue as many requests as it can, unless thats okay for performance.)
+             */
+            AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Updating meta requests with 'conservative' flag.", (void *)client);
+            aws_s3_client_update_meta_requests_threaded(client, AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE);
 
-            bool work_remaining =
-                aws_s3_meta_request_update(meta_request, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS, NULL);
-
-            /* While no meta request should be spinning up new requests in this case, it is possible that there is
-             * something outside of network connectivity that a meta request is waiting for. (example: parts being
-             * streamed to the caller) This may require the work task function to be called multiple times before every
-             * meta request can be removed. */
-            if (!work_remaining) {
-                s_s3_client_remove_meta_request_threaded(client, meta_request);
-            }
+            /* If we still have connections left over, then don't pass any flags, indicating to meta requests that any
+             * logic for better sharing connections between meta requests can now be ignored. */
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT, "id=%p Updating meta requests without 'conservative' flag.", (void *)client);
+            aws_s3_client_update_meta_requests_threaded(client, 0);
         }
+
+        /* Update connections, assigning requests where possible. */
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT, "id=%p Updating vip connections, assigning requests where possible.", (void *)client);
+        aws_s3_client_update_connections_threaded(client, client_active);
     }
-
-    /*******************/
-    /* Step 3: Go through all VIP connections, cleaning up old ones, and assigning requests where possible. */
-    /*******************/
-
-    /* We first assign requests to connections with the "conservative" flag. This will tell each meta request that
-     * connections can still potentially be shared between meta requests.  (ie: an individual meta request shouldn't
-     * necessarily try to issue as many requests as it can, unless it's known that that won't impact performance.) */
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_CLIENT,
-        "id=%p s_s3_client_process_work_default - Updating meta requests and connections with 'conservative' flag.",
-        (void *)client);
-    s_s3_client_assign_requests_to_connections_threaded(
-        client, client_active, AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE);
-
-    /* If we still have connections left over, then don't pass any flags, indicating to meta requests that any logic for
-     * better sharing connections between meta requests can now be ignored. */
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_CLIENT,
-        "id=%p s_s3_client_process_work_default - Updating meta requests and connections without 'conservative' flag.",
-        (void *)client);
-    s_s3_client_assign_requests_to_connections_threaded(client, client_active, 0);
 
     /*******************/
     /* Step 4: Log client stats. */
@@ -1264,29 +1380,36 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             ++num_idle_connections;
         }
 
+        uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
         uint32_t num_requests_network_io = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_io);
         uint32_t num_requests_stream_queued_waiting =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting);
         uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming);
-        uint32_t total_approx_requests =
-            num_requests_network_io + num_requests_stream_queued_waiting + num_requests_streaming;
+        uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
+                                         num_requests_streaming + client->threaded_data.num_requests_being_prepared +
+                                         client->threaded_data.request_queue_size;
 
         uint32_t num_allocated_connections =
             (uint32_t)aws_atomic_load_int(&client->stats.num_allocated_vip_connections);
+        uint32_t num_active_vip_connections = (uint32_t)aws_atomic_load_int(&client->stats.num_active_vip_connections);
 
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
-            "Requests-in-flight(approx/exact):%d/%d  Requests-network:%d  Requests-waiting:%d  Requests-streaming:%d  "
-            "Idle-connections:%d  Allocated-connections:%d  Active-connections:%d",
+            "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests_queued:%d  "
+            "Requests-network:%d  Requests-waiting:%d  Requests-streaming:%d  Idle-connections:%d  "
+            "Allocated-connections:%d  Active-connections:%d",
+            (void *)client,
             total_approx_requests,
-            client->threaded_data.num_requests_in_flight,
+            num_requests_in_flight,
+            client->threaded_data.num_requests_being_prepared,
+            client->threaded_data.request_queue_size,
             num_requests_network_io,
             num_requests_stream_queued_waiting,
             num_requests_streaming,
             num_idle_connections,
             num_allocated_connections,
-            client->threaded_data.num_active_vip_connections);
+            num_active_vip_connections);
     }
 
     /*******************/
@@ -1336,109 +1459,227 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 }
 
-static void s_s3_client_assign_requests_to_connections_threaded(
-    struct aws_s3_client *client,
-    bool client_active,
-    uint32_t meta_request_update_flags) {
+static void s_s3_client_prepare_callback_queue_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code,
+    void *user_data);
+
+void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client, uint32_t meta_request_update_flags) {
     AWS_PRECONDITION(client);
 
-    struct aws_linked_list vip_connections_updates;
-    aws_linked_list_init(&vip_connections_updates);
+    /* If we have an invalid endpoint, then try to finish any work in progress. */
+    /* TODO once we have multiple bucket support, this should only stop meta requests attached to bad endpoints. */
+    if ((meta_request_update_flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) != 0) {
+
+        /* Make sure that the request queue is empty. */
+        while (!aws_linked_list_empty(&client->threaded_data.request_queue)) {
+            struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
+            aws_s3_meta_request_finished_request(request->meta_request, request, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
+            aws_s3_request_release(request);
+        }
+
+        struct aws_linked_list_node *meta_request_node = aws_linked_list_begin(&client->threaded_data.meta_requests);
+
+        while (meta_request_node != aws_linked_list_end(&client->threaded_data.meta_requests)) {
+            struct aws_s3_meta_request *meta_request =
+                AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
+
+            struct aws_linked_list_node *next_meta_request_node = aws_linked_list_next(meta_request_node);
+
+            bool work_remaining =
+                aws_s3_meta_request_update(meta_request, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS, NULL);
+
+            /* While no meta request should be spinning up new requests in this case, it is possible that there is
+             * something outside of network connectivity that a meta request is waiting for. (example: parts being
+             * streamed to the caller) This may require the work task function to be called multiple times before every
+             * meta request can be removed. */
+            if (!work_remaining) {
+                s_s3_client_remove_meta_request_threaded(client, meta_request);
+            }
+
+            meta_request_node = next_meta_request_node;
+        }
+
+        return;
+    }
+
+    /* Don't spin up new work if we haven't made any connections. */
+    if (aws_atomic_load_int(&client->stats.num_active_vip_connections) == 0 &&
+        aws_linked_list_empty(&client->threaded_data.idle_vip_connections)) {
+        return;
+    }
+
+    const uint32_t max_requests_in_flight = aws_s3_client_get_max_requests_in_flight(client);
+    const uint32_t max_requests_prepare = aws_s3_client_get_max_requests_prepare(client);
 
     struct aws_linked_list meta_requests_work_remaining;
     aws_linked_list_init(&meta_requests_work_remaining);
 
+    uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+
+    /* While our number of prepared/queued requests is less than the max, and the total requests in flight is also less
+     * than the maximum, and we have meta requests to get requests from, then try to prepare requests for being
+     * queued. */
+    while ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) <
+               max_requests_prepare &&
+           num_requests_in_flight < max_requests_in_flight &&
+           !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+
+        struct aws_linked_list_node *meta_request_node = aws_linked_list_begin(&client->threaded_data.meta_requests);
+        struct aws_s3_meta_request *meta_request =
+            AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
+
+        struct aws_s3_request *request = NULL;
+
+        /* Try to grab the next request from the meta request. */
+        bool work_remaining = aws_s3_meta_request_update(meta_request, meta_request_update_flags, &request);
+
+        if (work_remaining) {
+            /* If there is work remaining, but we didn't get a request back, take the meta request out of the list so
+             * that we don't use it again during this function, with the intention of putting it back in the list before
+             * this function ends. */
+            if (request == NULL) {
+                aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
+                aws_linked_list_push_back(
+                    &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
+            } else {
+                request->tracked_by_client = true;
+
+                ++client->threaded_data.num_requests_being_prepared;
+
+                num_requests_in_flight = (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+
+                aws_s3_meta_request_prepare_request(
+                    meta_request, request, s_s3_client_prepare_callback_queue_request, client);
+            }
+        } else {
+            s_s3_client_remove_meta_request_threaded(client, meta_request);
+        }
+    }
+
+    aws_linked_list_move_all_front(&client->threaded_data.meta_requests, &meta_requests_work_remaining);
+}
+
+static void s_s3_client_prepare_callback_queue_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_client *client = user_data;
+    AWS_PRECONDITION(client);
+
+    if (error_code != AWS_ERROR_SUCCESS) {
+        aws_s3_meta_request_finished_request(meta_request, request, error_code);
+
+        aws_s3_request_release(request);
+        request = NULL;
+    }
+
+    aws_s3_client_lock_synced_data(client);
+
+    if (error_code == AWS_ERROR_SUCCESS) {
+        aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+    }
+
+    s_s3_client_schedule_process_work_synced(client);
+    aws_s3_client_unlock_synced_data(client);
+}
+
+void aws_s3_client_update_connections_threaded(struct aws_s3_client *client, bool client_active) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->http_connection_is_open);
+
+    struct aws_linked_list vip_connections_updates;
+    aws_linked_list_init(&vip_connections_updates);
+
+    struct aws_linked_list left_over_requests;
+    aws_linked_list_init(&left_over_requests);
+
     /* Move all idle connections into our local update list. */
     aws_linked_list_swap_contents(&vip_connections_updates, &client->threaded_data.idle_vip_connections);
 
-    const uint32_t max_num_active_connections = client->ideal_vip_count * s_num_connections_per_vip;
-    const uint32_t max_requests_in_flight = max_num_active_connections * s_max_requests_multiplier;
-
+    /* Clean up any connections that are dead, and sort warm connections to the front of the list. */
     while (!aws_linked_list_empty(&vip_connections_updates)) {
         struct aws_linked_list_node *vip_connection_node = aws_linked_list_pop_front(&vip_connections_updates);
         struct aws_s3_vip_connection *vip_connection =
             AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, node);
 
+        aws_s3_client_set_vip_connection_active(client, vip_connection, false);
+
         size_t owning_vip_active = aws_atomic_load_int(&vip_connection->owning_vip->active);
+
+        AWS_ASSERT(vip_connection->request == NULL);
 
         /* If the owning vip isn't active, and the client is either also inactive, or the connection is dead, clean it
          * up. */
         if (!owning_vip_active &&
             (!client_active || (vip_connection->http_connection == NULL ||
-                                !aws_http_connection_is_open(vip_connection->http_connection) ||
+                                !client->vtable->http_connection_is_open(vip_connection->http_connection) ||
                                 vip_connection->request_count >= s_s3_max_request_count_per_connection))) {
 
-            if (vip_connection->is_active) {
-                int sub_result = aws_sub_u32_checked(
-                    client->threaded_data.num_active_vip_connections,
-                    1,
-                    &client->threaded_data.num_active_vip_connections);
-                AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
-                (void)sub_result;
-
-                vip_connection->is_active = false;
-            }
+            aws_s3_client_set_vip_connection_warm(client, vip_connection, false);
 
             aws_s3_vip_connection_destroy(client, vip_connection);
-            continue;
-        }
-
-        AWS_ASSERT(vip_connection->request == NULL);
-
-        /* If we don't have any meta requests, or this connection is not already active and we are at capacity for
-         * active vip connections, throw this vip connection back in the idle list and continue. */
-        if (aws_linked_list_empty(&client->threaded_data.meta_requests) ||
-            client->threaded_data.num_requests_in_flight >= max_requests_in_flight ||
-            (!vip_connection->is_active &&
-             client->threaded_data.num_active_vip_connections >= max_num_active_connections)) {
-            aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &vip_connection->node);
-            continue;
-        }
-
-        struct aws_s3_request *request = NULL;
-
-        while (request == NULL && !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
-            struct aws_linked_list_node *meta_request_node =
-                aws_linked_list_begin(&client->threaded_data.meta_requests);
-            struct aws_s3_meta_request *meta_request =
-                AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
-
-            /* Grab the next request from the meta request. */
-            bool work_remaining = aws_s3_meta_request_update(meta_request, meta_request_update_flags, &request);
-
-            if (work_remaining) {
-                /* If there is work remaining, but we didn't get a request back, take it out of the list so that we
-                 * don't use it again during this function, with the intention of putting it back in the list before
-                 * this function ends. */
-                if (request == NULL) {
-                    aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
-                    aws_linked_list_push_back(
-                        &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
-                }
-            } else {
-                s_s3_client_remove_meta_request_threaded(client, meta_request);
-            }
-        }
-
-        if (request == NULL) {
-            aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, &vip_connection->node);
         } else {
-            request->request_was_sent = true;
-            ++client->threaded_data.num_requests_in_flight;
-            vip_connection->request = request;
-
-            if (!vip_connection->is_active) {
-                vip_connection->is_active = true;
-                ++client->threaded_data.num_active_vip_connections;
+            if (vip_connection->is_warm) {
+                aws_linked_list_push_front(&client->threaded_data.idle_vip_connections, vip_connection_node);
+            } else {
+                aws_linked_list_push_back(&client->threaded_data.idle_vip_connections, vip_connection_node);
             }
-
-            aws_atomic_fetch_add(&client->stats.num_requests_network_io, 1);
-
-            s_s3_client_process_request(client, vip_connection);
         }
     }
 
-    aws_linked_list_move_all_front(&client->threaded_data.meta_requests, &meta_requests_work_remaining);
+    /* While there are idle connections and requests in the queue, try to assign requests to idle connections. */
+    while (!aws_linked_list_empty(&client->threaded_data.idle_vip_connections) &&
+           !aws_linked_list_empty(&client->threaded_data.request_queue)) {
+
+        struct aws_linked_list_node *vip_connection_node =
+            aws_linked_list_pop_front(&client->threaded_data.idle_vip_connections);
+        struct aws_s3_vip_connection *vip_connection =
+            AWS_CONTAINER_OF(vip_connection_node, struct aws_s3_vip_connection, node);
+
+        struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
+
+        uint32_t num_conns_per_vip = s_num_conns_per_vip_meta_request_look_up[request->meta_request->type];
+        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, num_conns_per_vip);
+
+        /* If this meta request was finished, then let the meta request know and release the request. */
+        if (aws_s3_meta_request_has_finish_result(request->meta_request)) {
+            /* Put the unused connection at the front of the list so that it is used in the next iteration.*/
+            aws_linked_list_push_front(&client->threaded_data.idle_vip_connections, &vip_connection->node);
+
+            aws_s3_meta_request_finished_request(request->meta_request, request, AWS_ERROR_S3_CANCELED);
+
+            aws_s3_request_release(request);
+            request = NULL;
+        } else if (
+            vip_connection->is_warm ||
+            aws_atomic_load_int(&client->stats.num_active_vip_connections) < max_active_connections) {
+            vip_connection->request = request;
+
+            AWS_ASSERT(!vip_connection->is_active);
+
+            aws_s3_client_set_vip_connection_active(client, vip_connection, true);
+            aws_s3_client_set_vip_connection_warm(client, vip_connection, true);
+
+            aws_atomic_fetch_add(&client->stats.num_requests_network_io, 1);
+
+            s_s3_client_setup_vip_connection_retry_token(client, vip_connection);
+        } else {
+            /* Put the unused connection at the front of the list so that it is used in the next iteration.*/
+            aws_linked_list_push_front(&client->threaded_data.idle_vip_connections, &vip_connection->node);
+
+            /* Push the request into the left-over list to be used in a future call of this function. */
+            aws_linked_list_push_back(&left_over_requests, &request->node);
+        }
+    }
+
+    aws_s3_client_queue_requests_threaded(client, &left_over_requests, true);
 }
 
 static void s_s3_client_acquired_retry_token(
@@ -1449,7 +1690,27 @@ static void s_s3_client_acquired_retry_token(
 
 static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_code, void *user_data);
 
-static void s_s3_client_process_request(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection) {
+static void s_s3_client_setup_vip_connection_retry_token_default(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection);
+
+static void s_s3_client_setup_vip_connection_retry_token(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+
+    if (client->vtable->setup_vip_connection_retry_token) {
+        client->vtable->setup_vip_connection_retry_token(client, vip_connection);
+        return;
+    }
+
+    s_s3_client_setup_vip_connection_retry_token_default(client, vip_connection);
+}
+
+static void s_s3_client_setup_vip_connection_retry_token_default(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(vip_connection);
 
@@ -1459,34 +1720,30 @@ static void s_s3_client_process_request(struct aws_s3_client *client, struct aws
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    if (vip_connection->retry_token != NULL) {
-        s_s3_client_acquired_retry_token(
-            client->retry_strategy, AWS_ERROR_SUCCESS, vip_connection->retry_token, vip_connection);
-    } else {
+    AWS_ASSERT(vip_connection->retry_token == NULL);
 
-        struct aws_byte_cursor host_header_value;
-        AWS_ZERO_STRUCT(host_header_value);
+    struct aws_byte_cursor host_header_value;
+    AWS_ZERO_STRUCT(host_header_value);
 
-        struct aws_http_headers *message_headers = aws_http_message_get_headers(meta_request->initial_request_message);
-        AWS_ASSERT(message_headers);
+    struct aws_http_headers *message_headers = aws_http_message_get_headers(meta_request->initial_request_message);
+    AWS_ASSERT(message_headers);
 
-        int get_header_result = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
-        AWS_ASSERT(get_header_result == AWS_OP_SUCCESS);
-        (void)get_header_result;
+    int get_header_result = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
+    AWS_ASSERT(get_header_result == AWS_OP_SUCCESS);
+    (void)get_header_result;
 
-        if (aws_retry_strategy_acquire_retry_token(
-                client->retry_strategy, &host_header_value, s_s3_client_acquired_retry_token, vip_connection, 0)) {
+    if (aws_retry_strategy_acquire_retry_token(
+            client->retry_strategy, &host_header_value, s_s3_client_acquired_retry_token, vip_connection, 0)) {
 
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Client could not acquire retry token for request %p due to error %d (%s)",
-                (void *)client,
-                (void *)request,
-                aws_last_error_or_unknown(),
-                aws_error_str(aws_last_error_or_unknown()));
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client could not acquire retry token for request %p due to error %d (%s)",
+            (void *)client,
+            (void *)request,
+            aws_last_error_or_unknown(),
+            aws_error_str(aws_last_error_or_unknown()));
 
-            goto reset_vip_connection;
-        }
+        goto reset_vip_connection;
     }
 
     return;
@@ -1545,6 +1802,10 @@ error_clean_up:
         client, vip_connection, error_code, AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED);
 }
 
+static bool s_s3_client_http_connection_is_open(const struct aws_http_connection *connection) {
+    return aws_http_connection_is_open(connection);
+}
+
 static void s_s3_client_acquire_http_connection(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection) {
@@ -1562,6 +1823,8 @@ static void s_s3_client_acquire_http_connection_default(
     struct aws_s3_vip_connection *vip_connection,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback) {
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->http_connection_is_open);
     AWS_PRECONDITION(vip_connection);
 
     struct aws_http_connection **http_connection = &vip_connection->http_connection;
@@ -1588,7 +1851,7 @@ static void s_s3_client_acquire_http_connection_default(
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT, "id=%p VIP Connection %p hit request limit.", (void *)client, (void *)vip_connection);
 
-        } else if (!aws_http_connection_is_open(*http_connection)) {
+        } else if (!client->vtable->http_connection_is_open(*http_connection)) {
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT,
                 "id=%p VIP Connection %p being released because it is not open.",
@@ -1683,7 +1946,7 @@ static void s_s3_client_on_acquire_http_connection(
             vip_connection->request_count);
     }
 
-    aws_s3_meta_request_make_request(meta_request, client, vip_connection);
+    aws_s3_meta_request_send_request(meta_request, vip_connection);
 
     return;
 
@@ -1819,6 +2082,12 @@ reset_vip_connection:
     aws_s3_meta_request_release(meta_request);
 }
 
+static void s_s3_client_prepare_request_callback_retry_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code,
+    void *user_data);
+
 static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_code, void *user_data) {
     AWS_PRECONDITION(token);
     (void)token;
@@ -1862,7 +2131,8 @@ static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_cod
 
     vip_connection->is_retry = true;
 
-    s_s3_client_process_request(client, vip_connection);
+    aws_s3_meta_request_prepare_request(
+        meta_request, request, s_s3_client_prepare_request_callback_retry_request, vip_connection);
 
     return;
 
@@ -1877,11 +2147,42 @@ void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
-    if (request->request_was_sent) {
+    if (request->tracked_by_client) {
         aws_s3_client_lock_synced_data(client);
-        ++client->synced_data.pending_request_count;
+        aws_atomic_fetch_sub(&client->stats.num_requests_in_flight, 1);
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
+    }
+}
+
+static void s_s3_client_prepare_request_callback_retry_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    (void)meta_request;
+
+    AWS_PRECONDITION(request);
+    (void)request;
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+    AWS_PRECONDITION(vip_connection);
+
+    struct aws_s3_vip *owning_vip = vip_connection->owning_vip;
+    AWS_PRECONDITION(owning_vip);
+
+    struct aws_s3_client *client = owning_vip->owning_client;
+    AWS_PRECONDITION(client);
+
+    if (error_code == AWS_ERROR_SUCCESS) {
+        AWS_ASSERT(vip_connection->retry_token);
+
+        s_s3_client_acquired_retry_token(
+            client->retry_strategy, AWS_ERROR_SUCCESS, vip_connection->retry_token, vip_connection);
+    } else {
+        aws_s3_client_notify_connection_finished(
+            client, vip_connection, error_code, AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED);
     }
 }
 
