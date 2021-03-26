@@ -491,6 +491,11 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
     aws_mutex_unlock(&tester->synced_data.lock);
 }
 
+static bool s_s3_client_is_http_connection_open(const struct aws_http_connection *connection) {
+    (void)connection;
+    return false;
+}
+
 static void s_s3_client_acquire_http_connection_empty(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
@@ -512,6 +517,7 @@ static void s_s3_client_setup_vip_connection_retry_token_empty(
 }
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
+    .http_connection_is_open = s_s3_client_is_http_connection_open,
     .acquire_http_connection = s_s3_client_acquire_http_connection_empty,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
     .setup_vip_connection_retry_token = s_s3_client_setup_vip_connection_retry_token_empty,
