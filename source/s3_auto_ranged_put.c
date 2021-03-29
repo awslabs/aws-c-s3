@@ -12,6 +12,7 @@
 static const size_t s_etags_initial_capacity = 16;
 static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
+static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
@@ -28,9 +29,7 @@ static bool s_s3_auto_ranged_put_update(
 
 static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare);
+    struct aws_s3_request *request);
 
 static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -44,7 +43,6 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_put_request_finished,
-    .delivered_requests = aws_s3_meta_request_delivered_requests_default,
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
 };
@@ -176,25 +174,22 @@ static bool s_s3_auto_ranged_put_update(
                 goto has_work_remaining;
             }
 
+            if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
+                uint32_t num_parts_in_flight =
+                    (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_completed);
+
+                /* Because uploads must read from their streams serially, we try to limit the amount of in flight
+                 * requests for a given multipart upload if we can. */
+                if (num_parts_in_flight > 0) {
+                    goto has_work_remaining;
+                }
+            }
+
             /* Allocate a request for another part. */
             request = aws_s3_request_new(
                 meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
             request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
-
-            size_t request_body_size = meta_request->part_size;
-
-            /* Last part--adjust size to match remaining content length. */
-            if (request->part_number == auto_ranged_put->synced_data.total_num_parts) {
-                size_t content_remainder =
-                    (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
-
-                if (content_remainder > 0) {
-                    request_body_size = content_remainder;
-                }
-            }
-
-            aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
             ++auto_ranged_put->threaded_update_data.next_part_number;
             ++auto_ranged_put->synced_data.num_parts_sent;
@@ -227,9 +222,6 @@ static bool s_s3_auto_ranged_put_update(
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
                 0,
                 AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
-
-            aws_byte_buf_init(
-                &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
 
             auto_ranged_put->synced_data.complete_multipart_upload_sent = true;
 
@@ -295,9 +287,6 @@ static bool s_s3_auto_ranged_put_update(
                 0,
                 AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
-            aws_byte_buf_init(
-                &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
-
             auto_ranged_put->synced_data.abort_multipart_upload_sent = true;
 
             goto has_work_remaining;
@@ -323,19 +312,8 @@ no_work_remaining:
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (work_remaining) {
-        if (request != NULL && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
-            aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-
-            aws_s3_meta_request_lock_synced_data(meta_request);
-            aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error_or_unknown());
-            --auto_ranged_put->synced_data.num_parts_sent;
-            aws_s3_meta_request_unlock_synced_data(meta_request);
-
-            aws_s3_request_release(request);
-            request = NULL;
-
-            return s_s3_auto_ranged_put_update(meta_request, flags, out_request);
-        } else if (out_request != NULL) {
+        if (request != NULL) {
+            AWS_ASSERT(out_request);
             *out_request = request;
         }
     } else {
@@ -350,16 +328,8 @@ no_work_remaining:
 /* Given a request, prepare it for sending based on its description. */
 static int s_s3_auto_ranged_put_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare) {
+    struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(client);
-    (void)client;
-    (void)is_initial_prepare;
-
-    struct aws_s3_request *request = vip_connection->request;
-    AWS_PRECONDITION(request);
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     AWS_PRECONDITION(auto_ranged_put);
@@ -376,6 +346,27 @@ static int s_s3_auto_ranged_put_prepare_request(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
+
+            size_t request_body_size = meta_request->part_size;
+
+            /* Last part--adjust size to match remaining content length. */
+            if (request->part_number == auto_ranged_put->synced_data.total_num_parts) {
+                size_t content_remainder =
+                    (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+
+                if (content_remainder > 0) {
+                    request_body_size = content_remainder;
+                }
+            }
+
+            if (request->num_times_prepared == 0) {
+                aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+
+                if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+                    goto message_create_failed;
+                }
+            }
+
             /* Create a new put-object message to upload a part. */
             message = aws_s3_put_object_message_new(
                 meta_request->allocator,
@@ -386,6 +377,14 @@ static int s_s3_auto_ranged_put_prepare_request(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
+
+            if (request->num_times_prepared == 0) {
+                aws_byte_buf_init(
+                    &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
+            } else {
+                aws_byte_buf_reset(&request->request_body, false);
+            }
+
             aws_s3_meta_request_lock_synced_data(meta_request);
 
             AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
@@ -412,6 +411,13 @@ static int s_s3_auto_ranged_put_prepare_request(
                 "id=%p Abort multipart upload request for upload id %s.",
                 (void *)meta_request,
                 aws_string_c_str(auto_ranged_put->upload_id));
+
+            if (request->num_times_prepared == 0) {
+                aws_byte_buf_init(
+                    &request->request_body, meta_request->allocator, s_abort_multipart_upload_init_body_size_bytes);
+            } else {
+                aws_byte_buf_reset(&request->request_body, false);
+            }
 
             /* Build the message to abort our multipart upload */
             message = aws_s3_abort_multipart_upload_message_new(
@@ -538,8 +544,8 @@ static void s_s3_auto_ranged_put_request_finished(
 
                     error_code = AWS_ERROR_S3_MISSING_UPLOAD_ID;
                 } else {
-                    /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up later,
-                     * so just get rid of the quotes now. */
+                    /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up
+                     * later, so just get rid of the quotes now. */
                     if (etag_within_quotes.len >= 2 && etag_within_quotes.ptr[0] == '"' &&
                         etag_within_quotes.ptr[etag_within_quotes.len - 1] == '"') {
 
@@ -569,9 +575,9 @@ static void s_s3_auto_ranged_put_request_finished(
 
                 struct aws_string *null_etag = NULL;
 
-                /* ETags need to be associated with their part number, so we keep the etag indices consistent with part
-                 * numbers. This means we may have to add padding to the list in the case that parts finish out of
-                 * order. */
+                /* ETags need to be associated with their part number, so we keep the etag indices consistent with
+                 * part numbers. This means we may have to add padding to the list in the case that parts finish out
+                 * of order. */
                 while (aws_array_list_length(&auto_ranged_put->synced_data.etag_list) < part_number) {
                     int push_back_result =
                         aws_array_list_push_back(&auto_ranged_put->synced_data.etag_list, &null_etag);
@@ -596,7 +602,8 @@ static void s_s3_auto_ranged_put_request_finished(
                 /* Copy all the response headers from this request. */
                 copy_http_headers(request->send_data.response_headers, final_response_headers);
 
-                /* Copy over any response headers that we've previously determined are needed for this final response.
+                /* Copy over any response headers that we've previously determined are needed for this final
+                 * response.
                  */
                 aws_s3_meta_request_lock_synced_data(meta_request);
                 copy_http_headers(auto_ranged_put->synced_data.needed_response_headers, final_response_headers);

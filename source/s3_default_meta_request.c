@@ -20,9 +20,7 @@ static bool s_s3_meta_request_default_update(
 
 static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare);
+    struct aws_s3_request *request);
 
 static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -36,7 +34,6 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_meta_request_default_request_finished,
-    .delivered_requests = aws_s3_meta_request_delivered_requests_default,
     .destroy = s_s3_meta_request_default_destroy,
     .finish = aws_s3_meta_request_finish_default,
 };
@@ -199,67 +196,35 @@ no_work_remaining:
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (work_remaining) {
-        if (request == NULL) {
-            goto return_results;
+        if (request != NULL) {
+            AWS_ASSERT(out_request != NULL);
+            *out_request = request;
         }
-
-        /* If the request is not sending a body, then we can return the request now. */
-        if (meta_request_default->content_length == 0) {
-            goto return_results;
-        }
-
-        aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
-
-        /* If reading the stream is successful, then we can return the request now. */
-        if (!aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-            goto return_results;
-        }
-
-        goto rollback_and_re_update;
     } else {
         AWS_ASSERT(request == NULL);
 
         aws_s3_meta_request_finish(meta_request);
     }
 
-return_results:
-
-    if (out_request != NULL) {
-        *out_request = request;
-    }
-
     return work_remaining;
-
-rollback_and_re_update:
-    /* In the event of stream read failure, first release the request. */
-    aws_s3_request_release(request);
-    request = NULL;
-
-    /* Record failure and rewind the "sent" state. */
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error_or_unknown());
-    meta_request_default->synced_data.request_sent = false;
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    /* Call our function again, triggering the "work remaining" logic, and then finishing the meta request if
-     * possible. */
-    return s_s3_meta_request_default_update(meta_request, flags, out_request);
 }
 
 /* Given a request, prepare it for sending based on its description. */
 static int s_s3_meta_request_default_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare) {
+    struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(vip_connection);
-    (void)client;
-    (void)is_initial_prepare;
 
-    struct aws_s3_request *request = vip_connection->request;
-    AWS_PRECONDITION(request);
+    struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
+    AWS_PRECONDITION(meta_request_default);
+
+    if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
+        aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
+
+        if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+            return AWS_OP_ERR;
+        }
+    }
 
     struct aws_http_message *message = aws_s3_message_util_copy_http_message(
         meta_request->allocator, meta_request->initial_request_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
