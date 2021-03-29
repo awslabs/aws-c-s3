@@ -20,6 +20,110 @@
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
+AWS_TEST_CASE(test_s3_client_set_vip_connection_warm, s_test_s3_client_set_vip_connection_warm)
+static int s_test_s3_client_set_vip_connection_warm(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    aws_s3_tester_init(allocator, &tester);
+
+    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+
+    struct aws_s3_vip *mock_vip = aws_s3_tester_mock_vip_new(&tester);
+    aws_atomic_init_int(&mock_vip->active, 1);
+    mock_vip->owning_client = mock_client;
+
+    struct aws_s3_vip_connection *mock_vip_connection = aws_s3_tester_mock_vip_connection_new(&tester);
+    mock_vip_connection->owning_vip = mock_vip;
+
+    ASSERT_FALSE(mock_vip_connection->is_warm);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 0);
+
+    aws_s3_client_set_vip_connection_warm(mock_client, mock_vip_connection, true);
+
+    /* Connection should now be warm, and the total should increase by one. */
+    ASSERT_TRUE(mock_vip_connection->is_warm);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 1);
+
+    aws_s3_client_set_vip_connection_warm(mock_client, mock_vip_connection, true);
+
+    /* Connection should still be warm, and the total should stay at one since connection was already warm. */
+    ASSERT_TRUE(mock_vip_connection->is_warm);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 1);
+
+    aws_s3_client_set_vip_connection_warm(mock_client, mock_vip_connection, false);
+
+    /* Connection should no longer be warm, and the total should now be zero. */
+    ASSERT_FALSE(mock_vip_connection->is_warm);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 0);
+
+    aws_s3_client_set_vip_connection_warm(mock_client, mock_vip_connection, false);
+
+    /* Connection should still no longer be warm, and the total should stay at zero since connection was already not
+     * warm. */
+    ASSERT_FALSE(mock_vip_connection->is_warm);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 0);
+
+    aws_s3_tester_mock_vip_connection_destroy(&tester, mock_vip_connection);
+    aws_s3_tester_mock_vip_destroy(&tester, mock_vip);
+    aws_s3_client_release(mock_client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_client_set_vip_connection_active, s_test_s3_client_set_vip_connection_active)
+static int s_test_s3_client_set_vip_connection_active(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    aws_s3_tester_init(allocator, &tester);
+
+    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+
+    struct aws_s3_vip *mock_vip = aws_s3_tester_mock_vip_new(&tester);
+    aws_atomic_init_int(&mock_vip->active, 1);
+    mock_vip->owning_client = mock_client;
+
+    struct aws_s3_vip_connection *mock_vip_connection = aws_s3_tester_mock_vip_connection_new(&tester);
+    mock_vip_connection->owning_vip = mock_vip;
+
+    ASSERT_FALSE(mock_vip_connection->is_active);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 0);
+
+    aws_s3_client_set_vip_connection_active(mock_client, mock_vip_connection, true);
+
+    /* Connection should now be active, and the total should increase by one. */
+    ASSERT_TRUE(mock_vip_connection->is_active);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 1);
+
+    aws_s3_client_set_vip_connection_active(mock_client, mock_vip_connection, true);
+
+    /* Connection should still be active, and the total should stay at one since connection was already active. */
+    ASSERT_TRUE(mock_vip_connection->is_active);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 1);
+
+    aws_s3_client_set_vip_connection_active(mock_client, mock_vip_connection, false);
+
+    /* Connection should no longer be active, and the total should now be zero. */
+    ASSERT_FALSE(mock_vip_connection->is_active);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 0);
+
+    aws_s3_client_set_vip_connection_active(mock_client, mock_vip_connection, false);
+
+    /* Connection should still no longer be active, and the total should stay at zero since connection was already not
+     * active. */
+    ASSERT_FALSE(mock_vip_connection->is_active);
+    ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 0);
+
+    aws_s3_tester_mock_vip_connection_destroy(&tester, mock_vip_connection);
+    aws_s3_tester_mock_vip_destroy(&tester, mock_vip);
+    aws_s3_client_release(mock_client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 static void s_test_s3_vip_create_destroy_vip_shutdown_callback(void *user_data) {
     AWS_ASSERT(user_data);
     struct aws_s3_tester *tester = user_data;

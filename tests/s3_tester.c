@@ -491,9 +491,89 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
     aws_mutex_unlock(&tester->synced_data.lock);
 }
 
+static bool s_s3_client_is_http_connection_open(const struct aws_http_connection *connection) {
+    (void)connection;
+    return false;
+}
+
+static void s_s3_client_acquire_http_connection_empty(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection,
+    aws_http_connection_manager_on_connection_setup_fn *callback) {
+    (void)client;
+    (void)vip_connection;
+    (void)callback;
+}
+
+static void s_s3_client_schedule_process_work_synced_empty(struct aws_s3_client *client) {
+    (void)client;
+}
+
+static void s_s3_client_setup_vip_connection_retry_token_empty(
+    struct aws_s3_client *client,
+    struct aws_s3_vip_connection *vip_connection) {
+    (void)client;
+    (void)vip_connection;
+}
+
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
-    .acquire_http_connection = aws_s3_client_acquire_http_connection_empty,
+    .http_connection_is_open = s_s3_client_is_http_connection_open,
+    .acquire_http_connection = s_s3_client_acquire_http_connection_empty,
+    .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
+    .setup_vip_connection_retry_token = s_s3_client_setup_vip_connection_retry_token_empty,
 };
+
+static void s_s3_mock_client_start_destroy(void *user_data) {
+    struct aws_s3_client *client = user_data;
+    AWS_ASSERT(client);
+
+    aws_small_block_allocator_destroy(client->sba_allocator);
+
+    aws_mem_release(client->allocator, client);
+}
+
+struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester) {
+    struct aws_allocator *allocator = tester->allocator;
+    struct aws_s3_client *mock_client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
+
+    mock_client->allocator = allocator;
+    mock_client->vtable = &g_aws_s3_client_mock_vtable;
+
+    aws_ref_count_init(
+        &mock_client->ref_count, mock_client, (aws_simple_completion_callback *)s_s3_mock_client_start_destroy);
+
+    aws_mutex_init(&mock_client->synced_data.lock);
+
+    mock_client->sba_allocator = aws_small_block_allocator_new(allocator, false);
+
+    aws_atomic_init_int(&mock_client->stats.num_requests_network_io, 0);
+    aws_atomic_init_int(&mock_client->stats.num_requests_stream_queued_waiting, 0);
+    aws_atomic_init_int(&mock_client->stats.num_requests_streaming, 0);
+    aws_atomic_init_int(&mock_client->stats.num_requests_in_flight, 0);
+    aws_atomic_init_int(&mock_client->stats.num_allocated_vip_connections, 0);
+    aws_atomic_init_int(&mock_client->stats.num_active_vip_connections, 0);
+    aws_atomic_init_int(&mock_client->stats.num_warm_vip_connections, 0);
+
+    return mock_client;
+}
+
+struct aws_s3_vip *aws_s3_tester_mock_vip_new(struct aws_s3_tester *tester) {
+    return aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_vip));
+}
+
+void aws_s3_tester_mock_vip_destroy(struct aws_s3_tester *tester, struct aws_s3_vip *vip) {
+    aws_mem_release(tester->allocator, vip);
+}
+
+struct aws_s3_vip_connection *aws_s3_tester_mock_vip_connection_new(struct aws_s3_tester *tester) {
+    return aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_vip_connection));
+}
+
+void aws_s3_tester_mock_vip_connection_destroy(
+    struct aws_s3_tester *tester,
+    struct aws_s3_vip_connection *vip_connection) {
+    aws_mem_release(tester->allocator, vip_connection);
+}
 
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
@@ -510,20 +590,86 @@ struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_test
     return message;
 }
 
-static void s_s3_empty_meta_request_destroy(struct aws_s3_meta_request *meta_request) {
+static bool s_s3_meta_request_update_empty(
+    struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
+    struct aws_s3_request **out_request) {
+    (void)meta_request;
+    (void)flags;
+    (void)out_request;
+    return false;
+}
+
+void s_s3_meta_request_send_request_finish_empty(
+    struct aws_s3_vip_connection *vip_connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+    (void)vip_connection;
+    (void)stream;
+    (void)error_code;
+}
+
+static void s_s3_meta_request_finished_request_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code) {
+    (void)meta_request;
+    (void)request;
+    (void)error_code;
+}
+
+static void s_s3_meta_request_schedule_prepare_request_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+    (void)meta_request;
+    (void)request;
+    (void)callback;
+    (void)user_data;
+}
+
+static int s_s3_meta_request_prepare_request_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request) {
+    (void)meta_request;
+    (void)request;
+    return AWS_OP_ERR;
+}
+
+static void s_s3_meta_request_init_signing_date_time_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_date_time *date_time) {
+    (void)meta_request;
+    (void)date_time;
+}
+
+static void s_s3_meta_request_sign_request_empty(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
+    (void)meta_request;
+    (void)request;
+    (void)on_signing_complete;
+    (void)user_data;
+}
+
+static void s_s3_mock_meta_request_destroy(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
     aws_mem_release(meta_request->allocator, meta_request->impl);
 }
 
 static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
-    .update = aws_s3_meta_request_update_empty,
-    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
-    .prepare_request = aws_s3_meta_request_prepare_request_empty,
-    .finished_request = aws_s3_meta_request_finished_request_empty,
-    .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
-    .sign_request = aws_s3_meta_request_sign_request_default,
-    .destroy = s_s3_empty_meta_request_destroy,
+    .update = s_s3_meta_request_update_empty,
+    .send_request_finish = s_s3_meta_request_send_request_finish_empty,
+    .schedule_prepare_request = s_s3_meta_request_schedule_prepare_request_empty,
+    .prepare_request = s_s3_meta_request_prepare_request_empty,
+    .finished_request = s_s3_meta_request_finished_request_empty,
+    .init_signing_date_time = s_s3_meta_request_init_signing_date_time_empty,
+    .sign_request = s_s3_meta_request_sign_request_empty,
+    .destroy = s_s3_mock_meta_request_destroy,
 };
 
 struct aws_s3_empty_meta_request {
@@ -1355,44 +1501,4 @@ int aws_s3_tester_validate_put_object_results(
     }
 
     return AWS_OP_SUCCESS;
-}
-
-void aws_s3_client_acquire_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
-    (void)client;
-    (void)vip_connection;
-    (void)callback;
-}
-
-bool aws_s3_meta_request_update_empty(
-    struct aws_s3_meta_request *meta_request,
-    uint32_t flags,
-    struct aws_s3_request **out_request) {
-    (void)meta_request;
-    (void)out_request;
-    (void)flags;
-    return false;
-}
-
-void aws_s3_meta_request_finished_request_empty(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request,
-    int error_code) {
-    (void)meta_request;
-    (void)request;
-    (void)error_code;
-}
-
-int aws_s3_meta_request_prepare_request_empty(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare) {
-    (void)meta_request;
-    (void)client;
-    (void)vip_connection;
-    (void)is_initial_prepare;
-    return AWS_OP_ERR;
 }

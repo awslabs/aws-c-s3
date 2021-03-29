@@ -29,9 +29,7 @@ static bool s_s3_auto_ranged_get_update(
 
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare);
+    struct aws_s3_request *request);
 
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -45,7 +43,6 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_get_request_finished,
-    .delivered_requests = aws_s3_meta_request_delivered_requests_default,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
     .finish = aws_s3_meta_request_finish_default,
 };
@@ -278,13 +275,14 @@ no_work_remaining:
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    if (!work_remaining) {
+    if (work_remaining) {
+        if (request != NULL) {
+            AWS_ASSERT(out_request != NULL);
+            *out_request = request;
+        }
+    } else {
         AWS_ASSERT(request == NULL);
         aws_s3_meta_request_finish(meta_request);
-    }
-
-    if (out_request != NULL) {
-        *out_request = request;
     }
 
     return work_remaining;
@@ -293,22 +291,12 @@ no_work_remaining:
 /* Given a request, prepare it for sending based on its description. */
 static int s_s3_auto_ranged_get_prepare_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare) {
+    struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(vip_connection);
-    (void)client;
-    (void)is_initial_prepare;
-
-    struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
 
-    struct aws_http_message *message = NULL;
-
     /* Generate a new ranged get request based on the original message. */
-    message = aws_s3_get_object_message_new(
+    struct aws_http_message *message = aws_s3_get_object_message_new(
         meta_request->allocator,
         meta_request->initial_request_message,
         request->part_number,
