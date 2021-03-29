@@ -2892,22 +2892,25 @@ static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *al
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
 
-    {
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .get_options =
-                {
-                    .object_path = g_s3_path_get_object_test_1MB,
-                },
-        };
+    struct aws_s3_tester_meta_request_options meta_request_test_options = {
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
-    }
+    struct aws_s3_tester_send_meta_requests_options options = {
+        .tester = &tester,
+        .client = client,
+        .meta_request_test_options = &meta_request_test_options,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, NULL));
 
     aws_s3_client_release(client);
+
     aws_s3_tester_clean_up(&tester);
 
     return 0;
@@ -2923,29 +2926,31 @@ static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *al
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
 
-    {
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .put_options =
-                {
-                    .ensure_multipart = true,
-                },
-        };
+    struct aws_s3_tester_meta_request_options meta_request_test_options = {
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .put_options =
+            {
+                .ensure_multipart = true,
+            },
+    };
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
-    }
+    struct aws_s3_tester_send_meta_requests_options options = {
+        .tester = &tester,
+        .client = client,
+        .meta_request_test_options = &meta_request_test_options,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, NULL));
 
     aws_s3_client_release(client);
-    aws_s3_tester_clean_up(&tester);
 
+    aws_s3_tester_clean_up(&tester);
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_default_sending_meta_request, s_test_s3_default_sending_meta_request)
-static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_default_sending_user_agent, s_test_s3_default_sending_user_agent)
+static int s_test_s3_default_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -2954,26 +2959,29 @@ static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocato
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
 
-    {
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .default_type_options =
-                {
-                    .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
-                },
-            .get_options =
-                {
-                    .object_path = g_s3_path_get_object_test_1MB,
-                },
-        };
+    struct aws_s3_tester_meta_request_options meta_request_test_options = {
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
-    }
+    struct aws_s3_tester_send_meta_requests_options options = {
+        .tester = &tester,
+        .client = client,
+        .meta_request_test_options = &meta_request_test_options,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, NULL));
 
     aws_s3_client_release(client);
+
     aws_s3_tester_clean_up(&tester);
     return 0;
 }
