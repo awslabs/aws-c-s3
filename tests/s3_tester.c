@@ -193,7 +193,7 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         &tester->meta_request_vtable_patches, tester->allocator, 4, sizeof(struct aws_s3_meta_request_vtable_patch)));
 
     /* Setup an event loop group and host resolver. */
-    tester->el_group = aws_event_loop_group_new_default(allocator, 1, NULL);
+    tester->el_group = aws_event_loop_group_new_default_pinned_to_cpu_group(allocator, 18, 1, NULL);
     ASSERT_TRUE(tester->el_group != NULL);
 
     struct aws_host_resolver_default_options resolver_options = {
