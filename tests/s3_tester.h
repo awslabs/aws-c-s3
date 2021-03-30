@@ -114,27 +114,18 @@ struct aws_s3_tester_client_options {
     enum aws_s3_client_tls_usage tls_usage;
     size_t part_size;
     size_t max_part_size;
+    double throughput_target_gbps;
     uint32_t setup_region : 1;
 };
 
 struct aws_s3_tester_meta_request_options {
-    /* Optional if a valid aws_s3_tester was passed as an argument to the function. When NULL, the aws_s3_tester's
-     * allocator will be used. */
-    struct aws_allocator *allocator;
-
     enum aws_s3_meta_request_type meta_request_type;
 
     /* Optional. When NULL, a message will attempted to be created by the meta request type specific options. */
     struct aws_http_message *message;
 
-    /* Optional. If NULL, a client will be created. */
-    struct aws_s3_client *client;
-
     /* Optional. Bucket for this request. If NULL, g_test_bucket_name will be used. */
     struct aws_byte_cursor *bucket_name;
-
-    /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
-    struct aws_s3_tester_client_options *client_options;
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
@@ -147,6 +138,7 @@ struct aws_s3_tester_meta_request_options {
     /* Get Object Meta Request specific options.*/
     struct {
         struct aws_byte_cursor object_path;
+        struct aws_input_stream *expected_contents;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -155,14 +147,24 @@ struct aws_s3_tester_meta_request_options {
         bool ensure_multipart;
         bool invalid_request;
         bool invalid_input_stream;
-        /* manually overwrite the content length for some invalid input stream */
-        size_t content_length;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
     enum aws_s3_tester_validate_type validate_type;
+};
 
-    uint32_t dont_wait_for_shutdown : 1;
+struct aws_s3_tester_send_meta_requests_options {
+    struct aws_allocator *allocator;
+
+    struct aws_s3_tester *tester;
+
+    struct aws_s3_client *client;
+
+    size_t num_meta_requests;
+
+    struct aws_s3_tester_meta_request_options *meta_request_test_options;
+
+    uint32_t dont_validate_puts : 1;
 };
 
 /* TODO Rename to something more generic such as "aws_s3_meta_request_test_data" */
@@ -171,6 +173,7 @@ struct aws_s3_meta_request_test_results {
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    struct aws_input_stream *expected_contents;
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
@@ -233,6 +236,18 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester);
 
+struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester);
+
+struct aws_s3_vip *aws_s3_tester_mock_vip_new(struct aws_s3_tester *tester);
+
+void aws_s3_tester_mock_vip_destroy(struct aws_s3_tester *tester, struct aws_s3_vip *vip);
+
+struct aws_s3_vip_connection *aws_s3_tester_mock_vip_connection_new(struct aws_s3_tester *tester);
+
+void aws_s3_tester_mock_vip_connection_destroy(
+    struct aws_s3_tester *tester,
+    struct aws_s3_vip_connection *vip_connection);
+
 /* Create a new meta request for testing meta request functionality in isolation. test_results and client are optional.
  * If client is not specified, a new mock client will be created for the meta request. */
 struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester);
@@ -265,9 +280,8 @@ int aws_s3_tester_client_new(
     struct aws_s3_tester_client_options *options,
     struct aws_s3_client **out_client);
 
-int aws_s3_tester_send_meta_request_with_options(
-    struct aws_s3_tester *tester,
-    struct aws_s3_tester_meta_request_options *options,
+int aws_s3_tester_send_meta_requests(
+    struct aws_s3_tester_send_meta_requests_options *options,
     struct aws_s3_meta_request_test_results *test_results);
 
 /* Will copy the client's vtable into a new vtable that can be mutated. Returns the vtable that can be mutated. */
@@ -323,33 +337,13 @@ int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
     uint32_t flags);
 
-/*****************************************/
-/* Used for mocking functions in vtables */
-void aws_s3_client_acquire_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback);
-
-bool aws_s3_meta_request_update_empty(
-    struct aws_s3_meta_request *meta_request,
-    uint32_t flags,
-    struct aws_s3_request **out_request);
-
-void aws_s3_meta_request_finished_request_empty(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request,
-    int error_code);
-
-int aws_s3_meta_request_prepare_request_empty(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    bool is_initial_prepare);
-/****************************************/
-
 struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
+
+void aws_s3_init_test_input_stream_look_up(struct aws_s3_tester *tester);
+
+void aws_s3_destroy_test_input_stream_look_up(struct aws_s3_tester *tester);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 
