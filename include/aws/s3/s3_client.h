@@ -61,6 +61,10 @@ enum aws_s3_meta_request_tls_mode {
 /* Options for a new client. */
 struct aws_s3_client_config {
 
+    /* When set, this will cap the number of active connections. When 0, the client will determine this value based on
+     * throughput_target_gbps. (Recommended) */
+    uint32_t max_connections;
+
     /* Region that the S3 bucket lives in. */
     struct aws_byte_cursor region;
 
