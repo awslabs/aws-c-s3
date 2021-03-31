@@ -6,6 +6,8 @@ file(GLOB TEST_HDRS "*.h")
 file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
 add_net_test_case(test_s3_client_create_destroy)
+add_net_test_case(test_s3_client_max_active_connections_override)
+add_test_case(test_s3_client_get_max_active_connections)
 add_test_case(test_s3_request_create_destroy)
 add_test_case(test_s3_client_queue_requests)
 add_test_case(test_s3_meta_request_body_streaming)
@@ -81,6 +83,7 @@ add_net_test_case(test_s3_default_sending_meta_request)
 
 add_test_case(test_get_existing_compute_platform_info)
 add_test_case(test_get_nonexistent_compute_platform_info)
+
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

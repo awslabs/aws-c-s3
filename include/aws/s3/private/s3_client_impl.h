@@ -375,6 +375,9 @@ void aws_s3_client_lock_synced_data(struct aws_s3_client *client);
 AWS_S3_API
 void aws_s3_client_unlock_synced_data(struct aws_s3_client *client);
 
+AWS_S3_API
+extern const uint32_t g_max_num_connections_per_vip;
+
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_CLIENT_IMPL_H */
