@@ -253,7 +253,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_active_vip_connections, 0);
     aws_atomic_init_int(&client->stats.num_warm_vip_connections, 0);
 
-    *((size_t *)&client->max_active_connections) = client_config->max_connections;
+    *((uint32_t *)&client->max_active_connections) = client_config->max_connections;
 
     /* Store our client bootstrap. */
     client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
