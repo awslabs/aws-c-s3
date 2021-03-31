@@ -47,6 +47,77 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_client_max_active_connections_override, s_test_s3_client_max_active_connections_override)
+static int s_test_s3_client_max_active_connections_override(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .max_active_connections_override = 10,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client->max_active_connections_override == client_config.max_active_connections_override);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_client_get_max_active_connections, s_test_s3_client_get_max_active_connections)
+static int s_test_s3_client_get_max_active_connections(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    const uint32_t num_connections_per_vip_override = 5;
+
+    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+    *((uint32_t *)&mock_client->ideal_vip_count) = 5;
+    *((uint32_t *)&mock_client->max_active_connections_override) = 0;
+
+    /* Behavior should not be affected by max_active_connections_override since it is 0. */
+    ASSERT_TRUE(
+        aws_s3_client_get_max_active_connections(mock_client, 0) ==
+        mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+    ASSERT_TRUE(
+        aws_s3_client_get_max_active_connections(mock_client, num_connections_per_vip_override) ==
+        mock_client->ideal_vip_count * num_connections_per_vip_override);
+
+    *((uint32_t *)&mock_client->max_active_connections_override) = 3;
+
+    /* Max active connections override should now cap the calculated amount of active connections. */
+    ASSERT_TRUE(
+        aws_s3_client_get_max_active_connections(mock_client, 0) == mock_client->max_active_connections_override);
+    ASSERT_TRUE(
+        aws_s3_client_get_max_active_connections(mock_client, num_connections_per_vip_override) ==
+        mock_client->max_active_connections_override);
+
+    /* Max active connections override should be ignored since the calculated amount of connections is less. */
+    *((uint32_t *)&mock_client->max_active_connections_override) = 100;
+    ASSERT_TRUE(
+        aws_s3_client_get_max_active_connections(mock_client, 0) ==
+        mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+    ASSERT_TRUE(
+        aws_s3_client_get_max_active_connections(mock_client, num_connections_per_vip_override) ==
+        mock_client->ideal_vip_count * num_connections_per_vip_override);
+
+    aws_s3_client_release(mock_client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_request_create_destroy, s_test_s3_request_create_destroy)
 static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

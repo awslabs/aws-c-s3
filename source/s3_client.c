@@ -56,7 +56,7 @@ static const uint32_t s_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUE
 };
 
 /* Should be max of s_num_conns_per_vip_meta_request_look_up */
-static const uint32_t s_num_connections_per_vip = 10;
+const uint32_t g_max_num_connections_per_vip = 10;
 
 /* 50 = 0.5 * 100, where 100 is the max number of requests allowed per connection */
 static const uint8_t s_max_request_jitter_range = 50;
@@ -168,10 +168,17 @@ uint32_t aws_s3_client_get_max_active_connections(struct aws_s3_client *client, 
     AWS_PRECONDITION(client);
 
     if (num_connections_per_vip == 0) {
-        num_connections_per_vip = s_num_connections_per_vip;
+        num_connections_per_vip = g_max_num_connections_per_vip;
     }
 
-    return client->ideal_vip_count * num_connections_per_vip;
+    uint32_t max_active_connections = client->ideal_vip_count * num_connections_per_vip;
+
+    if (client->max_active_connections_override > 0 &&
+        client->max_active_connections_override < max_active_connections) {
+        max_active_connections = client->max_active_connections_override;
+    }
+
+    return max_active_connections;
 }
 
 uint32_t aws_s3_client_get_max_requests_in_flight(struct aws_s3_client *client) {
@@ -246,6 +253,8 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_allocated_vip_connections, 0);
     aws_atomic_init_int(&client->stats.num_active_vip_connections, 0);
     aws_atomic_init_int(&client->stats.num_warm_vip_connections, 0);
+
+    *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
     /* Store our client bootstrap. */
     client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
@@ -2301,7 +2310,7 @@ static int s_s3_client_add_vips_default(struct aws_s3_client *client, const stru
             client,
             &host_address_byte_cursor,
             &server_name,
-            s_num_connections_per_vip,
+            g_max_num_connections_per_vip,
             &vip_connections,
             s_s3_client_vip_shutdown_callback,
             client);
