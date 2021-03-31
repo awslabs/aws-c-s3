@@ -173,8 +173,8 @@ struct aws_s3_client {
     /* The calculated ideal number of VIP's based on throughput target and throughput per vip. */
     const uint32_t ideal_vip_count;
 
-    /* The hard cap on number of maximum connections. */
-    const uint32_t max_active_connections;
+    /* Hard limit on max connections set through the client config. */
+    const uint32_t max_active_connections_override;
 
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;

@@ -173,8 +173,9 @@ uint32_t aws_s3_client_get_max_active_connections(struct aws_s3_client *client, 
 
     uint32_t max_active_connections = client->ideal_vip_count * num_connections_per_vip;
 
-    if (client->max_active_connections > 0 && client->max_active_connections < max_active_connections) {
-        max_active_connections = client->max_active_connections;
+    if (client->max_active_connections_override > 0 &&
+        client->max_active_connections_override < max_active_connections) {
+        max_active_connections = client->max_active_connections_override;
     }
 
     return max_active_connections;
@@ -253,7 +254,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_active_vip_connections, 0);
     aws_atomic_init_int(&client->stats.num_warm_vip_connections, 0);
 
-    *((uint32_t *)&client->max_active_connections) = client_config->max_connections;
+    *((uint32_t *)&client->max_active_connections_override) = client_config->max_connections;
 
     /* Store our client bootstrap. */
     client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
