@@ -368,7 +368,7 @@ static int s_s3_auto_ranged_put_prepare_request(
             }
 
             /* Create a new put-object message to upload a part. */
-            message = aws_s3_put_object_message_new(
+            message = aws_s3_upload_part_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,

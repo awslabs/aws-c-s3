@@ -14,6 +14,95 @@
 #include <aws/s3/s3.h>
 #include <inttypes.h>
 
+static const struct aws_byte_cursor s_create_multipart_upload_excluded_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+};
+
+static const struct aws_byte_cursor s_upload_part_excluded_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Disposition"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Language"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Expires"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-full-control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-write-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-storage-class"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-website-redirect-location"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+};
+
+static const struct aws_byte_cursor s_complete_multipart_upload_excluded_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Disposition"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Language"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Expires"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-full-control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-write-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-storage-class"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-website-redirect-location"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+};
+
+static const struct aws_byte_cursor s_abort_multipart_upload_excluded_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Disposition"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Language"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Expires"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-full-control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-write-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-storage-class"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-website-redirect-location"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+};
+
 static int s_s3_message_util_set_multipart_request_path(
     struct aws_allocator *allocator,
     const struct aws_string *upload_id,
@@ -38,8 +127,7 @@ struct aws_http_message *aws_s3_get_object_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, NULL, 0);
 
     if (message == NULL) {
         return NULL;
@@ -63,37 +151,35 @@ error_clean_up:
     return NULL;
 }
 
-/* Create a new put object request from an existing put object request.  Currently just optionally adds part information
- * for a multipart upload. */
-struct aws_http_message *aws_s3_put_object_message_new(
+/* Creates a create-multipart-upload request from a given put objet request. */
+struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *base_message,
-    struct aws_byte_buf *buffer,
-    uint32_t part_number,
-    const struct aws_string *upload_id) {
+    struct aws_http_message *base_message) {
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(base_message);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    uint32_t flag = part_number > 0 ? AWS_S3_COPY_MESSAGE_WITHOUT_ACL : 0;
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, flag);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+        allocator,
+        base_message,
+        s_create_multipart_upload_excluded_headers,
+        AWS_ARRAY_SIZE(s_create_multipart_upload_excluded_headers));
 
     if (message == NULL) {
         goto error_clean_up;
     }
 
-    if (part_number > 0) {
-
-        if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, message)) {
-            goto error_clean_up;
-        }
-
-        if (buffer != NULL) {
-            if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
-                goto error_clean_up;
-            }
-        }
+    if (s_s3_create_multipart_set_up_request_path(allocator, message)) {
+        goto error_clean_up;
     }
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+
+    if (headers == NULL) {
+        goto error_clean_up;
+    }
+
+    aws_http_message_set_request_method(message, g_post_method);
+    aws_http_message_set_body_stream(message, NULL);
 
     return message;
 
@@ -107,38 +193,34 @@ error_clean_up:
     return NULL;
 }
 
-/* Creates a create-multipart-upload request from a given put objet request. */
-struct aws_http_message *aws_s3_create_multipart_upload_message_new(
+/* Create a new put object request from an existing put object request.  Currently just optionally adds part information
+ * for a multipart upload. */
+struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *base_message) {
+    struct aws_http_message *base_message,
+    struct aws_byte_buf *buffer,
+    uint32_t part_number,
+    const struct aws_string *upload_id) {
     AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(base_message);
+    AWS_PRECONDITION(part_number > 0);
 
-    /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
-    struct aws_http_headers *headers = NULL;
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+        allocator, base_message, s_upload_part_excluded_headers, AWS_ARRAY_SIZE(s_upload_part_excluded_headers));
 
     if (message == NULL) {
         goto error_clean_up;
     }
 
-    if (s_s3_create_multipart_set_up_request_path(allocator, message)) {
+    if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, message)) {
         goto error_clean_up;
     }
 
-    headers = aws_http_message_get_headers(message);
-
-    if (headers == NULL) {
-        goto error_clean_up;
+    if (buffer != NULL) {
+        if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
+            goto error_clean_up;
+        }
     }
-
-    if (aws_http_headers_erase(headers, g_content_length_header_name)) {
-        goto error_clean_up;
-    }
-
-    aws_http_message_set_request_method(message, g_post_method);
-
-    aws_http_message_set_body_stream(message, NULL);
 
     return message;
 
@@ -182,9 +264,12 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
 
-    /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+        allocator,
+        base_message,
+        s_complete_multipart_upload_excluded_headers,
+        AWS_ARRAY_SIZE(s_complete_multipart_upload_excluded_headers));
+
     struct aws_http_headers *headers = NULL;
 
     if (message == NULL) {
@@ -272,8 +357,12 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     const struct aws_string *upload_id) {
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(allocator, base_message, AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS);
+
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+        allocator,
+        base_message,
+        s_abort_multipart_upload_excluded_headers,
+        AWS_ARRAY_SIZE(s_abort_multipart_upload_excluded_headers));
 
     if (s_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, message)) {
         goto error_clean_up;
@@ -301,7 +390,10 @@ static int s_s3_create_multipart_set_up_request_path(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
 
-    const struct aws_byte_cursor request_path_suffix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("?uploads");
+    bool has_existing_parameters = false;
+    const struct aws_byte_cursor question_mark = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("?");
+    const struct aws_byte_cursor ampersand = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&");
+    const struct aws_byte_cursor request_path_suffix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("uploads");
 
     struct aws_byte_cursor request_path;
 
@@ -309,14 +401,27 @@ static int s_s3_create_multipart_set_up_request_path(
         return AWS_OP_ERR;
     }
 
+    for (size_t i = 0; i < request_path.len; ++i) {
+        if (request_path.ptr[i] == '?') {
+            has_existing_parameters = true;
+            break;
+        }
+    }
+
     struct aws_byte_buf request_path_buf;
 
-    if (aws_byte_buf_init(&request_path_buf, allocator, request_path.len + request_path_suffix.len)) {
+    if (aws_byte_buf_init(&request_path_buf, allocator, request_path.len + request_path_suffix.len + 1)) {
         return AWS_OP_ERR;
     }
 
     if (aws_byte_buf_append(&request_path_buf, &request_path)) {
         goto error_clean_request_path_buf;
+    }
+
+    if (has_existing_parameters) {
+        aws_byte_buf_append(&request_path_buf, &ampersand);
+    } else {
+        aws_byte_buf_append(&request_path_buf, &question_mark);
     }
 
     if (aws_byte_buf_append(&request_path_buf, &request_path_suffix)) {
@@ -384,14 +489,12 @@ error_clean_up:
 struct aws_http_message *aws_s3_message_util_copy_http_message(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    uint32_t flags) {
+    const struct aws_byte_cursor *excluded_header_array,
+    size_t excluded_header_array_size) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
-    uint32_t sse_included = (flags & AWS_S3_COPY_MESSAGE_INCLUDE_SSE) != 0;
-    uint32_t multipart_upload_ops = (flags & AWS_S3_COPY_MESSAGE_MULTIPART_UPLOAD_OPS) != 0;
-    uint32_t no_acl = (flags & AWS_S3_COPY_MESSAGE_WITHOUT_ACL) != 0;
 
     if (message == NULL) {
         return NULL;
@@ -424,25 +527,19 @@ struct aws_http_message *aws_s3_message_util_copy_http_message(
             goto error_clean_up;
         }
 
-        if (multipart_upload_ops) {
-            if (aws_byte_cursor_eq_c_str_ignore_case(&header.name, "host") ||
-                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-request-payer") ||
-                aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-expected-bucket-owner") ||
-                aws_byte_cursor_eq_ignore_case(&header.name, &g_user_agent_header_name)) {
-                if (aws_http_message_add_header(message, header)) {
-                    goto error_clean_up;
+        if (excluded_header_array && excluded_header_array_size > 0) {
+            bool exclude_header = false;
+
+            for (size_t exclude_index = 0; exclude_index < excluded_header_array_size; ++exclude_index) {
+                if (aws_byte_cursor_eq_ignore_case(&header.name, &excluded_header_array[exclude_index])) {
+                    exclude_header = true;
+                    break;
                 }
             }
-            continue;
-        }
 
-        /* For SSE upload, the sse related headers should only be shown in the create_multipart_upload.*/
-        if (!sse_included && aws_byte_cursor_eq_c_str_ignore_case(&header.name, "x-amz-server-side-encryption")) {
-            continue;
-        }
-
-        if (no_acl && aws_byte_cursor_eq_ignore_case(&header.name, &g_acl_header_name)) {
-            continue;
+            if (exclude_header) {
+                continue;
+            }
         }
 
         if (aws_http_message_add_header(message, header)) {

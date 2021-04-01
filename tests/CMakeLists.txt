@@ -5,6 +5,8 @@ file(GLOB TEST_SRC "*.c")
 file(GLOB TEST_HDRS "*.h")
 file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
+add_test_case(test_s3_copy_http_message)
+
 add_net_test_case(test_s3_client_create_destroy)
 add_net_test_case(test_s3_client_max_active_connections_override)
 add_test_case(test_s3_client_get_max_active_connections)
@@ -18,6 +20,7 @@ add_test_case(test_s3_client_update_connections_request_assign)
 add_test_case(test_s3_client_update_connections_too_many_conns)
 add_test_case(test_s3_client_update_connections_finish_result)
 add_test_case(test_s3_client_update_connections_clean_up)
+
 add_net_test_case(test_s3_vip_create_destroy)
 add_net_test_case(test_s3_client_add_remove_vips)
 add_net_test_case(test_s3_client_resolve_vips)
