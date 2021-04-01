@@ -61,6 +61,7 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
     ASSERT_TRUE(aws_byte_cursor_eq(&request_path, &copied_request_path));
 
     struct aws_http_headers *copied_headers = aws_http_message_get_headers(copied_message);
+    ASSERT_TRUE(copied_headers != NULL);
     ASSERT_TRUE(aws_http_headers_count(copied_headers) == 1);
 
     struct aws_http_header copied_header;
@@ -79,12 +80,53 @@ AWS_TEST_CASE(test_s3_message_util_assign_body, s_test_s3_message_util_assign_bo
 static int s_test_s3_message_util_assign_body(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    /*
-    struct aws_input_stream *aws_s3_message_util_assign_body(
-        struct aws_allocator *allocator,
-        struct aws_byte_buf *byte_buf,
-        struct aws_http_message *out_message);
-    */
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    const size_t test_buffer_size = 42;
+    struct aws_byte_buf test_buffer;
+    aws_byte_buf_init(&test_buffer, allocator, test_buffer_size);
+
+    srand(0);
+
+    for (size_t i = 0; i < test_buffer_size; ++i) {
+        const char single_char = (char)(rand() % (int)('a' - 'z') + (int)'a');
+
+        struct aws_byte_cursor single_char_cursor = {
+            .ptr = (uint8_t*)&single_char,
+            .len = 1,
+        };
+
+        aws_byte_buf_append(&test_buffer, &single_char_cursor);
+    }
+
+    struct aws_input_stream *input_stream = aws_s3_message_util_assign_body(allocator, &test_buffer, message);
+    ASSERT_TRUE(input_stream != NULL);
+
+    ASSERT_TRUE(aws_http_message_get_body_stream(message) == input_stream);
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    ASSERT_TRUE(headers != NULL);
+
+    /* Check for the content length header. */
+    struct aws_byte_cursor content_length_header_value;
+    AWS_ZERO_STRUCT(content_length_header_value);
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_content_length_header_name, &content_length_header_value));
+    ASSERT_TRUE((size_t)atoi((const char *)content_length_header_value.ptr) == test_buffer_size);
+
+    /* Check that the stream data is equal to the original buffer data. */
+    struct aws_byte_buf stream_read_buffer;
+    ASSERT_SUCCESS(aws_byte_buf_init(&stream_read_buffer, allocator, test_buffer_size));
+    ASSERT_SUCCESS(aws_input_stream_read(input_stream, &stream_read_buffer));
+    ASSERT_TRUE(aws_byte_buf_eq(&test_buffer, &stream_read_buffer));
+
+    /* There should be no data left in the stream, so additional reads should not cause the buffer to change. */
+    ASSERT_SUCCESS(aws_input_stream_read(input_stream, &stream_read_buffer));
+    ASSERT_TRUE(aws_byte_buf_eq(&test_buffer, &stream_read_buffer));
+
+    aws_byte_buf_clean_up(&stream_read_buffer);
+    aws_input_stream_destroy(input_stream);
+    aws_byte_buf_clean_up(&test_buffer);
+    aws_http_message_release(message);
 
     return 0;
 }

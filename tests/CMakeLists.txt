@@ -6,6 +6,7 @@ file(GLOB TEST_HDRS "*.h")
 file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
 add_test_case(test_s3_copy_http_message)
+add_test_case(test_s3_message_util_assign_body)
 
 add_net_test_case(test_s3_client_create_destroy)
 add_net_test_case(test_s3_client_max_active_connections_override)
