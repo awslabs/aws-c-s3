@@ -571,12 +571,21 @@ static void s_s3_meta_request_request_on_signed(
         aws_apply_signing_result_to_http_request(request->send_data.message, meta_request->allocator, signing_result)) {
 
         error_code = aws_last_error_or_unknown();
+
         goto finish;
     }
 
 finish:
 
     if (error_code != AWS_ERROR_SUCCESS) {
+
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Meta request could not sign TTP request due to error code %d (%s)",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code));
+
         aws_s3_meta_request_lock_synced_data(meta_request);
         aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
         aws_s3_meta_request_unlock_synced_data(meta_request);
