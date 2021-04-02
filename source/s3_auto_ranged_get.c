@@ -200,7 +200,7 @@ static bool s_s3_auto_ranged_get_update(
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
-                1,
+                0,
                 AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_get->synced_data.get_without_range_sent = true;
@@ -297,11 +297,7 @@ static int s_s3_auto_ranged_get_prepare_request(
 
     /* Generate a new ranged get request based on the original message. */
     struct aws_http_message *message = aws_s3_get_object_message_new(
-        meta_request->allocator,
-        meta_request->initial_request_message,
-        request->part_number,
-        meta_request->part_size,
-        request->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE);
+        meta_request->allocator, meta_request->initial_request_message, request->part_number, meta_request->part_size);
 
     if (message == NULL) {
         AWS_LOGF_ERROR(

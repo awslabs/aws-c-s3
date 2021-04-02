@@ -7,6 +7,12 @@ file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
 add_test_case(test_s3_copy_http_message)
 add_test_case(test_s3_message_util_assign_body)
+add_test_case(test_s3_get_object_message_new)
+add_test_case(test_s3_set_multipart_request_path)
+add_test_case(test_s3_create_multipart_upload_message_new)
+add_test_case(test_s3_upload_part_message_new)
+add_test_case(test_s3_complete_multipart_message_new)
+add_test_case(test_s3_abort_multipart_upload_message_new)
 
 add_net_test_case(test_s3_client_create_destroy)
 add_net_test_case(test_s3_client_max_active_connections_override)
