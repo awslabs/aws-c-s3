@@ -528,7 +528,7 @@ static int s_test_s3_get_object_message_new(struct aws_allocator *allocator, voi
 
     {
         const uint32_t part_number = 2;
-        const uint64_t part_size = 42;
+        const size_t part_size = 42;
 
         char expected_range_value_buffer[128] = "bytes=42-83";
         struct aws_byte_cursor expected_range_value_cursor = aws_byte_cursor_from_c_str(expected_range_value_buffer);
