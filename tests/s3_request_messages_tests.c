@@ -202,16 +202,22 @@ static int s_fill_byte_buf(struct aws_byte_buf *buffer, struct aws_allocator *al
 }
 
 static int s_test_http_headers_match(
+    struct aws_allocator *allocator,
     struct aws_http_message *message0,
     struct aws_http_message *message1,
-    const struct aws_byte_cursor *excluded_headers,
-    size_t excluded_headers_count,
-    const struct aws_byte_cursor *exclusion_exceptions,
-    size_t exclusion_exceptions_count) {
+
+    /* Headers that we know are in message0, but should NOT be in message1 */
+    const struct aws_byte_cursor *excluded_message0_headers,
+    size_t excluded_message0_headers_count,
+
+    /* Headers in message1 that are okay to be in message1 even if they are in the excluded list or are not in
+       message0.*/
+    const struct aws_byte_cursor *message1_header_exceptions,
+    size_t message1_header_exceptions_count) {
     ASSERT_TRUE(message0 != NULL);
     ASSERT_TRUE(message1 != NULL);
-    ASSERT_TRUE(excluded_headers != NULL || excluded_headers_count == 0);
-    ASSERT_TRUE(exclusion_exceptions != NULL || exclusion_exceptions_count == 0);
+    ASSERT_TRUE(excluded_message0_headers != NULL || excluded_message0_headers_count == 0);
+    ASSERT_TRUE(message1_header_exceptions != NULL || message1_header_exceptions_count == 0);
 
     struct aws_http_headers *message0_headers = aws_http_message_get_headers(message0);
     ASSERT_TRUE(message0_headers != NULL);
@@ -219,49 +225,87 @@ static int s_test_http_headers_match(
     struct aws_http_headers *message1_headers = aws_http_message_get_headers(message1);
     ASSERT_TRUE(message1_headers != NULL);
 
-    for (size_t i = 0; i < aws_http_headers_count(message0_headers); ++i) {
-        struct aws_http_header message0_header;
-        AWS_ZERO_STRUCT(message0_header);
-        ASSERT_SUCCESS(aws_http_headers_get_index(message0_headers, i, &message0_header));
+    struct aws_http_headers *expected_message0_headers = aws_http_headers_new(allocator);
 
-        bool header_should_be_excluded = false;
+    /* Copy message1 headers to expected_message0_headers. With upcoming adds/removes, it should transform back into
+     * message0.
+     */
+    for (size_t i = 0; i < aws_http_headers_count(message1_headers); ++i) {
+        struct aws_http_header message1_header;
+        AWS_ZERO_STRUCT(message1_header);
+        ASSERT_SUCCESS(aws_http_headers_get_index(message1_headers, i, &message1_header));
+        ASSERT_SUCCESS(aws_http_headers_add(expected_message0_headers, message1_header.name, message1_header.value));
+    }
 
-        for (size_t j = 0; j < excluded_headers_count; ++j) {
-            if (aws_byte_cursor_eq(&excluded_headers[j], &message0_header.name)) {
-                header_should_be_excluded = true;
+    /* Go through all of the headers that were originally removed from message1 after it was copied from message0. */
+    for (size_t i = 0; i < excluded_message0_headers_count; ++i) {
+        const struct aws_byte_cursor *excluded_header_name = &excluded_message0_headers[i];
+
+        bool header_existance_is_valid = false;
+
+        /* If the heaer is in the exception list, it's okay for message1 to have. (It may have been re-added.) */
+        for (size_t j = 0; j < message1_header_exceptions_count; ++j) {
+            if (aws_byte_cursor_eq(excluded_header_name, &message1_header_exceptions[j])) {
+                header_existance_is_valid = true;
                 break;
             }
         }
 
-        if (header_should_be_excluded && exclusion_exceptions != NULL) {
-            for (size_t j = 0; j < exclusion_exceptions_count; ++j) {
-                if (aws_byte_cursor_eq(&exclusion_exceptions[j], &message0_header.name)) {
-                    header_should_be_excluded = false;
-                    break;
-                }
-            }
-        }
-
+        /* Try to get the header from message1. */
         struct aws_byte_cursor message1_header_value;
         AWS_ZERO_STRUCT(message1_header_value);
-        int get_header_return_value =
-            aws_http_headers_get(message1_headers, message0_header.name, &message1_header_value);
+        int result = aws_http_headers_get(message1_headers, *excluded_header_name, &message1_header_value);
 
-        int last_error = aws_last_error();
+        if (header_existance_is_valid) {
 
-        ASSERT_TRUE(get_header_return_value == AWS_OP_SUCCESS || last_error == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
+            /* If this header is allowed to exist in message1, then we don't need to assert on its existance or
+             * non-existance.  But we do want to erase it from the expected_message0_headers, since its value may be
+             * different from that in message0. */
+            if (result == AWS_OP_SUCCESS) {
+                ASSERT_SUCCESS(aws_http_headers_erase(expected_message0_headers, *excluded_header_name));
+            }
 
-        if (header_should_be_excluded) {
-            ASSERT_TRUE(last_error == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
         } else {
-            ASSERT_TRUE(get_header_return_value == AWS_OP_SUCCESS);
+            /* In this case, message1 should not have the header. */
+            ASSERT_TRUE(result == AWS_OP_ERR && aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
+        }
+
+        /* At this point, expected_message0_headers should not have the excluded header in it. Add a copy of the header
+         * from message0 to expected_message0_headers to further transform it toward being a copy of message0 headers.
+         */
+        struct aws_byte_cursor message0_header_value;
+        AWS_ZERO_STRUCT(message0_header_value);
+        if (aws_http_headers_get(message0_headers, *excluded_header_name, &message0_header_value) == AWS_OP_SUCCESS) {
+            ASSERT_SUCCESS(
+                aws_http_headers_add(expected_message0_headers, *excluded_header_name, message0_header_value));
         }
     }
+
+    /* message0_headers should now match expected_message0_headers */
+    {
+        ASSERT_TRUE(aws_http_headers_count(message0_headers) == aws_http_headers_count(expected_message0_headers));
+
+        for (size_t i = 0; i < aws_http_headers_count(message0_headers); ++i) {
+            struct aws_http_header message0_header;
+            AWS_ZERO_STRUCT(message0_header);
+            ASSERT_SUCCESS(aws_http_headers_get_index(message0_headers, i, &message0_header));
+
+            struct aws_byte_cursor expected_message0_header_value;
+            AWS_ZERO_STRUCT(expected_message0_header_value);
+            ASSERT_SUCCESS(
+                aws_http_headers_get(expected_message0_headers, message0_header.name, &expected_message0_header_value));
+
+            ASSERT_TRUE(aws_byte_cursor_eq(&message0_header.value, &expected_message0_header_value));
+        }
+    }
+
+    aws_http_headers_release(expected_message0_headers);
 
     return AWS_OP_SUCCESS;
 }
 
 static int s_test_http_messages_match(
+    struct aws_allocator *allocator,
     struct aws_http_message *message0,
     struct aws_http_message *message1,
     const struct aws_byte_cursor *excluded_headers,
@@ -290,7 +334,8 @@ static int s_test_http_messages_match(
 
     ASSERT_TRUE(aws_byte_cursor_eq(&request_method, &copied_request_method));
 
-    ASSERT_SUCCESS(s_test_http_headers_match(message0, message1, excluded_headers, excluded_headers_count, NULL, 0));
+    ASSERT_SUCCESS(
+        s_test_http_headers_match(allocator, message0, message1, excluded_headers, excluded_headers_count, NULL, 0));
 
     return AWS_OP_SUCCESS;
 }
@@ -431,7 +476,7 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
         aws_s3_message_util_copy_http_message(allocator, message, &excluded_header.name, 1);
     ASSERT_TRUE(copied_message != NULL);
 
-    ASSERT_SUCCESS(s_test_http_messages_match(message, copied_message, &excluded_header.name, 1));
+    ASSERT_SUCCESS(s_test_http_messages_match(allocator, message, copied_message, &excluded_header.name, 1));
 
     aws_http_message_release(copied_message);
     aws_http_message_release(message);
@@ -476,7 +521,7 @@ static int s_test_s3_get_object_message_new(struct aws_allocator *allocator, voi
         struct aws_http_message *get_object_message = aws_s3_get_object_message_new(allocator, original_message, 0, 0);
         ASSERT_TRUE(get_object_message != NULL);
 
-        ASSERT_SUCCESS(s_test_http_messages_match(original_message, get_object_message, NULL, 0));
+        ASSERT_SUCCESS(s_test_http_messages_match(allocator, original_message, get_object_message, NULL, 0));
 
         aws_http_message_release(get_object_message);
     }
@@ -622,8 +667,9 @@ static int s_test_s3_create_multipart_upload_message_new(struct aws_allocator *a
     ASSERT_SUCCESS(s_test_http_message_request_method(create_multipart_upload_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(create_multipart_upload_message, &expected_create_path));
     ASSERT_SUCCESS(s_test_http_headers_match(
-        create_multipart_upload_message,
+        allocator,
         original_message,
+        create_multipart_upload_message,
         g_s3_create_multipart_upload_excluded_headers,
         g_s3_create_multipart_upload_excluded_headers_count,
         NULL,
@@ -672,8 +718,9 @@ static int s_test_s3_upload_part_message_new(struct aws_allocator *allocator, vo
     ASSERT_SUCCESS(s_test_http_message_request_method(upload_part_message, "PUT"));
     ASSERT_SUCCESS(s_test_http_message_request_path(upload_part_message, &expected_create_path));
     ASSERT_SUCCESS(s_test_http_headers_match(
-        upload_part_message,
+        allocator,
         original_message,
+        upload_part_message,
         g_s3_upload_part_excluded_headers,
         g_s3_upload_part_excluded_headers_count,
         header_exclude_exceptions,
@@ -790,8 +837,9 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     ASSERT_SUCCESS(s_test_http_message_request_method(complete_multipart_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(complete_multipart_message, &expected_create_path));
     ASSERT_SUCCESS(s_test_http_headers_match(
-        complete_multipart_message,
+        allocator,
         original_message,
+        complete_multipart_message,
         g_s3_complete_multipart_upload_excluded_headers,
         g_s3_complete_multipart_upload_excluded_headers_count,
         header_exclude_exceptions,
@@ -861,8 +909,9 @@ static int s_test_s3_abort_multipart_upload_message_newt(struct aws_allocator *a
     ASSERT_SUCCESS(s_test_http_message_request_method(abort_upload_message, "DELETE"));
     ASSERT_SUCCESS(s_test_http_message_request_path(abort_upload_message, &expected_create_path));
     ASSERT_SUCCESS(s_test_http_headers_match(
-        abort_upload_message,
+        allocator,
         original_message,
+        abort_upload_message,
         g_s3_abort_multipart_upload_excluded_headers,
         g_s3_abort_multipart_upload_excluded_headers_count,
         NULL,
