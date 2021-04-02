@@ -340,8 +340,8 @@ static void s_s3_auto_ranged_get_request_finished(
 
     uint32_t num_parts = 0;
 
-    /* Check if this was the first part and if it was successful. For ranged-get request, the part number will be 1, but
-     * can also be 0 if an empty file is being requested.*/
+    /* Check if this was the first part and if it was successful. For a ranged-get request, the first part number will
+     * be 1. For an empty file request, the part number will be 0.*/
     if (error_code == AWS_ERROR_SUCCESS && request->part_number <= 1) {
         uint64_t total_object_size = 0;
         if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
