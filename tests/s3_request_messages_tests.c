@@ -383,19 +383,25 @@ static int s_test_http_message_body_stream(
     struct aws_byte_cursor content_length_header_value;
     AWS_ZERO_STRUCT(content_length_header_value);
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_content_length_header_name, &content_length_header_value));
-    ASSERT_TRUE((size_t)atoi((const char *)content_length_header_value.ptr) == expected_stream_contents->len);
+
+    struct aws_string *content_length_header_str = aws_string_new_from_cursor(allocator, &content_length_header_value);
+    uint32_t content_length = (uint32_t)atoi((const char *)content_length_header_str->bytes);
+    ASSERT_TRUE(content_length == (uint32_t)expected_stream_contents->len);
+    aws_string_destroy(content_length_header_str);
 
     /* Check that the stream data is equal to the original buffer data. */
     struct aws_byte_buf stream_read_buffer;
     ASSERT_SUCCESS(aws_byte_buf_init(&stream_read_buffer, allocator, expected_stream_contents->len));
     ASSERT_SUCCESS(aws_input_stream_read(body_stream, &stream_read_buffer));
     ASSERT_TRUE(aws_byte_buf_eq(expected_stream_contents, &stream_read_buffer));
-
-    /* There should be no data left in the stream, so additional reads should not cause the buffer to change. */
-    ASSERT_SUCCESS(aws_input_stream_read(body_stream, &stream_read_buffer));
-    ASSERT_TRUE(aws_byte_buf_eq(expected_stream_contents, &stream_read_buffer));
-
     aws_byte_buf_clean_up(&stream_read_buffer);
+
+    /* There should be no data left in the stream. */
+    struct aws_byte_buf stream_overread_buffer;
+    ASSERT_SUCCESS(aws_byte_buf_init(&stream_overread_buffer, allocator, expected_stream_contents->len));
+    ASSERT_SUCCESS(aws_input_stream_read(body_stream, &stream_overread_buffer));
+    ASSERT_TRUE(stream_overread_buffer.len == 0);
+    aws_byte_buf_clean_up(&stream_overread_buffer);
 
     return AWS_OP_SUCCESS;
 }
@@ -492,7 +498,7 @@ static int s_test_s3_message_util_assign_body(struct aws_allocator *allocator, v
 
     const size_t test_buffer_size = 42;
     struct aws_byte_buf test_buffer;
-    s_fill_byte_buf(&test_buffer, allocator, test_buffer_size);
+    ASSERT_SUCCESS(s_fill_byte_buf(&test_buffer, allocator, test_buffer_size));
 
     struct aws_input_stream *input_stream = aws_s3_message_util_assign_body(allocator, &test_buffer, message);
     ASSERT_TRUE(input_stream != NULL);
