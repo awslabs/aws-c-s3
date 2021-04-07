@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/auth/signing.h>
 #include <aws/common/atomics.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/mutex.h>
@@ -14,6 +15,7 @@
 #include <aws/http/request_response.h>
 
 #include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_request.h"
 
 struct aws_s3_client;
 struct aws_s3_vip_connection;
@@ -25,159 +27,83 @@ struct aws_http_make_request_options;
 struct aws_retry_strategy;
 struct aws_byte_buffer;
 
-typedef void(aws_s3_meta_request_work_available_fn)(struct aws_s3_meta_request *meta_request, void *user_data);
-
-typedef void(aws_s3_meta_request_write_body_finished_callback_fn)(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request);
-
-typedef void(aws_s3_request_finished_callback_fn)(void *user_data);
-
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
     AWS_S3_META_REQUEST_STATE_FINISHED,
 };
 
-enum aws_s3_request_desc_flags {
-    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_DESC_STREAM_RESPONSE_BODY = 0x00000002,
-    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x0000004,
+enum aws_s3_meta_request_update_flags {
+    /* There are no connections available. Meta request can wait for anything in progress to finish up, but shouldn't
+       expect that there will be any connections for issuing requests. */
+    AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS = 0x00000001,
+
+    /* The client potentially has multiple meta requests that it can spread across connections, and the given meta
+       request can selectively not return a request if there is a performance reason to do so.*/
+    AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE = 0x00000002,
 };
 
-/* Represents an in-flight active request.  Does not persist past a the execution of the request. */
-struct aws_s3_request {
+typedef void(aws_s3_meta_request_prepare_request_callback_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code,
+    void *user_data);
 
-    /* Linked list node used for queuing. */
-    struct aws_linked_list_node node;
-
-    /* TODO Ref count on the request is no longer needed--only one part of code should ever be holding onto a request,
-     * and we can just transfer ownership.*/
-    struct aws_ref_count ref_count;
-
-    struct aws_allocator *allocator;
-
-    /* Owning meta request. */
-    struct aws_s3_meta_request *meta_request;
-
-    /* Current retry token for the request. If it has never been retried, this will be NULL. */
-    struct aws_retry_token *retry_token;
-
-    /* Request body to use when sending the request. The contents of this body will be re-used if a request is
-     * retried.*/
-    struct aws_byte_buf request_body;
-
-    /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
-     * However, must currently be a valid part number (ie: greater than 0) if the response body is to be streamed to the
-     * caller.
-     */
-    uint32_t part_number;
-
-    /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
-     * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
-     * be more contextual, like "first part" instead of just "part".) */
-    /* TODO we could potentially combine these with the bitfields below. */
-    int request_tag;
-
-    /* When true, response headers from the request will be stored in the request's response_headers variable. */
-    uint32_t record_response_headers : 1;
-
-    /* When true, the response body will be streamed back to the caller. */
-    uint32_t stream_response_body : 1;
-
-    /* When true, the response body buffer will be allocated in the size of a part. */
-    uint32_t part_size_response_body : 1;
-
-    /* Members of this structure will be repopulated each time the request is sent.  For example, If the request fails,
-     * and needs to be retried, then the members of this structure will be cleaned up and re-populated on the next send.
-     */
-    struct {
-
-        /* The HTTP message to send for this request. */
-        struct aws_http_message *message;
-
-        /* Signable created for the above message. */
-        struct aws_signable *signable;
-
-        /* Recorded response headers for the request. Set only when the request desc has record_response_headers set to
-         * true or when this response indicates an error. */
-        struct aws_http_headers *response_headers;
-
-        /* Recorded response body of the request. */
-        struct aws_byte_buf response_body;
-
-        /* Returned response status of this request. */
-        int response_status;
-
-        /* Error code result for this sending of the request. */
-        int error_code;
-
-    } send_data;
+struct aws_s3_prepare_request_payload {
+    struct aws_s3_request *request;
+    aws_s3_meta_request_prepare_request_callback_fn *callback;
+    void *user_data;
+    struct aws_task task;
 };
 
 struct aws_s3_meta_request_vtable {
-    /* Pass back a request with a populated description.  If no work is available, this is allowed to pass back a NULL
-     * pointer. */
-    int (*next_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request **out_request);
+    /* Update the meta request.  out_request is optional and can be NULL. If not null, and a request can be returned, it
+     * will be passed back into this variable. Returns true if there is there is any work in progress, false if there is
+     * not. */
+    bool (*update)(struct aws_s3_meta_request *meta_request, uint32_t flags, struct aws_s3_request **out_request);
 
-    /* Called when sending of the request has finished. */
+    void (*schedule_prepare_request)(
+        struct aws_s3_meta_request *meta_request,
+        struct aws_s3_request *request,
+        aws_s3_meta_request_prepare_request_callback_fn *callback,
+        void *user_data);
+
+    /* Given a request, prepare it for sending (ie: creating the correct HTTP message, reading from a stream (if
+     * necessary), signing it, computing hashes, etc.) */
+    int (*prepare_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+
+    void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
+
+    /* Sign the request on the given VIP Connection. */
+    void (*sign_request)(
+        struct aws_s3_meta_request *meta_request,
+        struct aws_s3_request *request,
+        aws_signing_complete_fn *on_signing_complete,
+        void *user_data);
+
+    /* Called when any sending of the request is finished, including for each retry. */
     void (*send_request_finish)(
         struct aws_s3_vip_connection *vip_connection,
         struct aws_http_stream *stream,
         int error_code);
 
-    /* Given a request, prepare it for sending based on its description. Should call aws_s3_request_setup_send_data
-     * before exitting. */
-    int (*prepare_request)(
-        struct aws_s3_meta_request *meta_request,
-        struct aws_s3_client *client,
-        struct aws_s3_vip_connection *vip_connection,
-        bool is_initial_prepare);
+    /* Called when the request is done being sent, and will not be retried/sent again. */
+    void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
 
-    void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
-
-    /* Sign the request on the given VIP Connection. */
-    int (*sign_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_vip_connection *vip_connection);
-
-    /* Callbacks for all HTTP messages being processed by this meta request. */
-    int (*incoming_headers)(
-        struct aws_http_stream *stream,
-        enum aws_http_header_block header_block,
-        const struct aws_http_header *headers,
-        size_t headers_count,
-        struct aws_s3_vip_connection *vip_connection);
-
-    int (*incoming_headers_block_done)(
-        struct aws_http_stream *stream,
-        enum aws_http_header_block header_block,
-        struct aws_s3_vip_connection *vip_connection);
-
-    int (*incoming_body)(
-        struct aws_http_stream *stream,
-        const struct aws_byte_cursor *data,
-        struct aws_s3_vip_connection *vip_connection);
-
-    int (*stream_complete)(struct aws_http_stream *stream, struct aws_s3_vip_connection *vip_connection);
-
-    /* Called when an aws_s3_request created by this meta request has been destroyed. */
-    void (*notify_request_destroyed)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+    /* Called by the derived meta request when the meta request is completely finished. */
+    void (*finish)(struct aws_s3_meta_request *meta_request);
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
 };
 
-/* This represents one meta request, ie, one accelerated file transfer.  One S3 meta request can represent multiple S3
+/**
+ * This represents one meta request, ie, one accelerated file transfer.  One S3 meta request can represent multiple S3
  * requests.
  */
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
 
     struct aws_ref_count ref_count;
-
-    /* Internal reference count.  This does not keep the meta request alive, but does delay the finish callback from
-     * taking place. Like a normal reference count, this should be incremented from a place that already owns an
-     * internal ref count.
-     */
-    struct aws_ref_count internal_ref_count;
 
     void *impl;
 
@@ -193,6 +119,14 @@ struct aws_s3_meta_request {
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
+    /* Client that created this meta request which also processes this request. After the meta request is finished, this
+     * reference is removed.*/
+    struct aws_s3_client *client;
+
+    /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc..
+     * After the meta request is finished, this will be reset along with the client reference.*/
+    struct aws_event_loop *io_event_loop;
+
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
 
@@ -202,19 +136,10 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 
+    enum aws_s3_meta_request_type type;
+
     struct {
         struct aws_mutex lock;
-
-        /* Client that created this meta request which also processes this request.  After the meta request is finished,
-         * this reference is removed. */
-        struct aws_s3_client *client;
-
-        /* Queue of aws_s3_request structures that will be retried. */
-        struct aws_linked_list retry_queue;
-
-        /* Body of stream of the initial_request_message.  We store this here so that parts can take turns seeking to
-         * their own specific position (which should be in close proximity of one another). */
-        struct aws_input_stream *initial_body_stream;
 
         /* Priority queue for pending streaming requests.  We use a priority queue to keep parts in order so that we
          * can stream them to the caller in order. */
@@ -227,13 +152,26 @@ struct aws_s3_meta_request {
          * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. */
         uint32_t next_streaming_part;
 
-    } synced_data;
+        /* Number of parts scheduled for delivery. */
+        uint32_t num_parts_delivery_sent;
 
-    /* Anything in this structure should only ever be accessed by the client. */
-    struct {
-        /* Event loop to be used for streaming the response bodies for this meta request.*/
-        struct aws_event_loop *body_streaming_event_loop;
-    } client_data;
+        /* Total number of parts that have been attempted to be delivered. (Will equal the sum of succeeded and
+         * failed.)*/
+        uint32_t num_parts_delivery_completed;
+
+        /* Number of parts that have been successfully delivered to the caller. */
+        uint32_t num_parts_delivery_succeeded;
+
+        /* Number of parts that have failed while trying to be delivered to the caller. */
+        uint32_t num_parts_delivery_failed;
+
+        /* The end finish result of the meta request. */
+        struct aws_s3_meta_request_result finish_result;
+
+        /* True if the finish result has been set. */
+        uint32_t finish_result_set : 1;
+
+    } synced_data;
 
     /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */
     struct {
@@ -248,41 +186,7 @@ struct aws_s3_meta_request {
     } client_process_work_threaded_data;
 };
 
-/* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */
-struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
-    struct aws_allocator *allocator,
-    struct aws_s3_client *client,
-    size_t part_size,
-    const struct aws_s3_meta_request_options *options);
-
-/* Creates a new auto-ranged put meta request.  This will do a multipart upload in parallel when appropriate. */
-struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
-    struct aws_allocator *allocator,
-    struct aws_s3_client *client,
-    size_t part_size,
-    uint32_t num_parts,
-    const struct aws_s3_meta_request_options *options);
-
-/* Creates a new default meta request. This will send the request as is and pass back the response. */
-struct aws_s3_meta_request *aws_s3_meta_request_default_new(
-    struct aws_allocator *allocator,
-    struct aws_s3_client *client,
-    uint64_t content_length,
-    bool should_compute_content_md5,
-    const struct aws_s3_meta_request_options *options);
-
-struct aws_s3_request *aws_s3_meta_request_next_request(struct aws_s3_meta_request *meta_request);
-
-int aws_s3_meta_request_make_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection);
-
 AWS_EXTERN_C_BEGIN
-
-/* ******************************************** */
-/* BEGIN - Meant only for use by derived types. */
-/* ******************************************** */
 
 /* Initialize the base meta request structure. */
 AWS_S3_API
@@ -296,39 +200,18 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_meta_request_vtable *vtable,
     struct aws_s3_meta_request *base_type);
 
-/* Create a new s3 request structure with the given options. */
+/* Returns true if the meta request is still in the "active" state. */
 AWS_S3_API
-struct aws_s3_request *aws_s3_request_new(
-    struct aws_s3_meta_request *meta_request,
-    int request_tag,
-    uint32_t part_number,
-    uint32_t flags);
+bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request);
 
-/* Set up the request to be sent. Called each time before the request is sent. Will initially call
- * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */
+/* Returns true if the meta request is in the "finished" state. */
 AWS_S3_API
-void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message);
+bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request);
 
-/* Clear out send_data members so that they can be repopulated before the next send. */
+/* Returns true if the meta request has a finish result, which indicates that the meta request has trying to finish or
+ * has already finished. */
 AWS_S3_API
-void aws_s3_request_clean_up_send_data(struct aws_s3_request *request);
-
-AWS_S3_API
-void aws_s3_request_acquire(struct aws_s3_request *request);
-
-AWS_S3_API
-void aws_s3_request_release(struct aws_s3_request *request);
-
-/* Tells the meta request to stop, with an error code for indicating failure when necessary. */
-void aws_s3_meta_request_finish(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *failed_request,
-    int response_status,
-    int error_code);
-
-void aws_s3_meta_request_internal_acquire(struct aws_s3_meta_request *meta_request);
-
-void aws_s3_meta_request_internal_release(struct aws_s3_meta_request *meta_request);
+bool aws_s3_meta_request_has_finish_result(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
 void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request);
@@ -336,13 +219,25 @@ void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_reque
 AWS_S3_API
 void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_request);
 
-/* Call to have the meta request notify the owning client (if one exists) that there is more work to be done. */
-void aws_s3_meta_request_push_to_client(struct aws_s3_meta_request *meta_request);
-
-/* Gets the client reference in the meta request synced_data, acquiring a reference to it if it exists. After calling
- * this function, it is necessary to release that reference. */
+/* Called by the client to retrieve the next request and update the meta request's internal state. out_request is
+ * optional, and can be NULL if just desiring to update internal state. */
 AWS_S3_API
-struct aws_s3_client *aws_s3_meta_request_acquire_client(struct aws_s3_meta_request *meta_request);
+bool aws_s3_meta_request_update(
+    struct aws_s3_meta_request *meta_request,
+    uint32_t flags,
+    struct aws_s3_request **out_request);
+
+AWS_S3_API
+void aws_s3_meta_request_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
+
+AWS_S3_API
+void aws_s3_meta_request_send_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_vip_connection *vip_connection);
 
 AWS_S3_API
 void aws_s3_meta_request_init_signing_date_time_default(
@@ -350,49 +245,84 @@ void aws_s3_meta_request_init_signing_date_time_default(
     struct aws_date_time *date_time);
 
 AWS_S3_API
-int aws_s3_meta_request_sign_request_default(
+void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data);
 
+/* Default implementation for when a request finishes a particular send. Will be invoked for each send of the request.
+ */
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_vip_connection *vip_connection,
     struct aws_http_stream *stream,
     int error_code);
 
-int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
-
-int aws_s3_meta_request_read_body_synced(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
-/* ******************************************** */
-/* END - Meant only for use by derived types.  */
-/* ******************************************** */
-
-/* ******************************************** */
-/* BEGIN - Exposed only for use in tests */
-/* ******************************************** */
+/* Called by the client when a request is completely finished and not doing any further retries. */
 AWS_S3_API
-void aws_s3_meta_request_handle_error(
+void aws_s3_meta_request_finished_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);
 
+/* Called to place the request in the meta request's priority queue for streaming back to the caller.  Once all requests
+ * with a part number less than the given request has been received, the given request and the previous requests will
+ * scheduled for streaming.  */
 AWS_S3_API
-void aws_s3_meta_request_retry_queue_push(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
-
-AWS_S3_API
-struct aws_s3_request *aws_s3_meta_request_retry_queue_pop_synced(struct aws_s3_meta_request *meta_request);
-
-AWS_S3_API
-void aws_s3_meta_request_body_streaming_push_synced(
+void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
+/* Read from the meta request's input stream. Should always be done outside of any mutex, as reading from the stream
+ * could cause user code to call back into aws-c-s3.*/
 AWS_S3_API
-struct aws_s3_request *aws_s3_meta_request_body_streaming_pop_synced(struct aws_s3_meta_request *meta_request);
+int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
+
+/* Set the meta request finish result as failed. This is meant to be called sometime before aws_s3_meta_request_finish.
+ * Subsequent calls to this function or to aws_s3_meta_request_set_success_synced will not overwrite the end result of
+ * the meta request. */
+AWS_S3_API
+void aws_s3_meta_request_set_fail_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *failed_request,
+    int error_code);
+
+/* Set the meta request finish result as successful. This is meant to be called sometime before
+ * aws_s3_meta_request_finish. Subsequent calls this function or to aws_s3_meta_request_set_fail_synced will not
+ * overwrite the end result of the meta request. */
+AWS_S3_API
+void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_request, int response_status);
+
+/* Returns true if the finish result has been set (ie: either aws_s3_meta_request_set_fail_synced or
+ * aws_s3_meta_request_set_success_synced have been called.) */
+AWS_S3_API
+bool aws_s3_meta_request_has_finish_result_synced(struct aws_s3_meta_request *meta_request);
+
+/* Virtual function called by the meta request derived type when it's completely finished and there is no other work to
+ * be done. */
+AWS_S3_API
+void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request);
+
+/* Default implementation of the meta request finish functino. */
+AWS_S3_API
+void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request);
+
+/* Sets up a meta request result structure. */
+AWS_S3_API
+void aws_s3_meta_request_result_setup(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_result *result,
+    struct aws_s3_request *request,
+    int response_status,
+    int error_code);
+
+/* Cleans up a meta request result structure. */
+AWS_S3_API
+void aws_s3_meta_request_result_clean_up(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_result *result);
 
 AWS_EXTERN_C_END
-/* ******************************************** */
-/* END - Exposed only for use in tests */
-/* ******************************************** */
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */

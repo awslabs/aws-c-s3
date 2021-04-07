@@ -27,16 +27,18 @@ struct aws_s3_meta_request_result;
 enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_DEFAULT,
     AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-    AWS_S3_META_REQUEST_TYPE_PUT_OBJECT
+    AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+
+    AWS_S3_META_REQUEST_TYPE_MAX,
 };
 
-typedef void(aws_s3_meta_request_headers_callback_fn)(
+typedef int(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data);
 
-typedef void(aws_s3_meta_request_receive_body_callback_fn)(
+typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t range_start,
@@ -63,6 +65,10 @@ enum aws_s3_meta_request_compute_content_md5 {
 
 /* Options for a new client. */
 struct aws_s3_client_config {
+
+    /* When set, this will cap the number of active connections. When 0, the client will determine this value based on
+     * throughput_target_gbps. (Recommended) */
+    uint32_t max_active_connections_override;
 
     /* Region that the S3 bucket lives in. */
     struct aws_byte_cursor region;
@@ -137,7 +143,7 @@ struct aws_s3_meta_request_options {
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 };
 
-/* Final result details of a meta request.
+/* Result details of a meta request.
  *
  * If error_code is AWS_ERROR_SUCCESS, then response_status will match the response_status passed earlier by the header
  * callback and error_response_headers and error_response_body will be NULL.
@@ -179,6 +185,9 @@ AWS_S3_API
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
+
+AWS_S3_API
+void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);
