@@ -692,6 +692,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         tester->allocator,
         NULL,
         0,
+        false,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
@@ -1428,6 +1429,14 @@ int aws_s3_tester_send_put_object_meta_request(
         g_test_body_content_type,
         input_stream,
         flags);
+
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5) {
+        ASSERT_SUCCESS(aws_s3_message_util_add_content_md5_header(allocator, &test_buffer, message));
+    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5) {
+        struct aws_http_header content_md5_header = {
+            .name = g_content_md5_header_name, .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
+        ASSERT_SUCCESS(aws_http_message_add_header(message, content_md5_header));
+    }
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);

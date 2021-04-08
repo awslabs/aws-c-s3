@@ -66,6 +66,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             allocator,
             client,
             part_size,
+            false,
             options,
             auto_ranged_get,
             &s_s3_auto_ranged_get_vtable,

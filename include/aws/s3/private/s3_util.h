@@ -42,6 +42,7 @@ struct aws_cached_signing_config_aws {
 extern const struct aws_byte_cursor g_s3_service_name;
 extern const struct aws_byte_cursor g_range_header_name;
 extern const struct aws_byte_cursor g_content_range_header_name;
+extern const struct aws_byte_cursor g_content_md5_header_name;
 extern const struct aws_byte_cursor g_accept_ranges_header_name;
 extern const struct aws_byte_cursor g_post_method;
 extern const struct aws_byte_cursor g_delete_method;
