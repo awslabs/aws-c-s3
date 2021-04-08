@@ -1141,7 +1141,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
 
         if (content_length < client_part_size) {
-            return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
+            return aws_s3_meta_request_default_new(
+                client->allocator,
+                client,
+                content_length,
+                client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
+                    !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
+                options);
         }
 
         uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;

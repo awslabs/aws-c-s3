@@ -370,12 +370,13 @@ static int s_s3_auto_ranged_put_prepare_request(
             }
 
             /* Create a new put-object message to upload a part. */
-            message = aws_s3_put_object_message_new(
+            message = aws_s3_upload_part_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,
                 request->part_number,
-                auto_ranged_put->upload_id);
+                auto_ranged_put->upload_id,
+                meta_request->should_compute_content_md5);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {

@@ -6,7 +6,6 @@
 #include "s3_tester.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
-#include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/system_info.h>

@@ -100,14 +100,14 @@ struct aws_s3_client_config {
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
 
+    /* Retry strategy to use. If NULL, a default retry strategy will be used. */
+    struct aws_retry_strategy *retry_strategy;
+
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
      * For single-part upload, keep the content-md5 in the initial request unchanged. */
     enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
-
-    /* Retry strategy to use. If NULL, a default retry strategy will be used. */
-    struct aws_retry_strategy *retry_strategy;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
