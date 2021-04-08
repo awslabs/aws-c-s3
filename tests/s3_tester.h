@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_request_messages.h"
 #include <aws/s3/private/s3_auto_ranged_put.h>
 #include <aws/s3/private/s3_client_impl.h>
 #include <aws/s3/private/s3_meta_request_impl.h>
@@ -37,6 +38,8 @@ enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256 = 0x00000010,
     /* Testing put object with x-amz-acl: bucket-owner-read */
     AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL = 0x00000020,
+    AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 = 0x00000040,
+    AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5 = 0x00000080,
 };
 
 enum aws_s3_tester_sse_type {

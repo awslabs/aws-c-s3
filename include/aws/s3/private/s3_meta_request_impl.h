@@ -115,6 +115,8 @@ struct aws_s3_meta_request {
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
 
+    const bool should_compute_content_md5;
+
     struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Client that created this meta request which also processes this request. After the meta request is finished, this
@@ -192,6 +194,7 @@ int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,

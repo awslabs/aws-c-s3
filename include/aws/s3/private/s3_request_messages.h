@@ -37,12 +37,13 @@ struct aws_http_message *aws_s3_get_object_message_new(
 /* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns a
  * body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and NULL,
  * respectively. */
-struct aws_http_message *aws_s3_put_object_message_new(
+struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
     uint32_t part_number,
-    const struct aws_string *upload_id);
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5);
 
 /* Create an HTTP request for an S3 Create-Multipart-Upload request. */
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
@@ -79,5 +80,10 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message);
+
+int aws_s3_message_util_add_content_md5_header(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *byte_buf,
+    struct aws_http_message *message);
 
 #endif /* AWS_S3_REQUEST_H */

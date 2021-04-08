@@ -58,6 +58,11 @@ enum aws_s3_meta_request_tls_mode {
     AWS_MR_TLS_DISABLED,
 };
 
+enum aws_s3_meta_request_compute_content_md5 {
+    AWS_MR_CONTENT_MD5_ENABLED,
+    AWS_MR_CONTENT_MD5_DISABLED,
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
 
@@ -97,6 +102,12 @@ struct aws_s3_client_config {
 
     /* Retry strategy to use. If NULL, a default retry strategy will be used. */
     struct aws_retry_strategy *retry_strategy;
+
+    /**
+     * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
+     *     or initial request has content-md5 header.
+     * For single-part upload, keep the content-md5 in the initial request unchanged. */
+    enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
