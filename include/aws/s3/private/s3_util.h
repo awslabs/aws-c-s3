@@ -51,6 +51,9 @@ extern const uint32_t g_s3_max_num_upload_parts;
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_content_md5_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_s3_client_version;
 
 AWS_S3_API

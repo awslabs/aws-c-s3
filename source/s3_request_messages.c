@@ -427,13 +427,13 @@ static int s_s3_message_util_add_content_range_header(
 /* Add a content-md5 header. */
 int aws_s3_message_util_add_content_md5_header(
     struct aws_allocator *allocator,
-    struct aws_byte_buf *byte_buf,
+    struct aws_byte_buf *input_buf,
     struct aws_http_message *out_message) {
 
     AWS_PRECONDITION(out_message);
 
     /* Compute MD5 */
-    struct aws_byte_cursor md5_input = aws_byte_cursor_from_buf(byte_buf);
+    struct aws_byte_cursor md5_input = aws_byte_cursor_from_buf(input_buf);
     uint8_t md5_output[AWS_MD5_LEN];
     struct aws_byte_buf md5_output_buf = aws_byte_buf_from_empty_array(md5_output, sizeof(md5_output));
     if (aws_md5_compute(allocator, &md5_input, &md5_output_buf, 0)) {
