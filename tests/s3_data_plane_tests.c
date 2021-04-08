@@ -2225,7 +2225,9 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
         allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {
-        .name = g_content_md5_header_name, .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
+        .name = g_content_md5_header_name,
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5"),
+    };
     ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
 
     struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
@@ -2271,7 +2273,9 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
         allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {
-        .name = g_content_md5_header_name, .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5")};
+        .name = g_content_md5_header_name,
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5"),
+    };
     ASSERT_SUCCESS(aws_http_message_add_header(base_message, content_md5_header));
 
     struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
@@ -2790,7 +2794,7 @@ static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *alloc
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
-                .ensure_multipart = true,
+                .object_size_mb = 1,
                 .invalid_request = true,
             },
     };
