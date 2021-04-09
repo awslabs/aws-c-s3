@@ -201,7 +201,7 @@ static bool s_s3_auto_ranged_get_update(
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
-                1,
+                0,
                 AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_get->synced_data.get_without_range_sent = true;
@@ -298,11 +298,7 @@ static int s_s3_auto_ranged_get_prepare_request(
 
     /* Generate a new ranged get request based on the original message. */
     struct aws_http_message *message = aws_s3_get_object_message_new(
-        meta_request->allocator,
-        meta_request->initial_request_message,
-        request->part_number,
-        meta_request->part_size,
-        request->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE);
+        meta_request->allocator, meta_request->initial_request_message, request->part_number, meta_request->part_size);
 
     if (message == NULL) {
         AWS_LOGF_ERROR(
@@ -345,7 +341,9 @@ static void s_s3_auto_ranged_get_request_finished(
 
     uint32_t num_parts = 0;
 
-    if (error_code == AWS_ERROR_SUCCESS && request->part_number == 1) {
+    /* Check if this was the first part and if it was successful. For a ranged-get request, the first part number will
+     * be 1. For an empty file request, the part number will be 0.*/
+    if (error_code == AWS_ERROR_SUCCESS && request->part_number <= 1) {
         uint64_t total_object_size = 0;
         if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
             struct aws_byte_cursor content_range_header_value;
