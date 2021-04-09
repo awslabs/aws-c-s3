@@ -226,8 +226,8 @@ static int s_s3_meta_request_default_prepare_request(
         }
     }
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
-        meta_request->allocator, meta_request->initial_request_message, AWS_S3_COPY_MESSAGE_INCLUDE_SSE);
+    struct aws_http_message *message =
+        aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message, NULL, 0);
 
     aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
 

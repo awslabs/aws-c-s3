@@ -39,14 +39,6 @@ struct aws_cached_signing_config_aws {
     struct aws_signing_config_aws config;
 };
 
-extern const struct aws_byte_cursor g_s3_service_name;
-extern const struct aws_byte_cursor g_range_header_name;
-extern const struct aws_byte_cursor g_content_range_header_name;
-extern const struct aws_byte_cursor g_accept_ranges_header_name;
-extern const struct aws_byte_cursor g_post_method;
-extern const struct aws_byte_cursor g_delete_method;
-extern const uint32_t g_s3_max_num_upload_parts;
-
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
@@ -75,6 +67,27 @@ extern const struct aws_byte_cursor g_etag_header_name;
 
 AWS_S3_API
 extern const size_t g_s3_min_upload_part_size;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_s3_service_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_range_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_content_range_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_accept_ranges_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_post_method;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_delete_method;
+
+AWS_S3_API
+extern const uint32_t g_s3_max_num_upload_parts;
 
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
     struct aws_allocator *allocator,
