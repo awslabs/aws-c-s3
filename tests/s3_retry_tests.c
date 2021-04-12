@@ -176,6 +176,8 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
 
+    ASSERT_TRUE(client->threaded_data.num_requests_being_prepared == 0);
+
     aws_s3_client_release(client);
     client = NULL;
 
