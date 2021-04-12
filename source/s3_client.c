@@ -1308,13 +1308,27 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     uint32_t num_requests_queued =
         aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
 
-    int sub_result = aws_sub_u32_checked(
-        client->threaded_data.num_requests_being_prepared,
-        num_requests_queued,
-        &client->threaded_data.num_requests_being_prepared);
+    {
+        int sub_result = aws_sub_u32_checked(
+            client->threaded_data.num_requests_being_prepared,
+            num_requests_queued,
+            &client->threaded_data.num_requests_being_prepared);
 
-    AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
-    (void)sub_result;
+        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+        (void)sub_result;
+    }
+
+    {
+        int sub_result = aws_sub_u32_checked(
+            client->threaded_data.num_requests_being_prepared,
+            client->synced_data.num_failed_prepare_requests,
+            &client->threaded_data.num_requests_being_prepared);
+
+        client->synced_data.num_failed_prepare_requests = 0;
+
+        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+        (void)sub_result;
+    }
 
     aws_s3_client_unlock_synced_data(client);
 
@@ -1593,6 +1607,8 @@ static void s_s3_client_prepare_callback_queue_request(
 
     if (error_code == AWS_ERROR_SUCCESS) {
         aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+    } else {
+        ++client->synced_data.num_failed_prepare_requests;
     }
 
     s_s3_client_schedule_process_work_synced(client);

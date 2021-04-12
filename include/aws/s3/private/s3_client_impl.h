@@ -209,14 +209,17 @@ struct aws_s3_client {
     struct {
         struct aws_mutex lock;
 
-        /* Endpoint to use for the bucket. */
-        struct aws_string *endpoint;
-
         /* How many vips are being actively used. */
         uint32_t active_vip_count;
 
         /* How many vips are allocated. (This number includes vips that are in the process of cleaning up) */
         uint32_t allocated_vip_count;
+
+        /* How many requests failed to be prepared. */
+        uint32_t num_failed_prepare_requests;
+
+        /* Endpoint to use for the bucket. */
+        struct aws_string *endpoint;
 
         /* Linked list of active VIP's. */
         struct aws_linked_list vips;
