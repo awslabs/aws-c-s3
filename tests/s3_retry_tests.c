@@ -114,25 +114,18 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
     return 0;
 }
 
-static int s_s3_fail_first_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+struct s3_fail_prepare_test_data {
+    uint32_t prepare_values_are_correct : 1;
+};
 
+static int s_s3_fail_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    (void)meta_request;
+    (void)request;
+    AWS_ASSERT(request != NULL);
     AWS_ASSERT(request != NULL);
 
-    struct aws_s3_client *client = meta_request->client;
-    AWS_ASSERT(client != NULL);
-
-    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
-    AWS_ASSERT(tester != NULL);
-
-    if (aws_s3_tester_inc_counter1(tester) == 1) {
-        aws_raise_error(AWS_ERROR_UNKNOWN);
-        return AWS_OP_ERR;
-    }
-
-    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
-        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
-
-    return original_meta_request_vtable->prepare_request(meta_request, request);
+    aws_raise_error(AWS_ERROR_UNKNOWN);
+    return AWS_OP_ERR;
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_prepare_request(
@@ -151,9 +144,32 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_prepare_request(
 
     struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
-    patched_meta_request_vtable->prepare_request = s_s3_fail_first_prepare_request;
+    patched_meta_request_vtable->prepare_request = s_s3_fail_prepare_request;
 
     return meta_request;
+}
+
+static void s_s3_fail_prepare_request_process_work(struct aws_s3_client *client) {
+    AWS_ASSERT(client);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    struct s3_fail_prepare_test_data *test_data = tester->user_data;
+
+    aws_s3_client_lock_synced_data(client);
+    bool request_fail_received = (client->synced_data.num_failed_prepare_requests > 0);
+    aws_s3_client_unlock_synced_data(client);
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    original_client_vtable->process_work(client);
+
+    if (request_fail_received) {
+        test_data->prepare_values_are_correct = client->synced_data.num_failed_prepare_requests == 0 &&
+                                                client->threaded_data.num_requests_being_prepared == 0;
+
+        aws_s3_tester_inc_counter1(tester);
+    }
 }
 
 /* Test recovery when prepare request fails. */
@@ -161,8 +177,13 @@ AWS_TEST_CASE(test_s3_meta_request_fail_prepare_request, s_test_s3_meta_request_
 static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    struct s3_fail_prepare_test_data test_data;
+    AWS_ZERO_STRUCT(test_data);
+
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    aws_s3_tester_set_counter1_desired(&tester, 1);
+    tester.user_data = &test_data;
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
@@ -173,10 +194,13 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_prepare_request;
+    patched_client_vtable->process_work = s_s3_fail_prepare_request_process_work;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
 
-    /*ASSERT_TRUE(client->threaded_data.num_requests_being_prepared == 0);*/
+    aws_s3_tester_wait_for_counters(&tester);
+
+    ASSERT_TRUE(test_data.prepare_values_are_correct);
 
     aws_s3_client_release(client);
     client = NULL;
