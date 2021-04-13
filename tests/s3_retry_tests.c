@@ -121,7 +121,7 @@ struct s3_fail_prepare_test_data {
 static int s_s3_fail_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
     (void)meta_request;
     (void)request;
-    AWS_ASSERT(request != NULL);
+    AWS_ASSERT(meta_request != NULL);
     AWS_ASSERT(request != NULL);
 
     aws_raise_error(AWS_ERROR_UNKNOWN);
@@ -149,27 +149,21 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_prepare_request(
     return meta_request;
 }
 
-static void s_s3_fail_prepare_request_process_work(struct aws_s3_client *client) {
+static void s_s3_fail_prepare_finish_destroy(struct aws_s3_client *client) {
     AWS_ASSERT(client);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
-    struct s3_fail_prepare_test_data *test_data = tester->user_data;
+    AWS_ASSERT(tester != NULL);
 
-    aws_s3_client_lock_synced_data(client);
-    bool request_fail_received = (client->synced_data.num_failed_prepare_requests > 0);
-    aws_s3_client_unlock_synced_data(client);
+    struct s3_fail_prepare_test_data *test_data = tester->user_data;
+    AWS_ASSERT(test_data != NULL);
+
+    test_data->prepare_values_are_correct = client->threaded_data.num_requests_being_prepared == 0;
 
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
 
-    original_client_vtable->process_work(client);
-
-    if (request_fail_received) {
-        test_data->prepare_values_are_correct = client->synced_data.num_failed_prepare_requests == 0 &&
-                                                client->threaded_data.num_requests_being_prepared == 0;
-
-        aws_s3_tester_inc_counter1(tester);
-    }
+    original_client_vtable->finish_destroy(client);
 }
 
 /* Test recovery when prepare request fails. */
@@ -177,12 +171,11 @@ AWS_TEST_CASE(test_s3_meta_request_fail_prepare_request, s_test_s3_meta_request_
 static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct s3_fail_prepare_test_data test_data;
-    AWS_ZERO_STRUCT(test_data);
-
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    aws_s3_tester_set_counter1_desired(&tester, 1);
+
+    struct s3_fail_prepare_test_data test_data;
+    AWS_ZERO_STRUCT(test_data);
     tester.user_data = &test_data;
 
     struct aws_s3_client_config client_config;
@@ -194,18 +187,18 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_prepare_request;
-    patched_client_vtable->process_work = s_s3_fail_prepare_request_process_work;
+    patched_client_vtable->finish_destroy = s_s3_fail_prepare_finish_destroy;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
 
     aws_s3_tester_wait_for_counters(&tester);
 
-    ASSERT_TRUE(test_data.prepare_values_are_correct);
-
     aws_s3_client_release(client);
     client = NULL;
 
     aws_s3_tester_clean_up(&tester);
+
+    ASSERT_TRUE(test_data.prepare_values_are_correct);
 
     return 0;
 }

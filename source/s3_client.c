@@ -78,7 +78,7 @@ AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 static void s_s3_client_start_destroy(void *user_data);
 
 /* Called by s_s3_client_process_work_default when all shutdown criteria has been met. */
-static void s_s3_client_finish_destroy(void *user_data);
+static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 
 /* Called when the body streaming elg shutdown has completed. */
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
@@ -158,6 +158,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .vip_connection_destroy = s_s3_vip_connection_destroy_default,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
+    .finish_destroy = s_s3_client_finish_destroy_default,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {
@@ -449,9 +450,8 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_s3_client_unlock_synced_data(client);
 }
 
-static void s_s3_client_finish_destroy(void *user_data) {
-    AWS_PRECONDITION(user_data);
-    struct aws_s3_client *client = user_data;
+static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
@@ -1277,6 +1277,8 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->finish_destroy);
 
     bool client_active = false;
     bool invalid_endpoint = false;
@@ -1478,7 +1480,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         aws_s3_client_unlock_synced_data(client);
 
         if (finish_destroy) {
-            s_s3_client_finish_destroy(client);
+            client->vtable->finish_destroy(client);
         }
     }
 }
