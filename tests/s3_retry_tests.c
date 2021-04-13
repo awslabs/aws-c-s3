@@ -115,7 +115,7 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
 }
 
 struct s3_fail_prepare_test_data {
-    uint32_t prepare_values_are_correct : 1;
+    uint32_t num_requests_being_prepared_is_correct : 1;
 };
 
 static int s_s3_fail_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
@@ -158,7 +158,7 @@ static void s_s3_fail_prepare_finish_destroy(struct aws_s3_client *client) {
     struct s3_fail_prepare_test_data *test_data = tester->user_data;
     AWS_ASSERT(test_data != NULL);
 
-    test_data->prepare_values_are_correct = client->threaded_data.num_requests_being_prepared == 0;
+    test_data->num_requests_being_prepared_is_correct = client->threaded_data.num_requests_being_prepared == 0;
 
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
@@ -198,7 +198,7 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
 
     aws_s3_tester_clean_up(&tester);
 
-    ASSERT_TRUE(test_data.prepare_values_are_correct);
+    ASSERT_TRUE(test_data.num_requests_being_prepared_is_correct);
 
     return 0;
 }
