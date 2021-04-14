@@ -1939,8 +1939,7 @@ static int s_test_s3_put_object_double_slashes(struct aws_allocator *allocator, 
     struct aws_s3_meta_request_test_results meta_request_test_results;
     AWS_ZERO_STRUCT(meta_request_test_results);
 
-    struct aws_s3_tester_meta_request_options options = {
-        .allocator = allocator,
+    struct aws_s3_tester_meta_request_options meta_request_test_options = {
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .put_options =
             {
@@ -1949,7 +1948,13 @@ static int s_test_s3_put_object_double_slashes(struct aws_allocator *allocator, 
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+    struct aws_s3_tester_send_meta_requests_options options = {
+        .allocator = allocator,
+        .num_meta_requests = 1,
+        .meta_request_test_options = &meta_request_test_options,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, &meta_request_test_results));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
