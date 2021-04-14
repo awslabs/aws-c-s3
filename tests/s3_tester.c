@@ -1130,7 +1130,7 @@ int aws_s3_tester_send_meta_requests(
                         case AWS_S3_TESTER_SSE_NONE:
                             snprintf(
                                 object_path_sprintf_buffer,
-                                sizeof(object_path_buffer),
+                                sizeof(object_path_sprintf_buffer),
                                 "/put_object_test_%uMB_%" PRIu64 ".txt",
                                 object_size_mb,
                                 (uint64_t)i);
@@ -1138,7 +1138,7 @@ int aws_s3_tester_send_meta_requests(
                         case AWS_S3_TESTER_SSE_KMS:
                             snprintf(
                                 object_path_sprintf_buffer,
-                                sizeof(object_path_buffer),
+                                sizeof(object_path_sprintf_buffer),
                                 "/put_object_test_kms_%uMB_%" PRIu64 ".txt",
                                 object_size_mb,
                                 (uint64_t)i);
@@ -1146,7 +1146,7 @@ int aws_s3_tester_send_meta_requests(
                         case AWS_S3_TESTER_SSE_AES256:
                             snprintf(
                                 object_path_sprintf_buffer,
-                                sizeof(object_path_buffer),
+                                sizeof(object_path_sprintf_buffer),
                                 "/put_object_test_aes256_%uMB_%" PRIu64 ".txt",
                                 object_size_mb,
                                 (uint64_t)i);
