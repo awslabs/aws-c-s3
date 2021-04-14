@@ -46,7 +46,7 @@ void aws_s3_init_test_input_stream_look_up(struct aws_s3_tester *tester) {
     for (size_t i = 0; i < MAX_TEST_STRINGS; ++i) {
         char current_string_buffer[64] = "";
 
-        sprintf(current_string_buffer, format_string, rand() % MAX_TEST_STRINGS);
+        snprintf(current_string_buffer, sizeof(current_string_buffer), format_string, rand() % MAX_TEST_STRINGS);
 
         AWS_ASSERT(strlen(current_string_buffer) == g_s3_test_input_stream_global.test_string_size);
 
