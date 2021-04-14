@@ -20,7 +20,7 @@ void aws_s3_init_test_input_stream_look_up(struct aws_s3_tester *tester) {
     AWS_ASSERT(tester);
     AWS_ASSERT(MAX_TEST_STRINGS > 0);
 
-    srand(time(NULL));
+    srand((unsigned int)time(NULL));
 
     uint32_t num_digits = 0;
     uint32_t max_contents_buffers_temp = MAX_TEST_STRINGS;
@@ -31,10 +31,10 @@ void aws_s3_init_test_input_stream_look_up(struct aws_s3_tester *tester) {
     }
 
     char format_string[64];
-    sprintf(format_string, "This is is an S3 test. %%%uu ", num_digits);
+    snprintf(format_string, sizeof(format_string), "This is is an S3 test. %%%uu ", num_digits);
 
     char test_format_string[64];
-    sprintf(test_format_string, format_string, 0);
+    snprintf(test_format_string, sizeof(test_format_string), format_string, 0);
 
     g_s3_test_input_stream_global.test_string_size = strlen(test_format_string);
 
