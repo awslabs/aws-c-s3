@@ -136,7 +136,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     ASSERT_TRUE(request_message != NULL);
 
     struct aws_s3_request *request =
-        aws_s3_request_new(meta_request, request_tag, part_number, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+        aws_s3_request_new(meta_request, request_tag, part_number, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
     ASSERT_TRUE(request != NULL);
 
@@ -1059,7 +1059,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
 
     /* Verify that the request still gets sent because it has the 'always send' flag. */
     {
-        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, AWS_S3_REQUEST_DESC_ALWAYS_SEND);
+        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
         ++mock_client->threaded_data.request_queue_size;
 

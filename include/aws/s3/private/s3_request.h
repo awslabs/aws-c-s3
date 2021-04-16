@@ -15,10 +15,10 @@ struct aws_http_message;
 struct aws_signable;
 struct aws_s3_meta_request;
 
-enum aws_s3_request_desc_flags {
-    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x00000002,
-    AWS_S3_REQUEST_DESC_ALWAYS_SEND = 0x00000004,
+enum aws_s3_request_flags {
+    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS = 0x00000001,
+    AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY = 0x00000002,
+    AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000004,
 };
 
 /* Represents a single request made to S3. */
@@ -88,7 +88,7 @@ struct aws_s3_request {
     /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
     uint32_t tracked_by_client : 1;
 
-    /* When true, even when the meta request is finished, this request will be sent. */
+    /* When true, even when the meta request has a finished result, this request will be sent. */
     uint32_t always_send : 1;
 };
 

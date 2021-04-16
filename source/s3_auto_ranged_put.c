@@ -154,7 +154,7 @@ static bool s_s3_auto_ranged_put_update(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_put->synced_data.create_multipart_upload_sent = true;
 
@@ -187,7 +187,7 @@ static bool s_s3_auto_ranged_put_update(
 
             /* Allocate a request for another part. */
             request = aws_s3_request_new(
-                meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART, 0, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
@@ -221,7 +221,7 @@ static bool s_s3_auto_ranged_put_update(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_put->synced_data.complete_multipart_upload_sent = true;
 
@@ -285,7 +285,7 @@ static bool s_s3_auto_ranged_put_update(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_ALWAYS_SEND);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
 
             auto_ranged_put->synced_data.abort_multipart_upload_sent = true;
 
