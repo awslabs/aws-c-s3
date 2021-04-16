@@ -94,7 +94,7 @@ add_net_test_case(test_s3_default_sending_meta_request)
 
 add_test_case(test_get_existing_compute_platform_info)
 add_test_case(test_get_nonexistent_compute_platform_info)
-
+add_test_case(test_s3_calculate_part_size)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

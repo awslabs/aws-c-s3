@@ -13,12 +13,12 @@
 #include <aws/s3/s3.h>
 
 #if DEBUG_BUILD
-#    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
-{
-    int cached_error = aws_last_error();
-    AWS_ASSERT(aws_mutex_try_lock(&(object)->synced_data.lock) == AWS_OP_ERR);
-    aws_raise_error(cached_error);
-}
+#    define ASSERT_SYNCED_DATA_LOCK_HELD(object)                                                                       \
+        {                                                                                                              \
+            int cached_error = aws_last_error();                                                                       \
+            AWS_ASSERT(aws_mutex_try_lock(&(object)->synced_data.lock) == AWS_OP_ERR);                                 \
+            aws_raise_error(cached_error);                                                                             \
+        }
 #else
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
 #endif
@@ -119,6 +119,14 @@ void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *
 
 /* TODO could be moved to aws-c-common. */
 int aws_last_error_or_unknown(void);
+
+AWS_S3_API
+int aws_s3_calculate_part_size(
+    uint64_t content_length,
+    size_t min_part_size,
+    size_t max_part_size,
+    size_t *out_part_size,
+    uint32_t *out_num_parts);
 
 AWS_S3_API
 void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message);

@@ -2920,3 +2920,21 @@ static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocato
 
     return 0;
 }
+
+AWS_TEST_CASE(test_s3_calculate_part_size, s_test_s3_calculate_part_size)
+static int s_test_s3_calculate_part_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    const uint64_t content_length = 16ULL << 30ULL;
+    const uint64_t part_size = 16ULL << 20ULL;
+
+    size_t actual_part_size = 0ULL;
+    uint32_t num_parts = 0;
+
+    aws_s3_calculate_part_size(content_length, part_size, part_size, &actual_part_size, &num_parts);
+
+    ASSERT_TRUE(actual_part_size == part_size);
+    ASSERT_TRUE(num_parts == 1024);
+
+    return 0;
+}

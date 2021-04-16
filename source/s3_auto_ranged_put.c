@@ -206,7 +206,7 @@ static bool s_s3_auto_ranged_put_update(
 
         /* There is one more request to send after all of the parts (the complete-multipart-upload) but it can't be done
          * until all of the parts have been completed.*/
-        if (auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->synced_data.total_num_parts) {
+        if (auto_ranged_put->synced_data.num_parts_successful != auto_ranged_put->synced_data.total_num_parts) {
             goto has_work_remaining;
         }
 

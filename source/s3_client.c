@@ -1112,69 +1112,40 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return NULL;
         }
 
-        size_t client_part_size = client->part_size;
-        size_t client_max_part_size = client->max_part_size;
+        size_t min_part_size = client->part_size;
+        size_t max_part_size = client->max_part_size;
 
-        if (client_part_size < g_s3_min_upload_part_size) {
-            AWS_LOGF_ERROR(
+        if (min_part_size < g_s3_min_upload_part_size) {
+            AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
                 "Client config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
                 ". Using to the minimum part-size for upload.",
-                (uint64_t)client_part_size,
+                (uint64_t)min_part_size,
                 (uint64_t)g_s3_min_upload_part_size);
 
-            client_part_size = g_s3_min_upload_part_size;
+            min_part_size = g_s3_min_upload_part_size;
         }
 
-        if (client_max_part_size < g_s3_min_upload_part_size) {
-            AWS_LOGF_ERROR(
+        if (max_part_size < g_s3_min_upload_part_size) {
+            AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
                 "Client config max part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
                 ". Clamping to the minimum part-size for upload.",
-                (uint64_t)client_max_part_size,
+                (uint64_t)max_part_size,
                 (uint64_t)g_s3_min_upload_part_size);
 
-            client_max_part_size = g_s3_min_upload_part_size;
+            max_part_size = g_s3_min_upload_part_size;
         }
 
-        if (content_length < client_part_size) {
+        if (content_length < min_part_size) {
             return aws_s3_meta_request_default_new(client->allocator, client, content_length, options);
         }
 
-        uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
+        size_t part_size = 0;
+        uint32_t num_parts = 0;
 
-        if (part_size_uint64 > SIZE_MAX) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-put meta request; required part size of %" PRIu64
-                " bytes is too large for platform.",
-                part_size_uint64);
-
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        if (aws_s3_calculate_part_size(content_length, min_part_size, max_part_size, &part_size, &num_parts)) {
             return NULL;
-        }
-
-        size_t part_size = (size_t)part_size_uint64;
-
-        if (part_size > client_max_part_size) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
-                ", but current maximum part size is %" PRIu64,
-                (uint64_t)part_size,
-                (uint64_t)client_max_part_size);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-
-        if (part_size < client_part_size) {
-            part_size = client_part_size;
-        }
-
-        uint32_t num_parts = (uint32_t)(content_length / part_size);
-
-        if ((content_length % part_size) > 0) {
-            ++num_parts;
         }
 
         return aws_s3_meta_request_auto_ranged_put_new(

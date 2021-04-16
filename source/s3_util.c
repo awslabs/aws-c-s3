@@ -11,6 +11,7 @@
 #include <aws/http/request_response.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
+#include <inttypes.h>
 
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
@@ -306,4 +307,95 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
 
     /* Clean up the scratch buffer. */
     aws_byte_buf_clean_up(&user_agent_buffer);
+}
+
+/*
+
+    uint64_t possible_part_size_uint64_t = content_length / (uint64_t)g_s3_max_num_upload_parts;
+
+    if (possible_part_size_uint64_t > SIZE_MAX) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Could not create auto-ranged-put meta request; required part size of %" PRIu64
+            " bytes is too large for platform.",
+            possible_part_size_uint64_t);
+
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return AWS_OP_ERR;
+    }
+
+    size_t part_size = (size_t)possible_part_size_uint64_t;
+
+    if (part_size > max_part_size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
+            ", but current maximum part size is %" PRIu64,
+            (uint64_t)part_size,
+            (uint64_t)max_part_size);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return AWS_OP_ERR;
+    }
+
+    if (part_size < min_part_size) {
+        part_size = min_part_size;
+    }
+
+    uint32_t num_parts = (uint32_t)(content_length / (uint64_t)part_size);
+
+    if ((content_length % (uint64_t)part_size) > 0) {
+        ++num_parts;
+    }
+
+*/
+
+int aws_s3_calculate_part_size(
+    uint64_t content_length,
+    size_t min_part_size,
+    size_t max_part_size,
+    size_t *out_part_size,
+    uint32_t *out_num_parts) {
+    AWS_PRECONDITION(out_part_size);
+    AWS_PRECONDITION(out_num_parts);
+
+    uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
+
+    if (part_size_uint64 > SIZE_MAX) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create auto-ranged-put meta request; required part size of %" PRIu64
+            " bytes is too large for platform.",
+            part_size_uint64);
+
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return AWS_OP_ERR;
+    }
+
+    size_t part_size = (size_t)part_size_uint64;
+
+    if (part_size > max_part_size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
+            ", but current maximum part size is %" PRIu64,
+            (uint64_t)part_size,
+            (uint64_t)max_part_size);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return AWS_OP_ERR;
+    }
+
+    if (part_size < min_part_size) {
+        part_size = min_part_size;
+    }
+
+    uint32_t num_parts = (uint32_t)(content_length / part_size);
+
+    if ((content_length % part_size) > 0) {
+        ++num_parts;
+    }
+
+    *out_part_size = part_size;
+    *out_num_parts = num_parts;
+
+    return AWS_OP_SUCCESS;
 }
