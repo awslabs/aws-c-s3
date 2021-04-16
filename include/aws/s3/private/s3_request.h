@@ -88,7 +88,7 @@ struct aws_s3_request {
     /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
     uint32_t tracked_by_client : 1;
 
-    /* When true, even when the meta request has a finished result, this request will be sent. */
+    /* When true, even when the meta request has a finish result set, this request will be sent. */
     uint32_t always_send : 1;
 };
 
