@@ -24,9 +24,10 @@ enum s3_update_cancel_type {
 
 struct s3_cancel_test_user_data {
     enum s3_update_cancel_type type;
+    bool abort_successful;
 };
 
-static bool s_s3_update_cancel_test(
+static bool s_s3_meta_request_update_cancel_test(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
     struct aws_s3_request **out_request) {
@@ -44,6 +45,7 @@ static bool s_s3_update_cancel_test(
     bool block_update = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
+
     switch (cancel_test_user_data->type) {
         case S3_UPDATE_CANCEL_TYPE_MPU_CREATE_NOT_SENT:
             call_cancel = auto_ranged_put->synced_data.create_multipart_upload_sent != 0;
@@ -89,6 +91,28 @@ static bool s_s3_update_cancel_test(
     return original_meta_request_vtable->update(meta_request, flags, out_request);
 }
 
+static void s_s3_meta_request_finished_request_cancel_test(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code) {
+    AWS_ASSERT(meta_request);
+    AWS_ASSERT(request);
+
+    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
+    struct aws_s3_tester *tester = results->tester;
+    struct s3_cancel_test_user_data *cancel_test_user_data = tester->user_data;
+
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
+        request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD) {
+        cancel_test_user_data->abort_successful = error_code == AWS_ERROR_SUCCESS;
+    }
+
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+
+    original_meta_request_vtable->finished_request(meta_request, request, error_code);
+}
+
 static struct aws_s3_meta_request *s_meta_request_factory_patch_update_cancel_test(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
@@ -104,7 +128,8 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_update_cancel_te
 
     struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
-    patched_meta_request_vtable->update = s_s3_update_cancel_test;
+    patched_meta_request_vtable->update = s_s3_meta_request_update_cancel_test;
+    patched_meta_request_vtable->finished_request = s_s3_meta_request_finished_request_cancel_test;
 
     return meta_request;
 }
@@ -151,8 +176,11 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
-        /* TODO: we need list-multipart-uploads to validate the cancel succeed, for now, we are using CLI to manually
-         * ensure the abort succeed */
+        if (cancel_type != S3_UPDATE_CANCEL_TYPE_MPU_CREATE_NOT_SENT) {
+            ASSERT_TRUE(test_user_data.abort_successful);
+        }
+
+        /* TODO: perform additional verification with list-multipart-uploads */
 
     } else {
 
