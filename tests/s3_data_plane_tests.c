@@ -2924,6 +2924,7 @@ static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocato
 AWS_TEST_CASE(test_s3_calculate_part_size, s_test_s3_calculate_part_size)
 static int s_test_s3_calculate_part_size(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    (void)allocator;
 
     const uint64_t content_length = 16ULL << 30ULL;
     const uint64_t part_size = 16ULL << 20ULL;
