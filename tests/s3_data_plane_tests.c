@@ -2927,9 +2927,9 @@ static int s_test_s3_calculate_part_size(struct aws_allocator *allocator, void *
     (void)allocator;
 
     const uint64_t content_length = 16ULL << 30ULL;
-    const uint64_t part_size = 16ULL << 20ULL;
+    const size_t part_size = 16 << 20;
 
-    size_t actual_part_size = 0ULL;
+    size_t actual_part_size = 0;
     uint32_t num_parts = 0;
 
     aws_s3_calculate_part_size(content_length, part_size, part_size, &actual_part_size, &num_parts);
