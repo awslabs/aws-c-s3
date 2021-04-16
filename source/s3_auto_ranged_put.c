@@ -285,7 +285,7 @@ static bool s_s3_auto_ranged_put_update(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_ALWAYS_SEND);
 
             auto_ranged_put->synced_data.abort_multipart_upload_sent = true;
 
@@ -557,16 +557,16 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
             }
 
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            ++auto_ranged_put->synced_data.num_parts_completed;
+
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p: %d out of %d parts have completed.",
                 (void *)meta_request,
                 auto_ranged_put->synced_data.num_parts_completed,
                 auto_ranged_put->synced_data.total_num_parts);
-
-            aws_s3_meta_request_lock_synced_data(meta_request);
-
-            ++auto_ranged_put->synced_data.num_parts_completed;
 
             if (error_code == AWS_ERROR_SUCCESS) {
                 AWS_ASSERT(etag != NULL);

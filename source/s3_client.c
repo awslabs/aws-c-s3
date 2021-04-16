@@ -1677,7 +1677,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client, boo
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, num_conns_per_vip);
 
         /* If this meta request was finished, then let the meta request know and release the request. */
-        if (aws_s3_meta_request_has_finish_result(request->meta_request)) {
+        if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
             /* Put the unused connection at the front of the list so that it is used in the next iteration.*/
             aws_linked_list_push_front(&client->threaded_data.idle_vip_connections, &vip_connection->node);
 
