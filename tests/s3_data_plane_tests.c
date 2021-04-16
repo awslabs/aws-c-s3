@@ -2936,6 +2936,7 @@ static int s_test_s3_calculate_part_size(struct aws_allocator *allocator, void *
 
     ASSERT_TRUE(actual_part_size == part_size);
     ASSERT_TRUE(num_parts == 1024);
+    ASSERT_TRUE((uint32_t)(content_length / (size_t)part_size) == (content_length / part_size));
 
     return 0;
 }
