@@ -42,9 +42,15 @@ export class BenchmarksStack extends cdk.Stack {
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
-    const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
-      vpcId: 'vpc-305f0856'
-    });
+    const vpc = new ec2.Vpc(this, 'VPC', {
+      cidr: '172.31.0.0/16',
+      enableDnsSupport: true,
+      enableDnsHostnames: true
+    })
+
+    const subnetSelection: ec2.SubnetSelection = {
+      subnets: vpc.publicSubnets
+    };
 
     const security_group = new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc: vpc,
@@ -113,7 +119,8 @@ export class BenchmarksStack extends cdk.Stack {
           userData: instance_user_data,
           role: canary_role,
           keyName: 'aws-common-runtime-keys',
-          securityGroup: security_group
+          securityGroup: security_group,
+          vpcSubnets: subnetSelection
         });
       }
     }
