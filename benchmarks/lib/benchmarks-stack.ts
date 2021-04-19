@@ -12,6 +12,7 @@ export class BenchmarksStack extends cdk.Stack {
 
     const user_name = this.node.tryGetContext('UserName') as string;
     const project_name = this.node.tryGetContext('ProjectName') as string;
+    const cidr = this.node.tryGetContext('CIDRRange') as string;
 
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
@@ -43,7 +44,7 @@ export class BenchmarksStack extends cdk.Stack {
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
     const vpc = new ec2.Vpc(this, 'VPC', {
-      cidr: '172.31.0.0/16',
+      cidr: cidr || ec2.Vpc.DEFAULT_CIDR_RANGE,
       enableDnsSupport: true,
       enableDnsHostnames: true
     })
