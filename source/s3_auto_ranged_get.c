@@ -174,7 +174,7 @@ static bool s_s3_auto_ranged_get_update(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                 1,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
             ++auto_ranged_get->synced_data.num_parts_requested;
             goto has_work_remaining;
@@ -201,7 +201,7 @@ static bool s_s3_auto_ranged_get_update(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_get->synced_data.get_without_range_sent = true;
             goto has_work_remaining;
@@ -218,7 +218,7 @@ static bool s_s3_auto_ranged_get_update(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                 auto_ranged_get->synced_data.num_parts_requested + 1,
-                AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY);
+                AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
             ++auto_ranged_get->synced_data.num_parts_requested;
             goto has_work_remaining;

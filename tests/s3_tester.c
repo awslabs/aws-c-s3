@@ -1309,7 +1309,7 @@ int aws_s3_tester_send_meta_requests(
                 aws_s3_test_input_stream_new(allocator, object_size_bytes);
         }
 
-        struct aws_s3_tester_send_meta_requests_options options = {
+        struct aws_s3_tester_send_meta_requests_options meta_request_options = {
             .allocator = allocator,
             .tester = tester,
             .client = client,
@@ -1317,7 +1317,7 @@ int aws_s3_tester_send_meta_requests(
             .meta_request_test_options = validate_puts_options,
         };
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, NULL));
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&meta_request_options, NULL));
 
         aws_mem_release(allocator, validate_puts_options);
     }
