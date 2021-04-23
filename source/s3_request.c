@@ -23,8 +23,9 @@ struct aws_s3_request *aws_s3_request_new(
 
     request->request_tag = request_tag;
     request->part_number = part_number;
-    request->record_response_headers = (flags & AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS) != 0;
-    request->part_size_response_body = (flags & AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY) != 0;
+    request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
+    request->part_size_response_body = (flags & AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY) != 0;
+    request->always_send = (flags & AWS_S3_REQUEST_FLAG_ALWAYS_SEND) != 0;
 
     return request;
 }
