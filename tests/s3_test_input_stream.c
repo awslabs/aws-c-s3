@@ -65,6 +65,7 @@ void aws_s3_init_test_input_stream_look_up(struct aws_s3_tester *tester) {
 }
 
 void aws_s3_destroy_test_input_stream_look_up(struct aws_s3_tester *tester) {
+    (void)tester;
     aws_byte_buf_clean_up(&g_s3_test_input_stream_global.test_strings_buffer);
 }
 
