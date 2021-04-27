@@ -36,8 +36,8 @@ export class DashboardStack extends cdk.Stack {
 
             let project_header_widget = {
                 type: "text",
-                width : 24,
-                height : 1,
+                width: 24,
+                height: 1,
                 properties: {
                     markdown: "## " + project_name + " (" + branch_name + ")"
                 }

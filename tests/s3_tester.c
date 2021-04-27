@@ -1306,7 +1306,7 @@ int aws_s3_tester_send_meta_requests(
             validate_put_options->validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS;
             validate_put_options->get_options.object_path = request_path;
             validate_put_options->get_options.expected_contents =
-                aws_s3_test_input_stream_new(allocator, object_size_bytes);
+                aws_s3_test_input_stream_new(allocator, (size_t)object_size_bytes);
         }
 
         struct aws_s3_tester_send_meta_requests_options meta_request_options = {

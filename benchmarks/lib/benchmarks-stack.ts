@@ -12,6 +12,7 @@ export class BenchmarksStack extends cdk.Stack {
 
     const user_name = this.node.tryGetContext('UserName') as string;
     const project_name = this.node.tryGetContext('ProjectName') as string;
+    const cidr = this.node.tryGetContext('CIDRRange') as string;
 
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
@@ -42,9 +43,15 @@ export class BenchmarksStack extends cdk.Stack {
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
-    const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
-      vpcId: 'vpc-305f0856'
-    });
+    const vpc = new ec2.Vpc(this, 'VPC', {
+      cidr: cidr || ec2.Vpc.DEFAULT_CIDR_RANGE,
+      enableDnsSupport: true,
+      enableDnsHostnames: true
+    })
+
+    const subnetSelection: ec2.SubnetSelection = {
+      subnets: vpc.publicSubnets
+    };
 
     const security_group = new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc: vpc,
@@ -113,7 +120,8 @@ export class BenchmarksStack extends cdk.Stack {
           userData: instance_user_data,
           role: canary_role,
           keyName: 'aws-common-runtime-keys',
-          securityGroup: security_group
+          securityGroup: security_group,
+          vpcSubnets: subnetSelection
         });
       }
     }
