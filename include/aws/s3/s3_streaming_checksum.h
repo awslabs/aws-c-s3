@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#ifndef AWS_S3_CHECKSUM_H
-#define AWS_S3_CHECKSUM_H
+#ifndef AWS_S3_STREAMING_CHECKSUM_H
+#define AWS_S3_STREAMING_CHECKSUM_H
 
 #include <aws/common/byte_buf.h>
 #include <aws/common/common.h>
@@ -21,6 +21,8 @@ enum checksum_type {
 #define AWS_SHA256_LEN 32
 /* #define AWS_SHA1_LEN 20 */
 #define AWS_CRC_LEN 4
+
+struct aws_checksum;
 
 typedef struct aws_checksum *(aws_checksum_new_fn)(struct aws_allocator *allocator);
 
@@ -110,4 +112,4 @@ int aws_checksum_crc32c_compute(
     struct aws_byte_buf *output,
     size_t truncate_to);
 
-#endif /* #define AWS_S3_H */
+#endif /* #define AWS_S3_STREAMING_CHECKSUM_H */

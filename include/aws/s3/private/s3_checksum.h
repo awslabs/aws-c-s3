@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#ifndef AWS_S3_CHECKSUM_H
+#define AWS_S3_CHECKSUM_H
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -26,3 +29,5 @@ int compute_checksum(
     const struct aws_byte_cursor *input,
     struct aws_byte_buf *output,
     size_t truncate_to);
+
+#endif /* #define AWS_S3_CHECKSUM_H */
