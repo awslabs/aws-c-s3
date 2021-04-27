@@ -11,13 +11,14 @@ static void s_destroy_hash(struct aws_checksum *checksum);
 static int s_update_hash(struct aws_checksum *checksum, const struct aws_byte_cursor *buffer);
 static int s_finalize_hash(struct aws_checksum *checksum, struct aws_byte_buf *output);
 
+/*
 static struct aws_checksum_vtable s_sha1_vtable = {
     .destroy = s_destroy_hash,
     .update = s_update_hash,
     .finalize = s_finalize_hash,
     .alg_name = "SHA1",
 };
-
+*/
 static struct aws_checksum_vtable s_sha256_vtable = {
     .destroy = s_destroy_hash,
     .update = s_update_hash,
@@ -46,7 +47,7 @@ static int s_finalize_hash(struct aws_checksum *checksum, struct aws_byte_buf *o
     struct aws_hash *hash = checksum->impl;
     return hash->vtable->finalize(hash, output);
 }
-
+/*
 struct aws_checksum *aws_checksum_sha1_new(struct aws_allocator *allocator) {
     struct aws_checksum *checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_checksum));
 
@@ -61,6 +62,7 @@ struct aws_checksum *aws_checksum_sha1_new(struct aws_allocator *allocator) {
     checksum->impl = aws_sha1_new(allocator);
     return checksum;
 }
+*/
 
 struct aws_checksum *aws_checksum_sha256_new(struct aws_allocator *allocator) {
     struct aws_checksum *checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_checksum));
@@ -85,6 +87,7 @@ int aws_checksum_sha256_compute(
     return compute_checksum(aws_checksum_sha256_new(allocator), input, output, truncate_to);
 }
 
+/*
 int aws_checksum_sha1_compute(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *input,
@@ -92,3 +95,4 @@ int aws_checksum_sha1_compute(
     size_t truncate_to) {
     return compute_checksum(aws_checksum_sha1_new(allocator), input, output, truncate_to);
 }
+*/

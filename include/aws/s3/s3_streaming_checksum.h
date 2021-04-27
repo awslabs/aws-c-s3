@@ -9,7 +9,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/common.h>
 #include <aws/s3/s3.h>
-
+/*
 enum checksum_type {
     AWS_CHECKSUM_MD5,
     AWS_CHECKSUM_SHA1,
@@ -17,9 +17,9 @@ enum checksum_type {
     AWS_CHECKSUM_CRC32,
     AWS_CHECKSUM_CRC32C,
 };
-
+*/
 #define AWS_SHA256_LEN 32
-#define AWS_SHA1_LEN 20
+/* #define AWS_SHA1_LEN 20 */
 #define AWS_CRC_LEN 4
 
 typedef struct aws_checksum *(aws_checksum_new_fn)(struct aws_allocator *allocator);
@@ -31,8 +31,10 @@ struct aws_checksum *aws_checksum_sha256_new(struct aws_allocator *allocator);
 /**
  * Allocates and initializes a sha1 checksum instance.
  */
+/*
 AWS_S3_API
 struct aws_checksum *aws_checksum_sha1_new(struct aws_allocator *allocator);
+*/
 /**
  * Allocates and initializes a crc32 checksum instance
  */
@@ -88,14 +90,14 @@ int aws_checksum_sha256_compute(
  * example if you want a SHA1 digest as the first 16 bytes, set truncate_to
  * to 16. If you want the full digest size, just set this to 0.
  */
-
+/*
 AWS_S3_API
 int aws_checksum_sha1_compute(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *input,
     struct aws_byte_buf *output,
     size_t truncate_to);
-
+*/
 AWS_S3_API
 int aws_checksum_crc32_compute(
     struct aws_allocator *allocator,
