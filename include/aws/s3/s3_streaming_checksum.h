@@ -24,8 +24,6 @@ enum checksum_type {
 
 typedef struct aws_checksum *(aws_checksum_new_fn)(struct aws_allocator *allocator);
 
-struct aws_checksum;
-
 AWS_S3_API
 struct aws_checksum *aws_checksum_sha256_new(struct aws_allocator *allocator);
 /**
