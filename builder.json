@@ -7,11 +7,17 @@
         }
     },
     "upstream": [
-        { "name": "aws-c-auth" },
-        { "name": "aws-c-http" }
+        {
+            "name": "aws-c-auth"
+        },
+        {
+            "name": "aws-c-http"
+        },
+        {
+            "name": "aws-checksums"
+        }
     ],
-    "downstream": [
-    ],
+    "downstream": [],
     "test_steps": [
         "test"
     ]
