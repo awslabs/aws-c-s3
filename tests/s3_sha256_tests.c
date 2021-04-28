@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/cal/cal.h>
 #include <aws/common/byte_buf.h>
 #include <aws/s3/s3_streaming_checksum.h>
 #include <aws/testing/aws_test_harness.h>
 #include <s3_test_case_helper.h>
-#include <aws/cal/cal.h>
 /*
  * these are the NIST test vectors, as compiled here:
  * https://www.di-mgt.com.au/sha_testvectors.html
