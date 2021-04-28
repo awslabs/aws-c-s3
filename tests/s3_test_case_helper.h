@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/cal/cal.h>
 #include <aws/s3/private/s3_checksum.h>
 #include <aws/s3/s3_streaming_checksum.h>
 
@@ -11,6 +12,9 @@ static inline int s_verify_checksum_test_case(
     struct aws_byte_cursor *input,
     struct aws_byte_cursor *expected,
     aws_checksum_new_fn *new_fn) {
+
+    aws_cal_library_init(allocator);
+
     /* test all possible segmentation lengths from 1 byte at a time to the entire
      * input. */
     for (size_t i = 1; i < input->len; ++i) {
@@ -37,5 +41,8 @@ static inline int s_verify_checksum_test_case(
 
         aws_checksum_destroy(checksum);
     }
+
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }

@@ -7,6 +7,7 @@
 #include <aws/s3/s3_streaming_checksum.h>
 #include <aws/testing/aws_test_harness.h>
 #include <s3_test_case_helper.h>
+#include <aws/cal/cal.h>
 /*
  * these are the NIST test vectors, as compiled here:
  * https://www.di-mgt.com.au/sha_testvectors.html
@@ -78,6 +79,8 @@ AWS_TEST_CASE(sha256_nist_test_case_4, s_sha256_nist_test_case_4_fn)
 static int s_sha256_nist_test_case_5_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    aws_cal_library_init(allocator);
+
     struct aws_checksum *checksum = aws_checksum_sha256_new(allocator);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
@@ -100,6 +103,8 @@ static int s_sha256_nist_test_case_5_fn(struct aws_allocator *allocator, void *c
 
     aws_checksum_destroy(checksum);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -107,6 +112,8 @@ AWS_TEST_CASE(sha256_nist_test_case_5, s_sha256_nist_test_case_5_fn)
 
 static int s_sha256_nist_test_case_5_truncated_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_checksum *checksum = aws_checksum_sha256_new(allocator);
     ASSERT_NOT_NULL(checksum);
@@ -144,6 +151,8 @@ static int s_sha256_nist_test_case_5_truncated_fn(struct aws_allocator *allocato
 
     aws_checksum_destroy(checksum);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -151,6 +160,8 @@ AWS_TEST_CASE(sha256_nist_test_case_5_truncated, s_sha256_nist_test_case_5_trunc
 
 static int s_sha256_nist_test_case_6_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_checksum *checksum = aws_checksum_sha256_new(allocator);
     ASSERT_NOT_NULL(checksum);
@@ -176,6 +187,8 @@ static int s_sha256_nist_test_case_6_fn(struct aws_allocator *allocator, void *c
 
     aws_checksum_destroy(checksum);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -183,6 +196,8 @@ AWS_TEST_CASE(sha256_nist_test_case_6, s_sha256_nist_test_case_6_fn)
 
 static int s_sha256_test_invalid_buffer_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
                                                               "klmghijklmnhijklmnoijklmnopjklmnopqklm"
@@ -193,6 +208,8 @@ static int s_sha256_test_invalid_buffer_fn(struct aws_allocator *allocator, void
 
     ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_sha256_compute(allocator, &input, &output_buf, 0));
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -200,6 +217,8 @@ AWS_TEST_CASE(sha256_test_invalid_buffer, s_sha256_test_invalid_buffer_fn)
 
 static int s_sha256_test_oneshot_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
                                                               "klmghijklmnhijklmnoijklmnopjklmnopqklm"
@@ -216,6 +235,8 @@ static int s_sha256_test_oneshot_fn(struct aws_allocator *allocator, void *ctx) 
     ASSERT_SUCCESS(aws_checksum_sha256_compute(allocator, &input, &output_buf, 0));
     ASSERT_BIN_ARRAYS_EQUALS(expected, sizeof(expected), output_buf.buffer, output_buf.len);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -223,6 +244,8 @@ AWS_TEST_CASE(sha256_test_oneshot, s_sha256_test_oneshot_fn)
 
 static int s_sha256_test_invalid_state_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
                                                               "klmghijklmnhijklmnoijklmnopjklmnopqklm"
@@ -241,6 +264,8 @@ static int s_sha256_test_invalid_state_fn(struct aws_allocator *allocator, void 
     ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(checksum, &output_buf, 0));
 
     aws_checksum_destroy(checksum);
+
+    aws_cal_library_clean_up();
 
     return AWS_OP_SUCCESS;
 }
