@@ -81,6 +81,8 @@ AWS_TEST_CASE(sha1_nist_test_case_4, s_sha1_nist_test_case_4_fn)
 static int s_sha1_nist_test_case_5_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    aws_cal_library_init(allocator);
+
     struct aws_checksum *checksum = aws_checksum_sha1_new(allocator);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
@@ -103,6 +105,8 @@ static int s_sha1_nist_test_case_5_fn(struct aws_allocator *allocator, void *ctx
 
     aws_checksum_destroy(checksum);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -110,6 +114,8 @@ AWS_TEST_CASE(sha1_nist_test_case_5, s_sha1_nist_test_case_5_fn)
 
 static int s_sha1_nist_test_case_5_truncated_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_checksum *checksum = aws_checksum_sha1_new(allocator);
     ASSERT_NOT_NULL(checksum);
@@ -131,6 +137,8 @@ static int s_sha1_nist_test_case_5_truncated_fn(struct aws_allocator *allocator,
 
     aws_checksum_destroy(checksum);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -138,6 +146,8 @@ AWS_TEST_CASE(sha1_nist_test_case_5_truncated, s_sha1_nist_test_case_5_truncated
 
 static int s_sha1_nist_test_case_6_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_checksum *checksum = aws_checksum_sha1_new(allocator);
     ASSERT_NOT_NULL(checksum);
@@ -163,6 +173,8 @@ static int s_sha1_nist_test_case_6_fn(struct aws_allocator *allocator, void *ctx
 
     aws_checksum_destroy(checksum);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -170,6 +182,8 @@ AWS_TEST_CASE(sha1_nist_test_case_6, s_sha1_nist_test_case_6_fn)
 
 static int s_sha1_test_invalid_buffer_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
                                                               "klmghijklmnhijklmnoijklmnopjklmnopqklm"
@@ -180,6 +194,8 @@ static int s_sha1_test_invalid_buffer_fn(struct aws_allocator *allocator, void *
 
     ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_sha1_compute(allocator, &input, &output_buf, 0));
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -187,6 +203,8 @@ AWS_TEST_CASE(sha1_test_invalid_buffer, s_sha1_test_invalid_buffer_fn)
 
 static int s_sha1_test_oneshot_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+
+    aws_cal_library_init(allocator);
 
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
                                                               "klmghijklmnhijklmnoijklmnopjklmnopqklm"
@@ -203,6 +221,8 @@ static int s_sha1_test_oneshot_fn(struct aws_allocator *allocator, void *ctx) {
     ASSERT_SUCCESS(aws_checksum_sha1_compute(allocator, &input, &output_buf, 0));
     ASSERT_BIN_ARRAYS_EQUALS(expected, sizeof(expected), output_buf.buffer, output_buf.len);
 
+    aws_cal_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }
 
@@ -210,6 +230,9 @@ AWS_TEST_CASE(sha1_test_oneshot, s_sha1_test_oneshot_fn)
 */
 static int s_sha1_test_invalid_state_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    /*
+    aws_cal_library_init(allocator);
+    */
     (void)allocator;
     /*
         struct aws_byte_cursor input = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
@@ -229,6 +252,8 @@ static int s_sha1_test_invalid_state_fn(struct aws_allocator *allocator, void *c
         ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(checksum, &output_buf, 0));
 
         aws_checksum_destroy(checksum);
+
+        aws_cal_library_clean_up();
      */
     return AWS_OP_SUCCESS;
 }

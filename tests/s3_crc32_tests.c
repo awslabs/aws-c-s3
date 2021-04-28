@@ -52,7 +52,6 @@ static int s_test_known_crc(
     size_t len = (size_t)input->len;
     struct aws_checksum *crc = func(allocator);
     ASSERT_SUCCESS(aws_checksum_update(crc, input));
-    // uintptr_t result = (uintptr_t)crc->impl;
     uint32_t result = 0;
     ASSERT_SUCCESS(s_finalize(crc, &result));
     ASSERT_HEX_EQUALS(expected, result, "%s(%s)", func_name, data_name);
@@ -69,7 +68,9 @@ static int s_test_known_crc(
     struct aws_checksum *crc1 = func(allocator);
     ASSERT_SUCCESS(aws_checksum_update(crc1, &input_first_half));
     ASSERT_SUCCESS(aws_checksum_update(crc1, &input_second_half));
-    uintptr_t result1 = (uintptr_t)crc1->impl;
+
+    uint32_t result1 = 0;
+    ASSERT_SUCCESS(s_finalize(crc1, &result1));
     ASSERT_HEX_EQUALS(expected, result1, "chaining %s(%s)", func_name, data_name);
 
     struct aws_checksum *crc2 = func(allocator);
@@ -80,8 +81,22 @@ static int s_test_known_crc(
         };
         ASSERT_SUCCESS(aws_checksum_update(crc2, &input_i));
     }
-    uintptr_t result2 = (uintptr_t)crc2->impl;
+
+    uint32_t result2 = 0;
+    ASSERT_SUCCESS(s_finalize(crc2, &result2));
     ASSERT_HEX_EQUALS(expected, result2, "one byte at a time %s(%s)", func_name, data_name);
+
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(crc, input));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(crc1, input));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(crc2, input));
+
+    uint8_t output[4] = {0};
+    struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(uint32_t));
+
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(crc, &output_buf, AWS_CRC_LEN));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(crc1, &output_buf, AWS_CRC_LEN));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(crc2, &output_buf, AWS_CRC_LEN));
+
     aws_checksum_destroy(crc);
     aws_checksum_destroy(crc1);
     aws_checksum_destroy(crc2);

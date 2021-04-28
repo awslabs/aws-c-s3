@@ -51,7 +51,7 @@ struct aws_checksum *aws_checksum_crc32c_new(struct aws_allocator *allocator);
 AWS_S3_API
 void aws_checksum_destroy(struct aws_checksum *checksum);
 /**
- * Updates the running checksum with to_checksum. this can be called multiple times.
+ * Updates the running checksum with buffer. this can be called multiple times.
  */
 AWS_S3_API
 int aws_checksum_update(struct aws_checksum *checksum, const struct aws_byte_cursor *buffer);
