@@ -4,6 +4,7 @@ import 'source-map-support/register';
 import * as cdk from '@aws-cdk/core';
 import { BenchmarksStack } from '../lib/benchmarks-stack';
 import { DashboardStack } from '../lib/dashboard-stack';
+import { LambdaStack } from '../lib/lambda-stack';
 
 const app = new cdk.App();
 let base_stack_name = app.node.tryGetContext('StackName') as string;
@@ -18,3 +19,5 @@ if (base_stack_name != null) {
 new BenchmarksStack(app, 'BenchmarksStack', { stackName: benchmarks_stack_name, env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
 
 new DashboardStack(app, 'DashboardStack', { stackName: dashboard_stack_name, env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
+
+new LambdaStack(app, 'LambdaStack', { stackName: dashboard_stack_name, env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
