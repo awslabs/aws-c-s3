@@ -9,22 +9,11 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/common.h>
 #include <aws/s3/s3.h>
-/*
-enum checksum_type {
-    AWS_CHECKSUM_MD5,
-    AWS_CHECKSUM_SHA1,
-    AWS_CHECKSUM_SHA256,
-    AWS_CHECKSUM_CRC32,
-    AWS_CHECKSUM_CRC32C,
-};
-*/
 #define AWS_SHA256_LEN 32
 /* #define AWS_SHA1_LEN 20 */
 #define AWS_CRC_LEN 4
 
 struct aws_checksum;
-
-typedef struct aws_checksum *(aws_checksum_new_fn)(struct aws_allocator *allocator);
 
 AWS_S3_API
 struct aws_checksum *aws_checksum_sha256_new(struct aws_allocator *allocator);

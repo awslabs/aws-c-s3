@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+typedef struct aws_checksum *(aws_checksum_new_fn)(struct aws_allocator *allocator);
+
 struct aws_checksum {
     struct aws_allocator *allocator;
     struct aws_checksum_vtable *vtable;

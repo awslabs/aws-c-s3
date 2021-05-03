@@ -65,17 +65,18 @@ static int s_crc32_common_update(
 
     /* checksum->impl has type (void *) to match the rest of the API, but we are storing as a uintptr, and using it as
      * an int to avoid mem allocation */
-    uintptr_t crc_value = (uintptr_t)checksum->impl;
-    uint32_t crc = (uint32_t)crc_value;
-    if (to_checksum->len > INT_MAX) {
-        /* is the subject here correct ?
-         * compiler doesn/t like below log
-         */
-        /* AWS_LOG_ERROR(AWS_LS_S3_REQUEST, "Input too long for CRC32"); */
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    uintptr_t crc_ptr = (uintptr_t)checksum->impl;
+    uint32_t crc = (uint32_t)crc_ptr;
+
+    /* This function takes length as size_t, but actual CRC function takes length as int. * Consume the input in chunks
+     * up to INT_MAX in length, just in case the input is larger than that. */
+    struct aws_byte_cursor input_remainder = *to_checksum;
+    while (input_remainder.len > 0) {
+        struct aws_byte_cursor input_chunk =
+            aws_byte_cursor_advance(&input_remainder, aws_min_size(input_remainder.len, INT_MAX));
+        uint32_t new_crc = checksum_fn(input_chunk.ptr, (int)input_chunk.len, crc);
+        checksum->impl = (void *)(uintptr_t)new_crc;
     }
-    uintptr_t new_crc = checksum_fn(to_checksum->ptr, (int)to_checksum->len, crc);
-    checksum->impl = (void *)new_crc;
     return AWS_OP_SUCCESS;
 }
 
@@ -101,10 +102,9 @@ static int s_finalize_crc(struct aws_checksum *checksum, struct aws_byte_buf *ou
     checksum->good = false;
     /* checksum->impl has type (void *) to match the rest of the API, but we are storing as a uintptr, and using it as
      * an int to avoid mem allocation */
-    uintptr_t crc_value = (uintptr_t)checksum->impl;
-    const uint32_t crc = (uint32_t)crc_value;
-    /* changed to BE in response to @graebm hesitant comment */
-    /* is this conditional necessary? */
+    uintptr_t crc_ptr = (uintptr_t)checksum->impl;
+    const uint32_t crc = (uint32_t)crc_ptr;
+    /* Write out bytes in big endian order */
     return aws_byte_buf_write_be32(output, crc) ? AWS_OP_SUCCESS : AWS_OP_ERR;
 }
 
