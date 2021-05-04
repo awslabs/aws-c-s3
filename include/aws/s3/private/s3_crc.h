@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/exports.h>
+#include <aws/s3/s3.h>
 
 #define AWS_CRC_LEN 4
 
