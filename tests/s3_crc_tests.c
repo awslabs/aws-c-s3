@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/cal/hash.h>
 #include <aws/common/byte_buf.h>
-#include <aws/s3/private/s3_checksum.h>
-#include <aws/s3/s3_streaming_checksum.h>
+#include <aws/s3/private/s3_crc.h>
 #include <aws/testing/aws_test_harness.h>
 
 static const uint8_t DATA_32_ZEROS[32] = {0};
@@ -21,7 +21,7 @@ static const uint8_t TEST_VECTOR[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9
 static const uint32_t KNOWN_CRC32_TEST_VECTOR = 0xCBF43926;
 static const uint32_t KNOWN_CRC32C_TEST_VECTOR = 0xE3069283;
 
-typedef struct aws_checksum *(crc_fn)(struct aws_allocator *);
+typedef struct aws_hash *(crc_fn)(struct aws_allocator *);
 
 static int s_byte_buf_to_int_buf(const struct aws_byte_buf *in_value, uint32_t *out_value) {
     struct aws_byte_cursor cursor_value = aws_byte_cursor_from_buf(in_value);
@@ -31,12 +31,12 @@ static int s_byte_buf_to_int_buf(const struct aws_byte_buf *in_value, uint32_t *
     return AWS_OP_SUCCESS;
 }
 
-static int s_finalize(struct aws_checksum *checksum, uint32_t *out_value) {
+static int s_finalize(struct aws_hash *hash, uint32_t *out_value) {
     uint8_t output[4] = {0};
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(uint32_t));
     output_buf.len = 0;
-    size_t truncation_size = checksum->digest_size - sizeof(uint32_t);
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, truncation_size));
+    size_t truncation_size = hash->digest_size - sizeof(uint32_t);
+    ASSERT_SUCCESS(aws_hash_finalize(hash, &output_buf, truncation_size));
     return s_byte_buf_to_int_buf(&output_buf, out_value);
 }
 
@@ -50,8 +50,8 @@ static int s_test_known_crc(
     struct aws_allocator *allocator) {
 
     size_t len = (size_t)input->len;
-    struct aws_checksum *crc = func(allocator);
-    ASSERT_SUCCESS(aws_checksum_update(crc, input));
+    struct aws_hash *crc = func(allocator);
+    ASSERT_SUCCESS(aws_hash_update(crc, input));
     uint32_t result = 0;
     ASSERT_SUCCESS(s_finalize(crc, &result));
     ASSERT_HEX_EQUALS(expected, result, "%s(%s)", func_name, data_name);
@@ -65,41 +65,41 @@ static int s_test_known_crc(
         .len = (int)(len - len / 2),
         .ptr = (input->ptr) + (len / 2),
     };
-    struct aws_checksum *crc1 = func(allocator);
-    ASSERT_SUCCESS(aws_checksum_update(crc1, &input_first_half));
-    ASSERT_SUCCESS(aws_checksum_update(crc1, &input_second_half));
+    struct aws_hash *crc1 = func(allocator);
+    ASSERT_SUCCESS(aws_hash_update(crc1, &input_first_half));
+    ASSERT_SUCCESS(aws_hash_update(crc1, &input_second_half));
 
     uint32_t result1 = 0;
     ASSERT_SUCCESS(s_finalize(crc1, &result1));
     ASSERT_HEX_EQUALS(expected, result1, "chaining %s(%s)", func_name, data_name);
 
-    struct aws_checksum *crc2 = func(allocator);
+    struct aws_hash *crc2 = func(allocator);
     for (size_t i = 0; i < len; ++i) {
         const struct aws_byte_cursor input_i = {
             .len = 1,
             .ptr = input->ptr + i,
         };
-        ASSERT_SUCCESS(aws_checksum_update(crc2, &input_i));
+        ASSERT_SUCCESS(aws_hash_update(crc2, &input_i));
     }
 
     uint32_t result2 = 0;
     ASSERT_SUCCESS(s_finalize(crc2, &result2));
     ASSERT_HEX_EQUALS(expected, result2, "one byte at a time %s(%s)", func_name, data_name);
 
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(crc, input));
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(crc1, input));
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(crc2, input));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_hash_update(crc, input));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_hash_update(crc1, input));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_hash_update(crc2, input));
 
     uint8_t output[4] = {0};
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(uint32_t));
 
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(crc, &output_buf, AWS_CRC_LEN));
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(crc1, &output_buf, AWS_CRC_LEN));
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(crc2, &output_buf, AWS_CRC_LEN));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_hash_finalize(crc, &output_buf, AWS_CRC_LEN));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_hash_finalize(crc1, &output_buf, AWS_CRC_LEN));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_hash_finalize(crc2, &output_buf, AWS_CRC_LEN));
 
-    aws_checksum_destroy(crc);
-    aws_checksum_destroy(crc1);
-    aws_checksum_destroy(crc2);
+    aws_hash_destroy(crc);
+    aws_hash_destroy(crc1);
+    aws_hash_destroy(crc2);
     return AWS_OP_SUCCESS;
 }
 
@@ -150,7 +150,7 @@ static int s_test_known_crc32c(const char *func_name, crc_fn *func, struct aws_a
     /*this tests three things, first it tests the case where we aren't 8-byte aligned*/
     /*second, it tests that reads aren't performed before start of buffer*/
     /*third, it tests that writes aren't performed after the end of the buffer.*/
-    /*if any of those things happen, then the checksum will be wrong and the assertion will fail */
+    /*if any of those things happen, then the hash will be wrong and the assertion will fail */
     uint8_t *s_non_mem_aligned_vector;
     s_non_mem_aligned_vector = aws_mem_acquire(allocator, sizeof(DATA_32_VALUES) + 6);
     memset(s_non_mem_aligned_vector, 1, sizeof(DATA_32_VALUES) + 6);
@@ -173,7 +173,7 @@ static int s_test_known_crc32c(const char *func_name, crc_fn *func, struct aws_a
 static int s_test_crc32c(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_known_crc32c("aws_checksum_crc32c_new", aws_checksum_crc32c_new, allocator));
+    ASSERT_SUCCESS(s_test_known_crc32c("aws_hash_crc32c_new", aws_hash_crc32c_new, allocator));
 
     return AWS_OP_SUCCESS;
 }
@@ -182,7 +182,7 @@ AWS_TEST_CASE(test_crc32c, s_test_crc32c)
 static int s_test_crc32(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_known_crc32("aws_checksum_crc32_new", aws_checksum_crc32_new, allocator));
+    ASSERT_SUCCESS(s_test_known_crc32("aws_hash_crc32_new", aws_hash_crc32_new, allocator));
 
     return AWS_OP_SUCCESS;
 }

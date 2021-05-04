@@ -32,6 +32,14 @@ enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_MAX,
 };
 
+enum aws_s3_meta_request_checksum {
+    AWS_S3MR_CHECKSUM_NONE,
+    AWS_S3MR_CHECKSUM_CRC32,
+    AWS_S3MR_CHECKSUM_CRC32C,
+    AWS_S3MR_CHECKSUM_SHA1,
+    AWS_S3MR_CHECKSUM_SHA256,
+};
+
 typedef int(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
@@ -105,6 +113,9 @@ struct aws_s3_client_config {
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
 struct aws_s3_meta_request_options {
+
+    /* The type of checksum to append to the end of an s3 request */
+    enum aws_s3_meta_request_checksum checksum;
 
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
