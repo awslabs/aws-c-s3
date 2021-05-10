@@ -103,7 +103,7 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
-    *((uint64_t *)&meta_request->part_size) = part_size;
+    *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
 
     if (options->signing_config) {

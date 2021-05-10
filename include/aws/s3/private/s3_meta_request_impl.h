@@ -115,8 +115,6 @@ struct aws_s3_meta_request {
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
 
-    const bool should_compute_content_md5;
-
     struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Client that created this meta request which also processes this request. After the meta request is finished, this
@@ -184,6 +182,8 @@ struct aws_s3_meta_request {
         bool scheduled;
 
     } client_process_work_threaded_data;
+
+    const bool should_compute_content_md5;
 };
 
 AWS_EXTERN_C_BEGIN
