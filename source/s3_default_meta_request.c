@@ -141,7 +141,7 @@ static bool s_s3_meta_request_default_update(
                 goto has_work_remaining;
             }
 
-            request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+            request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,

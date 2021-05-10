@@ -154,6 +154,7 @@ struct aws_s3_tester_meta_request_options {
 
     /* Put Object Meta request specific options. */
     struct {
+        struct aws_byte_cursor object_path_override;
         uint32_t object_size_mb;
         bool ensure_multipart;
         bool invalid_request;

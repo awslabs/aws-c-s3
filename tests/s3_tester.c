@@ -1103,32 +1103,46 @@ int aws_s3_tester_send_meta_request_with_options(
                 input_stream = aws_s3_test_input_stream_new(allocator, object_size_bytes);
             }
 
-            char object_path_buffer[128] = "";
-            switch (options->sse_type) {
-                case AWS_S3_TESTER_SSE_NONE:
-                    snprintf(
-                        object_path_buffer, sizeof(object_path_buffer), "/put_object_test_%uMB.txt", object_size_mb);
-                    break;
-                case AWS_S3_TESTER_SSE_KMS:
-                    snprintf(
-                        object_path_buffer,
-                        sizeof(object_path_buffer),
-                        "/put_object_test_kms_%uMB.txt",
-                        object_size_mb);
-                    break;
-                case AWS_S3_TESTER_SSE_AES256:
-                    snprintf(
-                        object_path_buffer,
-                        sizeof(object_path_buffer),
-                        "/put_object_test_aes256_%uMB.txt",
-                        object_size_mb);
-                    break;
+            struct aws_byte_buf object_path_buffer;
+            aws_byte_buf_init(&object_path_buffer, allocator, 128);
 
-                default:
-                    break;
+            if (options->put_options.object_path_override.ptr != NULL) {
+                aws_byte_buf_append_dynamic(&object_path_buffer, &options->put_options.object_path_override);
+            } else {
+                char object_path_sprintf_buffer[128] = "";
+
+                switch (options->sse_type) {
+                    case AWS_S3_TESTER_SSE_NONE:
+                        snprintf(
+                            object_path_sprintf_buffer,
+                            sizeof(object_path_sprintf_buffer),
+                            "/put_object_test_%uMB.txt",
+                            object_size_mb);
+                        break;
+                    case AWS_S3_TESTER_SSE_KMS:
+                        snprintf(
+                            object_path_sprintf_buffer,
+                            sizeof(object_path_sprintf_buffer),
+                            "/put_object_test_kms_%uMB.txt",
+                            object_size_mb);
+                        break;
+                    case AWS_S3_TESTER_SSE_AES256:
+                        snprintf(
+                            object_path_sprintf_buffer,
+                            sizeof(object_path_sprintf_buffer),
+                            "/put_object_test_aes256_%uMB.txt",
+                            object_size_mb);
+                        break;
+
+                    default:
+                        break;
+                }
+
+                struct aws_byte_cursor sprintf_buffer_cursor = aws_byte_cursor_from_c_str(object_path_sprintf_buffer);
+                aws_byte_buf_append_dynamic(&object_path_buffer, &sprintf_buffer_cursor);
             }
 
-            struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
+            struct aws_byte_cursor test_object_path = aws_byte_cursor_from_buf(&object_path_buffer);
 
             /* Put together a simple S3 Put Object request. */
             struct aws_http_message *message = aws_s3_test_put_object_request_new(
@@ -1138,6 +1152,8 @@ int aws_s3_tester_send_meta_request_with_options(
                 g_test_body_content_type,
                 input_stream,
                 options->sse_type);
+
+            aws_byte_buf_clean_up(&object_path_buffer);
 
             if (options->put_options.content_length) {
                 /* make a invalid request */

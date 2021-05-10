@@ -136,7 +136,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     ASSERT_TRUE(request_message != NULL);
 
     struct aws_s3_request *request =
-        aws_s3_request_new(meta_request, request_tag, part_number, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+        aws_s3_request_new(meta_request, request_tag, part_number, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
     ASSERT_TRUE(request != NULL);
 
@@ -1001,7 +1001,7 @@ static void s_s3_test_meta_request_has_finish_result_finished_request(
     ++user_data->call_counter;
 }
 
-/* Test that the client will discard requests for meta requests that are trying to finish. */
+/* Test that the client will correctly discard requests for meta requests that are trying to finish. */
 AWS_TEST_CASE(test_s3_client_update_connections_finish_result, s_test_s3_client_update_connections_finish_result)
 static int s_test_s3_client_update_connections_finish_result(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1026,7 +1026,6 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
         aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request, NULL);
     mock_meta_request_vtable->finished_request = s_s3_test_meta_request_has_finish_result_finished_request;
 
-    struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, 0);
     struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
 
     *((uint32_t *)&mock_client->ideal_vip_count) = 1;
@@ -1035,11 +1034,12 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
 
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
 
-    aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
-    ++mock_client->threaded_data.request_queue_size;
-
-    /* Because the meta request is finishing, the request should be released. */
+    /* Verify that the request does not get sent. */
     {
+        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, 0);
+        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
+        ++mock_client->threaded_data.request_queue_size;
+
         aws_s3_client_update_connections_threaded(mock_client, true);
 
         ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
@@ -1052,6 +1052,31 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
         ASSERT_FALSE(vip_connection->is_warm);
         ASSERT_FALSE(vip_connection->is_active);
         ASSERT_TRUE(vip_connection->request == NULL);
+
+        test_update_connections_finish_result_user_data.request = 0;
+        test_update_connections_finish_result_user_data.call_counter = 0;
+    }
+
+    /* Verify that the request still gets sent because it has the 'always send' flag. */
+    {
+        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
+        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
+        ++mock_client->threaded_data.request_queue_size;
+
+        aws_s3_client_update_connections_threaded(mock_client, true);
+
+        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
+        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
+        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 1);
+
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.request == NULL);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.call_counter == 0);
+
+        ASSERT_TRUE(vip_connection->is_warm);
+        ASSERT_TRUE(vip_connection->is_active);
+        ASSERT_TRUE(vip_connection->request == request);
+
+        aws_s3_request_release(request);
     }
 
     aws_s3_meta_request_release(mock_meta_request);
@@ -1621,20 +1646,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_enabled, s_test_s3_put_object_tls_enabled)
 static int s_test_s3_put_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
-
-    struct aws_s3_tester_meta_request_options options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .put_options =
-            {
-                .ensure_multipart = true,
-            },
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0));
 
     return 0;
 }
@@ -2316,6 +2328,30 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&test_buffer);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_double_slashes, s_test_s3_put_object_double_slashes)
+static int s_test_s3_put_object_double_slashes(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .object_path_override = aws_byte_cursor_from_c_str("/prefix//test.txt"),
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     return 0;
 }

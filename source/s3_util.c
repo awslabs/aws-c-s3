@@ -217,7 +217,6 @@ void aws_s3_init_default_signing_config(
     signing_config->service = g_s3_service_name;
     signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
-    signing_config->flags.should_normalize_uri_path = true;
 }
 
 void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf) {

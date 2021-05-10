@@ -78,7 +78,7 @@ AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 static void s_s3_client_start_destroy(void *user_data);
 
 /* Called by s_s3_client_process_work_default when all shutdown criteria has been met. */
-static void s_s3_client_finish_destroy(void *user_data);
+static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 
 /* Called when the body streaming elg shutdown has completed. */
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
@@ -158,6 +158,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .vip_connection_destroy = s_s3_vip_connection_destroy_default,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
+    .finish_destroy = s_s3_client_finish_destroy_default,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {
@@ -452,9 +453,8 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_s3_client_unlock_synced_data(client);
 }
 
-static void s_s3_client_finish_destroy(void *user_data) {
-    AWS_PRECONDITION(user_data);
-    struct aws_s3_client *client = user_data;
+static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
@@ -1286,6 +1286,8 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->finish_destroy);
 
     bool client_active = false;
     bool invalid_endpoint = false;
@@ -1317,13 +1319,27 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     uint32_t num_requests_queued =
         aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
 
-    int sub_result = aws_sub_u32_checked(
-        client->threaded_data.num_requests_being_prepared,
-        num_requests_queued,
-        &client->threaded_data.num_requests_being_prepared);
+    {
+        int sub_result = aws_sub_u32_checked(
+            client->threaded_data.num_requests_being_prepared,
+            num_requests_queued,
+            &client->threaded_data.num_requests_being_prepared);
 
-    AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
-    (void)sub_result;
+        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+        (void)sub_result;
+    }
+
+    {
+        int sub_result = aws_sub_u32_checked(
+            client->threaded_data.num_requests_being_prepared,
+            client->synced_data.num_failed_prepare_requests,
+            &client->threaded_data.num_requests_being_prepared);
+
+        client->synced_data.num_failed_prepare_requests = 0;
+
+        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+        (void)sub_result;
+    }
 
     aws_s3_client_unlock_synced_data(client);
 
@@ -1473,7 +1489,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         aws_s3_client_unlock_synced_data(client);
 
         if (finish_destroy) {
-            s_s3_client_finish_destroy(client);
+            client->vtable->finish_destroy(client);
         }
     }
 }
@@ -1602,6 +1618,8 @@ static void s_s3_client_prepare_callback_queue_request(
 
     if (error_code == AWS_ERROR_SUCCESS) {
         aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+    } else {
+        ++client->synced_data.num_failed_prepare_requests;
     }
 
     s_s3_client_schedule_process_work_synced(client);
@@ -1667,8 +1685,9 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client, boo
         uint32_t num_conns_per_vip = s_num_conns_per_vip_meta_request_look_up[request->meta_request->type];
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, num_conns_per_vip);
 
-        /* If this meta request was finished, then let the meta request know and release the request. */
-        if (aws_s3_meta_request_has_finish_result(request->meta_request)) {
+        /* Unless the request is marked "always send", if this meta request has a finish result, then finish the request
+         * now and release it. */
+        if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
             /* Put the unused connection at the front of the list so that it is used in the next iteration.*/
             aws_linked_list_push_front(&client->threaded_data.idle_vip_connections, &vip_connection->node);
 
