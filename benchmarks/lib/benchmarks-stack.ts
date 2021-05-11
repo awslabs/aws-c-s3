@@ -43,8 +43,8 @@ export class BenchmarksStack extends cdk.Stack {
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
+    // TODO create the VPC from the dashboard stack avoid the overlap, as we will have multiple benchmark stacks at the same time
     const vpc = new ec2.Vpc(this, 'VPC', {
-      cidr: cidr || ec2.Vpc.DEFAULT_CIDR_RANGE,
       enableDnsSupport: true,
       enableDnsHostnames: true
     })
@@ -58,7 +58,7 @@ export class BenchmarksStack extends cdk.Stack {
     });
 
     security_group.addIngressRule(
-      ec2.Peer.anyIpv4(),
+      cidr ? ec2.Peer.ipv4(cidr) : ec2.Peer.anyIpv4(),
       ec2.Port.tcp(22),
       'SSH'
     );
