@@ -1219,7 +1219,7 @@ static int s_test_s3_get_object_helper(
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
 
     struct aws_string *endpoint =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_bucket_name, &tester.test_region);
     struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
 
     tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
@@ -1300,7 +1300,7 @@ static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_public_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_public_bucket_name, &tester.test_region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message = aws_s3_test_get_object_request_new(
@@ -1345,7 +1345,7 @@ static int s_test_s3_signing_override(struct aws_allocator *allocator, void *ctx
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_bucket_name, &tester.test_region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message = aws_s3_test_get_object_request_new(
@@ -1488,7 +1488,7 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_bucket_name, &tester.test_region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
@@ -1591,7 +1591,7 @@ static int s_test_s3_put_object_helper(
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
 
     struct aws_string *endpoint =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_bucket_name, &tester.test_region);
     struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
 
     tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
@@ -1696,7 +1696,7 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_bucket_name, &tester.test_region);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
         AWS_ZERO_STRUCT(meta_request_test_results[i]);
@@ -1995,7 +1995,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_bucket_name, &tester.test_region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
@@ -2070,7 +2070,7 @@ static int s_test_s3_error_missing_file(struct aws_allocator *allocator, void *c
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_bucket_name, &tester.test_region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
@@ -2157,7 +2157,7 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_public_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester.test_public_bucket_name, &tester.test_region);
 
     {
         struct aws_host_resolution_config host_resolver_config;
@@ -2713,6 +2713,7 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
 
     struct aws_byte_cursor expected_user_agent_value = aws_byte_cursor_from_buf(&expected_user_agent_value_buf);
 
+    /* Add just the user agent string.  It should be the only user agent present. */
     {
         struct aws_byte_cursor user_agent_value;
         AWS_ZERO_STRUCT(user_agent_value);
@@ -2743,17 +2744,21 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
         aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &forward_slash);
         aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &g_s3_client_version);
 
+        /* Calculate what the final string should look like. */
         struct aws_byte_cursor total_expected_user_agent_value =
             aws_byte_cursor_from_buf(&total_expected_user_agent_value_buf);
 
+        /* Create a message with a pre-existing dummy_agent_header_value */
         struct aws_http_message *message = aws_http_message_new_request(allocator);
         struct aws_http_headers *headers = aws_http_message_get_headers(message);
         ASSERT_TRUE(headers != NULL);
 
         ASSERT_SUCCESS(aws_http_headers_add(headers, g_user_agent_header_name, dummy_agent_header_value));
 
+        /* Add the s3 crt client user agent header to it. */
         aws_s3_add_user_agent_header(allocator, message);
 
+        /* Verify that it matches what is expected. */
         {
             struct aws_byte_cursor user_agent_value;
             AWS_ZERO_STRUCT(user_agent_value);

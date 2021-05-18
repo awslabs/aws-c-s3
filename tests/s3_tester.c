@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/common/environment.h>
 #include <aws/common/system_info.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
@@ -24,11 +25,17 @@
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif
 
-const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
-const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
-const struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket");
-const struct aws_byte_cursor g_test_public_bucket_name =
+AWS_STATIC_STRING_FROM_LITERAL(s_test_region_env_var, "S3_TEST_REGION");
+AWS_STATIC_STRING_FROM_LITERAL(s_test_bucket_name_env_var, "S3_TEST_BUCKET_NAME");
+AWS_STATIC_STRING_FROM_LITERAL(s_test_public_bucket_name_env_var, "S3_TEST_PUBLIC_BUCKET_NAME");
+
+static struct aws_byte_cursor s_default_test_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
+static struct aws_byte_cursor s_default_test_bucket_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket");
+static struct aws_byte_cursor s_default_test_public_bucket_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff-us-west-2");
+
+const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 const struct aws_byte_cursor g_s3_path_get_object_test_1MB =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
@@ -167,13 +174,9 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 
     aws_s3_library_init(allocator);
 
-    if (aws_mutex_init(&tester->synced_data.lock)) {
-        return AWS_OP_ERR;
-    }
+    ASSERT_SUCCESS(aws_mutex_init(&tester->synced_data.lock));
 
-    if (aws_condition_variable_init(&tester->signal)) {
-        goto condition_variable_failed;
-    }
+    ASSERT_SUCCESS(aws_condition_variable_init(&tester->signal));
 
     ASSERT_SUCCESS(aws_array_list_init_dynamic(
         &tester->client_vtable_patches, tester->allocator, 4, sizeof(struct aws_s3_client_vtable_patch)));
@@ -192,7 +195,7 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
     tester->host_resolver = aws_host_resolver_new_default(allocator, &resolver_options);
     ASSERT_TRUE(tester->host_resolver != NULL);
 
-    /* Setup the client boot strap. */
+    /* Setup the client bootstrap. */
     {
         struct aws_client_bootstrap_options bootstrap_options;
         AWS_ZERO_STRUCT(bootstrap_options);
@@ -201,6 +204,8 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         bootstrap_options.user_data = tester;
 
         tester->client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+
+        ASSERT_TRUE(tester->client_bootstrap != NULL);
     }
 
     /* Setup the credentials provider */
@@ -209,17 +214,36 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         AWS_ZERO_STRUCT(credentials_config);
         credentials_config.bootstrap = tester->client_bootstrap;
         tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
+
+        ASSERT_TRUE(tester->credentials_provider != NULL);
     }
 
-    aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
+    ASSERT_SUCCESS(aws_get_environment_value(allocator, s_test_region_env_var, &tester->test_region_string));
+    ASSERT_SUCCESS(aws_get_environment_value(allocator, s_test_bucket_name_env_var, &tester->test_bucket_name_string));
+    ASSERT_SUCCESS(aws_get_environment_value(
+        allocator, s_test_public_bucket_name_env_var, &tester->test_public_bucket_name_string));
+
+    if (tester->test_region_string == NULL) {
+        tester->test_region_string = aws_string_new_from_cursor(allocator, &s_default_test_region);
+    }
+
+    if (tester->test_bucket_name_string == NULL) {
+        tester->test_bucket_name_string = aws_string_new_from_cursor(allocator, &s_default_test_bucket_name);
+    }
+
+    if (tester->test_public_bucket_name_string == NULL) {
+        tester->test_public_bucket_name_string =
+            aws_string_new_from_cursor(allocator, &s_default_test_public_bucket_name);
+    }
+
+    tester->test_region = aws_byte_cursor_from_string(tester->test_region_string);
+    tester->test_bucket_name = aws_byte_cursor_from_string(tester->test_bucket_name_string);
+    tester->test_public_bucket_name = aws_byte_cursor_from_string(tester->test_public_bucket_name_string);
+
+    aws_s3_init_default_signing_config(
+        &tester->default_signing_config, tester->test_region, tester->credentials_provider);
 
     return AWS_OP_SUCCESS;
-
-condition_variable_failed:
-
-    aws_mutex_clean_up(&tester->synced_data.lock);
-
-    return AWS_OP_ERR;
 }
 
 int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client_config *config, uint32_t flags) {
@@ -234,7 +258,7 @@ int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client
 
     if (flags & AWS_S3_TESTER_BIND_CLIENT_REGION) {
         ASSERT_TRUE(config->region.len == 0);
-        config->region = g_test_s3_region;
+        config->region = tester->test_region;
     }
 
     if (flags & AWS_S3_TESTER_BIND_CLIENT_SIGNING) {
@@ -473,6 +497,21 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
 
     aws_event_loop_group_release(tester->el_group);
     tester->el_group = NULL;
+
+    if (tester->test_region_string != NULL) {
+        aws_string_destroy(tester->test_region_string);
+        tester->test_region_string = NULL;
+    }
+
+    if (tester->test_bucket_name_string) {
+        aws_string_destroy(tester->test_bucket_name_string);
+        tester->test_bucket_name_string = NULL;
+    }
+
+    if (tester->test_public_bucket_name_string != NULL) {
+        aws_string_destroy(tester->test_public_bucket_name_string);
+        tester->test_public_bucket_name_string = NULL;
+    }
 
     aws_s3_library_clean_up();
 
@@ -984,7 +1023,7 @@ int aws_s3_tester_client_new(
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
 
     struct aws_string *endpoint =
-        aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(tester->allocator, &tester->test_bucket_name, &tester->test_region);
     struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
 
     tls_connection_options.server_name = aws_string_new_from_cursor(tester->allocator, &endpoint_cursor);
@@ -1065,10 +1104,11 @@ int aws_s3_tester_send_meta_request_with_options(
         const struct aws_byte_cursor *bucket_name = options->bucket_name;
 
         if (bucket_name == NULL) {
-            bucket_name = &g_test_bucket_name;
+            bucket_name = &tester->test_bucket_name;
         }
 
-        struct aws_string *host_name = aws_s3_tester_build_endpoint_string(allocator, bucket_name, &g_test_s3_region);
+        struct aws_string *host_name =
+            aws_s3_tester_build_endpoint_string(allocator, bucket_name, &tester->test_region);
 
         if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
@@ -1312,7 +1352,7 @@ int aws_s3_tester_send_get_object_meta_request(
     struct aws_s3_meta_request_test_results *out_results) {
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(tester->allocator, &tester->test_bucket_name, &tester->test_region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
@@ -1418,7 +1458,7 @@ int aws_s3_tester_send_put_object_meta_request(
     struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
 
     struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+        aws_s3_tester_build_endpoint_string(allocator, &tester->test_bucket_name, &tester->test_region);
 
     char object_path_buffer[128] = "";
 

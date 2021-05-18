@@ -87,6 +87,14 @@ struct aws_s3_tester {
     struct aws_array_list meta_request_vtable_patches;
     void *user_data;
 
+    struct aws_string *test_region_string;
+    struct aws_string *test_bucket_name_string;
+    struct aws_string *test_public_bucket_name_string;
+
+    struct aws_byte_cursor test_region;
+    struct aws_byte_cursor test_bucket_name;
+    struct aws_byte_cursor test_public_bucket_name;
+
     struct {
         struct aws_mutex lock;
 
@@ -130,7 +138,7 @@ struct aws_s3_tester_meta_request_options {
     /* Optional. If NULL, a client will be created. */
     struct aws_s3_client *client;
 
-    /* Optional. Bucket for this request. If NULL, g_test_bucket_name will be used. */
+    /* Optional. Bucket for this request. If NULL, the tester's test_bucket_name will be used. */
     struct aws_byte_cursor *bucket_name;
 
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
