@@ -33,6 +33,18 @@ const struct aws_byte_cursor g_s3_path_get_object_test_1MB =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
 
+#ifdef BYO_CRYPTO
+/* Under BYO_CRYPTO, this function currently needs to be defined by the user. Defining a null implementation here so
+ * that tests build, but it is not currently meant to be used by any tests. */
+struct aws_byte_buf aws_tls_handler_protocol(struct aws_channel_handler *handler) {
+    (void)handler;
+    AWS_FATAL_ASSERT(false);
+    struct aws_byte_buf byte_buf;
+    AWS_ZERO_STRUCT(byte_buf);
+    return byte_buf;
+}
+#endif
+
 static int s_s3_test_meta_request_header_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
@@ -203,6 +215,7 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         tester->client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
     }
 
+#ifndef BYO_CRYPTO
     /* Setup the credentials provider */
     {
         struct aws_credentials_provider_chain_default_options credentials_config;
@@ -210,6 +223,7 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         credentials_config.bootstrap = tester->client_bootstrap;
         tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
     }
+#endif
 
     aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
 
@@ -976,12 +990,16 @@ int aws_s3_tester_client_new(
         .max_part_size = options->max_part_size,
     };
 
+    struct aws_tls_connection_options tls_connection_options;
+    AWS_ZERO_STRUCT(tls_connection_options);
+
+#ifndef BYO_CRYPTO
     struct aws_tls_ctx_options tls_context_options;
     aws_tls_ctx_options_init_default_client(&tls_context_options, tester->allocator);
-    struct aws_tls_ctx *context = aws_tls_client_ctx_new(tester->allocator, &tls_context_options);
 
-    struct aws_tls_connection_options tls_connection_options;
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(tester->allocator, &tls_context_options);
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+#endif
 
     struct aws_string *endpoint =
         aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -1007,9 +1025,12 @@ int aws_s3_tester_client_new(
     *out_client = aws_s3_client_new(tester->allocator, &client_config);
 
     aws_string_destroy(endpoint);
+
+#ifndef BYO_CRYPTO
     aws_tls_ctx_release(context);
     aws_tls_connection_options_clean_up(&tls_connection_options);
     aws_tls_ctx_options_clean_up(&tls_context_options);
+#endif
 
     return AWS_OP_SUCCESS;
 }
