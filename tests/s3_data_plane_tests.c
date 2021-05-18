@@ -1260,12 +1260,16 @@ static int s_test_s3_get_object_helper(
         .part_size = 64 * 1024,
     };
 
+    struct aws_tls_connection_options tls_connection_options;
+    AWS_ZERO_STRUCT(tls_connection_options);
+
+#ifndef BYO_CRYPTO
     struct aws_tls_ctx_options tls_context_options;
     aws_tls_ctx_options_init_default_client(&tls_context_options, allocator);
-    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
 
-    struct aws_tls_connection_options tls_connection_options;
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+#endif
 
     struct aws_string *endpoint =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -1294,9 +1298,12 @@ static int s_test_s3_get_object_helper(
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, s3_path, flags, NULL));
 
     aws_string_destroy(endpoint);
+
+#ifndef BYO_CRYPTO
     aws_tls_ctx_release(context);
     aws_tls_connection_options_clean_up(&tls_connection_options);
     aws_tls_ctx_options_clean_up(&tls_context_options);
+#endif
 
     aws_s3_client_release(client);
     client = NULL;
@@ -1632,12 +1639,16 @@ static int s_test_s3_put_object_helper(
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
+    struct aws_tls_connection_options tls_connection_options;
+    AWS_ZERO_STRUCT(tls_connection_options);
+
+#ifndef BYO_CRYPTO
     struct aws_tls_ctx_options tls_context_options;
     aws_tls_ctx_options_init_default_client(&tls_context_options, allocator);
-    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
 
-    struct aws_tls_connection_options tls_connection_options;
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+#endif
 
     struct aws_string *endpoint =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -1670,9 +1681,12 @@ static int s_test_s3_put_object_helper(
         &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | extra_meta_request_flag, NULL));
 
     aws_string_destroy(endpoint);
+
+#ifndef BYO_CRYPTO
     aws_tls_ctx_release(context);
     aws_tls_connection_options_clean_up(&tls_connection_options);
     aws_tls_ctx_options_clean_up(&tls_context_options);
+#endif
 
     aws_s3_client_release(client);
     client = NULL;

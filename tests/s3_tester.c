@@ -990,12 +990,16 @@ int aws_s3_tester_client_new(
         .max_part_size = options->max_part_size,
     };
 
+    struct aws_tls_connection_options tls_connection_options;
+    AWS_ZERO_STRUCT(tls_connection_options);
+
+#ifndef BYO_CRYPTO
     struct aws_tls_ctx_options tls_context_options;
     aws_tls_ctx_options_init_default_client(&tls_context_options, tester->allocator);
-    struct aws_tls_ctx *context = aws_tls_client_ctx_new(tester->allocator, &tls_context_options);
 
-    struct aws_tls_connection_options tls_connection_options;
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(tester->allocator, &tls_context_options);
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+#endif
 
     struct aws_string *endpoint =
         aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -1021,9 +1025,12 @@ int aws_s3_tester_client_new(
     *out_client = aws_s3_client_new(tester->allocator, &client_config);
 
     aws_string_destroy(endpoint);
+
+#ifndef BYO_CRYPTO
     aws_tls_ctx_release(context);
     aws_tls_connection_options_clean_up(&tls_connection_options);
     aws_tls_ctx_options_clean_up(&tls_context_options);
+#endif
 
     return AWS_OP_SUCCESS;
 }
