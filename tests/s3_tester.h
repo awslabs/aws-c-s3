@@ -340,6 +340,15 @@ struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *alloc
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
 
+#ifdef BYO_CRYPTO
+struct aws_tls_context;
+struct aws_tls_ctx_options;
+
+/* Under BYO_CRYPTO, aws-c-io actually links in a null implementation of this function, but omits the function
+ * declaration. Exposing it here so that tests build without the need for any ifdef's around calls to this function.  */
+struct aws_tls_ctx *aws_tls_client_ctx_new(struct aws_allocator *allocator, const struct aws_tls_ctx_options *options);
+#endif
+
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 
 extern const struct aws_byte_cursor g_test_body_content_type;

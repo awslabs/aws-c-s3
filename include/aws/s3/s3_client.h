@@ -80,7 +80,8 @@ struct aws_s3_client_config {
      */
     enum aws_s3_meta_request_tls_mode tls_mode;
 
-    /* TLS Options to be used for each connection, if tls_mode is ENABLED */
+    /* TLS Options to be used for each connection, if tls_mode is ENABLED. When compiling with BYO_CRYPTO, and tls_mode
+     * is ENABLED, this is required. Otherwise, this is optional. */
     struct aws_tls_connection_options *tls_connection_options;
 
     /* Signing options to be used for each request. Specify NULL to not sign requests. */

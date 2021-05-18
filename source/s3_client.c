@@ -227,6 +227,17 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
+#ifdef BYO_CRYPTO
+    if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; when using BYO_CRYPTO, tls_connection_options can not be "
+            "NULL when TLS is enabled.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+#endif
+
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
