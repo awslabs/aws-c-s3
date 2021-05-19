@@ -13,6 +13,11 @@
 #include <aws/s3/s3_client.h>
 #include <inttypes.h>
 
+#ifdef _MSC_VER
+/* sscanf warning (not currently scanning for strings) */
+#    pragma warning(disable : 4996)
+#endif
+
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
 const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
