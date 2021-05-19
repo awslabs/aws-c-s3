@@ -108,10 +108,27 @@ AWS_S3_API
 void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf);
 
 /* TODO could be moved to aws-c-common. */
+AWS_S3_API
 int aws_last_error_or_unknown(void);
 
 AWS_S3_API
 void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message);
+
+struct aws_s3_range_header_values {
+    uint64_t range_start;
+    uint64_t range_end;
+    uint64_t range_suffix;
+
+    uint32_t range_start_found : 1;
+    uint32_t range_end_found : 1;
+    uint32_t range_suffix_found : 1;
+};
+
+AWS_S3_API
+int aws_s3_parse_range_header_value(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor *range_header_value,
+    struct aws_s3_range_header_values *out_values);
 
 AWS_EXTERN_C_END
 

@@ -11,6 +11,7 @@
 #include <aws/http/request_response.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
+#include <inttypes.h>
 
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
@@ -306,4 +307,126 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
 
     /* Clean up the scratch buffer. */
     aws_byte_buf_clean_up(&user_agent_buffer);
+}
+
+static bool s_read_uint64(struct aws_byte_cursor *cursor, uint64_t *result) {
+    AWS_PRECONDITION(cursor);
+    AWS_PRECONDITION(result);
+
+    *cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
+
+    if (cursor->len == 0) {
+        return false;
+    }
+
+    if (!aws_isdigit(*cursor->ptr)) {
+        return false;
+    }
+
+    uint32_t num_chars_read = 0;
+
+    if (sscanf((const char *)cursor->ptr, "%" PRIu64 "%n", result, &num_chars_read) == 0) {
+        return false;
+    }
+
+    cursor->ptr += num_chars_read;
+    cursor->len -= num_chars_read;
+
+    return true;
+}
+
+static bool s_read_char(struct aws_byte_cursor *cursor, char character) {
+    AWS_PRECONDITION(cursor);
+
+    *cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
+
+    if (cursor->len == 0) {
+        return false;
+    }
+
+    if (*cursor->ptr == character) {
+        ++cursor->ptr;
+        --cursor->len;
+        return true;
+    }
+
+    return false;
+}
+
+static bool s_read_token(struct aws_byte_cursor *cursor, struct aws_byte_cursor *token) {
+    AWS_PRECONDITION(cursor);
+
+    *cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
+
+    if (cursor->len < token->len) {
+        return false;
+    }
+
+    if (!strncmp((const char *)cursor->ptr, (const char *)token->ptr, token->len)) {
+        cursor->ptr += token->len;
+        cursor->len -= token->len;
+        return true;
+    }
+
+    return false;
+}
+
+int aws_s3_parse_range_header_value(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor *range_header_value,
+    struct aws_s3_range_header_values *out_values) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(range_header_value);
+    AWS_PRECONDITION(out_values);
+
+    int result = AWS_OP_ERR;
+    struct aws_s3_range_header_values values;
+    AWS_ZERO_STRUCT(values);
+
+    struct aws_byte_cursor bytes_equals = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=");
+
+    struct aws_string *range_value_str = aws_string_new_from_cursor(allocator, range_header_value);
+    struct aws_byte_cursor range_value_cursor = aws_byte_cursor_from_string(range_value_str);
+
+    if (!s_read_token(&range_value_cursor, &bytes_equals)) {
+        aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+        goto clean_up;
+    }
+
+    if (s_read_char(&range_value_cursor, '-')) {
+
+        if (s_read_uint64(&range_value_cursor, &values.range_suffix)) {
+            values.range_suffix_found = true;
+        }
+
+    } else {
+        if (s_read_uint64(&range_value_cursor, &values.range_start)) {
+            values.range_start_found = true;
+        }
+
+        if (s_read_char(&range_value_cursor, '-')) {
+            if (s_read_uint64(&range_value_cursor, &values.range_end)) {
+                values.range_end_found = true;
+            }
+        }
+    }
+
+    range_value_cursor = aws_byte_cursor_left_trim_pred(&range_value_cursor, aws_isspace);
+
+    if (range_value_cursor.len > 0) {
+        if (s_read_char(&range_value_cursor, ',')) {
+            aws_raise_error(AWS_ERROR_S3_MULTIRANGE_HEADER_UNSUPPORTED);
+        } else {
+            aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+        }
+        goto clean_up;
+    }
+
+    result = AWS_OP_SUCCESS;
+    *out_values = values;
+
+clean_up:
+
+    aws_string_destroy(range_value_str);
+    return result;
 }
