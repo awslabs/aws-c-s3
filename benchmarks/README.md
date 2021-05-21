@@ -19,3 +19,5 @@ when the instance boots.
  * `cdk deploy`      deploy this stack to your default AWS account/region
  * `cdk diff`        compare deployed stack with current state
  * `cdk synth`       emits the synthesized CloudFormation template
+ * `cdk deploy BenchmarksStack -c UserName=ec2-user -c ProjectName=aws-c-s3`
+ * `cdk deploy BenchmarksStack -c UserName=ec2-user -c ProjectName=aws-c-s3 -c StackName=aws-c-s3`

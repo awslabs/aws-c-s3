@@ -10,9 +10,12 @@ export class BenchmarksStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    // Set by the lambda function running the stack
     const user_name = this.node.tryGetContext('UserName') as string;
     const project_name = this.node.tryGetContext('ProjectName') as string;
     const cidr = this.node.tryGetContext('CIDRRange') as string;
+    const instance_config_name = this.node.tryGetContext('InstanceConfigName') as string;
+    const throughput_gbps = this.node.tryGetContext('ThroughputGbps') as number;
 
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
@@ -43,8 +46,8 @@ export class BenchmarksStack extends cdk.Stack {
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
+    // TODO create the VPC from the dashboard stack avoid the overlap, as we will have multiple benchmark stacks at the same time
     const vpc = new ec2.Vpc(this, 'VPC', {
-      cidr: cidr || ec2.Vpc.DEFAULT_CIDR_RANGE,
       enableDnsSupport: true,
       enableDnsHostnames: true
     })
@@ -58,7 +61,7 @@ export class BenchmarksStack extends cdk.Stack {
     });
 
     security_group.addIngressRule(
-      ec2.Peer.anyIpv4(),
+      cidr ? ec2.Peer.ipv4(cidr) : ec2.Peer.anyIpv4(),
       ec2.Port.tcp(22),
       'SSH'
     );
@@ -72,58 +75,55 @@ export class BenchmarksStack extends cdk.Stack {
 
     for (let run_command_index in project_run_commands) {
       const run_command = project_run_commands[run_command_index];
+      const instance_user_data = ec2.UserData.forLinux();
 
-      for (let instance_config_name in benchmark_config.instances) {
-        const instance_config = benchmark_config.instances[instance_config_name]
-        const instance_user_data = ec2.UserData.forLinux();
+      const init_instance_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: init_instance_sh.s3ObjectKey
+      });
 
-        const init_instance_sh_path = instance_user_data.addS3DownloadCommand({
-          bucket: assetBucket,
-          bucketKey: init_instance_sh.s3ObjectKey
-        });
+      const show_instance_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: show_instance_dashboard_sh.s3ObjectKey
+      });
 
-        const show_instance_dashboard_sh_path = instance_user_data.addS3DownloadCommand({
-          bucket: assetBucket,
-          bucketKey: show_instance_dashboard_sh.s3ObjectKey
-        });
+      const run_project_template_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: run_project_template_sh.s3ObjectKey
+      });
 
-        const run_project_template_sh_path = instance_user_data.addS3DownloadCommand({
-          bucket: assetBucket,
-          bucketKey: run_project_template_sh.s3ObjectKey
-        });
+      const project_shell_script_sh_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: project_shell_script_sh.s3ObjectKey
+      })
 
-        const project_shell_script_sh_path = instance_user_data.addS3DownloadCommand({
-          bucket: assetBucket,
-          bucketKey: project_shell_script_sh.s3ObjectKey
-        })
+      const init_instance_arguments = user_name + ' ' +
+        show_instance_dashboard_sh_path + ' ' +
+        run_project_template_sh_path + ' ' +
+        project_name + ' ' +
+        branch_name + ' ' +
+        throughput_gbps + ' ' +
+        project_shell_script_sh_path + ' ' +
+        instance_config_name + ' ' +
+        region + ' ' +
+        run_command + ' ' +
+        this.stackName;
 
-        const init_instance_arguments = user_name + ' ' +
-          show_instance_dashboard_sh_path + ' ' +
-          run_project_template_sh_path + ' ' +
-          project_name + ' ' +
-          branch_name + ' ' +
-          instance_config.throughput_gbps + ' ' +
-          project_shell_script_sh_path + ' ' +
-          instance_config_name + ' ' +
-          region + ' ' +
-          run_command;
+      instance_user_data.addExecuteFileCommand({
+        filePath: init_instance_sh_path,
+        arguments: init_instance_arguments
+      });
 
-        instance_user_data.addExecuteFileCommand({
-          filePath: init_instance_sh_path,
-          arguments: init_instance_arguments
-        });
-
-        const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name + "_" + run_command, {
-          instanceType: new ec2.InstanceType(instance_config_name),
-          vpc: vpc,
-          machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
-          userData: instance_user_data,
-          role: canary_role,
-          keyName: 'aws-common-runtime-keys',
-          securityGroup: security_group,
-          vpcSubnets: subnetSelection
-        });
-      }
+      const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name + "_" + run_command, {
+        instanceType: new ec2.InstanceType(instance_config_name),
+        vpc: vpc,
+        machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
+        userData: instance_user_data,
+        role: canary_role,
+        keyName: 'aws-common-runtime-keys',
+        securityGroup: security_group,
+        vpcSubnets: subnetSelection
+      });
     }
 
   }

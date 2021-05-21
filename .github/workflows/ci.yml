@@ -135,6 +135,6 @@ jobs:
       run: |
         cd benchmarks/
         sudo npm install -g aws-cdk
-        npm i .
+        npm i
         npm run build
         npm run test
