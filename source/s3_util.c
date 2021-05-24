@@ -318,24 +318,26 @@ static bool s_read_uint64(struct aws_byte_cursor *cursor, uint64_t *result) {
     AWS_PRECONDITION(cursor);
     AWS_PRECONDITION(result);
 
-    *cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
+    struct aws_byte_cursor result_cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
 
-    if (cursor->len == 0) {
+    if (result_cursor.len == 0) {
         return false;
     }
 
-    if (!aws_isdigit(*cursor->ptr)) {
+    if (!aws_isdigit(*result_cursor.ptr)) {
         return false;
     }
 
     uint32_t num_chars_read = 0;
 
-    if (sscanf((const char *)cursor->ptr, "%" PRIu64 "%n", result, &num_chars_read) == 0) {
+    if (sscanf((const char *)result_cursor.ptr, "%" PRIu64 "%n", result, &num_chars_read) == 0) {
         return false;
     }
 
-    cursor->ptr += num_chars_read;
-    cursor->len -= num_chars_read;
+    result_cursor.ptr += num_chars_read;
+    result_cursor.len -= num_chars_read;
+
+    *cursor = result_cursor;
 
     return true;
 }
@@ -343,15 +345,17 @@ static bool s_read_uint64(struct aws_byte_cursor *cursor, uint64_t *result) {
 static bool s_read_char(struct aws_byte_cursor *cursor, char character) {
     AWS_PRECONDITION(cursor);
 
-    *cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
+    struct aws_byte_cursor result_cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
 
-    if (cursor->len == 0) {
+    if (result_cursor.len == 0) {
         return false;
     }
 
-    if (*cursor->ptr == character) {
-        ++cursor->ptr;
-        --cursor->len;
+    if (*result_cursor.ptr == character) {
+        ++result_cursor.ptr;
+        --result_cursor.len;
+
+        *cursor = result_cursor;
         return true;
     }
 
@@ -361,15 +365,17 @@ static bool s_read_char(struct aws_byte_cursor *cursor, char character) {
 static bool s_read_token(struct aws_byte_cursor *cursor, struct aws_byte_cursor *token) {
     AWS_PRECONDITION(cursor);
 
-    *cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
+    struct aws_byte_cursor result_cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
 
-    if (cursor->len < token->len) {
+    if (result_cursor.len < token->len) {
         return false;
     }
 
-    if (!strncmp((const char *)cursor->ptr, (const char *)token->ptr, token->len)) {
-        cursor->ptr += token->len;
-        cursor->len -= token->len;
+    if (!strncmp((const char *)result_cursor.ptr, (const char *)token->ptr, token->len)) {
+        result_cursor.ptr += token->len;
+        result_cursor.len -= token->len;
+
+        *cursor = result_cursor;
         return true;
     }
 
