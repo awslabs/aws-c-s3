@@ -148,7 +148,13 @@ static int s_test_s3_ranged_header_parsing(struct aws_allocator *allocator, void
         if (test_cases[i].expected_error == 0) {
             ASSERT_SUCCESS(parse_result);
 
-            ASSERT_TRUE(memcmp(&values, expected_values, sizeof(struct aws_s3_range_header_values)) == 0);
+            ASSERT_TRUE(values.range_start == expected_values->range_start);
+            ASSERT_TRUE(values.range_end == expected_values->range_end);
+            ASSERT_TRUE(values.range_suffix == expected_values->range_suffix);
+            ASSERT_TRUE(values.range_start_found == expected_values->range_start_found);
+            ASSERT_TRUE(values.range_end_found == expected_values->range_end_found);
+            ASSERT_TRUE(values.range_suffix_found == expected_values->range_suffix_found);
+
         } else {
             ASSERT_FAILS(parse_result);
 
