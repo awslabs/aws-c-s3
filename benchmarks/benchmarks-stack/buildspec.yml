@@ -1,0 +1,14 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - echo Build started on `date`
+      - node --version
+      - npm --version
+      - npm install
+      - npm run build
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - ./node_modules/aws-cdk/bin/cdk deploy -v --require-approval never

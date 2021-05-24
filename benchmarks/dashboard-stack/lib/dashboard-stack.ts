@@ -1,6 +1,7 @@
 import * as cdk from '@aws-cdk/core';
 import * as cloudwatch from '@aws-cdk/aws-cloudwatch';
 import * as iam from '@aws-cdk/aws-iam';
+import * as _lambda from '@aws-cdk/aws-lambda';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -10,6 +11,17 @@ export class DashboardStack extends cdk.Stack {
 
         const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8');
         const benchmark_config = JSON.parse(benchmark_config_json);
+
+        const lambda_role = iam.Role.fromRoleArn(this, 'LambdaRole', 'arn:aws:iam::123124136734:role/lambda-role-CFN');
+        const lambda = new _lambda.Function(this, 'BenchmarkManager',
+            {
+                runtime: _lambda.Runtime.PYTHON_3_8,
+                code: _lambda.Code.fromAsset("lambda"),
+                handler: "benchmarkManager.benchmarkManager",
+                role: lambda_role,
+                functionName: "BenchmarkManager",
+                timeout: cdk.Duration.minutes(15)
+            });
 
         let region = 'unknown';
 

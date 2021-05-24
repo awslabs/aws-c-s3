@@ -10,6 +10,9 @@ export PROJECT_SHELL_SCRIPT=$7
 export INSTANCE_TYPE=$8
 export REGION=$9
 export RUN_COMMAND=${10}
+export CFN_NAME=${11}
+# TODO the auto tear down should be a flag that makes more sense
+export AUTO_TEAR_DOWN=${12:-1}
 
 export RUN_PROJECT_LOG_FN=/tmp/benchmark.log
 export PUBLISH_METRICS_LOG_FN=/tmp/publish_metrics.log
@@ -111,4 +114,13 @@ elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
         | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@"' _ &
 
     $UPLOAD_PERF_SCRIPT
+fi
+
+if [ $AUTO_TEAR_DOWN = 1 ]; then
+    aws lambda invoke \
+        --cli-binary-format raw-in-base64-out \
+        --function-name BenchmarkManager \
+        --invocation-type Event \
+        --payload '{ "action": "delete", "stack_name": '\"${CFN_NAME}\"' }' \
+        response.json
 fi
