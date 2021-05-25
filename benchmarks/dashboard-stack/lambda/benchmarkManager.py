@@ -43,13 +43,6 @@ def benchmarkManager(event, context):
     delete: Delete a stack.
         - stack_name (string): the name of stack to delete. Default name is `BenchmarksStack`
     test: Deploy the stack via code build.
-        - region (string): The region to deploy BenmarkStack
-        - configure (map): Configurations for the Stack. Keys listed as below:
-            - UserName (string): default: ec2-user
-            - ProjectName (string): The project BenchmarkStack runs on. eg: aws-crt-java
-            - CIDRRange (string): The inbound IP range for the ec2 instances created by the stack.
-            - InstanceConfigName (string): The ec2 instance type to create, default: c5n.18xlarge
-            - ThroughputGbps (string): String of the thought put target in Gbps, default: 100
     '''
     cf_client = boto3.client('cloudformation')
     print("## LOG started")
@@ -72,24 +65,17 @@ def benchmarkManager(event, context):
             'body': 'Deleting {}, it may fail, check your consol to see it succeed or not'.format(stack_name)
         }
     elif event['action'] == 'test':
-        s3 = boto3.client('s3')
-        # If region is in the event. Update the region in the cdk app file.
-        if 'region' in event:
-            region = event['region']
-            update_cdk_region(s3, region)
-
-        config_file = "cdk_conf.json"
-        configure = event["configure"]
-        # Create a cdk.context.json file for configuration
-        with open(config_file, "w") as f:
-            json.dump(configure, f)
-        # Upload the file to code stored at s3://aws-crt-test-stuff/benchmarks-stack/
-        s3.upload_file(config_file, BUCKET_NAME, CDK_CONTEXT_PATH)
-
-        # The configured codebuild live in us-east-1
-        codebuild = boto3.client('codebuild', region_name='us-east-1')
+        # trigger codebuild to deploy the benchmarks stack
+        codebuild = boto3.client('codebuild')
         response = codebuild.start_build(projectName=CODE_BUILD_NAME)
         print("Code build: Response: {}".format(response))
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'text/plain'
+            },
+            'body': '{} code build in process, check logs if anything failed'.format(CODE_BUILD_NAME)
+        }
 
     print(event)
     print("## LOG ended")

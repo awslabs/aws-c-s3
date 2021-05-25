@@ -5,10 +5,12 @@ phases:
     commands:
       - echo Build started on `date`
       - node --version
+      - npm i -g npm
       - npm --version
       - npm install
       - npm run build
   post_build:
     commands:
       - echo Build completed on `date`
-      - ./node_modules/aws-cdk/bin/cdk deploy -v --require-approval never
+      - chmod +x ./deploy/benchmarks_deploy.sh
+      - ./deploy/benchmarks_deploy.sh

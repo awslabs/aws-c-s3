@@ -2,6 +2,10 @@ import * as cdk from '@aws-cdk/core';
 import * as cloudwatch from '@aws-cdk/aws-cloudwatch';
 import * as iam from '@aws-cdk/aws-iam';
 import * as _lambda from '@aws-cdk/aws-lambda';
+import * as codebuild from '@aws-cdk/aws-codebuild';
+import * as s3 from '@aws-cdk/aws-s3';
+import * as assets from '@aws-cdk/aws-s3-assets';
+import * as s3deploy from '@aws-cdk/aws-s3-deployment'
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -34,6 +38,31 @@ export class DashboardStack extends cdk.Stack {
         const metric_widget_width = 6;
         const metric_widget_height = 6;
         const num_widgets_per_row = 4;
+
+        const codebuild_role = iam.Role.fromRoleArn(this, 'CodeBuildRole', 'arn:aws:iam::123124136734:role/service-role/S3BenchmarksCodeBuildRole');
+
+        const code_bucket = new s3.Bucket(this, 'CodeBucket', {});
+
+        new s3deploy.BucketDeployment(this, 'DeployWebsite', {
+            sources: [s3deploy.Source.asset('../benchmarks-stack')],
+            destinationBucket: code_bucket,
+        });
+
+        // const assetBucket = s3.Bucket.fromBucketName(this, 'CodeBucket', code_asset.s3BucketName)
+        // Create the ECR source
+        new codebuild.Project(this, 'S3BenchmarksDeploy', {
+            source: codebuild.Source.s3({
+                bucket: code_bucket,
+                path: 'benchmarks-stack/',
+            }),
+            environment: {
+                buildImage: codebuild.LinuxBuildImage.fromCodeBuildImageId('aws/codebuild/standard:5.0'),
+                // buildImage: codebuild.LinuxBuildImage.fromDockerRegistry('node'),
+            },
+            role: codebuild_role,
+            projectName: "S3BenchmarksDeploy"
+        });
+
 
         let x = 0;
         let y = 0;
