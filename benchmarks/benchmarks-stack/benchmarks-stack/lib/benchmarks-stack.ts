@@ -46,11 +46,9 @@ export class BenchmarksStack extends cdk.Stack {
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
-    // TODO create the VPC from the dashboard stack avoid the overlap, as we will have multiple benchmark stacks at the same time
-    const vpc = new ec2.Vpc(this, 'VPC', {
-      enableDnsSupport: true,
-      enableDnsHostnames: true
-    })
+    const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
+      vpcId: 'vpc-d96a98a3'
+    });
 
     const subnetSelection: ec2.SubnetSelection = {
       subnets: vpc.publicSubnets
