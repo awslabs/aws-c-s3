@@ -42,17 +42,12 @@ export class DashboardStack extends cdk.Stack {
             "benchmarks-stack.ts"
         );
 
-        const bench_marks_file = fs.readFileSync(benchmarks_stack_path, "utf8");
-
         const vpc = new ec2.Vpc(this, 'VPC', {
             enableDnsSupport: true,
             enableDnsHostnames: true
         })
 
-        const re = /vpcId: '.*'/;
-        const updated_bench_mark = bench_marks_file.replace(re, "vpcId: '" + vpc.vpcId + "'");
-
-        fs.writeFileSync(benchmarks_stack_path, updated_bench_mark);
+        cdk.Tags.of(vpc).add('source-ag:environment-type', 'prodVPC');
 
         const metrics_namespace = "S3Benchmark";
 

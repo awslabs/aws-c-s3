@@ -47,7 +47,7 @@ export class BenchmarksStack extends cdk.Stack {
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
 
     const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
-      vpcId: 'vpc-d96a98a3'
+      tags: { 'source-ag:environment-type': 'prodVPC' }
     });
 
     const subnetSelection: ec2.SubnetSelection = {
