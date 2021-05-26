@@ -12,5 +12,4 @@ phases:
   post_build:
     commands:
       - echo Build completed on `date`
-      - chmod +x ./deploy/benchmarks_deploy.sh
-      - ./deploy/benchmarks_deploy.sh
+      - node ./deploy/benchmarks_deploy.js

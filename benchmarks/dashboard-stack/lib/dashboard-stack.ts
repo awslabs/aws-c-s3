@@ -13,7 +13,13 @@ export class DashboardStack extends cdk.Stack {
     constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
 
-        const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8');
+        const benchmark_config_json_path = path.join(
+            __dirname,
+            "..",
+            "..",
+            "benchmark-config.json"
+        );
+        const benchmark_config_json = fs.readFileSync(benchmark_config_json_path, 'utf8');
         const benchmark_config = JSON.parse(benchmark_config_json);
 
         const lambda_role = iam.Role.fromRoleArn(this, 'LambdaRole', 'arn:aws:iam::123124136734:role/lambda-role-CFN');
@@ -32,15 +38,6 @@ export class DashboardStack extends cdk.Stack {
         if (props != undefined && props.env != undefined && props.env.region != undefined) {
             region = props.env.region;
         }
-        const benchmarks_stack_path = path.join(
-            __dirname,
-            "..",
-            "..",
-            "benchmarks-stack",
-            "benchmarks-stack",
-            "lib",
-            "benchmarks-stack.ts"
-        );
 
         const vpc = new ec2.Vpc(this, 'VPC', {
             enableDnsSupport: true,
@@ -158,6 +155,17 @@ export class DashboardStack extends cdk.Stack {
         const codebuild_role = iam.Role.fromRoleArn(this, 'CodeBuildRole', 'arn:aws:iam::123124136734:role/service-role/S3BenchmarksCodeBuildRole');
 
         const code_bucket = new s3.Bucket(this, 'CodeBucket', {});
+
+        //Write the config for deploy benchmarks-stack
+        fs.writeFileSync(path.join(
+            __dirname,
+            "..",
+            "..",
+            "benchmarks-stack",
+            "benchmarks-stack",
+            "lib",
+            "benchmark-config.json"
+        ), benchmark_config_json);
 
         new s3deploy.BucketDeployment(this, 'DeployCodeBase', {
             sources: [s3deploy.Source.asset('../benchmarks-stack')],
