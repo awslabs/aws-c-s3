@@ -18,17 +18,19 @@ const benchmark_config = JSON.parse(benchmark_config_json);
 // - ThroughputGbps (string): String of the thought put target in Gbps, default: 100
 for (let project_name in benchmark_config.projects) {
   const project_name_config = " -c ProjectName=" + project_name;
-
+  let instance_count = 0;
   for (let instance_config_name in benchmark_config.instances) {
+    instance_count++;
     const instance_config = benchmark_config.instances[instance_config_name];
     const instance_config_name_config =
       " -c InstanceConfigName=" + instance_config_name;
     const throuphput_gbps_config =
       " -c ThroughputGbps=" + instance_config["throughput_gbps"];
 
-    var cmd =
+    let cmd =
       "./node_modules/aws-cdk/bin/cdk deploy -v --require-approval never -c UserName=ec2-user";
-    const name_config = " -c StackName=" + project_name + instance_config_name;
+    const name_config =
+      " -c StackName=" + project_name + "-instance-" + instance_count;
     cmd =
       cmd +
       project_name_config +
