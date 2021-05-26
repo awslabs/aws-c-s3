@@ -3,6 +3,8 @@ import * as cloudwatch from '@aws-cdk/aws-cloudwatch';
 import * as iam from '@aws-cdk/aws-iam';
 import * as _lambda from '@aws-cdk/aws-lambda';
 import * as codebuild from '@aws-cdk/aws-codebuild';
+import * as events from '@aws-cdk/aws-events';
+import * as targets from '@aws-cdk/aws-events-targets';
 import * as s3 from '@aws-cdk/aws-s3';
 import * as ec2 from '@aws-cdk/aws-ec2';
 import * as s3deploy from '@aws-cdk/aws-s3-deployment'
@@ -22,6 +24,7 @@ export class DashboardStack extends cdk.Stack {
         const benchmark_config_json = fs.readFileSync(benchmark_config_json_path, 'utf8');
         const benchmark_config = JSON.parse(benchmark_config_json);
 
+        // Lambda to handle trigger codebuild to deploy benchmark and clean up benchmark after tests
         const lambda_role = iam.Role.fromRoleArn(this, 'LambdaRole', 'arn:aws:iam::123124136734:role/lambda-role-CFN');
         const lambda = new _lambda.Function(this, 'BenchmarkManager',
             {
@@ -32,6 +35,19 @@ export class DashboardStack extends cdk.Stack {
                 functionName: "BenchmarkManager",
                 timeout: cdk.Duration.minutes(15)
             });
+
+
+        // Creat the Cloudwatch Event to schedule the lambda to run daily
+        const lambda_target = new targets.LambdaFunction(lambda, {
+            event: events.RuleTargetInput.fromObject({ 'action': 'test' })
+        });
+
+        new events.Rule(this, 'ScheduleRule', {
+            schedule: events.Schedule.cron({ minute: '0', hour: '0', day: '1' }),
+            targets: [lambda_target],
+            ruleName: 'BenchMarksTrigger',
+            description: 'Trigger BenchMarks test.'
+        });
 
         let region = 'unknown';
 
@@ -152,6 +168,7 @@ export class DashboardStack extends cdk.Stack {
             dashboardName: id
         });
 
+        // Codebuild to deploy the benchmark-stack
         const codebuild_role = iam.Role.fromRoleArn(this, 'CodeBuildRole', 'arn:aws:iam::123124136734:role/service-role/S3BenchmarksCodeBuildRole');
 
         const code_bucket = new s3.Bucket(this, 'CodeBucket', {});
