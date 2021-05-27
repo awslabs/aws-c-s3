@@ -94,11 +94,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
     AWS_ASSERT(headers != NULL);
 
-    if (aws_http_headers_has(headers, g_range_header_name)) {
-        auto_ranged_get->initial_message_has_range_header = true;
-    } else if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
-        goto error_clean_up;
-    }
+    auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
