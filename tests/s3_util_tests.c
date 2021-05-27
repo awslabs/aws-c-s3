@@ -113,8 +113,8 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
 
         ASSERT_SUCCESS(aws_s3_parse_content_range_response_header(
             allocator, response_headers, &range_start, &range_end, &object_size));
-        ASSERT_TRUE(object_size == 55ULL);
-        ASSERT_TRUE(object_size == 100ULL);
+        ASSERT_TRUE(range_start == 55ULL);
+        ASSERT_TRUE(range_end == 100ULL);
         ASSERT_TRUE(object_size == 12345ULL);
     }
 
