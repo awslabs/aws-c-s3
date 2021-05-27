@@ -291,6 +291,8 @@ static bool s_s3_auto_ranged_get_update(
         }
 
     } else {
+        /* Else, if there is a finish result set, make sure that all work-in-progress winds down before the meta request
+         * completely exits. */
 
         if (auto_ranged_get->synced_data.head_object_sent && !auto_ranged_get->synced_data.head_object_completed) {
             goto has_work_remaining;
