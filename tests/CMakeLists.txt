@@ -101,6 +101,9 @@ add_net_test_case(test_s3_default_sending_meta_request)
 
 add_test_case(test_s3_replace_quote_entities)
 add_test_case(test_s3_ranged_header_parsing)
+add_test_case(test_s3_parse_content_range_response_header)
+add_test_case(test_s3_parse_content_length_response_header)
+add_test_case(test_s3_get_num_parts_and_get_part_range)
 add_test_case(test_add_user_agent_header)
 
 add_test_case(test_get_existing_compute_platform_info)
