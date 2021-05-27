@@ -137,6 +137,8 @@ AWS_S3_API
 int aws_s3_parse_content_range_response_header(
     struct aws_allocator *allocator,
     struct aws_http_headers *response_headers,
+    uint64_t *out_range_start,
+    uint64_t *out_range_end,
     uint64_t *out_object_size);
 
 AWS_S3_API

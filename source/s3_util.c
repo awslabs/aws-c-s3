@@ -315,137 +315,11 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     aws_byte_buf_clean_up(&user_agent_buffer);
 }
 
-static bool s_read_uint64(struct aws_byte_cursor *cursor, uint64_t *result) {
-    AWS_PRECONDITION(cursor);
-    AWS_PRECONDITION(result);
-
-    struct aws_byte_cursor result_cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
-
-    if (result_cursor.len == 0) {
-        return false;
-    }
-
-    if (!aws_isdigit(*result_cursor.ptr)) {
-        return false;
-    }
-
-    uint32_t num_chars_read = 0;
-
-    if (sscanf((const char *)result_cursor.ptr, "%" PRIu64 "%n", result, &num_chars_read) == 0) {
-        return false;
-    }
-
-    result_cursor.ptr += num_chars_read;
-    result_cursor.len -= num_chars_read;
-
-    *cursor = result_cursor;
-
-    return true;
-}
-
-static bool s_read_char(struct aws_byte_cursor *cursor, char character) {
-    AWS_PRECONDITION(cursor);
-
-    struct aws_byte_cursor result_cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
-
-    if (result_cursor.len == 0) {
-        return false;
-    }
-
-    if (*result_cursor.ptr == character) {
-        ++result_cursor.ptr;
-        --result_cursor.len;
-
-        *cursor = result_cursor;
-        return true;
-    }
-
-    return false;
-}
-
-static bool s_read_token(struct aws_byte_cursor *cursor, struct aws_byte_cursor *token) {
-    AWS_PRECONDITION(cursor);
-
-    struct aws_byte_cursor result_cursor = aws_byte_cursor_left_trim_pred(cursor, aws_isspace);
-
-    if (result_cursor.len < token->len) {
-        return false;
-    }
-
-    if (!strncmp((const char *)result_cursor.ptr, (const char *)token->ptr, token->len)) {
-        result_cursor.ptr += token->len;
-        result_cursor.len -= token->len;
-
-        *cursor = result_cursor;
-        return true;
-    }
-
-    return false;
-}
-
-int aws_s3_parse_range_header_value(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor *range_header_value,
-    struct aws_s3_range_header_values *out_values) {
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(range_header_value);
-    AWS_PRECONDITION(out_values);
-
-    int result = AWS_OP_ERR;
-    struct aws_s3_range_header_values values;
-    AWS_ZERO_STRUCT(values);
-
-    struct aws_byte_cursor bytes_equals = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=");
-
-    struct aws_string *range_value_str = aws_string_new_from_cursor(allocator, range_header_value);
-    struct aws_byte_cursor range_value_cursor = aws_byte_cursor_from_string(range_value_str);
-
-    if (!s_read_token(&range_value_cursor, &bytes_equals)) {
-        aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
-        goto clean_up;
-    }
-
-    if (s_read_char(&range_value_cursor, '-')) {
-
-        if (s_read_uint64(&range_value_cursor, &values.range_suffix)) {
-            values.range_suffix_found = true;
-        }
-
-    } else {
-        if (s_read_uint64(&range_value_cursor, &values.range_start)) {
-            values.range_start_found = true;
-        }
-
-        if (s_read_char(&range_value_cursor, '-')) {
-            if (s_read_uint64(&range_value_cursor, &values.range_end)) {
-                values.range_end_found = true;
-            }
-        }
-    }
-
-    range_value_cursor = aws_byte_cursor_left_trim_pred(&range_value_cursor, aws_isspace);
-
-    if (range_value_cursor.len > 0) {
-        if (s_read_char(&range_value_cursor, ',')) {
-            aws_raise_error(AWS_ERROR_S3_MULTIRANGE_HEADER_UNSUPPORTED);
-        } else {
-            aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
-        }
-        goto clean_up;
-    }
-
-    result = AWS_OP_SUCCESS;
-    *out_values = values;
-
-clean_up:
-
-    aws_string_destroy(range_value_str);
-    return result;
-}
-
 int aws_s3_parse_content_range_response_header(
     struct aws_allocator *allocator,
     struct aws_http_headers *response_headers,
+    uint64_t *out_range_start,
+    uint64_t *out_range_end,
     uint64_t *out_object_size) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(response_headers);
@@ -480,6 +354,14 @@ int aws_s3_parse_content_range_response_header(
         goto clean_up;
     }
 
+    if (out_range_start != NULL) {
+        *out_range_start = range_start;
+    }
+
+    if (out_range_end != NULL) {
+        *out_range_end = range_end;
+    }
+
     *out_object_size = object_size;
     result = AWS_OP_SUCCESS;
 
@@ -490,6 +372,7 @@ clean_up:
     return result;
 }
 
+/* Parse the content-length from a content-length respone header.*/
 int aws_s3_parse_content_length_response_header(
     struct aws_allocator *allocator,
     struct aws_http_headers *response_headers,
@@ -515,27 +398,30 @@ int aws_s3_parse_content_length_response_header(
     return AWS_OP_SUCCESS;
 }
 
+/* Calculate the number of parts based on object range and end. */
 uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
     if ((object_range_start - object_range_end) == 0ULL) {
         return 0;
     }
 
+    uint32_t num_parts = 1;
+
     uint64_t first_part_size = part_size;
     uint64_t first_part_alignment_offset = object_range_start % part_size;
 
-    uint32_t num_parts = 1;
-
+    /* If the first part size isn't aligned on the assumed part boundary, make it smaller so that it is. */
     if (first_part_alignment_offset > 0) {
         first_part_size = part_size - first_part_alignment_offset;
     }
 
     uint64_t second_part_start = object_range_start + first_part_size;
 
+    /* If the range has room for a second part, calculate the additional amount of parts. */
     if (second_part_start <= object_range_end) {
-        uint64_t aligned_range_size = object_range_end - second_part_start;
-        num_parts += (uint32_t)(aligned_range_size / (uint64_t)part_size);
+        uint64_t aligned_range_remainder = object_range_end - second_part_start;
+        num_parts += (uint32_t)(aligned_range_remainder / (uint64_t)part_size);
 
-        if ((aligned_range_size % part_size) > 0) {
+        if ((aligned_range_remainder % part_size) > 0) {
             ++num_parts;
         }
     }
@@ -543,6 +429,7 @@ uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uin
     return num_parts;
 }
 
+/* Calculate the part range for a given part. Intended to be used in conjunction with aws_s3_get_num_parts. */
 void aws_s3_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
@@ -561,20 +448,26 @@ void aws_s3_get_part_range(
 
     const uint32_t part_index = part_number - 1;
 
+    /* Part index is assumed to be in a valid range. */
     AWS_ASSERT(part_index < aws_s3_get_num_parts(part_size, object_range_start, object_range_end));
 
+    /* Shrink the part to a smaller size if need be to align to the assumed part boundary. */
     if (first_part_alignment_offset > 0) {
         first_part_size = part_size_uint64 - first_part_alignment_offset;
     }
 
     if (part_index == 0) {
+        /* If this is the first part, then use the first part size. */
         *out_part_range_start = object_range_start;
         *out_part_range_end = *out_part_range_start + first_part_size - 1;
     } else {
+        /* Else, find the next part by adding the object range + total number of whole parts before this one + initial
+         * part size*/
         *out_part_range_start = object_range_start + ((uint64_t)(part_index - 1)) * part_size_uint64 + first_part_size;
         *out_part_range_end = *out_part_range_start + part_size_uint64 - 1;
     }
 
+    /* Cap the part's range end using the object's range end. */
     if (*out_part_range_end > object_range_end) {
         *out_part_range_end = object_range_end;
     }

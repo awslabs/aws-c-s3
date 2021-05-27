@@ -80,93 +80,6 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
     return 0;
 }
 
-struct ranged_header_test_case {
-    struct aws_byte_cursor header_value;
-    struct aws_s3_range_header_values expected_values;
-    int expected_error;
-};
-
-AWS_TEST_CASE(test_s3_ranged_header_parsing, s_test_s3_ranged_header_parsing)
-static int s_test_s3_ranged_header_parsing(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct ranged_header_test_case test_cases[] = {
-        {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=123-456"),
-            .expected_values =
-                {
-                    .range_start = 123,
-                    .range_end = 456,
-                    .range_start_found = true,
-                    .range_end_found = true,
-                },
-        },
-        {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=123-"),
-            .expected_values =
-                {
-                    .range_start = 123,
-                    .range_start_found = true,
-                },
-        },
-        {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-123"),
-            .expected_values =
-                {
-                    .range_suffix = 123,
-                    .range_suffix_found = true,
-                },
-        },
-        {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("invalid=123"),
-            .expected_error = AWS_ERROR_S3_INVALID_RANGE_HEADER,
-        },
-        {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-123-35"),
-            .expected_error = AWS_ERROR_S3_INVALID_RANGE_HEADER,
-        },
-        {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=123-,"),
-            .expected_error = AWS_ERROR_S3_MULTIRANGE_HEADER_UNSUPPORTED,
-        },
-        {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=123-, 456-789"),
-            .expected_error = AWS_ERROR_S3_MULTIRANGE_HEADER_UNSUPPORTED,
-        },
-    };
-
-    for (size_t i = 0; i < sizeof(test_cases) / sizeof(test_cases[0]); ++i) {
-        struct aws_s3_range_header_values *expected_values = &test_cases[i].expected_values;
-
-        struct aws_s3_range_header_values values;
-        int parse_result = aws_s3_parse_range_header_value(allocator, &test_cases[i].header_value, &values);
-
-        if (test_cases[i].expected_error == 0) {
-            ASSERT_SUCCESS(parse_result);
-
-            ASSERT_TRUE(values.range_start == expected_values->range_start);
-            ASSERT_TRUE(values.range_end == expected_values->range_end);
-            ASSERT_TRUE(values.range_suffix == expected_values->range_suffix);
-            ASSERT_TRUE(values.range_start_found == expected_values->range_start_found);
-            ASSERT_TRUE(values.range_end_found == expected_values->range_end_found);
-            ASSERT_TRUE(values.range_suffix_found == expected_values->range_suffix_found);
-
-        } else {
-            ASSERT_FAILS(parse_result);
-
-            ASSERT_TRUE(aws_last_error() == test_cases[i].expected_error);
-        }
-    }
-
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
 AWS_TEST_CASE(test_s3_parse_content_range_response_header, s_test_s3_parse_content_range_response_header)
 static int s_test_s3_parse_content_range_response_header(struct aws_allocator *allocator, void *ctx) {
 
@@ -182,25 +95,44 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
 
     struct aws_http_headers *response_headers = aws_http_headers_new(allocator);
 
+    /* Try to parse a header that isn't there. */
     {
         uint64_t object_size = 0ULL;
-        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, &object_size));
+
+        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(aws_last_error() == AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
     }
 
     aws_http_headers_add_header(response_headers, &content_range_header);
 
+    /* Parse all of the data from a valid header. */
     {
         uint64_t object_size = 0ULL;
-        ASSERT_SUCCESS(aws_s3_parse_content_range_response_header(allocator, response_headers, &object_size));
+        uint64_t range_start = 0ULL;
+        uint64_t range_end = 0ULL;
+
+        ASSERT_SUCCESS(aws_s3_parse_content_range_response_header(
+            allocator, response_headers, &range_start, &range_end, &object_size));
+        ASSERT_TRUE(object_size == 55ULL);
+        ASSERT_TRUE(object_size == 100ULL);
+        ASSERT_TRUE(object_size == 12345ULL);
+    }
+
+    /* Range-end and range-start are optional output arguments. */
+    {
+        uint64_t object_size = 0ULL;
+
+        ASSERT_SUCCESS(
+            aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(object_size == 12345ULL);
     }
 
     aws_http_headers_set(response_headers, invalid_content_range_header.name, invalid_content_range_header.value);
 
+    /* Try to parse an invalid header. */
     {
         uint64_t object_size = 0ULL;
-        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, &object_size));
+        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(aws_last_error() == AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
 
@@ -214,6 +146,7 @@ static int s_test_s3_parse_content_length_response_header(struct aws_allocator *
 
     struct aws_http_headers *response_headers = aws_http_headers_new(allocator);
 
+    /* Try to parse a header that isn't there. */
     {
         uint64_t content_length = 0ULL;
         ASSERT_FAILS(aws_s3_parse_content_length_response_header(allocator, response_headers, &content_length));
@@ -227,6 +160,7 @@ static int s_test_s3_parse_content_length_response_header(struct aws_allocator *
 
     aws_http_headers_add_header(response_headers, &valid_content_range_header);
 
+    /* Parse a valid header. */
     {
         uint64_t content_length = 0ULL;
         ASSERT_SUCCESS(aws_s3_parse_content_length_response_header(allocator, response_headers, &content_length));
