@@ -3019,14 +3019,10 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
     const struct aws_byte_cursor object_names[] = {
         g_s3_path_get_object_test_1MB,
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_kms_10MB.txt"),
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_aes256_10MB.txt"),
     };
 
     enum aws_s3_tester_sse_type object_sse_types[] = {
         AWS_S3_TESTER_SSE_NONE,
-        AWS_S3_TESTER_SSE_KMS,
-        AWS_S3_TESTER_SSE_AES256,
     };
 
     const struct aws_byte_cursor ranges[] = {
