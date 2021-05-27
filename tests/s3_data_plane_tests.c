@@ -1625,10 +1625,7 @@ static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void
 
     /* Keep TLS enabled for SSE related download, or it will fail. */
     return s_test_s3_get_object_helper(
-        allocator,
-        AWS_S3_TLS_ENABLED,
-        AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256,
-        aws_byte_cursor_from_c_str("/get_object_test_aes256_10MB.txt"));
+        allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256, g_pre_existing_object_aes256_10MB);
 }
 
 static int s_test_s3_put_object_helper(

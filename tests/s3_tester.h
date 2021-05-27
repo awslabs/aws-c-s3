@@ -348,4 +348,9 @@ extern const struct aws_byte_cursor g_test_bucket_name;
 extern const struct aws_byte_cursor g_test_public_bucket_name;
 extern const struct aws_byte_cursor g_s3_path_get_object_test_1MB;
 
+extern const struct aws_byte_cursor g_pre_existing_object_1MB;
+extern const struct aws_byte_cursor g_pre_existing_object_kms_10MB;
+extern const struct aws_byte_cursor g_pre_existing_object_aes256_10MB;
+extern const struct aws_byte_cursor g_pre_existing_empty_object;
+
 #endif /* AWS_S3_TESTER_H */
