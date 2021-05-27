@@ -402,6 +402,7 @@ message_alloc_failed:
     return AWS_OP_ERR;
 }
 
+/* Using the response returned from the given request, determine the overall object-range and content-length. */
 static int s_discover_object_range_and_content_length(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
