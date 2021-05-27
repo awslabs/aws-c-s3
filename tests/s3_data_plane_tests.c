@@ -3019,10 +3019,14 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
     const struct aws_byte_cursor object_names[] = {
         g_s3_path_get_object_test_1MB,
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_kms_10MB.txt"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_aes256_10MB.txt"),
     };
 
     enum aws_s3_tester_sse_type object_sse_types[] = {
         AWS_S3_TESTER_SSE_NONE,
+        AWS_S3_TESTER_SSE_KMS,
+        AWS_S3_TESTER_SSE_AES256,
     };
 
     const struct aws_byte_cursor ranges[] = {
@@ -3149,6 +3153,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 struct aws_http_header verify_header;
                 ASSERT_SUCCESS(aws_http_headers_get_index(verify_range_get_headers, i, &verify_header));
 
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_GENERAL, "Checking for header " PRInSTR, AWS_BYTE_CURSOR_PRI(verify_header.name));
+
                 struct aws_byte_cursor header_value;
                 ASSERT_SUCCESS(aws_http_headers_get(range_get_headers, verify_header.name, &header_value));
 
@@ -3165,7 +3172,10 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
             for (size_t i = 0; i < aws_http_headers_count(range_get_headers); ++i) {
                 struct aws_http_header header;
+
                 ASSERT_SUCCESS(aws_http_headers_get_index(range_get_headers, i, &header));
+
+                AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Left over header: " PRInSTR, AWS_BYTE_CURSOR_PRI(header.name));
             }
 
             ASSERT_TRUE(aws_http_headers_count(range_get_headers) == 0);
