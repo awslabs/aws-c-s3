@@ -3154,7 +3154,10 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 ASSERT_SUCCESS(aws_http_headers_get_index(verify_range_get_headers, i, &verify_header));
 
                 AWS_LOGF_INFO(
-                    AWS_LS_S3_GENERAL, "Checking for header " PRInSTR, AWS_BYTE_CURSOR_PRI(verify_header.name));
+                    AWS_LS_S3_GENERAL,
+                    "%d Checking for header " PRInSTR,
+                    (int)i,
+                    AWS_BYTE_CURSOR_PRI(verify_header.name));
 
                 struct aws_byte_cursor header_value;
                 ASSERT_SUCCESS(aws_http_headers_get(range_get_headers, verify_header.name, &header_value));
@@ -3163,6 +3166,13 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                     if (!aws_byte_cursor_eq_ignore_case(&headers_that_should_match[j], &verify_header.name)) {
                         continue;
                     }
+
+                    AWS_LOGF_INFO(
+                        AWS_LS_S3_GENERAL,
+                        "%d Header Contents " PRInSTR " vs " PRInSTR,
+                        (int)i,
+                        AWS_BYTE_CURSOR_PRI(verify_header.value),
+                        AWS_BYTE_CURSOR_PRI(header_value));
 
                     ASSERT_TRUE(aws_byte_cursor_eq(&verify_header.value, &header_value));
                 }

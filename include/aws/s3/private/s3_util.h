@@ -99,6 +99,7 @@ struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
 void aws_cached_signing_config_destroy(struct aws_cached_signing_config_aws *cached_signing_config);
 
 /* Sets all headers specified for src on dest */
+AWS_S3_API
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest);
 
 /* Get a top-level (exists directly under the root tag) tag value. */
