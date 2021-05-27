@@ -12,7 +12,7 @@
 enum aws_s3_auto_ranged_get_request_type {
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
+    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE,
 };
 
 struct aws_s3_auto_ranged_get {
@@ -36,7 +36,6 @@ struct aws_s3_auto_ranged_get {
         uint32_t get_without_range_completed : 1;
     } synced_data;
 
-    uint32_t success_response_status;
     uint32_t initial_message_has_range_header : 1;
 };
 
