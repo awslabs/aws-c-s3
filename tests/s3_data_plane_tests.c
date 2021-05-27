@@ -258,6 +258,8 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
 
     const size_t request_response_body_size = 16;
 
+    const uint64_t total_object_size = (uint64_t)part_range1_end * request_response_body_size;
+
     struct aws_byte_buf response_body_source_buffer;
     aws_byte_buf_init(&response_body_source_buffer, allocator, request_response_body_size);
 
@@ -292,6 +294,15 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     {
         for (uint32_t part_number = part_range0_start; part_number <= part_range0_end; ++part_number) {
             struct aws_s3_request *request = aws_s3_request_new(meta_request, 0, part_number, 0);
+
+            aws_s3_get_part_range(
+                0ULL,
+                total_object_size - 1,
+                (uint64_t)request_response_body_size,
+                part_number,
+                &request->part_range_start,
+                &request->part_range_end);
+
             aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
 
             aws_s3_tester_set_counter1_desired(&tester, part_number);
@@ -319,6 +330,15 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
 
         for (uint32_t part_number = part_range1_start + 1; part_number <= part_range1_end; ++part_number) {
             struct aws_s3_request *request = aws_s3_request_new(meta_request, 0, part_number, 0);
+
+            aws_s3_get_part_range(
+                0ULL,
+                total_object_size - 1,
+                (uint64_t)request_response_body_size,
+                part_number,
+                &request->part_range_start,
+                &request->part_range_end);
+
             aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
 
             aws_s3_meta_request_lock_synced_data(meta_request);
@@ -338,6 +358,15 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     /* Stream the last part of the body, which should flush the priority queue. */
     {
         struct aws_s3_request *request = aws_s3_request_new(meta_request, 0, part_range1_start, 0);
+
+        aws_s3_get_part_range(
+            0ULL,
+            total_object_size - 1,
+            (uint64_t)request_response_body_size,
+            part_range1_start,
+            &request->part_range_start,
+            &request->part_range_end);
+
         aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
 
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -1842,7 +1871,7 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     ASSERT_TRUE(client != NULL);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester, client, 1, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     client = NULL;
@@ -2913,8 +2942,8 @@ static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *al
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_default_sending_meta_request, s_test_s3_default_sending_meta_request)
-static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_default_sending_meta_request_user_agent, s_test_s3_default_sending_meta_request_user_agent)
+static int s_test_s3_default_sending_meta_request_user_agent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -2940,6 +2969,94 @@ static int s_test_s3_default_sending_meta_request(struct aws_allocator *allocato
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_range_requests, s_test_s3_range_requests)
+static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    const struct aws_byte_cursor object_names[] = {
+        g_s3_path_get_object_test_1MB,
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_kms_10MB.txt"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_aes256_10MB.txt"),
+    };
+
+    enum aws_s3_tester_sse_type object_sse_types[] = {
+        AWS_S3_TESTER_SSE_NONE,
+        AWS_S3_TESTER_SSE_KMS,
+        AWS_S3_TESTER_SSE_AES256,
+    };
+
+    const struct aws_byte_cursor ranges[] = {
+        // First 8K.  8K < client's 16K part size.
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-8191"),
+
+        // First 0.5 MB.  0.5 MB < 1 MB test file.
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-524287"),
+
+        // 0.5 MB - 2 MB range.  This overlaps and goes beyond the 1 MB test file size.
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=524288-2097151"),
+
+        // Get everything after the first 0.5 MB
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=524288-"),
+
+        // Last 0.5 MB
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-524288"),
+
+        // Everyting after first 8K
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=8192-"),
+
+        // Last 8K
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-8192"),
+    };
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    const size_t num_object_names = sizeof(object_names) / sizeof(object_names[0]);
+    const size_t num_ranges = sizeof(ranges) / sizeof(ranges[0]);
+
+    for (size_t object_name_index = 0; object_name_index < num_object_names; ++object_name_index) {
+        for (size_t range_index = 0; range_index < num_ranges; ++range_index) {
+
+            struct aws_s3_tester_meta_request_options options = {
+                .allocator = allocator,
+                .client = client,
+                .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+                .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+                .get_options =
+                    {
+                        .object_path = object_names[object_name_index],
+                        .object_range = ranges[range_index],
+                    },
+                .sse_type = object_sse_types[object_name_index],
+            };
+
+            int meta_request_result = aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL);
+
+            if (meta_request_result == AWS_OP_ERR) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_GENERAL,
+                    "Test failed with object name %d and range %d",
+                    (int)object_name_index,
+                    (int)range_index);
+            }
+
+            ASSERT_SUCCESS(meta_request_result);
+        }
     }
 
     aws_s3_client_release(client);

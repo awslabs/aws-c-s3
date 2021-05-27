@@ -7,8 +7,10 @@
  */
 
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_util.h"
 
 enum aws_s3_auto_ranged_get_request_type {
+    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART_WITHOUT_RANGE,
 };
@@ -18,6 +20,8 @@ struct aws_s3_auto_ranged_get {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
+        uint64_t object_range_start;
+        uint64_t object_range_end;
         uint32_t total_num_parts;
 
         uint32_t num_parts_requested;
@@ -25,10 +29,15 @@ struct aws_s3_auto_ranged_get {
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
 
-        uint32_t get_without_range : 1;
+        uint32_t object_range_known : 1;
+        uint32_t head_object_sent : 1;
+        uint32_t head_object_completed : 1;
         uint32_t get_without_range_sent : 1;
         uint32_t get_without_range_completed : 1;
     } synced_data;
+
+    uint32_t success_response_status;
+    uint32_t initial_message_has_range_header : 1;
 };
 
 /* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */

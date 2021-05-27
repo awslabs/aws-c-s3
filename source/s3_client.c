@@ -1096,17 +1096,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
     /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-
-        /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
-         * this requires some additional logic.  For now just a default meta request. */
-        if (aws_http_headers_has(initial_message_headers, g_range_header_name)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-get meta request; handling of ranged header is currently unsupported.");
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
 
