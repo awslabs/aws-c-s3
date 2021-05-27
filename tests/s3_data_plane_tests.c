@@ -3155,8 +3155,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
                 AWS_LOGF_INFO(
                     AWS_LS_S3_GENERAL,
-                    "%d Checking for header " PRInSTR,
-                    (int)i,
+                    "%d,%d Checking for header " PRInSTR,
+                    (int)object_name_index,
+                    (int)range_index,
                     AWS_BYTE_CURSOR_PRI(verify_header.name));
 
                 struct aws_byte_cursor header_value;
@@ -3169,8 +3170,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
                     AWS_LOGF_INFO(
                         AWS_LS_S3_GENERAL,
-                        "%d Header Contents " PRInSTR " vs " PRInSTR,
-                        (int)i,
+                        "%d,%d Header Contents " PRInSTR " vs " PRInSTR,
+                        (int)object_name_index,
+                        (int)range_index,
                         AWS_BYTE_CURSOR_PRI(verify_header.value),
                         AWS_BYTE_CURSOR_PRI(header_value));
 
