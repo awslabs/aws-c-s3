@@ -155,14 +155,8 @@ static bool s_s3_auto_ranged_get_update(
     aws_s3_meta_request_lock_synced_data(meta_request);
 
     if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
-        /* If we have haven't already requested all of the parts, then we need to fail now. Note: total_num_parts is
-         * not populated until after the object size is known, so the initial num_parts_requested == 0 check is
-         * necessary. */
-        if (auto_ranged_get->synced_data.num_parts_requested == 0 ||
-            (auto_ranged_get->synced_data.total_num_parts > 0 &&
-             auto_ranged_get->synced_data.num_parts_requested < auto_ranged_get->synced_data.total_num_parts)) {
-            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
-        }
+        /* If there isn't a connection, then fail the meta request now if it hasn't been already. */
+        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
     }
 
     /* If nothing has set the the "finish result" then this meta request is still in progress and we can potentially
