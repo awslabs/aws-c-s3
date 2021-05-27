@@ -169,6 +169,8 @@ static bool s_s3_auto_ranged_get_update(
         }
     }
 
+    /* If nothing has set the the "finish result" then this meta request is still in progress and we can potentially
+     * send additional requests. */
     if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
         if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
@@ -185,10 +187,15 @@ static bool s_s3_auto_ranged_get_update(
             }
         }
 
+        /* If the overall range of the object that we are trying to retrieve isn't known yet, then we need to send a
+         * request to figure that out. */
         if (!auto_ranged_get->synced_data.object_range_known) {
-            /* If there exists a range header, we currently always do a head request first. While the header value could
-             * be parsed client side, there is no way of knowing if the range is valid until it is actually sent to the
-             * service. Additionally, range header requests are not required to specify the full range. */
+
+            /* If there exists a range header, we currently always do a head request first. While the range header value
+             * could be parsed client-side, doing so presents a number of complications. For example, the given range
+             * could be an unsatisfiable range, and might not even specify a complete range. To keep things simple, we
+             * are currently relying on the service to handle turning the Range header into a Content-Range response
+             * header.*/
             bool head_object_required = auto_ranged_get->initial_message_has_range_header;
 
             if (head_object_required) {
