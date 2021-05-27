@@ -3153,8 +3153,6 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 struct aws_http_header verify_header;
                 ASSERT_SUCCESS(aws_http_headers_get_index(verify_range_get_headers, i, &verify_header));
 
-                AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Verifying header '%s' exists", (const char *)verify_header.name.ptr);
-
                 struct aws_byte_cursor header_value;
                 ASSERT_SUCCESS(aws_http_headers_get(range_get_headers, verify_header.name, &header_value));
 
@@ -3172,8 +3170,6 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
             for (size_t i = 0; i < aws_http_headers_count(range_get_headers); ++i) {
                 struct aws_http_header header;
                 ASSERT_SUCCESS(aws_http_headers_get_index(range_get_headers, i, &header));
-
-                AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Left over header: %s", (const char *)header.name.ptr);
             }
 
             ASSERT_TRUE(aws_http_headers_count(range_get_headers) == 0);
