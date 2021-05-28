@@ -33,6 +33,16 @@ const struct aws_byte_cursor g_s3_path_get_object_test_1MB =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
 
+/* TODO populate these at the beginning of running tests with names that are unique to the test run. */
+const struct aws_byte_cursor g_pre_existing_object_1MB =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_1MB.txt");
+const struct aws_byte_cursor g_pre_existing_object_kms_10MB =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_kms_10MB.txt");
+const struct aws_byte_cursor g_pre_existing_object_aes256_10MB =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_aes256_10MB.txt");
+const struct aws_byte_cursor g_pre_existing_empty_object =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_empty.txt");
+
 #ifdef BYO_CRYPTO
 /* Under BYO_CRYPTO, this function currently needs to be defined by the user. Defining a null implementation here so
  * that tests build, but it is not currently meant to be used by any tests. */
