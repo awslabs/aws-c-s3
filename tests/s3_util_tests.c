@@ -153,7 +153,7 @@ static int s_test_s3_parse_content_length_response_header(struct aws_allocator *
 
     const struct aws_http_header invalid_content_length_header = {
         .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("12345"),
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(""),
     };
 
     /* Try to parse a header that isn't there. */
@@ -176,8 +176,8 @@ static int s_test_s3_parse_content_length_response_header(struct aws_allocator *
 
     /* Try to parse an invalid header. */
     {
-        uint64_t object_size = 0ULL;
-        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
+        uint64_t content_length = 0ULL;
+        ASSERT_FAILS(aws_s3_parse_content_length_response_header(allocator, response_headers, &content_length));
         ASSERT_TRUE(aws_last_error() == AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
     }
 
