@@ -323,7 +323,6 @@ int aws_s3_parse_content_range_response_header(
     uint64_t *out_object_size) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(response_headers);
-    AWS_PRECONDITION(out_object_size);
 
     struct aws_byte_cursor content_range_header_value;
 
@@ -362,7 +361,10 @@ int aws_s3_parse_content_range_response_header(
         *out_range_end = range_end;
     }
 
-    *out_object_size = object_size;
+    if (out_object_size != NULL) {
+        *out_object_size = object_size;
+    }
+
     result = AWS_OP_SUCCESS;
 
 clean_up:
@@ -372,7 +374,6 @@ clean_up:
     return result;
 }
 
-/* Parse the content-length from a content-length respone header.*/
 int aws_s3_parse_content_length_response_header(
     struct aws_allocator *allocator,
     struct aws_http_headers *response_headers,
@@ -390,15 +391,19 @@ int aws_s3_parse_content_length_response_header(
 
     struct aws_string *content_length_header_value_str =
         aws_string_new_from_cursor(allocator, &content_length_header_value);
-    char *content_length_str_end = NULL;
 
-    *out_content_length = strtoull((const char *)content_length_header_value_str->bytes, &content_length_str_end, 10);
+    int result = AWS_OP_ERR;
+
+    if (sscanf((const char *)content_length_header_value_str->bytes, "%" PRIu64, out_content_length) == 1) {
+        result = AWS_OP_SUCCESS;
+    } else {
+        aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
+    }
+
     aws_string_destroy(content_length_header_value_str);
-
-    return AWS_OP_SUCCESS;
+    return result;
 }
 
-/* Calculate the number of parts based on object range and end. */
 uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
     if ((object_range_start - object_range_end) == 0ULL) {
         return 0;
@@ -429,7 +434,6 @@ uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uin
     return num_parts;
 }
 
-/* Calculate the part range for a given part. Intended to be used in conjunction with aws_s3_get_num_parts. */
 void aws_s3_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
@@ -440,16 +444,16 @@ void aws_s3_get_part_range(
     AWS_PRECONDITION(out_part_range_start);
     AWS_PRECONDITION(out_part_range_end);
 
-    uint64_t part_size_uint64 = (uint64_t)part_size;
-    uint64_t first_part_size = part_size_uint64;
-    uint64_t first_part_alignment_offset = object_range_start % part_size_uint64;
-
     AWS_ASSERT(part_number > 0);
 
     const uint32_t part_index = part_number - 1;
 
     /* Part index is assumed to be in a valid range. */
     AWS_ASSERT(part_index < aws_s3_get_num_parts(part_size, object_range_start, object_range_end));
+
+    uint64_t part_size_uint64 = (uint64_t)part_size;
+    uint64_t first_part_size = part_size_uint64;
+    uint64_t first_part_alignment_offset = object_range_start % part_size_uint64;
 
     /* Shrink the part to a smaller size if need be to align to the assumed part boundary. */
     if (first_part_alignment_offset > 0) {

@@ -17,6 +17,7 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER, "Response missing required Content-Range header."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER, "Response contains invalid Content-Range header."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_CONTENT_LENGTH_HEADER, "Response missing required Content-Length header."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER, "Response contains invalid Content-Length header."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MISSING_ETAG, "Response missing required ETag header."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INTERNAL_ERROR, "Response code indicates internal server error"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_SLOW_DOWN, "Response code indicates throttling"),
