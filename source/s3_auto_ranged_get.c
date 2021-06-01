@@ -558,7 +558,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
             error_code = aws_last_error_or_unknown();
 
-            goto error_encountered;
+            goto update_synced_data;
         }
 
         /* If we were able to discover the object-range/content length successfully, then any error code that was passed
@@ -598,7 +598,7 @@ static void s_s3_auto_ranged_get_request_finished(
         }
     }
 
-error_encountered:
+update_synced_data:
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
