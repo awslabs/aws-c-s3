@@ -16,6 +16,7 @@ export class BenchmarksStack extends cdk.Stack {
     const cidr = this.node.tryGetContext('CIDRRange') as string;
     const instance_config_name = this.node.tryGetContext('InstanceConfigName') as string;
     const throughput_gbps = this.node.tryGetContext('ThroughputGbps') as number;
+    const auto_tear_down = this.node.tryGetContext('AutoTearDown') as number;
 
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
@@ -116,7 +117,8 @@ export class BenchmarksStack extends cdk.Stack {
         instance_config_name + ' ' +
         region + ' ' +
         run_command + ' ' +
-        this.stackName;
+        this.stackName + ' ' +
+        auto_tear_down;
 
       instance_user_data.addExecuteFileCommand({
         filePath: init_instance_sh_path,
