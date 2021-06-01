@@ -13,6 +13,7 @@
 #include <aws/common/environment.h>
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
+#include <aws/http/status_code.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
@@ -3048,7 +3049,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         // Last 0.5 MB
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-524288"),
 
-        // Everyting after first 8K
+        // Everything after first 8K
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=8192-"),
 
         // Last 8K
@@ -3202,6 +3203,47 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
             aws_byte_buf_clean_up(&verify_range_get_buffer);
         }
     }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_not_satisfiable_range, s_test_s3_not_satisfiable_range)
+static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .headers_callback = s_range_requests_headers_callback,
+        .body_callback = s_range_requests_receive_body_callback,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_1MB,
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=2097151-"),
+            },
+    };
+
+    struct aws_s3_meta_request_test_results results;
+    AWS_ZERO_STRUCT(results);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
+
+    ASSERT_TRUE(results.finished_response_status == AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE);
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);

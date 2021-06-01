@@ -7,7 +7,6 @@
  */
 
 #include "aws/s3/private/s3_meta_request_impl.h"
-#include "aws/s3/private/s3_util.h"
 
 enum aws_s3_auto_ranged_get_request_type {
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
@@ -20,8 +19,14 @@ struct aws_s3_auto_ranged_get {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
+        /* The starting byte of the data that we will be retrieved from the object.*/
         uint64_t object_range_start;
+
+        /* The last byte of the data that will be retrieved from the object.*/
         uint64_t object_range_end;
+
+        /* The total number of parts that are being used in downloading the object range. Note that "part" here
+         * currently refers to a range-get, and does not require a "part" on the service side. */
         uint32_t total_num_parts;
 
         uint32_t num_parts_requested;
