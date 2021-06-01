@@ -29,3 +29,4 @@ The configuration are listed here **(TO BE FINALIZED)**:
 * CIDRRange (string): *Optional* The inbound IP range for the ec2 instances created by the stack.
 * InstanceConfigName (string): The ec2 instance type to create
 * ThroughputGbps (string): String of the thought put target in Gbp
+* AutoTearDown (1 or 0): Whether to tear down the benchmarks stack after test or not, default: 1
