@@ -64,7 +64,18 @@ export class BenchmarksStack extends cdk.Stack {
       'SSH'
     );
 
-    const canary_role = iam.Role.fromRoleArn(this, 'S3CanaryInstanceRole', 'arn:aws:iam::123124136734:role/S3CanaryEC2Role');
+    const policy_doc_json_path = path.join(
+      __dirname,
+      "canary-policy-doc.json"
+    );
+    const policy_doc_json = fs.readFileSync(policy_doc_json_path, 'utf8');
+    const policy_doc_obj = JSON.parse(policy_doc_json);
+    const policy_doc = iam.PolicyDocument.fromJson(policy_doc_obj);
+
+    const canary_role = new iam.Role(this, 'EC2CanaryRole', {
+      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+      inlinePolicies: { "CanaryEC2Policy": policy_doc }
+    });
 
     const project_run_commands = [
       "DOWNLOAD_PERFORMANCE",
@@ -118,7 +129,7 @@ export class BenchmarksStack extends cdk.Stack {
         machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
         userData: instance_user_data,
         role: canary_role,
-        keyName: 'aws-common-runtime-keys',
+        keyName: 'S3-EC2-Canary-key-pair',
         securityGroup: security_group,
         vpcSubnets: subnetSelection
       });

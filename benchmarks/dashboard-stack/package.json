@@ -31,8 +31,9 @@
     "@aws-cdk/aws-s3-deployment": "1.103.0",
     "@aws-cdk/aws-events": "1.103.0",
     "@aws-cdk/aws-events-targets": "1.103.0",
+    "@aws-cdk/aws-kms": "1.103.0",
     "@aws-cdk/core": "1.103.0",
-    "constructs": "^10.0.0",
+    "cdk-ec2-key-pair": "2.2.0",
     "source-map-support": "^0.5.16"
   }
 }

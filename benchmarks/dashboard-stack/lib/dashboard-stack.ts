@@ -11,6 +11,14 @@ import * as s3deploy from '@aws-cdk/aws-s3-deployment'
 import * as path from 'path';
 import * as fs from 'fs';
 
+import { KeyPair } from 'cdk-ec2-key-pair';
+
+function policy_doc_helper(path: string): iam.PolicyDocument {
+    const policy_doc_json = fs.readFileSync(path, 'utf8');
+    const policy_doc = JSON.parse(policy_doc_json);
+    return iam.PolicyDocument.fromJson(policy_doc);
+}
+
 export class DashboardStack extends cdk.Stack {
     constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
@@ -25,7 +33,19 @@ export class DashboardStack extends cdk.Stack {
         const benchmark_config = JSON.parse(benchmark_config_json);
 
         // Lambda to handle trigger codebuild to deploy benchmark and clean up benchmark after tests
-        const lambda_role = iam.Role.fromRoleArn(this, 'LambdaRole', 'arn:aws:iam::123124136734:role/lambda-role-CFN');
+        // use admin role here. TODO: simplify later.
+        // Permission to delete CFN stack with ec2,s3, iam and security group in it and invoke codebuild.
+        const admin_policy_doc = policy_doc_helper(path.join(
+            __dirname,
+            "policy-doc",
+            "admin-policy-doc.json"
+        ));
+
+        const lambda_role = new iam.Role(this, 'LambdaRole', {
+            assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+            inlinePolicies: { "AdminPolicy": admin_policy_doc }
+        });
+
         const lambda = new _lambda.Function(this, 'BenchmarkManager',
             {
                 runtime: _lambda.Runtime.PYTHON_3_8,
@@ -168,8 +188,12 @@ export class DashboardStack extends cdk.Stack {
             dashboardName: id
         });
 
-        // Codebuild to deploy the benchmark-stack
-        const codebuild_role = iam.Role.fromRoleArn(this, 'CodeBuildRole', 'arn:aws:iam::123124136734:role/service-role/S3BenchmarksCodeBuildRole');
+        // Permission to create CFN stack with ec2,s3, iam and security group in it.
+        // TODO: simplify it later. Use admin policy for simplicity now.
+        const codebuild_role = new iam.Role(this, 'CodeBuildRole', {
+            assumedBy: new iam.ServicePrincipal("codebuild.amazonaws.com"),
+            inlinePolicies: { "AdminPolicy": admin_policy_doc }
+        });
 
         const code_bucket = new s3.Bucket(this, 'CodeBucket', {});
 
@@ -201,5 +225,12 @@ export class DashboardStack extends cdk.Stack {
             projectName: "S3BenchmarksDeploy"
         });
 
+        // Create the Key Pair
+        const key = new KeyPair(this, 'EC2CanaryKeyPair', {
+            name: 'S3-EC2-Canary-key-pair',
+            description: 'Key pair for BenchMarks stack to launch Ec2 instance. The private key is stored in \
+             Secrets Manager as ec2-ssh-key/S3-EC2-Canary-key-pair/private',
+            storePublicKey: true, // by default the public key will not be stored in Secrets Manager
+        });
     }
 }
