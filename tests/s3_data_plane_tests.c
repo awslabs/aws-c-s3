@@ -3067,6 +3067,10 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key"),
     };
 
+    const struct aws_byte_cursor headers_to_ignore[] = {
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Connection"),
+    };
+
     struct aws_s3_tester_client_options client_options = {
         .part_size = 16 * 1024,
     };
@@ -3153,6 +3157,20 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
             for (size_t i = 0; i < aws_http_headers_count(verify_range_get_headers); ++i) {
                 struct aws_http_header verify_header;
                 ASSERT_SUCCESS(aws_http_headers_get_index(verify_range_get_headers, i, &verify_header));
+
+                bool ignore_header = false;
+
+                for (size_t j = 0; j < sizeof(headers_to_ignore) / sizeof(headers_to_ignore[0]); ++j) {
+                    if (aws_byte_cursor_eq_ignore_case(&headers_to_ignore[j], &verify_header.name)) {
+                        ignore_header = true;
+                        break;
+                    }
+                }
+
+                if (ignore_header) {
+                    aws_http_headers_erase(range_get_headers, verify_header.name);
+                    continue;
+                }
 
                 AWS_LOGF_INFO(
                     AWS_LS_S3_GENERAL,
