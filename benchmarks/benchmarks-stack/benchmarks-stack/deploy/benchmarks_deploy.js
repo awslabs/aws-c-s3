@@ -8,6 +8,11 @@ const benchmark_config_json = fs.readFileSync(
   "utf8"
 );
 const benchmark_config = JSON.parse(benchmark_config_json);
+let auto_tear_down = "1";
+if (benchmark_config["auto-tear-down"] != undefined) {
+  auto_tear_down = benchmark_config["auto-tear-down"] ? "1" : "0";
+}
+const auto_tear_down_config = " -c AutoTearDown=" + auto_tear_down;
 
 // Configurations for the Stack. Keys listed as below:
 // - StackName (string): Name of the stack to be created
@@ -16,6 +21,7 @@ const benchmark_config = JSON.parse(benchmark_config_json);
 // - CIDRRange (string): The inbound IP range for the ec2 instances created by the stack.
 // - InstanceConfigName (string): The ec2 instance type to create, default: c5n.18xlarge
 // - ThroughputGbps (string): String of the thought put target in Gbps, default: 100
+// - AutoTearDown (1 or 0): Whether to tear down the benchmarks stack after test or not, default: 1
 for (let project_name in benchmark_config.projects) {
   const project_name_config = " -c ProjectName=" + project_name;
   let instance_count = 0;
@@ -36,7 +42,8 @@ for (let project_name in benchmark_config.projects) {
       project_name_config +
       instance_config_name_config +
       throuphput_gbps_config +
-      name_config;
+      name_config +
+      auto_tear_down_config;
     result = execSync(cmd).toString();
     console.log(result);
   }
