@@ -3056,6 +3056,8 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-8192"),
     };
 
+    /* List of headers that should have matching values between the auto_ranged_get and default (which sends the HTTP
+     * request as-is to S3) meta request.*/
     const struct aws_byte_cursor headers_that_should_match[] = {
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag"),
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Accept-Ranges"),
@@ -3067,6 +3069,8 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key"),
     };
 
+    /* List of headers that are okay to be in the auto_ranged_get response and not in the default response, or vice
+     * versa.*/
     const struct aws_byte_cursor headers_to_ignore[] = {
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Connection"),
     };
