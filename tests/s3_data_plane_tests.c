@@ -3245,6 +3245,8 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
 
     ASSERT_TRUE(results.finished_response_status == AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE);
 
+    aws_s3_meta_request_test_results_clean_up(&results);
+
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
