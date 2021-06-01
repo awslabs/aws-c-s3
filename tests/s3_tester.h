@@ -147,6 +147,7 @@ struct aws_s3_tester_meta_request_options {
     /* Get Object Meta Request specific options.*/
     struct {
         struct aws_byte_cursor object_path;
+        struct aws_byte_cursor object_range;
     } get_options;
 
     /* Put Object Meta request specific options. */

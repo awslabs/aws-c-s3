@@ -40,6 +40,14 @@ struct aws_s3_request {
      * retried.*/
     struct aws_byte_buf request_body;
 
+    /* Beginning range of this part. */
+    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
+    uint64_t part_range_start;
+
+    /* Last byte of this part.*/
+    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
+    uint64_t part_range_end;
+
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
      * However, must currently be a valid part number (ie: greater than 0) if the response body is to be streamed to the
      * caller.
@@ -90,6 +98,10 @@ struct aws_s3_request {
 
     /* When true, even when the meta request has a finish result set, this request will be sent. */
     uint32_t always_send : 1;
+
+    /* When true, this request is intended to find out the object size. This is currently only used by auto_range_get.
+     */
+    uint32_t discovers_object_size : 1;
 };
 
 AWS_EXTERN_C_BEGIN
