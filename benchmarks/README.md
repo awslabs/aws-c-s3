@@ -3,6 +3,13 @@
 This will deploy an EC2 instance with the S3Canary on it, and will dump a run to CloudWatch
 when the instance boots.
 
+## Pre-request
+
+* Node
+* npm 7.0+
+* aws CDK 1.103.0+ (`npm install -g aws-cdk@1.103.0`)
+* AWS account with CDK (`cdk bootstrap aws://<ACCOUNT-ID>/<REGION>`)
+
 ## Structures
 
 ### Dashboard-stack
@@ -10,7 +17,7 @@ when the instance boots.
 The stack deploys dashboard and all the other resources for Benchmarks-stack. It will deploy a cloudwatch event to trigger the Benchmarks-stack running daily and clean it up after each test. Usually, user will need to manually deploy this stack by following steps:
 
 * `npm run build`   compile typescript to js
-* `cdk deploy`      deploy this stack to your default AWS account/region
+* `cdk deploy`      deploy this stack to your default AWS account/region (Use aws cli to setup the default AWS account via `aws configure`)
 
 ### Benchmarks-stack
 
