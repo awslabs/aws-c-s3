@@ -12,6 +12,17 @@ The stack deploys dashboard and all the other resources for Benchmarks-stack. It
 * `npm run build`   compile typescript to js
 * `cdk deploy`      deploy this stack to your default AWS account/region
 
+Will use following resource:
+
+* Code build: Deploy the Benchmarks-stack.
+* Lambda function: Invoke code build and automatically delete Benchmarks-stack after testing.
+* Cloud Watch Event: Schedule the Benchmark test to run daily.
+* EC2 VPC: Control the VPC of the EC2 instances in Benchmarks-stack.
+* Cloud Watch Dashboard: Log and visualize the performance test result.
+* IAM roles: permission of the services.
+* Key Management Service: Generate the Key-pair for the EC2 instance created by Benchmarks-stack.
+* Secret Manger: Store the key-pair generated.
+
 ### Benchmarks-stack
 
 The stack deploy the ec2 instance with the S3Canary on it, and will dump a run to CloudWatch

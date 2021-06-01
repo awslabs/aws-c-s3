@@ -11,4 +11,4 @@ if (base_stack_name != null) {
   benchmarks_stack_name = benchmarks_stack_name + '-' + base_stack_name;
 }
 
-new BenchmarksStack(app, 'BenchmarksStack', { stackName: benchmarks_stack_name, env: { region: "us-west-2", account: process.env.CDK_DEFAULT_ACCOUNT } });
+new BenchmarksStack(app, 'BenchmarksStack', { stackName: benchmarks_stack_name, env: { region: process.env.CDK_DEFAULT_REGION, account: process.env.CDK_DEFAULT_ACCOUNT } });
