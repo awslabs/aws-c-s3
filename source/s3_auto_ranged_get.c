@@ -186,7 +186,7 @@ static bool s_s3_auto_ranged_get_update(
              * could be an unsatisfiable range, and might not even specify a complete range. To keep things simple, we
              * are currently relying on the service to handle turning the Range header into a Content-Range response
              * header.*/
-            bool head_object_required = auto_ranged_get->initial_message_has_range_header;
+            bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0;
 
             if (head_object_required) {
                 if (out_request == NULL) {
