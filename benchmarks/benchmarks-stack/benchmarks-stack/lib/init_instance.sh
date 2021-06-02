@@ -60,10 +60,10 @@ cp $SHOW_INSTANCE_DASHBOARD_SCRIPT $SHOW_INSTANCE_DASHBOARD_USER_DEST
 
 sudo yum install -y cmake3 git gcc clang
 
-sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 100 \
-    --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \
-    --slave /usr/local/bin/cpack cpack /usr/bin/cpack3 \
-    --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake3
+sudo alternatives --install /usr/bin/cmake cmake /usr/bin/cmake3 100 \
+    --slave /usr/bin/ctest ctest /usr/bin/ctest3 \
+    --slave /usr/bin/cpack cpack /usr/bin/cpack3 \
+    --slave /usr/bin/ccmake ccmake /usr/bin/ccmake3
 
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
