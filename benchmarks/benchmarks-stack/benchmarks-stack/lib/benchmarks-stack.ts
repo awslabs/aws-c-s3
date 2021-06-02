@@ -125,7 +125,7 @@ export class BenchmarksStack extends cdk.Stack {
         arguments: init_instance_arguments
       });
 
-      const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name + "_" + run_command, {
+      const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + this.stackName + "_" + instance_config_name + "_" + run_command, {
         instanceType: new ec2.InstanceType(instance_config_name),
         vpc: vpc,
         machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
