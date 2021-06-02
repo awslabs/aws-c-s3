@@ -21,7 +21,7 @@ Will use following resource:
 * Cloud Watch Dashboard: Log and visualize the performance test result.
 * IAM roles: permission of the services.
 * Key Management Service: Generate the Key-pair for the EC2 instance created by Benchmarks-stack.
-* Secret Manger: Store the key-pair generated.
+* Secret Manger: Store the key-pair generated. To get the key generated via aws CLI `aws secretsmanager get-secret-value --secret-id ec2-ssh-key/S3-EC2-Canary-key-pair/private`.
 
 ### Benchmarks-stack
 

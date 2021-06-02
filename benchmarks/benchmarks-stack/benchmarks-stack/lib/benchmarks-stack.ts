@@ -15,8 +15,8 @@ export class BenchmarksStack extends cdk.Stack {
     const project_name = this.node.tryGetContext('ProjectName') as string;
     const cidr = this.node.tryGetContext('CIDRRange') as string;
     const instance_config_name = this.node.tryGetContext('InstanceConfigName') as string;
-    const throughput_gbps = this.node.tryGetContext('ThroughputGbps') as number;
-    const auto_tear_down = this.node.tryGetContext('AutoTearDown') as number;
+    const throughput_gbps = this.node.tryGetContext('ThroughputGbps') as string;
+    const auto_tear_down = this.node.tryGetContext('AutoTearDown') as string;
 
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
