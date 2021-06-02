@@ -106,14 +106,14 @@ if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
         | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
         | xargs -n3 -t -P 32 bash -c 'publish_bytes_in_metric "$@"' _ &
 
-    $DOWNLOAD_PERF_SCRIPT
+    sudo $DOWNLOAD_PERF_SCRIPT
 elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
     stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
         | stdbuf -o0 grep -v total \
         | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
         | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@"' _ &
 
-    $UPLOAD_PERF_SCRIPT
+    sudo $UPLOAD_PERF_SCRIPT
 fi
 
 if [ $AUTO_TEAR_DOWN = 1 ]; then
