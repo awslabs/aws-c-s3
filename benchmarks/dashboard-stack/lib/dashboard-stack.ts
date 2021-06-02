@@ -195,7 +195,10 @@ export class DashboardStack extends cdk.Stack {
             inlinePolicies: { "AdminPolicy": admin_policy_doc }
         });
 
-        const code_bucket = new s3.Bucket(this, 'CodeBucket', {});
+        const code_bucket = new s3.Bucket(this, 'CodeBucket', {
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            autoDeleteObjects: true,
+        });
 
         //Write the config for deploy benchmarks-stack
         fs.writeFileSync(path.join(
