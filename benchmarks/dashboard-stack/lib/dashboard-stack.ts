@@ -196,6 +196,7 @@ export class DashboardStack extends cdk.Stack {
         });
 
         const code_bucket = new s3.Bucket(this, 'CodeBucket', {
+            bucketName: "S3CanaryCodeBucket",
             removalPolicy: cdk.RemovalPolicy.DESTROY,
             autoDeleteObjects: true,
         });
