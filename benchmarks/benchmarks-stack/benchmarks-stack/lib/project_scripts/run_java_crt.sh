@@ -25,7 +25,6 @@ elif [ $1 = "DOWNLOAD_PERFORMANCE" ]; then
         -Daws.crt.s3.benchmark.gbps=$THROUGHPUT_GBPS \
         -Daws.crt.s3.benchmark.transfers=1600 \
         -Daws.crt.s3.benchmark.concurrent=1600 \
-        -Daws.crt.s3.benchmark.object=crt-canary-obj-multipart \
         -Daws.crt.s3.benchmark.threads=18 \
         -Daws.crt.s3.benchmark.warmup=30 \
         -Daws.crt.s3.benchmark.tls=true
