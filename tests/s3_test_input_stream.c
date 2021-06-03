@@ -71,7 +71,7 @@ void aws_s3_destroy_test_input_stream_look_up(struct aws_s3_tester *tester) {
 
 static int s_aws_s3_test_input_stream_seek(
     struct aws_input_stream *stream,
-    aws_off_t offset,
+    int64_t offset,
     enum aws_stream_seek_basis basis) {
     (void)stream;
     (void)offset;

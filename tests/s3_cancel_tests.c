@@ -19,7 +19,13 @@ enum s3_update_cancel_type {
     S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES,
 
     S3_UPDATE_CANCEL_TYPE_MPD_NOTHING_SENT,
+    S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_SENT,
+    S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_COMPLETED,
+    S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT,
+    S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED,
+    S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_SENT,
     S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED,
+    S3_UPDATE_CANCEL_TYPE_MPD_TWO_PARTS_COMPLETED,
 };
 
 struct s3_cancel_test_user_data {
@@ -69,9 +75,39 @@ static bool s_s3_meta_request_update_cancel_test(
         case S3_UPDATE_CANCEL_TYPE_MPD_NOTHING_SENT:
             call_cancel = auto_ranged_get->synced_data.num_parts_requested == 0;
             break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_SENT:
+            call_cancel = auto_ranged_get->synced_data.head_object_sent;
+            break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_COMPLETED:
+            call_cancel = auto_ranged_get->synced_data.head_object_completed;
+            break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT:
+            call_cancel = auto_ranged_get->synced_data.get_without_range_sent;
+            break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED:
+            call_cancel = auto_ranged_get->synced_data.get_without_range_completed;
+            break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_SENT:
+            call_cancel = auto_ranged_get->synced_data.num_parts_requested == 1;
+            break;
+
         case S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED:
             call_cancel = auto_ranged_get->synced_data.num_parts_completed == 1;
+
+            /* Prevent other parts from being queued while we wait for this one to complete. */
             block_update = !call_cancel && auto_ranged_get->synced_data.num_parts_requested == 1;
+            break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPD_TWO_PARTS_COMPLETED:
+            call_cancel = auto_ranged_get->synced_data.num_parts_completed == 2;
+
+            /* Prevent other parts from being queued while we wait for these two to complete. */
+            block_update = !call_cancel && auto_ranged_get->synced_data.num_parts_requested == 2;
             break;
     }
 
@@ -146,9 +182,15 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
 
     tester.user_data = &test_user_data;
 
+    size_t client_part_size = 0;
+
+    if (cancel_type > S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES) {
+        client_part_size = 16 * 1024;
+    }
+
     struct aws_s3_client *client = NULL;
     struct aws_s3_tester_client_options client_options = {
-        .part_size = 64 * 1024 * 1024,
+        .part_size = client_part_size,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -160,7 +202,9 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
         struct aws_s3_meta_request_test_results meta_request_test_results;
         AWS_ZERO_STRUCT(meta_request_test_results);
 
-        struct aws_s3_tester_meta_request_options meta_request_test_options = {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
             .put_options =
@@ -169,14 +213,7 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
                 },
         };
 
-        struct aws_s3_tester_send_meta_requests_options options = {
-            .tester = &tester,
-            .client = client,
-            .num_meta_requests = 1,
-            .meta_request_test_options = &meta_request_test_options,
-        };
-
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, &meta_request_test_results));
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
         ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_CANCELED);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -192,23 +229,42 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
         struct aws_s3_meta_request_test_results meta_request_test_results;
         AWS_ZERO_STRUCT(meta_request_test_results);
 
-        struct aws_s3_tester_meta_request_options meta_request_test_options = {
+        // Range for the second 16k
+        const struct aws_byte_cursor range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=16384-32767");
+
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
             .get_options =
                 {
-                    .object_path = g_s3_path_get_object_test_1MB,
+                    .object_path = g_pre_existing_object_1MB,
                 },
         };
 
-        struct aws_s3_tester_send_meta_requests_options options = {
-            .tester = &tester,
-            .client = client,
-            .num_meta_requests = 1,
-            .meta_request_test_options = &meta_request_test_options,
-        };
+        switch (cancel_type) {
+            case S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_SENT:
+                options.get_options.object_range = range;
+                break;
 
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_requests(&options, &meta_request_test_results));
+            case S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_COMPLETED:
+                options.get_options.object_range = range;
+                break;
+
+            case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT:
+                options.get_options.object_path = g_pre_existing_empty_object;
+                break;
+
+            case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED:
+                options.get_options.object_path = g_pre_existing_empty_object;
+                break;
+
+            default:
+                break;
+        }
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
         ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_CANCELED);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -269,7 +325,61 @@ AWS_TEST_CASE(test_s3_cancel_mpd_one_part_sent, s_test_s3_cancel_mpd_one_part_se
 static int s_test_s3_cancel_mpd_one_part_sent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_SENT));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_one_part_completed, s_test_s3_cancel_mpd_one_part_completed)
+static int s_test_s3_cancel_mpd_one_part_completed(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
     ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_two_parts_completed, s_test_s3_cancel_mpd_two_parts_completed)
+static int s_test_s3_cancel_mpd_two_parts_completed(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_TWO_PARTS_COMPLETED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_head_object_sent, s_test_s3_cancel_mpd_head_object_sent)
+static int s_test_s3_cancel_mpd_head_object_sent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_SENT));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_head_object_completed, s_test_s3_cancel_mpd_head_object_completed)
+static int s_test_s3_cancel_mpd_head_object_completed(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_COMPLETED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_get_without_range_sent, s_test_s3_cancel_mpd_get_without_range_sent)
+static int s_test_s3_cancel_mpd_get_without_range_sent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_get_without_range_completed, s_test_s3_cancel_mpd_get_without_range_completed)
+static int s_test_s3_cancel_mpd_get_without_range_completed(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED));
 
     return 0;
 }
