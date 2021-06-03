@@ -45,8 +45,8 @@ export class DashboardStack extends cdk.Stack {
         new events.Rule(this, 'ScheduleRule', {
             schedule: events.Schedule.rate(cdk.Duration.days(1)),
             targets: [lambda_target],
-            ruleName: 'BenchMarksTrigger',
-            description: 'Trigger BenchMarks test.'
+            ruleName: 'BenchmarksTrigger',
+            description: 'Trigger Benchmarks test.'
         });
 
         let region = 'unknown';
@@ -60,7 +60,7 @@ export class DashboardStack extends cdk.Stack {
             enableDnsHostnames: true
         })
 
-        cdk.Tags.of(vpc).add('source-ag:environment-type', 'prodVPC');
+        cdk.Tags.of(vpc).add('S3BenchmarkResources', 'VPC');
 
         const metrics_namespace = "S3Benchmark";
 
