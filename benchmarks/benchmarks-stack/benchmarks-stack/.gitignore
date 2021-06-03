@@ -10,3 +10,4 @@ cdk.out
 
 # The config will be copied from upper level
 lib/benchmark-config.json
+cdk.context.json
