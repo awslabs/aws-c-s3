@@ -83,6 +83,8 @@ export class BenchmarksStack extends cdk.Stack {
       "UPLOAD_PERFORMANCE",
     ];
 
+    const key_name = benchmark_config["key-pair-name"];
+
     for (let run_command_index in project_run_commands) {
       const run_command = project_run_commands[run_command_index];
       const instance_user_data = ec2.UserData.forLinux();
@@ -131,7 +133,7 @@ export class BenchmarksStack extends cdk.Stack {
         machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
         userData: instance_user_data,
         role: canary_role,
-        keyName: 'S3-EC2-Canary-key-pair',
+        keyName: key_name ? key_name : 'S3-EC2-Canary-key-pair',
         securityGroup: security_group,
         vpcSubnets: subnetSelection
       });

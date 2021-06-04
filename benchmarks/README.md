@@ -48,3 +48,4 @@ The configuration are listed here **(TO BE FINALIZED)**:
 * InstanceConfigName (string): The ec2 instance type to create
 * ThroughputGbps (string): String of the thought put target in Gbp
 * AutoTearDown (1 or 0): Whether to tear down the benchmarks stack after test or not, default: 1
+* KeyPairName (string): Set to the key pair name to an existing EC2 key pair for the EC2 instance to use, if not set, CDK will create one and it can be accessed via aws CLI `aws secretsmanager get-secret-value --secret-id ec2-ssh-key/S3-EC2-Canary-key-pair/private`

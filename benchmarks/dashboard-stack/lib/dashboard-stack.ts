@@ -229,12 +229,15 @@ export class DashboardStack extends cdk.Stack {
             projectName: "S3BenchmarksDeploy"
         });
 
-        // Create the Key Pair
-        const key = new KeyPair(this, 'EC2CanaryKeyPair', {
-            name: 'S3-EC2-Canary-key-pair',
-            description: 'Key pair for BenchMarks stack to launch Ec2 instance. The private key is stored in \
+
+        if (benchmark_config["key-pair-name"] == undefined) {
+            // Create the Key Pair
+            const key = new KeyPair(this, 'EC2CanaryKeyPair', {
+                name: 'S3-EC2-Canary-key-pair',
+                description: 'Key pair for BenchMarks stack to launch Ec2 instance. The private key is stored in \
              Secrets Manager as ec2-ssh-key/S3-EC2-Canary-key-pair/private',
-            storePublicKey: true, // by default the public key will not be stored in Secrets Manager
-        });
+                storePublicKey: true, // by default the public key will not be stored in Secrets Manager
+            });
+        }
     }
 }
