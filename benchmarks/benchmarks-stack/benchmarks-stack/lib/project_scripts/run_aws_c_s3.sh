@@ -8,11 +8,11 @@ if [ $1 = "SETUP" ]; then
     export INSTALL_PATH=$USER_DIR/install
 
     git clone https://github.com/awslabs/aws-lc.git
-    cmake -S aws-lc -B aws-lc/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH
+    cmake -S aws-lc -B aws-lc/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=OFF -DENABLE_SANITIZERS=ON -DPERFORM_HEADER_CHECK=ON
     cmake --build aws-lc/build --target install
 
     git clone https://github.com/aws/s2n-tls.git
-    cmake -S s2n-tls -B s2n-tls/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_PREFIX_PATH=$INSTALL_PATH
+    cmake -S s2n-tls -B s2n-tls/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_PREFIX_PATH=$INSTALL_PATH -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=OFF -DENABLE_SANITIZERS=ON -DPERFORM_HEADER_CHECK=ON
     cmake --build s2n-tls/build --target install
 
     git clone https://github.com/awslabs/aws-c-common.git

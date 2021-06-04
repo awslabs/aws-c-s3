@@ -19,6 +19,17 @@ The stack deploys dashboard and all the other resources for Benchmarks-stack. It
 * `npm run build`   compile typescript to js
 * `cdk deploy`      deploy this stack to your default AWS account/region (Use aws cli to setup the default AWS account via `aws configure`)
 
+Will use following resource:
+
+* Code build: Deploy the Benchmarks-stack.
+* Lambda function: Invoke code build and automatically delete Benchmarks-stack after testing.
+* Cloud Watch Event: Schedule the Benchmark test to run daily.
+* EC2 VPC: Control the VPC of the EC2 instances in Benchmarks-stack.
+* Cloud Watch Dashboard: Log and visualize the performance test result.
+* IAM roles: permission of the services.
+* Key Management Service: Generate the Key-pair for the EC2 instance created by Benchmarks-stack.
+* Secret Manger: Store the key-pair generated. To get the key generated via aws CLI `aws secretsmanager get-secret-value --secret-id ec2-ssh-key/S3-EC2-Canary-key-pair/private`.
+
 ### Benchmarks-stack
 
 The stack deploy the ec2 instance with the S3Canary on it, and will dump a run to CloudWatch
@@ -37,3 +48,4 @@ The configuration are listed here **(TO BE FINALIZED)**:
 * InstanceConfigName (string): The ec2 instance type to create
 * ThroughputGbps (string): String of the thought put target in Gbp
 * AutoTearDown (1 or 0): Whether to tear down the benchmarks stack after test or not, default: 1
+* KeyPairName (string): Set to the key pair name to an existing EC2 key pair for the EC2 instance to use, if not set, CDK will create one and it can be accessed via aws CLI `aws secretsmanager get-secret-value --secret-id ec2-ssh-key/S3-EC2-Canary-key-pair/private`

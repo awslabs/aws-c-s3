@@ -26,6 +26,7 @@ elif [ $1 = "DOWNLOAD_PERFORMANCE" ]; then
         -Daws.crt.s3.benchmark.transfers=1600 \
         -Daws.crt.s3.benchmark.concurrent=1600 \
         -Daws.crt.s3.benchmark.object=crt-canary-obj-multipart \
+        -Daws.crt.s3.benchmark.bucket=aws-crt-canary-bucket \
         -Daws.crt.s3.benchmark.threads=18 \
         -Daws.crt.s3.benchmark.warmup=30 \
         -Daws.crt.s3.benchmark.tls=true
@@ -36,6 +37,7 @@ elif [ $1 = "UPLOAD_PERFORMANCE" ]; then
     mvn test -DforkCount=0 -Dtest="S3ClientTest#benchmarkS3Put" -Daws.crt.s3.benchmark=1 \
         -Daws.crt.s3.benchmark.region=$REGION \
         -Daws.crt.s3.benchmark.gbps=$THROUGHPUT_GBPS \
+        -Daws.crt.s3.benchmark.bucket=aws-crt-canary-bucket \
         -Daws.crt.s3.benchmark.transfers=1600 \
         -Daws.crt.s3.benchmark.concurrent=1600 \
         -Daws.crt.s3.benchmark.threads=18 \

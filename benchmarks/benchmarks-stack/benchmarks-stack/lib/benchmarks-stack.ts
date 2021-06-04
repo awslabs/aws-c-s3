@@ -15,8 +15,8 @@ export class BenchmarksStack extends cdk.Stack {
     const project_name = this.node.tryGetContext('ProjectName') as string;
     const cidr = this.node.tryGetContext('CIDRRange') as string;
     const instance_config_name = this.node.tryGetContext('InstanceConfigName') as string;
-    const throughput_gbps = this.node.tryGetContext('ThroughputGbps') as number;
-    const auto_tear_down = this.node.tryGetContext('AutoTearDown') as number;
+    const throughput_gbps = this.node.tryGetContext('ThroughputGbps') as string;
+    const auto_tear_down = this.node.tryGetContext('AutoTearDown') as string;
 
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
@@ -65,12 +65,25 @@ export class BenchmarksStack extends cdk.Stack {
       'SSH'
     );
 
-    const canary_role = iam.Role.fromRoleArn(this, 'S3CanaryInstanceRole', 'arn:aws:iam::123124136734:role/S3CanaryEC2Role');
+    const policy_doc_json_path = path.join(
+      __dirname,
+      "canary-policy-doc.json"
+    );
+    const policy_doc_json = fs.readFileSync(policy_doc_json_path, 'utf8');
+    const policy_doc_obj = JSON.parse(policy_doc_json);
+    const policy_doc = iam.PolicyDocument.fromJson(policy_doc_obj);
+
+    const canary_role = new iam.Role(this, 'EC2CanaryRole', {
+      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+      inlinePolicies: { "CanaryEC2Policy": policy_doc }
+    });
 
     const project_run_commands = [
       "DOWNLOAD_PERFORMANCE",
       "UPLOAD_PERFORMANCE",
     ];
+
+    const key_name = benchmark_config["key-pair-name"];
 
     for (let run_command_index in project_run_commands) {
       const run_command = project_run_commands[run_command_index];
@@ -114,13 +127,13 @@ export class BenchmarksStack extends cdk.Stack {
         arguments: init_instance_arguments
       });
 
-      const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + instance_config_name + "_" + run_command, {
+      const ec2instance = new ec2.Instance(this, 'S3BenchmarkClient_' + this.stackName + "_" + instance_config_name + "_" + run_command, {
         instanceType: new ec2.InstanceType(instance_config_name),
         vpc: vpc,
         machineImage: ec2.MachineImage.latestAmazonLinux({ generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2 }),
         userData: instance_user_data,
         role: canary_role,
-        keyName: 'aws-common-runtime-keys',
+        keyName: key_name ? key_name : 'S3-EC2-Canary-key-pair',
         securityGroup: security_group,
         vpcSubnets: subnetSelection
       });

@@ -13,5 +13,7 @@
     "c5n.18xlarge": {
       "throughput_gbps": 100
     }
-  }
+  },
+  "auto-tear-down": false,
+  "key-pair-name": "aws-common-runtime-keys"
 }
