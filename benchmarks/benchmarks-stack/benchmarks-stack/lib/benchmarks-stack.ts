@@ -120,6 +120,7 @@ export class BenchmarksStack extends cdk.Stack {
         region + ' ' +
         run_command + ' ' +
         this.stackName + ' ' +
+        init_instance_sh.s3BucketName + ' ' +
         auto_tear_down;
 
       instance_user_data.addExecuteFileCommand({
