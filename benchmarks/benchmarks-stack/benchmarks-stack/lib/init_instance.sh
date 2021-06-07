@@ -11,9 +11,11 @@ export INSTANCE_TYPE=$8
 export REGION=$9
 export RUN_COMMAND=${10}
 export CFN_NAME=${11}
+export S3_BUCKET_NAME=${12}
 # TODO the auto tear down should be a flag that makes more sense
-export AUTO_TEAR_DOWN=${12:-1}
+export AUTO_TEAR_DOWN=${13:-1}
 
+export TEST_OBJECT_NAME=crt-canary-obj-multipart
 export RUN_PROJECT_LOG_FN=/tmp/benchmark.log
 export PUBLISH_METRICS_LOG_FN=/tmp/publish_metrics.log
 export SHOW_INSTANCE_DASHBOARD_USER_DEST=/home/$USER_NAME/show_instance_dashboard.sh
@@ -91,6 +93,8 @@ AWK_SCRIPT="$AWK_SCRIPT sub(\"{REGION}\", \"$REGION\");"
 AWK_SCRIPT="$AWK_SCRIPT sub(\"{USER_NAME}\", \"$USER_NAME\");"
 AWK_SCRIPT="$AWK_SCRIPT sub(\"{RUN_PROJECT_LOG_FN}\", \"$RUN_PROJECT_LOG_FN\");"
 AWK_SCRIPT="$AWK_SCRIPT sub(\"{PUBLISH_METRICS_LOG_FN}\", \"$PUBLISH_METRICS_LOG_FN\");"
+AWK_SCRIPT="$AWK_SCRIPT sub(\"{TEST_OBJECT_NAME}\", \"$TEST_OBJECT_NAME\");"
+AWK_SCRIPT="$AWK_SCRIPT sub(\"{S3_BUCKET_NAME}\", \"$S3_BUCKET_NAME\");"
 AWK_SCRIPT="$AWK_SCRIPT print}"
 
 awk "$AWK_SCRIPT" $RUN_PROJECT_TEMPLATE > $PERF_SCRIPT_TEMP
@@ -101,6 +105,8 @@ sudo chmod +x $DOWNLOAD_PERF_SCRIPT
 sudo chmod +x $UPLOAD_PERF_SCRIPT
 
 if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
+    truncate -s 5G $TEST_OBJECT_NAME
+    aws s3 cp $TEST_OBJECT_NAME s3://$S3_BUCKET_NAME
     stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
         | stdbuf -o0 grep -v total \
         | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
