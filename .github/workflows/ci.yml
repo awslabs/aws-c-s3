@@ -124,3 +124,26 @@ jobs:
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
         chmod a+x builder
         ./builder build -p ${{ env.PACKAGE_NAME }} downstream
+  benchmarks-test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Sources
+      uses: actions/checkout@v2
+
+    - name: benchmark build+test
+      run: |
+        cd benchmarks/
+        sudo npm install -g aws-cdk
+        npm i .
+        npm run build
+        npm run test
+  byo-crypto:
+    runs-on: ubuntu-latest
+    steps:
+        # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u awslabs --password-stdin
+        export DOCKER_IMAGE=docker.pkg.github.com/awslabs/aws-crt-builder/aws-crt-${{ env.LINUX_BASE_IMAGE }}:${{ env.BUILDER_VERSION }}
+        docker pull $DOCKER_IMAGE
+        docker run --mount type=bind,source=$(pwd),target=/root/${{ env.PACKAGE_NAME }} --env GITHUB_REF --env AWS_ACCESS_KEY_ID --env AWS_SECRET_ACCESS_KEY --env AWS_DEFAULT_REGION $DOCKER_IMAGE build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBYO_CRYPTO=ON downstream
