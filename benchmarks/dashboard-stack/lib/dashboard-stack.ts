@@ -7,7 +7,6 @@ import * as events from '@aws-cdk/aws-events';
 import * as targets from '@aws-cdk/aws-events-targets';
 import * as s3 from '@aws-cdk/aws-s3';
 import * as ec2 from '@aws-cdk/aws-ec2';
-import * as tasks from "@aws-cdk/aws-stepfunctions-tasks";
 import * as s3deploy from '@aws-cdk/aws-s3-deployment'
 import * as path from 'path';
 import * as fs from 'fs';
@@ -58,8 +57,7 @@ export class DashboardStack extends cdk.Stack {
             });
 
 
-        // Creat the Cloudwatch Event to schedule the lambda to run daily.
-        // Note: it will start from the next day. Using task to start the first test once the CFN deployed
+        // Creat the Cloudwatch Event to schedule the lambda to run daily
         const lambda_target = new targets.LambdaFunction(lambda, {
             event: events.RuleTargetInput.fromObject({ 'action': 'test' })
         });
@@ -218,7 +216,7 @@ export class DashboardStack extends cdk.Stack {
             destinationBucket: code_bucket,
         });
 
-        const codebuildProject = new codebuild.Project(this, 'S3BenchmarksDeploy', {
+        new codebuild.Project(this, 'S3BenchmarksDeploy', {
             source: codebuild.Source.s3({
                 bucket: code_bucket,
                 path: 'benchmarks-stack/',
@@ -230,10 +228,6 @@ export class DashboardStack extends cdk.Stack {
             projectName: "S3BenchmarksDeploy"
         });
 
-        // Start the first test right on the CFN deployed.
-        const task = new tasks.CodeBuildStartBuild(this, 'Task', {
-            project: codebuildProject
-        });
 
         if (benchmark_config["key-pair-name"] == undefined) {
             // Create the Key Pair
