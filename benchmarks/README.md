@@ -16,8 +16,10 @@ when the instance boots.
 
 The stack deploys dashboard and all the other resources for Benchmarks-stack. It will deploy a cloudwatch event to trigger the Benchmarks-stack running daily and clean it up after each test. Usually, user will need to manually deploy this stack by following steps:
 
-* `npm run build`   compile typescript to js
-* `cdk deploy`      deploy this stack to your default AWS account/region (Use aws cli to setup the default AWS account via `aws configure`)
+* `cd dashboard-stack/` change directory to `dashboard-stack/`. If the current directory is not `aws-c-s3/benchmarks`, use the correct path instead.
+* `npm install`         install the dependencies
+* `npm run build`       compile typescript to js
+* `cdk deploy`          deploy this stack to your default AWS account/region (Use aws cli to setup the default AWS account via `aws configure`)
 
 Will use following resource:
 
