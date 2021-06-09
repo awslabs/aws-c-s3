@@ -13,6 +13,7 @@ export class BenchmarksStack extends cdk.Stack {
     // Set by the lambda function running the stack
     const user_name = this.node.tryGetContext('UserName') as string;
     const project_name = this.node.tryGetContext('ProjectName') as string;
+    const branch_name = this.node.tryGetContext('BranchName') as string;
     const cidr = this.node.tryGetContext('CIDRRange') as string;
     const instance_config_name = this.node.tryGetContext('InstanceConfigName') as string;
     const throughput_gbps = this.node.tryGetContext('ThroughputGbps') as string;
@@ -21,7 +22,6 @@ export class BenchmarksStack extends cdk.Stack {
     const benchmark_config_json = fs.readFileSync(path.join(__dirname, 'benchmark-config.json'), 'utf8')
     const benchmark_config = JSON.parse(benchmark_config_json)
     const project_config = benchmark_config.projects[project_name];
-    const branch_name = project_config.branch;
 
     let region = 'unknown';
 

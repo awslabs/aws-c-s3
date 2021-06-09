@@ -10,7 +10,9 @@ def benchmarkManager(event, context):
 
     delete: Delete a stack.
         - stack_name (string): the name of stack to delete.
-    test: Deploy the stack via code build.
+    test: Deploy the stack via code build. If project and branch name are not set, the settings from benchmark-config will be used
+        - project_name (Optional[string]): "aws-crt-java"/"aws-c-s3"
+        - branch_name (Optional[string]): Github branch of the project to test on
     '''
     cf_client = boto3.client('cloudformation')
     print("## LOG started")
@@ -52,9 +54,29 @@ def benchmarkManager(event, context):
                 check your consol to see it succeed or not'.format(stack_name)
         }
     elif event['action'] == 'test':
-        # trigger codebuild to deploy the benchmarks stack
         codebuild = boto3.client('codebuild')
-        response = codebuild.start_build(projectName=CODE_BUILD_NAME)
+        if "project_name" not in event:
+            # trigger codebuild to deploy the benchmarks stack
+            response = codebuild.start_build(projectName=CODE_BUILD_NAME)
+        else:
+            if "branch_name" not in event:
+                # Required if project name is set
+                print("\'branch_name\' is required when \'project_name\' is set")
+                return {
+                    'statusCode': 400
+                }
+            response = codebuild.start_build(projectName=CODE_BUILD_NAME, environmentVariablesOverride=[
+                {
+                    'name': 'PROJECT_NAME',
+                    'value': event['project_name'],
+                    'type': 'PLAINTEXT'
+                },
+                {
+                    'name': 'BRANCH_NAME',
+                    'value': event['branch_name'],
+                    'type': 'PLAINTEXT'
+                }
+            ])
         print("Code build: Response: {}".format(response))
         return {
             'statusCode': 200,
