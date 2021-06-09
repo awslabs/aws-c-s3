@@ -3,10 +3,6 @@
     "aws-crt-java": {
       "shell_script": "project_scripts/run_java_crt.sh",
       "branch": "upload_test"
-    },
-    "aws-c-s3": {
-      "shell_script": "project_scripts/run_aws_c_s3.sh",
-      "branch": "dashboard_work"
     }
   },
   "instances": {
