@@ -239,6 +239,9 @@ struct aws_s3_client *aws_s3_client_new(
 #endif
 
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
+    if (!client) {
+        return NULL;
+    }
 
     client->allocator = allocator;
     client->sba_allocator = aws_small_block_allocator_new(allocator, true);
