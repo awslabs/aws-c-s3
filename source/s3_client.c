@@ -239,18 +239,20 @@ struct aws_s3_client *aws_s3_client_new(
 #endif
 
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
-    if (!client) {
-        return NULL;
-    }
 
     client->allocator = allocator;
     client->sba_allocator = aws_small_block_allocator_new(allocator, true);
+    if (!client->sba_allocator) {
+        goto sba_allocator_fail;
+    }
 
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
-    aws_mutex_init(&client->synced_data.lock);
+    if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
+        goto lock_init_fail;
+    }
 
     aws_linked_list_init(&client->synced_data.vips);
     aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
@@ -303,7 +305,7 @@ struct aws_s3_client *aws_s3_client_new(
         }
         if (!client->body_streaming_elg) {
             /* Fail to create elg, we should fail the call */
-            goto on_error;
+            goto elg_create_fail;
         }
         client->synced_data.body_streaming_elg_allocated = true;
     }
@@ -330,10 +332,6 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
-
-        if (client->tls_connection_options == NULL) {
-            goto on_error;
-        }
 
         if (client_config->tls_connection_options != NULL) {
             aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
@@ -400,9 +398,22 @@ struct aws_s3_client *aws_s3_client_new(
     return client;
 
 on_error:
-
-    aws_s3_client_release(client);
-
+    aws_event_loop_group_release(client->body_streaming_elg);
+    client->body_streaming_elg = NULL;
+    if (client->tls_connection_options) {
+        aws_tls_connection_options_clean_up(client->tls_connection_options);
+        aws_mem_release(client->allocator, client->tls_connection_options);
+        client->tls_connection_options = NULL;
+    }
+elg_create_fail:
+    aws_retry_strategy_release(client->retry_strategy);
+    aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
+    aws_client_bootstrap_release(client->client_bootstrap);
+    aws_mutex_clean_up(&client->synced_data.lock);
+lock_init_fail:
+    aws_small_block_allocator_destroy(client->sba_allocator);
+sba_allocator_fail:
+    aws_mem_release(client->allocator, client);
     return NULL;
 }
 
