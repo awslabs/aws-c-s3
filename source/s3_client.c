@@ -298,6 +298,10 @@ struct aws_s3_client *aws_s3_client_new(
             client->body_streaming_elg = aws_event_loop_group_new_default(
                 client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
         }
+        if (!client->body_streaming_elg) {
+            /* Fail to create elg, we should fail the call */
+            goto on_error;
+        }
         client->synced_data.body_streaming_elg_allocated = true;
     }
 
