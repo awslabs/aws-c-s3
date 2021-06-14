@@ -406,7 +406,6 @@ on_error:
         client->tls_connection_options = NULL;
     }
 elg_create_fail:
-    aws_retry_strategy_release(client->retry_strategy);
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
