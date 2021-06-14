@@ -45,7 +45,7 @@ static struct aws_log_subject_info s_s3_log_subject_infos[] = {
         AWS_LS_S3_META_REQUEST,
         "S3MetaRequest",
         "Subject for aws-c-s3 logging from an aws_s3_meta_request."),
-    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_VIP, "S3VIP", "Subject for aws-c-s3 logging from an aws_s3_vip."),
+    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_ENDPOINT, "S3Endpoint", "Subject for aws-c-s3 logging from an aws_s3_endpoint."),
     DEFINE_LOG_SUBJECT_INFO(
         AWS_LS_S3_VIP_CONNECTION,
         "S3VIPConnection",

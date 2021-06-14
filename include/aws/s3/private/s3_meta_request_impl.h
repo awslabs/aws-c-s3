@@ -33,9 +33,7 @@ enum aws_s3_meta_request_state {
 };
 
 enum aws_s3_meta_request_update_flags {
-    /* There are no connections available. Meta request can wait for anything in progress to finish up, but shouldn't
-       expect that there will be any connections for issuing requests. */
-    AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS = 0x00000001,
+    AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED = 0x00000001,
 
     /* The client potentially has multiple meta requests that it can spread across connections, and the given meta
        request can selectively not return a request if there is a performance reason to do so.*/
@@ -120,6 +118,8 @@ struct aws_s3_meta_request {
     /* Client that created this meta request which also processes this request. After the meta request is finished, this
      * reference is removed.*/
     struct aws_s3_client *client;
+
+    struct aws_s3_endpoint *endpoint;
 
     /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc..
      * After the meta request is finished, this will be reset along with the client reference.*/

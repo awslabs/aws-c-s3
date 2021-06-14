@@ -136,7 +136,7 @@ static bool s_s3_auto_ranged_put_update(
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
         /* If there isn't a connection, then fail the meta request now if it hasn't been already. */
         aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
     }
@@ -267,7 +267,7 @@ static bool s_s3_auto_ranged_put_update(
 
         /* If there are no endpoint connections to send requests on, then we can't send an abort message, so there is no
          * work remaining. */
-        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
             goto no_work_remaining;
         }
 

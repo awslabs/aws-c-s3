@@ -807,16 +807,18 @@ void aws_s3_meta_request_send_request_finish_default(
     struct aws_http_stream *stream,
     int error_code) {
     AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->owning_vip);
-
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
-    AWS_PRECONDITION(client);
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_endpoint *endpoint = meta_request->endpoint;
+    AWS_PRECONDITION(endpoint);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
 
     int response_status = request->send_data.response_status;
 

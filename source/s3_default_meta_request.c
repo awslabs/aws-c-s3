@@ -125,7 +125,7 @@ static bool s_s3_meta_request_default_update(
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
         if (!meta_request_default->synced_data.request_sent) {
             aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
         }

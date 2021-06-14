@@ -136,7 +136,7 @@ static bool s_s3_auto_ranged_get_update(
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
         /* If we have haven't already requested all of the parts, then we need to fail now. Note: total_num_parts is
          * not populated until after we get the respones from the first request, so the initial num_parts_requested == 0
          * check is necessary. */

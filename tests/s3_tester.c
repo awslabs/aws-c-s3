@@ -491,11 +491,6 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
     aws_mutex_unlock(&tester->synced_data.lock);
 }
 
-static bool s_s3_client_is_http_connection_open(const struct aws_http_connection *connection) {
-    (void)connection;
-    return false;
-}
-
 static void s_s3_client_acquire_http_connection_empty(
     struct aws_s3_client *client,
     struct aws_s3_vip_connection *vip_connection,
@@ -517,7 +512,6 @@ static void s_s3_client_setup_vip_connection_retry_token_empty(
 }
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
-    .http_connection_is_open = s_s3_client_is_http_connection_open,
     .acquire_http_connection = s_s3_client_acquire_http_connection_empty,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
     .setup_vip_connection_retry_token = s_s3_client_setup_vip_connection_retry_token_empty,
@@ -546,23 +540,16 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
 
     mock_client->sba_allocator = aws_small_block_allocator_new(allocator, false);
 
-    aws_atomic_init_int(&mock_client->stats.num_requests_network_io, 0);
+    aws_atomic_init_int(&mock_client->stats.num_requests_in_flight, 0);
+
+    for (uint32_t i = 0; i < (uint32_t)AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+        aws_atomic_init_int(&mock_client->stats.num_requests_network_io[i], 0);
+    }
+
     aws_atomic_init_int(&mock_client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&mock_client->stats.num_requests_streaming, 0);
-    aws_atomic_init_int(&mock_client->stats.num_requests_in_flight, 0);
-    aws_atomic_init_int(&mock_client->stats.num_allocated_vip_connections, 0);
-    aws_atomic_init_int(&mock_client->stats.num_active_vip_connections, 0);
-    aws_atomic_init_int(&mock_client->stats.num_warm_vip_connections, 0);
 
     return mock_client;
-}
-
-struct aws_s3_vip *aws_s3_tester_mock_vip_new(struct aws_s3_tester *tester) {
-    return aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_vip));
-}
-
-void aws_s3_tester_mock_vip_destroy(struct aws_s3_tester *tester, struct aws_s3_vip *vip) {
-    aws_mem_release(tester->allocator, vip);
 }
 
 struct aws_s3_vip_connection *aws_s3_tester_mock_vip_connection_new(struct aws_s3_tester *tester) {
