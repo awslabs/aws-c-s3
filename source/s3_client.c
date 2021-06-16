@@ -47,7 +47,7 @@ static const uint32_t s_max_requests_multiplier = 4;
 static const double s_throughput_per_vip_gbps = 3.33;
 
 /* Preferred amount of active vip connections per meta request type. */
-static const uint32_t s_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE_MAX] = {
+const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE_MAX] = {
     10, /* AWS_S3_META_REQUEST_TYPE_DEFAULT */
     10, /* AWS_S3_META_REQUEST_TYPE_GET_OBJECT */
     10, /* AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
@@ -102,6 +102,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory_default,
     .acquire_http_connection = aws_http_connection_manager_acquire_connection,
+    .get_host_address_count = aws_host_resolver_get_host_address_count,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
     .finish_destroy = s_s3_client_finish_destroy_default,
@@ -116,11 +117,12 @@ uint32_t aws_s3_client_get_max_active_connections(
     uint32_t num_vips = client->ideal_vip_count;
 
     if (meta_request != NULL) {
-        num_connections_per_vip = s_num_conns_per_vip_meta_request_look_up[meta_request->type];
+        num_connections_per_vip = g_num_conns_per_vip_meta_request_look_up[meta_request->type];
 
         struct aws_s3_endpoint *endpoint = meta_request->endpoint;
 
-        uint32_t num_known_vips = aws_host_resolver_get_host_address_count(
+        AWS_ASSERT(client->vtable->get_host_address_count);
+        uint32_t num_known_vips = client->vtable->get_host_address_count(
             client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
 
         if (num_known_vips < client->ideal_vip_count) {

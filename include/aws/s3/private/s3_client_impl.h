@@ -22,6 +22,7 @@
 
 struct aws_http_connection;
 struct aws_http_connection_manager;
+struct aws_host_resolver;
 struct aws_s3_endpoint;
 
 enum aws_s3_vip_connection_finish_code {
@@ -93,6 +94,8 @@ struct aws_s3_client_vtable {
         struct aws_http_connection_manager *conn_manager,
         aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback,
         void *user_data);
+
+    size_t (*get_host_address_count)(struct aws_host_resolver* host_resolver, const struct aws_string *host_name, uint32_t flags);
 
     void (*vip_connection_destroy)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
@@ -297,6 +300,10 @@ void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_max_num_connections_per_vip;
+
+AWS_S3_API
+extern const uint32_t g_num_conns_per_vip_meta_request_look_up[];
+
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_CLIENT_IMPL_H */

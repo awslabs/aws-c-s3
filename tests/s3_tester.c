@@ -538,12 +538,12 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
 }
 
 static void s_s3_client_acquire_http_connection_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
-    (void)client;
-    (void)vip_connection;
-    (void)callback;
+    struct aws_http_connection_manager *conn_manager,
+    aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback,
+    void *user_data) {
+    (void)conn_manager;
+    (void)on_connection_acquired_callback;
+    (void)user_data;
 }
 
 static void s_s3_client_schedule_process_work_synced_empty(struct aws_s3_client *client) {
