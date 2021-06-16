@@ -66,7 +66,7 @@ static const uint32_t s_default_max_retries = 5;
 static void s_s3_client_start_destroy(void *user_data);
 
 /* Called by s_s3_client_process_work_default when all shutdown criteria has been met. */
-static void s_s3_client_finish_destroy(void *user_data);
+static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 
 /* Called when the body streaming elg shutdown has completed. */
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
@@ -103,6 +103,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory_default,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
+    .finish_destroy = s_s3_client_finish_destroy_default,
 };
 
 uint32_t aws_s3_client_get_max_active_connections(
@@ -196,6 +197,17 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
+#ifdef BYO_CRYPTO
+    if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; when using BYO_CRYPTO, tls_connection_options can not be "
+            "NULL when TLS is enabled.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+#endif
+
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
@@ -287,6 +299,9 @@ struct aws_s3_client *aws_s3_client_new(
         if (client_config->tls_connection_options != NULL) {
             aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
         } else {
+#ifdef BYO_CRYPTO
+            AWS_ASSERT(false);
+#else
             struct aws_tls_ctx_options default_tls_ctx_options;
             AWS_ZERO_STRUCT(default_tls_ctx_options);
 
@@ -301,6 +316,7 @@ struct aws_s3_client *aws_s3_client_new(
 
             aws_tls_ctx_release(default_tls_ctx);
             aws_tls_ctx_options_clean_up(&default_tls_ctx_options);
+#endif
         }
     }
 
@@ -405,9 +421,8 @@ static void s_s3_client_start_destroy(void *user_data) {
     aws_s3_client_unlock_synced_data(client);
 }
 
-static void s_s3_client_finish_destroy(void *user_data) {
-    AWS_PRECONDITION(user_data);
-    struct aws_s3_client *client = user_data;
+static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
@@ -662,17 +677,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
     /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-
-        /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
-         * this requires some additional logic.  For now just a default meta request. */
-        if (aws_http_headers_has(initial_message_headers, g_range_header_name)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-get meta request; handling of ranged header is currently unsupported.");
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
 
@@ -848,6 +852,8 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(client->vtable);
+    AWS_PRECONDITION(client->vtable->finish_destroy);
 
     bool client_active = false;
 
@@ -874,13 +880,27 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     uint32_t num_requests_queued =
         aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
 
-    int sub_result = aws_sub_u32_checked(
-        client->threaded_data.num_requests_being_prepared,
-        num_requests_queued,
-        &client->threaded_data.num_requests_being_prepared);
+    {
+        int sub_result = aws_sub_u32_checked(
+            client->threaded_data.num_requests_being_prepared,
+            num_requests_queued,
+            &client->threaded_data.num_requests_being_prepared);
 
-    AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
-    (void)sub_result;
+        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+        (void)sub_result;
+    }
+
+    {
+        int sub_result = aws_sub_u32_checked(
+            client->threaded_data.num_requests_being_prepared,
+            client->synced_data.num_failed_prepare_requests,
+            &client->threaded_data.num_requests_being_prepared);
+
+        client->synced_data.num_failed_prepare_requests = 0;
+
+        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
+        (void)sub_result;
+    }
 
     aws_s3_client_unlock_synced_data(client);
 
@@ -1005,7 +1025,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         aws_s3_client_unlock_synced_data(client);
 
         if (finish_destroy) {
-            s_s3_client_finish_destroy(client);
+            client->vtable->finish_destroy(client);
         }
     }
 }
@@ -1104,6 +1124,8 @@ static void s_s3_client_prepare_callback_queue_request(
 
     if (error_code == AWS_ERROR_SUCCESS) {
         aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+    } else {
+        ++client->synced_data.num_failed_prepare_requests;
     }
 
     s_s3_client_schedule_process_work_synced(client);
@@ -1124,8 +1146,9 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, request->meta_request);
 
-        /* If this meta request was finished, then immediately finish this request. */
-        if (aws_s3_meta_request_has_finish_result(request->meta_request)) {
+        /* Unless the request is marked "always send", if this meta request has a finish result, then finish the request
+         * now and release it. */
+        if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
             aws_s3_meta_request_finished_request(request->meta_request, request, AWS_ERROR_S3_CANCELED);
 
             aws_s3_request_release(request);

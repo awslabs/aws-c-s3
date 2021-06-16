@@ -107,6 +107,8 @@ struct aws_s3_client_vtable {
 
     void (
         *setup_vip_connection_retry_token)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+
+    void (*finish_destroy)(struct aws_s3_client *client);
 };
 
 /* Represents the state of the S3 client. */
@@ -183,6 +185,9 @@ struct aws_s3_client {
 
         /* Hash table of endpoints that are in-use by the client.*/
         struct aws_hash_table endpoints;
+
+        /* How many requests failed to be prepared. */
+        uint32_t num_failed_prepare_requests;
 
         /* Meta requests that need added in the work event loop. */
         struct aws_linked_list pending_meta_request_work;

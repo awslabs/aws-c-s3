@@ -15,9 +15,10 @@ struct aws_http_message;
 struct aws_signable;
 struct aws_s3_meta_request;
 
-enum aws_s3_request_desc_flags {
-    AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_DESC_PART_SIZE_RESPONSE_BODY = 0x0000002,
+enum aws_s3_request_flags {
+    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS = 0x00000001,
+    AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY = 0x00000002,
+    AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000004,
 };
 
 /* Represents a single request made to S3. */
@@ -38,6 +39,14 @@ struct aws_s3_request {
     /* Request body to use when sending the request. The contents of this body will be re-used if a request is
      * retried.*/
     struct aws_byte_buf request_body;
+
+    /* Beginning range of this part. */
+    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
+    uint64_t part_range_start;
+
+    /* Last byte of this part.*/
+    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
+    uint64_t part_range_end;
 
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
      * However, must currently be a valid part number (ie: greater than 0) if the response body is to be streamed to the
@@ -86,6 +95,13 @@ struct aws_s3_request {
 
     /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
     uint32_t tracked_by_client : 1;
+
+    /* When true, even when the meta request has a finish result set, this request will be sent. */
+    uint32_t always_send : 1;
+
+    /* When true, this request is intended to find out the object size. This is currently only used by auto_range_get.
+     */
+    uint32_t discovers_object_size : 1;
 };
 
 AWS_EXTERN_C_BEGIN

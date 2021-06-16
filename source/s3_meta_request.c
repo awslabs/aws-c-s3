@@ -997,14 +997,12 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
 
         AWS_ASSERT(request->part_number >= 1);
 
-        uint64_t range_start = (request->part_number - 1) * meta_request->part_size;
-
         if (aws_s3_meta_request_has_finish_result(meta_request)) {
             ++num_failed;
         } else {
             if (error_code == AWS_ERROR_SUCCESS && meta_request->body_callback &&
                 meta_request->body_callback(
-                    meta_request, &body_buffer_byte_cursor, range_start, meta_request->user_data)) {
+                    meta_request, &body_buffer_byte_cursor, request->part_range_start, meta_request->user_data)) {
                 error_code = aws_last_error_or_unknown();
             }
 
