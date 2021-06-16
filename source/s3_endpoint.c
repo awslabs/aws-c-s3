@@ -97,6 +97,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     AWS_PRECONDITION(client_bootstrap);
     AWS_PRECONDITION(host_name);
 
+    struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
+
     /* Try to set up an HTTP connection manager. */
     struct aws_socket_options socket_options;
     AWS_ZERO_STRUCT(socket_options);
@@ -109,7 +111,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.bootstrap = client_bootstrap;
     manager_options.initial_window_size = SIZE_MAX;
     manager_options.socket_options = &socket_options;
-    manager_options.host = aws_byte_cursor_from_string(host_name);
+    manager_options.host = host_name_cursor;
     manager_options.max_connections = max_connections;
     manager_options.shutdown_complete_callback = s_s3_endpoint_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = endpoint;
@@ -139,7 +141,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         }
 
         aws_tls_connection_options_set_server_name(
-            manager_tls_options, endpoint->allocator, (struct aws_byte_cursor *)host_name);
+            manager_tls_options, endpoint->allocator, &host_name_cursor);
 
         manager_options.tls_connection_options = manager_tls_options;
         manager_options.port = s_https_port;

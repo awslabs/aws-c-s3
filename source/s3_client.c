@@ -125,6 +125,10 @@ uint32_t aws_s3_client_get_max_active_connections(
         if (num_known_vips < client->ideal_vip_count) {
             num_vips = num_known_vips;
         }
+
+        if(num_vips == 0) {
+            num_vips = 1;
+        }
     }
 
     uint32_t max_active_connections = num_vips * num_connections_per_vip;
@@ -152,14 +156,13 @@ static uint32_t s_s3_client_get_num_requests_network_io(
     AWS_PRECONDITION(client);
 
     uint32_t num_requests_network_io = 0;
-    enum aws_s3_meta_request_type meta_request_type = meta_request->type;
 
-    if (meta_request_type == AWS_S3_META_REQUEST_TYPE_MAX) {
+    if (meta_request == NULL) {
         for (uint32_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
             num_requests_network_io += aws_atomic_load_int(&client->stats.num_requests_network_io[i]);
         }
     } else {
-        num_requests_network_io = aws_atomic_load_int(&client->stats.num_requests_network_io[meta_request_type]);
+        num_requests_network_io = aws_atomic_load_int(&client->stats.num_requests_network_io[meta_request->type]);
     }
 
     return num_requests_network_io;
@@ -596,7 +599,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             .client_bootstrap = client->client_bootstrap,
             .tls_connection_options = client->tls_connection_options,
             .user_data = client,
-            .max_connections = aws_s3_client_get_max_active_connections(client, meta_request),
+            .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
         };
 
         endpoint = aws_s3_client_endpoint_new(client->sba_allocator, &endpoint_options);
@@ -1462,7 +1465,7 @@ reset_vip_connection:
     aws_retry_token_release(vip_connection->retry_token);
     vip_connection->retry_token = NULL;
 
-    aws_mem_release(client->allocator, vip_connection);
+    aws_mem_release(client->sba_allocator, vip_connection);
     vip_connection = NULL;
 
     /* Throw this VIP Connection structure back into the update list. */
