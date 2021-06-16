@@ -136,11 +136,6 @@ static bool s_s3_auto_ranged_put_update(
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
-        /* If there isn't a connection, then fail the meta request now if it hasn't been already. */
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
-    }
-
     if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
         /* If we haven't already sent a create-multipart-upload message, do so now. */
@@ -267,9 +262,12 @@ static bool s_s3_auto_ranged_put_update(
 
         /* If there are no endpoint connections to send requests on, then we can't send an abort message, so there is no
          * work remaining. */
+        /*
+        TODO
         if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
             goto no_work_remaining;
         }
+        */
 
         /* If we made it here, and the abort-multipart-upload message hasn't been sent yet, then do so now. */
         if (!auto_ranged_put->synced_data.abort_multipart_upload_sent) {

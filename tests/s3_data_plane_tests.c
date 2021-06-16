@@ -1622,7 +1622,7 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -1942,13 +1942,14 @@ static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *
         struct aws_s3_meta_request_test_results meta_request_test_results;
         AWS_ZERO_STRUCT(meta_request_test_results);
 
-        struct aws_byte_cursor bucket_without_file = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff");
+        struct aws_byte_cursor bucket_without_file =
+            AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff-us-west-2");
 
         struct aws_s3_tester_meta_request_options options = {
             .allocator = allocator,
             .client = client,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
             .bucket_name = &bucket_without_file,
             .get_options =
                 {
@@ -1957,8 +1958,6 @@ static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_INVALID_ARGUMENT);
-
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     }
 

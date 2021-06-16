@@ -116,6 +116,8 @@ static bool s_s3_meta_request_default_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
     struct aws_s3_request **out_request) {
+    (void)flags;
+
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_request);
 
@@ -124,12 +126,6 @@ static bool s_s3_meta_request_default_update(
     bool work_remaining = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
-        if (!meta_request_default->synced_data.request_sent) {
-            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
-        }
-    }
 
     if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 

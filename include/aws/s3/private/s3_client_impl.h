@@ -30,11 +30,6 @@ enum aws_s3_vip_connection_finish_code {
     AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY,
 };
 
-typedef void(aws_s3_client_acquire_http_connection_callback)(
-    struct aws_http_connection *http_connection,
-    int error_code,
-    void *user_data);
-
 typedef void(aws_s3_client_sign_callback)(int error_code, void *user_data);
 
 typedef void(aws_s3_vip_shutdown_callback_fn)(void *user_data);
@@ -95,9 +90,9 @@ struct aws_s3_client_vtable {
     void (*create_connection_for_request)(struct aws_s3_client *client, struct aws_s3_request *request);
 
     void (*acquire_http_connection)(
-        struct aws_s3_client *client,
-        struct aws_s3_vip_connection *vip_connection,
-        aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback);
+        struct aws_http_connection_manager *conn_manager,
+        aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback,
+        void *user_data);
 
     void (*vip_connection_destroy)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 
