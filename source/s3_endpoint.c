@@ -140,8 +140,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
             manager_tls_options->server_name = NULL;
         }
 
-        aws_tls_connection_options_set_server_name(
-            manager_tls_options, endpoint->allocator, &host_name_cursor);
+        aws_tls_connection_options_set_server_name(manager_tls_options, endpoint->allocator, &host_name_cursor);
 
         manager_options.tls_connection_options = manager_tls_options;
         manager_options.port = s_https_port;

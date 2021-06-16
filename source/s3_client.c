@@ -126,7 +126,7 @@ uint32_t aws_s3_client_get_max_active_connections(
             num_vips = num_known_vips;
         }
 
-        if(num_vips == 0) {
+        if (num_vips == 0) {
             num_vips = 1;
         }
     }
