@@ -79,7 +79,7 @@ struct aws_s3_endpoint *aws_s3_client_endpoint_new(
         options->tls_connection_options,
         options->max_connections);
 
-    if(endpoint->http_connection_manager == NULL) {
+    if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
     }
 
@@ -139,7 +139,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         proxy_options->port = proxy_uri.port;
 
         manager_options.proxy_options = proxy_options;
-    } else if(aws_last_error() != AWS_ERROR_S3_PROXY_ENV_NOT_FOUND) {
+    } else if (aws_last_error() != AWS_ERROR_S3_PROXY_ENV_NOT_FOUND) {
         return NULL;
     }
 
