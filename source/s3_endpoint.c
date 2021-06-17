@@ -72,7 +72,6 @@ struct aws_s3_endpoint *aws_s3_client_endpoint_new(
     endpoint->allocator = allocator;
     endpoint->host_name = options->host_name;
 
-    /* TODO handle errors */
     endpoint->http_connection_manager = s_s3_endpoint_create_http_connection_manager(
         endpoint,
         options->host_name,
@@ -80,11 +79,23 @@ struct aws_s3_endpoint *aws_s3_client_endpoint_new(
         options->tls_connection_options,
         options->max_connections);
 
+    if(endpoint->http_connection_manager == NULL) {
+        goto error_cleanup;
+    }
+
     endpoint->ref_count_zero_callback = options->ref_count_zero_callback;
     endpoint->shutdown_callback = options->shutdown_callback;
     endpoint->user_data = options->user_data;
 
     return endpoint;
+
+error_cleanup:
+
+    aws_string_destroy(options->host_name);
+
+    aws_mem_release(allocator, endpoint);
+
+    return NULL;
 }
 
 static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_manager(
@@ -128,6 +139,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         proxy_options->port = proxy_uri.port;
 
         manager_options.proxy_options = proxy_options;
+    } else if(aws_last_error() != AWS_ERROR_S3_PROXY_ENV_NOT_FOUND) {
+        return NULL;
     }
 
     if (tls_connection_options != NULL) {

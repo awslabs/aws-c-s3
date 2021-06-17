@@ -39,7 +39,7 @@ struct aws_s3_meta_request_work {
     struct aws_s3_meta_request *meta_request;
 };
 
-/* static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO; */
+static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 
 static const uint32_t s_max_requests_multiplier = 4;
 
@@ -158,17 +158,17 @@ uint32_t aws_s3_client_get_max_requests_prepare(struct aws_s3_client *client) {
 
 static uint32_t s_s3_client_get_num_requests_network_io(
     struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request) {
+    enum aws_s3_meta_request_type meta_request_type) {
     AWS_PRECONDITION(client);
 
     uint32_t num_requests_network_io = 0;
 
-    if (meta_request == NULL) {
+    if (meta_request_type == AWS_S3_META_REQUEST_TYPE_MAX) {
         for (uint32_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
             num_requests_network_io += aws_atomic_load_int(&client->stats.num_requests_network_io[i]);
         }
     } else {
-        num_requests_network_io = aws_atomic_load_int(&client->stats.num_requests_network_io[meta_request->type]);
+        num_requests_network_io = aws_atomic_load_int(&client->stats.num_requests_network_io[meta_request_type]);
     }
 
     return num_requests_network_io;
@@ -363,7 +363,6 @@ struct aws_s3_client *aws_s3_client_new(
         client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
     }
 
-    /* TODO handle error. */
     aws_hash_table_init(
         &client->synced_data.endpoints,
         client->sba_allocator,
@@ -585,6 +584,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
+    bool error_occurred = false;
+
     aws_s3_client_lock_synced_data(client);
 
     struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->sba_allocator, &host_header_value);
@@ -594,7 +595,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     int was_created = 0;
 
-    aws_hash_table_create(&client->synced_data.endpoints, endpoint_host_name, &endpoint_hash_element, &was_created);
+    if (aws_hash_table_create(
+            &client->synced_data.endpoints, endpoint_host_name, &endpoint_hash_element, &was_created)) {
+        error_occurred = true;
+        goto unlock;
+    }
 
     if (was_created) {
 
@@ -610,6 +615,12 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
         endpoint = aws_s3_client_endpoint_new(client->sba_allocator, &endpoint_options);
 
+        if (endpoint == NULL) {
+            aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
+            error_occurred = true;
+            goto unlock;
+        }
+
         endpoint_hash_element->value = endpoint;
         ++client->synced_data.num_endpoints_allocated;
     } else {
@@ -623,9 +634,23 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     s_s3_client_push_meta_request_synced(client, meta_request);
     s_s3_client_schedule_process_work_synced(client);
+
+unlock:
     aws_s3_client_unlock_synced_data(client);
 
-    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
+    if (error_occurred) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Could not create meta request due to error %d (%s)",
+            (void *)client,
+            aws_last_error(),
+            aws_error_str(aws_last_error()));
+
+        aws_s3_meta_request_release(meta_request);
+        meta_request = NULL;
+    } else {
+        AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
+    }
 
     return meta_request;
 }
@@ -640,6 +665,9 @@ static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint
 
     aws_s3_client_lock_synced_data(client);
 
+    /* It is possible that the critical section used for checking the existance of an endpoint in the table was called in
+     * a different thread before we acquired the lock for this critical section. To accommodate this, we check the ref
+     * count before removing it.*/
     if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 0) {
         aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
         clean_up_endpoint = true;
@@ -957,7 +985,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /*******************/
     /* Step 4: Log client stats. */
     /*******************/
-    /*
     {
         uint32_t num_requests_tracked_requests = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
@@ -965,7 +992,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_GET_OBJECT);
         uint32_t num_auto_ranged_put_network_io =
             s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_PUT_OBJECT);
-        uint32_t num_auto_ranged_default_network_io =
+        uint32_t num_auto_default_network_io =
             s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_DEFAULT);
 
         uint32_t num_requests_network_io =
@@ -990,12 +1017,11 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             client->threaded_data.request_queue_size,
             num_auto_ranged_get_network_io,
             num_auto_ranged_put_network_io,
-            num_auto_ranged_default_network_io,
+            num_auto_default_network_io,
             num_requests_network_io,
             num_requests_stream_queued_waiting,
             num_requests_streaming);
     }
-    */
 
     /*******************/
     /* Step 5: Check for client shutdown. */
@@ -1148,7 +1174,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
     struct aws_linked_list left_over_requests;
     aws_linked_list_init(&left_over_requests);
 
-    while (s_s3_client_get_num_requests_network_io(client, NULL) <
+    while (s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX) <
                aws_s3_client_get_max_active_connections(client, NULL) &&
            !aws_linked_list_empty(&client->threaded_data.request_queue)) {
 
@@ -1162,7 +1188,8 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
             aws_s3_request_release(request);
             request = NULL;
-        } else if (s_s3_client_get_num_requests_network_io(client, request->meta_request) < max_active_connections) {
+        } else if (
+            s_s3_client_get_num_requests_network_io(client, request->meta_request->type) < max_active_connections) {
             s_s3_client_create_connection_for_request(client, request);
         } else {
             /* Push the request into the left-over list to be used in a future call of this function. */
