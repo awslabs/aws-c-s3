@@ -202,7 +202,7 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
     }
 
     for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
-        aws_mem_release(tester.allocator, mock_meta_requests[i]);
+        aws_s3_meta_request_release(mock_meta_requests[i]);
         mock_meta_requests[i] = NULL;
     }
 
