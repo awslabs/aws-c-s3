@@ -665,9 +665,9 @@ static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint
 
     aws_s3_client_lock_synced_data(client);
 
-    /* It is possible that the critical section used for checking the existance of an endpoint in the table was called in
-     * a different thread before we acquired the lock for this critical section. To accommodate this, we check the ref
-     * count before removing it.*/
+    /* It is possible that the critical section used for checking the existance of an endpoint in the table was called
+     * in a different thread before we acquired the lock for this critical section. To accommodate this, we check the
+     * ref count before removing it.*/
     if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 0) {
         aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
         clean_up_endpoint = true;
@@ -1091,9 +1091,14 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
-        /* While our number of prepared/queued requests is less than the max, and the total requests in flight is also
-         * less than the maximum, and we have meta requests to get requests from, then try to prepare requests for being
-         * queued. */
+        /* While:
+         *     * Number of prepared + queued requests is less than the max that can be in the preparation stage.
+         *     * Total number of requests tracked by the client is less than the max tracked ("in flight") requests.
+         *     * There are meta requests to get requests from.
+         *
+         * Then update meta requests to get new requests that can then be prepared (reading from any streams, signing,
+         * etc.) for sending.
+         */
         while ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) <
                    max_requests_prepare &&
                num_requests_in_flight < max_requests_in_flight &&
@@ -1103,6 +1108,24 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 aws_linked_list_begin(&client->threaded_data.meta_requests);
             struct aws_s3_meta_request *meta_request =
                 AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
+
+            struct aws_s3_endpoint *endpoint = meta_request->endpoint;
+            AWS_ASSERT(endpoint != NULL);
+
+            AWS_ASSERT(client->vtable->get_host_address_count);
+            uint32_t num_known_vips = client->vtable->get_host_address_count(
+                client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
+
+            /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
+             * ramping up requests just yet. If there is already enough in the queue for one address (even if those
+             * aren't for this particular endpoint) we skip over this meta request for now. */
+            if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
+                                        client->threaded_data.request_queue_size) >= g_max_num_connections_per_vip) {
+                aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
+                aws_linked_list_push_back(
+                    &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
+                continue;
+            }
 
             struct aws_s3_request *request = NULL;
 
