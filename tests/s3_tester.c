@@ -68,7 +68,6 @@ static int s_s3_test_meta_request_header_callback(
 
     aws_http_headers_release(meta_request_test_results->response_headers);
 
-    /* TODO copy this instead of making acquiring reference. */
     meta_request_test_results->response_headers = (struct aws_http_headers *)headers;
     aws_http_headers_acquire(meta_request_test_results->response_headers);
 

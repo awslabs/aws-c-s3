@@ -95,7 +95,10 @@ struct aws_s3_client_vtable {
         aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback,
         void *user_data);
 
-    size_t (*get_host_address_count)(struct aws_host_resolver* host_resolver, const struct aws_string *host_name, uint32_t flags);
+    size_t (*get_host_address_count)(
+        struct aws_host_resolver *host_resolver,
+        const struct aws_string *host_name,
+        uint32_t flags);
 
     void (*vip_connection_destroy)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
 

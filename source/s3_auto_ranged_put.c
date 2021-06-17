@@ -260,15 +260,6 @@ static bool s_s3_auto_ranged_put_update(
             goto no_work_remaining;
         }
 
-        /* If there are no endpoint connections to send requests on, then we can't send an abort message, so there is no
-         * work remaining. */
-        /*
-        TODO
-        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CLIENT_STARTUP_FAILED) > 0) {
-            goto no_work_remaining;
-        }
-        */
-
         /* If we made it here, and the abort-multipart-upload message hasn't been sent yet, then do so now. */
         if (!auto_ranged_put->synced_data.abort_multipart_upload_sent) {
             if (auto_ranged_put->upload_id == NULL) {
