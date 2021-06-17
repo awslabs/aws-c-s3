@@ -545,6 +545,15 @@ static void s_s3_client_acquire_http_connection_empty(
     (void)user_data;
 }
 
+size_t s_s3_client_get_host_address_count_empty(
+    struct aws_host_resolver *host_resolver,
+    const struct aws_string *host_name,
+    uint32_t flags) {
+    (void)host_resolver;
+    (void)host_name;
+    return 0;
+}
+
 static void s_s3_client_schedule_process_work_synced_empty(struct aws_s3_client *client) {
     (void)client;
 }
@@ -558,6 +567,7 @@ static void s_s3_client_setup_vip_connection_retry_token_empty(
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .acquire_http_connection = s_s3_client_acquire_http_connection_empty,
+    .get_host_address_count = s_s3_client_get_host_address_count_empty,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
     .setup_vip_connection_retry_token = s_s3_client_setup_vip_connection_retry_token_empty,
 };
@@ -707,6 +717,24 @@ static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
 struct aws_s3_empty_meta_request {
     struct aws_s3_meta_request base;
 };
+
+static void s_s3_mock_endpoint_zero_ref(void *user_data) {
+    struct aws_s3_endpoint *endpoint = user_data;
+
+    aws_string_destroy(endpoint->host_name);
+    aws_mem_release(endpoint->allocator, endpoint);
+}
+
+struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *tester) {
+    struct aws_s3_endpoint *endpoint = aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_endpoint));
+    endpoint->allocator = tester->allocator;
+    aws_ref_count_init(&endpoint->ref_count, endpoint, s_s3_mock_endpoint_zero_ref);
+
+    struct aws_byte_cursor empty_cursor = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("");
+    endpoint->host_name = aws_string_new_from_cursor(tester->allocator, &empty_cursor);
+
+    return endpoint;
+}
 
 struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);

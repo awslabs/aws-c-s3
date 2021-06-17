@@ -153,9 +153,6 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
     mock_client->client_bootstrap = &mock_client_bootstrap;
     mock_client->vtable->get_host_address_count = s_test_get_max_active_connections_host_address_count;
 
-    struct aws_s3_endpoint mock_endpoint;
-    AWS_ZERO_STRUCT(mock_endpoint);
-
     struct aws_s3_meta_request *mock_meta_requests[AWS_S3_META_REQUEST_TYPE_MAX];
 
     for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
@@ -166,7 +163,7 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
         /* Setup test data. */
         mock_meta_requests[i] = aws_s3_tester_mock_meta_request_new(&tester);
         mock_meta_requests[i]->type = i;
-        mock_meta_requests[i]->endpoint = &mock_endpoint;
+        mock_meta_requests[i]->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
     }
 
     /* With host count at 0, we should allow for one VIP worth of max-active-connections. */
@@ -247,6 +244,8 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
     }
 
     for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+        aws_s3_endpoint_release(mock_meta_requests[i]->endpoint);
+
         aws_s3_meta_request_release(mock_meta_requests[i]);
         mock_meta_requests[i] = NULL;
     }
@@ -649,8 +648,11 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
 
-    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+    struct aws_client_bootstrap mock_bootstrap;
+    AWS_ZERO_STRUCT(mock_bootstrap);
 
+    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+    mock_client->client_bootstrap = &mock_bootstrap;
     *((uint32_t *)&mock_client->ideal_vip_count) = 1;
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
     aws_linked_list_init(&mock_client->threaded_data.meta_requests);
@@ -660,6 +662,8 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
     ///////////////////////////////////
 
     struct aws_s3_meta_request *mock_meta_request_0 = aws_s3_tester_mock_meta_request_new(&tester);
+    mock_meta_request_0->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
+
     struct test_work_meta_request_update_user_data mock_meta_request_0_data = {
         .has_work_remaining = false,
     };
@@ -685,6 +689,7 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
         .has_work_remaining = true,
     };
 
+    mock_meta_request_1->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
     mock_meta_request_1->user_data = &mock_meta_request_1_data;
 
     struct aws_s3_meta_request_vtable *meta_request_vtable_1 =
@@ -738,6 +743,8 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
         aws_s3_meta_request_release(meta_request);
     }
 
+    aws_s3_endpoint_release(mock_meta_request_0->endpoint);
+    aws_s3_endpoint_release(mock_meta_request_1->endpoint);
     aws_s3_meta_request_release(mock_meta_request_0);
     aws_s3_meta_request_release(mock_meta_request_1);
     aws_s3_client_release(mock_client);
@@ -802,13 +809,10 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
     struct s3_test_update_connections_finish_result_user_data test_update_connections_finish_result_user_data;
     AWS_ZERO_STRUCT(test_update_connections_finish_result_user_data);
 
-    struct aws_s3_endpoint mock_endpoint;
-    AWS_ZERO_STRUCT(mock_endpoint);
-
     struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     mock_meta_request->synced_data.finish_result_set = true;
     mock_meta_request->user_data = &test_update_connections_finish_result_user_data;
-    mock_meta_request->endpoint = &mock_endpoint;
+    mock_meta_request->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
 
     struct aws_s3_meta_request_vtable *mock_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request, NULL);
@@ -865,6 +869,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
         aws_s3_request_release(request);
     }
 
+    aws_s3_endpoint_release(mock_meta_request->endpoint);
     aws_s3_meta_request_release(mock_meta_request);
 
     aws_s3_client_release(mock_client);

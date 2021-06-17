@@ -274,6 +274,8 @@ static void s_s3_endpoint_ref_count_zero(void *user_data) {
     if (endpoint->http_connection_manager != NULL) {
         aws_http_connection_manager_release(endpoint->http_connection_manager);
         endpoint->http_connection_manager = NULL;
+    } else {
+        s_s3_endpoint_http_connection_manager_shutdown_callback(endpoint->user_data);
     }
 }
 
