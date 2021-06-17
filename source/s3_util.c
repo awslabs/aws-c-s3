@@ -281,7 +281,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     struct aws_byte_buf user_agent_buffer;
     AWS_ZERO_STRUCT(user_agent_buffer);
 
-    if (!aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header)) {
+    if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
         /* If the header was found, then create a buffer with the total size we'll need, and append the curent user
          * agent header with a trailing space. */
         aws_byte_buf_init(
