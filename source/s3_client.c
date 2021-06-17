@@ -120,18 +120,21 @@ uint32_t aws_s3_client_get_max_active_connections(
         num_connections_per_vip = g_num_conns_per_vip_meta_request_look_up[meta_request->type];
 
         struct aws_s3_endpoint *endpoint = meta_request->endpoint;
+        AWS_ASSERT(endpoint != NULL);
 
         AWS_ASSERT(client->vtable->get_host_address_count);
         uint32_t num_known_vips = client->vtable->get_host_address_count(
             client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
 
-        if (num_known_vips < client->ideal_vip_count) {
+        /* If the number of known vips is less than our current VIP counter, clamp it to that known value. */
+        if (num_known_vips < num_vips) {
             num_vips = num_known_vips;
         }
+    }
 
-        if (num_vips == 0) {
-            num_vips = 1;
-        }
+    /* We always want to allow for at least one VIP worth of connections. */
+    if (num_vips == 0) {
+        num_vips = 1;
     }
 
     uint32_t max_active_connections = num_vips * num_connections_per_vip;

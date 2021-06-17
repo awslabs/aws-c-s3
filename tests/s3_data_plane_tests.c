@@ -122,7 +122,7 @@ static int s_test_s3_client_byo_crypto_with_options(struct aws_allocator *alloca
     return 0;
 }
 
-const size_t s_test_max_active_connections_host_count = 2;
+size_t s_test_max_active_connections_host_count = 0;
 
 size_t s_test_get_max_active_connections_host_address_count(
     struct aws_host_resolver *host_resolver,
@@ -159,46 +159,91 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
     struct aws_s3_meta_request *mock_meta_requests[AWS_S3_META_REQUEST_TYPE_MAX];
 
     for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+        /* Verify that g_max_num_connections_per_vip and g_num_conns_per_vip_meta_request_look_up are set up
+         * correctly.*/
         ASSERT_TRUE(g_max_num_connections_per_vip >= g_num_conns_per_vip_meta_request_look_up[i]);
 
+        /* Setup test data. */
         mock_meta_requests[i] = aws_s3_tester_mock_meta_request_new(&tester);
         mock_meta_requests[i]->type = i;
         mock_meta_requests[i]->endpoint = &mock_endpoint;
     }
 
-    /* Behavior should not be affected by max_active_connections_override since it is 0. */
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, NULL) ==
-        mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+    /* With host count at 0, we should allow for one VIP worth of max-active-connections. */
+    {
+        s_test_max_active_connections_host_count = 0;
 
-    for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
         ASSERT_TRUE(
-            aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
-            s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                g_num_conns_per_vip_meta_request_look_up[i]);
+        }
     }
 
-    *((uint32_t *)&mock_client->max_active_connections_override) = 3;
+    s_test_max_active_connections_host_count = 2;
+
+    /* Behavior should not be affected by max_active_connections_override since it is 0, and should just be in relation
+     * to ideal-vip-count and host-count. */
+    {
+        ASSERT_TRUE(
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+        }
+    }
 
     /* Max active connections override should now cap the calculated amount of active connections. */
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, NULL) == mock_client->max_active_connections_override);
+    {
+        *((uint32_t *)&mock_client->max_active_connections_override) = 3;
 
-    for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
         ASSERT_TRUE(
-            aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+            mock_client->max_active_connections_override <
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        ASSERT_TRUE(
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
             mock_client->max_active_connections_override);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                mock_client->max_active_connections_override <
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                mock_client->max_active_connections_override);
+        }
     }
 
-    /* Max active connections override should be ignored since the calculated amount of connections is less. */
-    *((uint32_t *)&mock_client->max_active_connections_override) = 100;
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, NULL) ==
-        mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+    /* Max active connections override should be ignored since the calculated amount of max connections is less. */
+    {
+        *((uint32_t *)&mock_client->max_active_connections_override) = 100000;
 
-    for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
         ASSERT_TRUE(
-            aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
-            s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+            mock_client->max_active_connections_override >
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        ASSERT_TRUE(
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                mock_client->max_active_connections_override >
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+        }
     }
 
     for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
