@@ -32,14 +32,13 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message);
 
-/* Create an HTTP request for an S3 Get Object Request, using the original request as a basis. If multipart is not
- * needed, part_number and part_size can be 0. */
+/* Create an HTTP request for an S3 Ranged Get Object Request, using the given request as a basis */
 AWS_S3_API
-struct aws_http_message *aws_s3_get_object_message_new(
+struct aws_http_message *aws_s3_ranged_get_object_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    uint32_t part_number,
-    size_t part_size);
+    uint64_t range_start,
+    uint64_t range_end);
 
 AWS_S3_API
 int aws_s3_message_util_set_multipart_request_path(

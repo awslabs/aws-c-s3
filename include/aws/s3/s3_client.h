@@ -39,9 +39,17 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
     void *user_data);
 
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
+    /* The meta request that the callback is being issued for. */
     struct aws_s3_meta_request *meta_request,
+
+    /* The body data for this chunk of the object. */
     const struct aws_byte_cursor *body,
+
+    /* The byte index of the object that this refers to. For example, for an HTTP message that has a range header, the
+       first chunk received will have a range_start that matches the range header's range-start.*/
     uint64_t range_start,
+
+    /* User data specified by aws_s3_meta_request_options.*/
     void *user_data);
 
 typedef void(aws_s3_meta_request_finish_fn)(
@@ -85,7 +93,8 @@ struct aws_s3_client_config {
      */
     enum aws_s3_meta_request_tls_mode tls_mode;
 
-    /* TLS Options to be used for each connection, if tls_mode is ENABLED */
+    /* TLS Options to be used for each connection, if tls_mode is ENABLED. When compiling with BYO_CRYPTO, and tls_mode
+     * is ENABLED, this is required. Otherwise, this is optional. */
     struct aws_tls_connection_options *tls_connection_options;
 
     /* Signing options to be used for each request. Specify NULL to not sign requests. */

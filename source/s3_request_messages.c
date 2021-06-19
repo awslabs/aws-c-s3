@@ -117,17 +117,17 @@ const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
 static int s_s3_message_util_add_content_range_header(
-    uint64_t part_index,
-    uint64_t part_size,
+    uint64_t part_range_start,
+    uint64_t part_range_end,
     struct aws_http_message *out_message);
 
 /* Create a new get object request from an existing get object request. Currently just adds an optional ranged header.
  */
-struct aws_http_message *aws_s3_get_object_message_new(
+struct aws_http_message *aws_s3_ranged_get_object_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    uint32_t part_number,
-    size_t part_size) {
+    uint64_t range_start,
+    uint64_t range_end) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
@@ -137,10 +137,8 @@ struct aws_http_message *aws_s3_get_object_message_new(
         return NULL;
     }
 
-    if (part_number > 0) {
-        if (s_s3_message_util_add_content_range_header(part_number - 1, part_size, message)) {
-            goto error_clean_up;
-        }
+    if (s_s3_message_util_add_content_range_header(range_start, range_end, message)) {
+        goto error_clean_up;
     }
 
     return message;
@@ -564,18 +562,15 @@ error_clean_up:
 
 /* Add a content-range header.*/
 static int s_s3_message_util_add_content_range_header(
-    uint64_t part_index,
-    uint64_t part_size,
+    uint64_t part_range_start,
+    uint64_t part_range_end,
     struct aws_http_message *out_message) {
     AWS_PRECONDITION(out_message);
 
-    uint64_t range_start = part_index * part_size;
-    uint64_t range_end = range_start + part_size - 1;
-
-    /* TODO this is more than enough space, but maybe there's a better way to do this?
-     * ((2^64)-1 = 20 characters;  2*20 + length-of("bytes=-") < 128) */
+    /* ((2^64)-1 = 20 characters;  2*20 + length-of("bytes=-") < 128) */
     char range_value_buffer[128] = "";
-    snprintf(range_value_buffer, sizeof(range_value_buffer), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end);
+    snprintf(
+        range_value_buffer, sizeof(range_value_buffer), "bytes=%" PRIu64 "-%" PRIu64, part_range_start, part_range_end);
 
     struct aws_http_header range_header;
     AWS_ZERO_STRUCT(range_header);

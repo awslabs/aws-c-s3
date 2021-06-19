@@ -513,8 +513,8 @@ static int s_test_s3_message_util_assign_body(struct aws_allocator *allocator, v
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_get_object_message_new, s_test_s3_get_object_message_new)
-static int s_test_s3_get_object_message_new(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_ranged_get_object_message_new, s_test_s3_ranged_get_object_message_new)
+static int s_test_s3_ranged_get_object_message_new(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     const struct aws_byte_cursor test_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/TestPath");
@@ -524,23 +524,11 @@ static int s_test_s3_get_object_message_new(struct aws_allocator *allocator, voi
     ASSERT_TRUE(original_message != NULL);
 
     {
-        struct aws_http_message *get_object_message = aws_s3_get_object_message_new(allocator, original_message, 0, 0);
-        ASSERT_TRUE(get_object_message != NULL);
-
-        ASSERT_SUCCESS(s_test_http_messages_match(allocator, original_message, get_object_message, NULL, 0));
-
-        aws_http_message_release(get_object_message);
-    }
-
-    {
-        const uint32_t part_number = 2;
-        const size_t part_size = 42;
-
         char expected_range_value_buffer[128] = "bytes=42-83";
         struct aws_byte_cursor expected_range_value_cursor = aws_byte_cursor_from_c_str(expected_range_value_buffer);
 
         struct aws_http_message *get_object_message =
-            aws_s3_get_object_message_new(allocator, original_message, part_number, part_size);
+            aws_s3_ranged_get_object_message_new(allocator, original_message, 42, 83);
         ASSERT_TRUE(get_object_message != NULL);
 
         struct aws_http_headers *headers = aws_http_message_get_headers(get_object_message);

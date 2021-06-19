@@ -227,16 +227,32 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
+#ifdef BYO_CRYPTO
+    if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; when using BYO_CRYPTO, tls_connection_options can not be "
+            "NULL when TLS is enabled.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+#endif
+
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
     client->sba_allocator = aws_small_block_allocator_new(allocator, true);
+    if (!client->sba_allocator) {
+        goto sba_allocator_fail;
+    }
 
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
-    aws_mutex_init(&client->synced_data.lock);
+    if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
+        goto lock_init_fail;
+    }
 
     aws_linked_list_init(&client->synced_data.vips);
     aws_linked_list_init(&client->synced_data.pending_vip_connection_updates);
@@ -287,6 +303,10 @@ struct aws_s3_client *aws_s3_client_new(
             client->body_streaming_elg = aws_event_loop_group_new_default(
                 client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
         }
+        if (!client->body_streaming_elg) {
+            /* Fail to create elg, we should fail the call */
+            goto elg_create_fail;
+        }
         client->synced_data.body_streaming_elg_allocated = true;
     }
 
@@ -313,13 +333,12 @@ struct aws_s3_client *aws_s3_client_new(
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
 
-        if (client->tls_connection_options == NULL) {
-            goto on_error;
-        }
-
         if (client_config->tls_connection_options != NULL) {
             aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
         } else {
+#ifdef BYO_CRYPTO
+            AWS_ASSERT(false);
+#else
             struct aws_tls_ctx_options default_tls_ctx_options;
             AWS_ZERO_STRUCT(default_tls_ctx_options);
 
@@ -334,6 +353,7 @@ struct aws_s3_client *aws_s3_client_new(
 
             aws_tls_ctx_release(default_tls_ctx);
             aws_tls_ctx_options_clean_up(&default_tls_ctx_options);
+#endif
         }
     }
 
@@ -381,9 +401,21 @@ struct aws_s3_client *aws_s3_client_new(
     return client;
 
 on_error:
-
-    aws_s3_client_release(client);
-
+    aws_event_loop_group_release(client->body_streaming_elg);
+    client->body_streaming_elg = NULL;
+    if (client->tls_connection_options) {
+        aws_tls_connection_options_clean_up(client->tls_connection_options);
+        aws_mem_release(client->allocator, client->tls_connection_options);
+        client->tls_connection_options = NULL;
+    }
+elg_create_fail:
+    aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
+    aws_client_bootstrap_release(client->client_bootstrap);
+    aws_mutex_clean_up(&client->synced_data.lock);
+lock_init_fail:
+    aws_small_block_allocator_destroy(client->sba_allocator);
+sba_allocator_fail:
+    aws_mem_release(client->allocator, client);
     return NULL;
 }
 
@@ -1084,17 +1116,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
     /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-
-        /* TODO If we already have a ranged header, we can break the range up into parts too.  However,
-         * this requires some additional logic.  For now just a default meta request. */
-        if (aws_http_headers_has(initial_message_headers, g_range_header_name)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-get meta request; handling of ranged header is currently unsupported.");
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
 
