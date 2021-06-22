@@ -40,32 +40,45 @@ typedef bool(aws_s3_endpoint_ref_zero_fn)(struct aws_s3_endpoint *endpoint);
 typedef void(aws_s3_endpoint_shutdown_fn)(void *user_data);
 
 struct aws_s3_endpoint_options {
+    /* URL of the host that this endpoint refers to. */
     struct aws_string *host_name;
 
+    /* Callback for when the reference count of this endpoint hits zero. */
     aws_s3_endpoint_ref_zero_fn *ref_count_zero_callback;
 
+    /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
 
+    /* Bootstrap of the client to be used for spawning a connection manager. */
     struct aws_client_bootstrap *client_bootstrap;
 
+    /* TLS connection options to be used for the connection manager. */
     const struct aws_tls_connection_options *tls_connection_options;
 
+    /* User data to be passed around with the endpoint. */
     void *user_data;
 
+    /* Maximum number of connections that can be spawned for this endpoint. */
     uint32_t max_connections;
 };
 
 struct aws_s3_endpoint {
+    /* Reference count for this endpoint. */
     struct aws_ref_count ref_count;
 
+    /* What allocator was used to create this endpoint. */
     struct aws_allocator *allocator;
 
+    /* URL of the host that this endpoint refers to. */
     struct aws_string *host_name;
 
+    /* Connection manager that manages all connections to this endpoint. */
     struct aws_http_connection_manager *http_connection_manager;
 
+    /* Callback for when the reference count of this endpoint hits zero. */
     aws_s3_endpoint_ref_zero_fn *ref_count_zero_callback;
 
+    /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
 
     void *user_data;
