@@ -536,6 +536,19 @@ void aws_s3_tester_unlock_synced_data(struct aws_s3_tester *tester) {
     aws_mutex_unlock(&tester->synced_data.lock);
 }
 
+struct aws_s3_meta_request *s_s3_client_meta_request_factory_empty(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+    return NULL;
+}
+
+void s_s3_client_create_connection_for_request_empty(struct aws_s3_client *client, struct aws_s3_request *request) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(request);
+}
+
 static void s_s3_client_acquire_http_connection_empty(
     struct aws_http_connection_manager *conn_manager,
     aws_http_connection_manager_on_connection_setup_fn *on_connection_acquired_callback,
@@ -558,10 +571,33 @@ static void s_s3_client_schedule_process_work_synced_empty(struct aws_s3_client 
     (void)client;
 }
 
+static void s_s3_client_process_work_empty(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+}
+
+static bool s_s3_client_endpoint_ref_count_zero_empty(struct aws_s3_endpoint *endpoint) {
+    AWS_PRECONDITION(endpoint);
+    return true;
+}
+
+static void s_s3_client_endpoint_shutdown_callback_empty(void *user_data) {
+    AWS_PRECONDITION(user_data);
+}
+
+static void s_s3_client_finish_destroy_empty(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+}
+
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
+    .meta_request_factory = s_s3_client_meta_request_factory_empty,
+    .create_connection_for_request = s_s3_client_create_connection_for_request_empty,
     .acquire_http_connection = s_s3_client_acquire_http_connection_empty,
     .get_host_address_count = s_s3_client_get_host_address_count_empty,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
+    .process_work = s_s3_client_process_work_empty,
+    .endpoint_ref_count_zero = s_s3_client_endpoint_ref_count_zero_empty,
+    .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback_empty,
+    .finish_destroy = s_s3_client_finish_destroy_empty,
 };
 
 static void s_s3_mock_client_start_destroy(void *user_data) {
