@@ -20,14 +20,14 @@
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
-AWS_TEST_CASE(test_s3_client_set_vip_connection_warm, s_test_s3_client_set_vip_connection_warm)
-static int s_test_s3_client_set_vip_connection_warm(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_client_set_connection_warm, s_test_s3_client_set_connection_warm)
+static int s_test_s3_client_set_connection_warm(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_client_set_vip_connection_active, s_test_s3_client_set_vip_connection_active)
-static int s_test_s3_client_set_vip_connection_active(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_client_set_connection_active, s_test_s3_client_set_connection_active)
+static int s_test_s3_client_set_connection_active(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     return 0;
 }

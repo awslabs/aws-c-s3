@@ -53,7 +53,7 @@ static int s_s3_meta_request_incoming_headers(
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
 
 static void s_s3_meta_request_send_request_finish(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code);
 
@@ -599,12 +599,12 @@ finish:
 
 void aws_s3_meta_request_send_request(
     struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection) {
+    struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->http_connection);
+    AWS_PRECONDITION(connection);
+    AWS_PRECONDITION(connection->http_connection);
 
-    struct aws_s3_request *request = vip_connection->request;
+    struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
     /* Now that we have a signed request and a connection, go ahead and issue the request. */
@@ -613,13 +613,13 @@ void aws_s3_meta_request_send_request(
 
     options.self_size = sizeof(struct aws_http_make_request_options);
     options.request = request->send_data.message;
-    options.user_data = vip_connection;
+    options.user_data = connection;
     options.on_response_headers = s_s3_meta_request_incoming_headers;
     options.on_response_header_block_done = NULL;
     options.on_response_body = s_s3_meta_request_incoming_body;
     options.on_complete = s_s3_meta_request_stream_complete;
 
-    struct aws_http_stream *stream = aws_http_connection_make_request(vip_connection->http_connection, &options);
+    struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
 
     if (stream == NULL) {
         AWS_LOGF_ERROR(
@@ -644,7 +644,7 @@ void aws_s3_meta_request_send_request(
 
 error_finish:
 
-    s_s3_meta_request_send_request_finish(vip_connection, NULL, aws_last_error_or_unknown());
+    s_s3_meta_request_send_request_finish(connection, NULL, aws_last_error_or_unknown());
 }
 
 static int s_s3_meta_request_error_code_from_response_status(int response_status) {
@@ -681,10 +681,10 @@ static int s_s3_meta_request_incoming_headers(
 
     AWS_PRECONDITION(stream);
 
-    struct aws_s3_vip_connection *vip_connection = user_data;
-    AWS_PRECONDITION(vip_connection);
+    struct aws_s3_connection *connection = user_data;
+    AWS_PRECONDITION(connection);
 
-    struct aws_s3_request *request = vip_connection->request;
+    struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -692,10 +692,10 @@ static int s_s3_meta_request_incoming_headers(
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p Incoming headers for request %p. VIP connection: %p.",
+        "id=%p Incoming headers for request %p on connection %p.",
         (void *)meta_request,
         (void *)request,
-        (void *)vip_connection);
+        (void *)connection);
 
     if (aws_http_stream_get_incoming_response_status(stream, &request->send_data.response_status)) {
         AWS_LOGF_ERROR(
@@ -733,10 +733,10 @@ static int s_s3_meta_request_incoming_body(
     void *user_data) {
     (void)stream;
 
-    struct aws_s3_vip_connection *vip_connection = user_data;
-    AWS_PRECONDITION(vip_connection);
+    struct aws_s3_connection *connection = user_data;
+    AWS_PRECONDITION(connection);
 
-    struct aws_s3_request *request = vip_connection->request;
+    struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -750,7 +750,7 @@ static int s_s3_meta_request_incoming_body(
         (void *)request,
         request->send_data.response_status,
         (uint64_t)data->len,
-        (void *)vip_connection);
+        (void *)connection);
 
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;
@@ -781,19 +781,19 @@ static int s_s3_meta_request_incoming_body(
 /* Finish up the processing of the request work. */
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
 
-    struct aws_s3_vip_connection *vip_connection = user_data;
-    AWS_PRECONDITION(vip_connection);
+    struct aws_s3_connection *connection = user_data;
+    AWS_PRECONDITION(connection);
 
-    s_s3_meta_request_send_request_finish(vip_connection, stream, error_code);
+    s_s3_meta_request_send_request_finish(connection, stream, error_code);
 }
 
 static void s_s3_meta_request_send_request_finish(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code) {
-    AWS_PRECONDITION(vip_connection);
+    AWS_PRECONDITION(connection);
 
-    struct aws_s3_request *request = vip_connection->request;
+    struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -802,16 +802,16 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
-    vtable->send_request_finish(vip_connection, stream, error_code);
+    vtable->send_request_finish(connection, stream, error_code);
 }
 
 void aws_s3_meta_request_send_request_finish_default(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code) {
-    AWS_PRECONDITION(vip_connection);
+    AWS_PRECONDITION(connection);
 
-    struct aws_s3_request *request = vip_connection->request;
+    struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -841,11 +841,11 @@ void aws_s3_meta_request_send_request_finish_default(
         error_code,
         response_status);
 
-    enum aws_s3_vip_connection_finish_code finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED;
+    enum aws_s3_connection_finish_code finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
     if (error_code == AWS_ERROR_SUCCESS) {
 
-        finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_SUCCESS;
+        finish_code = AWS_S3_CONNECTION_FINISH_CODE_SUCCESS;
 
     } else {
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -855,7 +855,7 @@ void aws_s3_meta_request_send_request_finish_default(
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already has
          * a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || meta_request_finishing) {
-            finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED;
+            finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
@@ -868,7 +868,7 @@ void aws_s3_meta_request_send_request_finish_default(
 
         } else {
             /* Otherwise, set this up for a retry if the meta request is active. */
-            finish_code = AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY;
+            finish_code = AWS_S3_CONNECTION_FINISH_CODE_RETRY;
         }
     }
 
@@ -877,7 +877,7 @@ void aws_s3_meta_request_send_request_finish_default(
         stream = NULL;
     }
 
-    aws_s3_client_notify_connection_finished(client, vip_connection, error_code, finish_code);
+    aws_s3_client_notify_connection_finished(client, connection, error_code, finish_code);
 }
 
 void aws_s3_meta_request_finished_request(
