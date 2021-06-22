@@ -1373,9 +1373,9 @@ static void s_s3_client_on_acquire_http_connection(
 
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_VIP_CONNECTION,
+            AWS_LS_S3_ENDPOINT,
             "id=%p: Could not acquire connection due to error code %d (%s)",
-            (void *)vip_connection,
+            (void *)endpoint,
             error_code,
             aws_error_str(error_code));
 

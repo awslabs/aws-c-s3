@@ -635,16 +635,6 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
     return mock_client;
 }
 
-struct aws_s3_vip_connection *aws_s3_tester_mock_vip_connection_new(struct aws_s3_tester *tester) {
-    return aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_vip_connection));
-}
-
-void aws_s3_tester_mock_vip_connection_destroy(
-    struct aws_s3_tester *tester,
-    struct aws_s3_vip_connection *vip_connection) {
-    aws_mem_release(tester->allocator, vip_connection);
-}
-
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 

@@ -237,12 +237,6 @@ struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_test
 
 struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester);
 
-struct aws_s3_vip_connection *aws_s3_tester_mock_vip_connection_new(struct aws_s3_tester *tester);
-
-void aws_s3_tester_mock_vip_connection_destroy(
-    struct aws_s3_tester *tester,
-    struct aws_s3_vip_connection *vip_connection);
-
 struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *tester);
 
 /* Create a new meta request for testing meta request functionality in isolation. test_results and client are optional.
