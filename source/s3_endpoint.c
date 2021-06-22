@@ -44,6 +44,13 @@ AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 
 static int s_s3_endpoint_get_proxy_uri(struct aws_s3_endpoint *endpoint, struct aws_uri *proxy_uri);
 
+static void s_s3_endpoint_on_host_resolver_address_resolved(
+    struct aws_host_resolver *resolver,
+    const struct aws_string *host_name,
+    int err_code,
+    const struct aws_array_list *host_addresses,
+    void *user_data);
+
 static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_manager(
     struct aws_s3_endpoint *endpoint,
     const struct aws_string *host_name,
@@ -71,6 +78,21 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
 
     endpoint->allocator = allocator;
     endpoint->host_name = options->host_name;
+
+    struct aws_host_resolution_config host_resolver_config;
+    AWS_ZERO_STRUCT(host_resolver_config);
+    host_resolver_config.impl = aws_default_dns_resolve;
+    host_resolver_config.max_ttl = s_dns_host_address_ttl_seconds;
+    host_resolver_config.impl_data = NULL;
+
+    /* It's okay if this fails. Fatal resolution errors will also be encountered by the connection manager, causing
+     * requests to fail and everything to clean up. What we want to do here is to establish the host address TTL. */
+    aws_host_resolver_resolve_host(
+        options->client_bootstrap->host_resolver,
+        endpoint->host_name,
+        s_s3_endpoint_on_host_resolver_address_resolved,
+        &host_resolver_config,
+        endpoint);
 
     endpoint->http_connection_manager = s_s3_endpoint_create_http_connection_manager(
         endpoint,
@@ -293,4 +315,17 @@ static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_d
     if (shutdown_callback != NULL) {
         shutdown_callback(endpoint_user_data);
     }
+}
+
+static void s_s3_endpoint_on_host_resolver_address_resolved(
+    struct aws_host_resolver *resolver,
+    const struct aws_string *host_name,
+    int err_code,
+    const struct aws_array_list *host_addresses,
+    void *user_data) {
+    (void)resolver;
+    (void)host_name;
+    (void)err_code;
+    (void)host_addresses;
+    (void)user_data;
 }
