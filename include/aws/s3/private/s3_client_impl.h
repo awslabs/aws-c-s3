@@ -100,14 +100,13 @@ struct aws_s3_client_vtable {
         const struct aws_string *host_name,
         uint32_t flags);
 
-    void (*vip_connection_destroy)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
-
     void (*schedule_process_work_synced)(struct aws_s3_client *client);
 
     void (*process_work)(struct aws_s3_client *client);
 
-    void (
-        *setup_vip_connection_retry_token)(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
+    bool (*endpoint_ref_count_zero)(struct aws_s3_endpoint *endpoint);
+
+    void (*endpoint_shutdown_callback)(void *user_data);
 
     void (*finish_destroy)(struct aws_s3_client *client);
 };
@@ -274,9 +273,6 @@ AWS_S3_API
 struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_client *client);
 
 AWS_S3_API
-void aws_s3_vip_connection_destroy(struct aws_s3_client *client, struct aws_s3_vip_connection *vip_connection);
-
-AWS_S3_API
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client);
 
 AWS_S3_API
@@ -286,7 +282,7 @@ AWS_S3_API
 void aws_s3_client_update_connections_threaded(struct aws_s3_client *client);
 
 AWS_S3_API
-struct aws_s3_endpoint *aws_s3_client_endpoint_new(
+struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_allocator *allocator,
     const struct aws_s3_endpoint_options *options);
 

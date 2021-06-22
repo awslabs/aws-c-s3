@@ -640,7 +640,54 @@ static void s_s3_test_work_meta_request_schedule_prepare_request(
     aws_s3_request_release(request);
 }
 
-/* Test that the client will prepare requests under the correct conditions. */
+static size_t s_test_s3_update_meta_request_trigger_prepare_host_address_count = 0;
+
+static size_t s_test_s3_update_meta_request_trigger_prepare_get_host_address_count(
+    struct aws_host_resolver *host_resolver,
+    const struct aws_string *host_name,
+    uint32_t flags) {
+    (void)host_resolver;
+    (void)host_name;
+    return s_test_s3_update_meta_request_trigger_prepare_host_address_count;
+}
+
+static int s_validate_prepared_requests(
+    struct aws_s3_client *client,
+    size_t expected_num_being_prepared,
+    struct aws_s3_meta_request *meta_request_with_work,
+    struct aws_s3_meta_request *meta_request_without_work) {
+
+    ASSERT_TRUE(client->threaded_data.request_queue_size == 0);
+    ASSERT_TRUE(aws_linked_list_empty(&client->threaded_data.request_queue));
+    ASSERT_TRUE(client->threaded_data.num_requests_being_prepared == expected_num_being_prepared);
+    ASSERT_TRUE(aws_atomic_load_int(&client->stats.num_requests_in_flight) == expected_num_being_prepared);
+
+    uint32_t num_meta_requests_in_list = 0;
+    bool meta_request_with_work_found = false;
+
+    for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
+         node != aws_linked_list_end(&client->threaded_data.meta_requests);
+         node = aws_linked_list_next(node)) {
+
+        struct aws_s3_meta_request *meta_request =
+            AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
+
+        if (meta_request == meta_request_with_work) {
+            meta_request_with_work_found = true;
+        }
+
+        ASSERT_TRUE(meta_request != meta_request_without_work);
+
+        ++num_meta_requests_in_list;
+    }
+
+    ASSERT_TRUE(meta_request_with_work_found);
+    ASSERT_TRUE(num_meta_requests_in_list == 1);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that the client will prepare requests correctly. */
 AWS_TEST_CASE(test_s3_update_meta_requests_trigger_prepare, s_test_s3_update_meta_requests_trigger_prepare)
 static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -651,86 +698,79 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
     struct aws_client_bootstrap mock_bootstrap;
     AWS_ZERO_STRUCT(mock_bootstrap);
 
+    const uint32_t ideal_vip_count = 10;
+
     struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
     mock_client->client_bootstrap = &mock_bootstrap;
-    *((uint32_t *)&mock_client->ideal_vip_count) = 1;
+    mock_client->vtable->get_host_address_count = s_test_s3_update_meta_request_trigger_prepare_get_host_address_count;
+    *((uint32_t *)&mock_client->ideal_vip_count) = ideal_vip_count;
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
     aws_linked_list_init(&mock_client->threaded_data.meta_requests);
 
-    const uint32_t max_requests_prepare = aws_s3_client_get_max_requests_prepare(mock_client);
+    struct aws_s3_meta_request *mock_meta_request_without_work = aws_s3_tester_mock_meta_request_new(&tester);
+    mock_meta_request_without_work->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
 
-    ///////////////////////////////////
-
-    struct aws_s3_meta_request *mock_meta_request_0 = aws_s3_tester_mock_meta_request_new(&tester);
-    mock_meta_request_0->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
-
-    struct test_work_meta_request_update_user_data mock_meta_request_0_data = {
+    struct test_work_meta_request_update_user_data mock_meta_request_without_work_data = {
         .has_work_remaining = false,
     };
 
-    mock_meta_request_0->user_data = &mock_meta_request_0_data;
+    mock_meta_request_without_work->user_data = &mock_meta_request_without_work_data;
 
-    struct aws_s3_meta_request_vtable *meta_request_vtable_0 =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_0, NULL);
-    meta_request_vtable_0->update = s_s3_test_work_meta_request_update;
-    meta_request_vtable_0->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
+    struct aws_s3_meta_request_vtable *meta_request_without_work_vtable =
+        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_without_work, NULL);
+    meta_request_without_work_vtable->update = s_s3_test_work_meta_request_update;
+    meta_request_without_work_vtable->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
 
-    /* Intentionally push this meta request first to test that it's properly removed from the list when the list has
-     * items after it. */
+    /* Intentionally push this meta request first to test that it's properly removed from the list. */
     aws_linked_list_push_back(
-        &mock_client->threaded_data.meta_requests, &mock_meta_request_0->client_process_work_threaded_data.node);
+        &mock_client->threaded_data.meta_requests,
+        &mock_meta_request_without_work->client_process_work_threaded_data.node);
 
-    aws_s3_meta_request_acquire(mock_meta_request_0);
+    aws_s3_meta_request_acquire(mock_meta_request_without_work);
 
-    ///////////////////////////////////
-
-    struct aws_s3_meta_request *mock_meta_request_1 = aws_s3_tester_mock_meta_request_new(&tester);
-    struct test_work_meta_request_update_user_data mock_meta_request_1_data = {
+    struct aws_s3_meta_request *mock_meta_request_with_work = aws_s3_tester_mock_meta_request_new(&tester);
+    struct test_work_meta_request_update_user_data mock_meta_request_with_work_data = {
         .has_work_remaining = true,
     };
 
-    mock_meta_request_1->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
-    mock_meta_request_1->user_data = &mock_meta_request_1_data;
+    mock_meta_request_with_work->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
+    mock_meta_request_with_work->user_data = &mock_meta_request_with_work_data;
 
-    struct aws_s3_meta_request_vtable *meta_request_vtable_1 =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_1, NULL);
-    meta_request_vtable_1->update = s_s3_test_work_meta_request_update;
-    meta_request_vtable_1->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
+    struct aws_s3_meta_request_vtable *mock_meta_request_with_work_vtable =
+        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_with_work, NULL);
+    mock_meta_request_with_work_vtable->update = s_s3_test_work_meta_request_update;
+    mock_meta_request_with_work_vtable->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
 
     aws_linked_list_push_back(
-        &mock_client->threaded_data.meta_requests, &mock_meta_request_1->client_process_work_threaded_data.node);
-    aws_s3_meta_request_acquire(mock_meta_request_1);
+        &mock_client->threaded_data.meta_requests,
+        &mock_meta_request_with_work->client_process_work_threaded_data.node);
+    aws_s3_meta_request_acquire(mock_meta_request_with_work);
 
-    ///////////////////////////////////
-
-    aws_s3_client_update_meta_requests_threaded(mock_client);
-
-    /* After the update, the max number of requests that can be prepared should have been triggered. */
+    /* With no known addresses, the amount of requests that can be prepared should only be enough for one VIP. */
     {
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(mock_client->threaded_data.num_requests_being_prepared == max_requests_prepare);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_requests_in_flight) == max_requests_prepare);
+        s_test_s3_update_meta_request_trigger_prepare_host_address_count = 0;
+        aws_s3_client_update_meta_requests_threaded(mock_client);
 
-        uint32_t num_meta_requests_in_list = 0;
-        bool meta_request_1_found = false;
+        ASSERT_SUCCESS(s_validate_prepared_requests(
+            mock_client, g_max_num_connections_per_vip, mock_meta_request_with_work, mock_meta_request_without_work));
+    }
 
-        for (struct aws_linked_list_node *node = aws_linked_list_begin(&mock_client->threaded_data.meta_requests);
-             node != aws_linked_list_end(&mock_client->threaded_data.meta_requests);
-             node = aws_linked_list_next(node)) {
+    /* When the number of known addresses is greater than or equal to the ideal vip count, the max number of requests
+     * should be reached. */
+    {
+        const uint32_t max_requests_prepare = aws_s3_client_get_max_requests_prepare(mock_client);
 
-            struct aws_s3_meta_request *meta_request =
-                AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
+        s_test_s3_update_meta_request_trigger_prepare_host_address_count = (size_t)(ideal_vip_count);
+        aws_s3_client_update_meta_requests_threaded(mock_client);
 
-            if (meta_request == mock_meta_request_1) {
-                meta_request_1_found = true;
-            }
+        ASSERT_SUCCESS(s_validate_prepared_requests(
+            mock_client, max_requests_prepare, mock_meta_request_with_work, mock_meta_request_without_work));
 
-            ++num_meta_requests_in_list;
-        }
+        s_test_s3_update_meta_request_trigger_prepare_host_address_count = (size_t)(ideal_vip_count + 1);
+        aws_s3_client_update_meta_requests_threaded(mock_client);
 
-        ASSERT_TRUE(meta_request_1_found);
-        ASSERT_TRUE(num_meta_requests_in_list == 1);
+        ASSERT_SUCCESS(s_validate_prepared_requests(
+            mock_client, max_requests_prepare, mock_meta_request_with_work, mock_meta_request_without_work));
     }
 
     while (!aws_linked_list_empty(&mock_client->threaded_data.meta_requests)) {
@@ -743,10 +783,8 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
         aws_s3_meta_request_release(meta_request);
     }
 
-    aws_s3_endpoint_release(mock_meta_request_0->endpoint);
-    aws_s3_endpoint_release(mock_meta_request_1->endpoint);
-    aws_s3_meta_request_release(mock_meta_request_0);
-    aws_s3_meta_request_release(mock_meta_request_1);
+    aws_s3_meta_request_release(mock_meta_request_without_work);
+    aws_s3_meta_request_release(mock_meta_request_with_work);
     aws_s3_client_release(mock_client);
     aws_s3_tester_clean_up(&tester);
     return 0;
@@ -2208,68 +2246,6 @@ static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocat
     ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_IO_STREAM_READ_FAILED);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_different_endpoints, s_test_s3_different_endpoints)
-static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client *client = NULL;
-    struct aws_s3_tester_client_options client_options;
-
-    AWS_ZERO_STRUCT(client_options);
-    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
-
-    {
-        struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
-
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .get_options =
-                {
-                    .object_path = g_s3_path_get_object_test_1MB,
-                },
-        };
-
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-    }
-
-    {
-        struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
-
-        struct aws_byte_cursor bucket_without_file =
-            AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff-us-west-2");
-
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .bucket_name = &bucket_without_file,
-            .get_options =
-                {
-                    .object_path = g_s3_path_get_object_test_1MB,
-                },
-        };
-
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-    }
-
-    aws_s3_client_release(client);
-
-    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }

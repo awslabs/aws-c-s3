@@ -558,18 +558,10 @@ static void s_s3_client_schedule_process_work_synced_empty(struct aws_s3_client 
     (void)client;
 }
 
-static void s_s3_client_setup_vip_connection_retry_token_empty(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
-    (void)client;
-    (void)vip_connection;
-}
-
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .acquire_http_connection = s_s3_client_acquire_http_connection_empty,
     .get_host_address_count = s_s3_client_get_host_address_count_empty,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
-    .setup_vip_connection_retry_token = s_s3_client_setup_vip_connection_retry_token_empty,
 };
 
 static void s_s3_mock_client_start_destroy(void *user_data) {

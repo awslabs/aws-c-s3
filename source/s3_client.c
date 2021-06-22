@@ -94,6 +94,10 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
+static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
+
+static void s_s3_client_endpoint_shutdown_callback(void *user_data);
+
 /* Default factory function for creating a meta request. */
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     struct aws_s3_client *client,
@@ -105,6 +109,8 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .get_host_address_count = aws_host_resolver_get_host_address_count,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
+    .endpoint_ref_count_zero = s_s3_client_endpoint_ref_count_zero,
+    .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
 };
 
@@ -520,10 +526,6 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
     return request;
 }
 
-static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
-
-static void s_s3_client_endpoint_shutdown(void *user_data);
-
 /* Public facing make-meta-request function. */
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
@@ -602,18 +604,17 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     }
 
     if (was_created) {
-
         struct aws_s3_endpoint_options endpoint_options = {
             .host_name = endpoint_host_name,
-            .ref_count_zero_callback = s_s3_client_endpoint_ref_count_zero,
-            .shutdown_callback = s_s3_client_endpoint_shutdown,
+            .ref_count_zero_callback = client->vtable->endpoint_ref_count_zero,
+            .shutdown_callback = client->vtable->endpoint_shutdown_callback,
             .client_bootstrap = client->client_bootstrap,
             .tls_connection_options = client->tls_connection_options,
             .user_data = client,
             .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
         };
 
-        endpoint = aws_s3_client_endpoint_new(client->sba_allocator, &endpoint_options);
+        endpoint = aws_s3_endpoint_new(client->sba_allocator, &endpoint_options);
 
         if (endpoint == NULL) {
             aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
@@ -665,9 +666,9 @@ static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint
 
     aws_s3_client_lock_synced_data(client);
 
-    /* It is possible that the critical section used for checking the existance of an endpoint in the table was called
-     * in a different thread before we acquired the lock for this critical section. To accommodate this, we check the
-     * ref count before removing it.*/
+    /* It is possible that before we were able to acquire the lock here, the critical section used for looking up the
+     * endpoint in the table and assigning it to a new meta request was called in a different thread. To handle this
+     * case, we check the ref count before removing it.*/
     if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 0) {
         aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
         clean_up_endpoint = true;
@@ -678,7 +679,7 @@ static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint
     return clean_up_endpoint;
 }
 
-static void s_s3_client_endpoint_shutdown(void *user_data) {
+static void s_s3_client_endpoint_shutdown_callback(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
@@ -1092,7 +1093,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /* While:
-         *     * Number of prepared + queued requests is less than the max that can be in the preparation stage.
+         *     * Number of being-prepared + already-prepared-and-queued requests is less than the max that can be in the
+         * preparation stage.
          *     * Total number of requests tracked by the client is less than the max tracked ("in flight") requests.
          *     * There are meta requests to get requests from.
          *

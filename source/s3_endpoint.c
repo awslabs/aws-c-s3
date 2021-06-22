@@ -59,7 +59,7 @@ void aws_s3_set_dns_ttl(size_t ttl) {
     s_dns_host_address_ttl_seconds = ttl;
 }
 
-struct aws_s3_endpoint *aws_s3_client_endpoint_new(
+struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_allocator *allocator,
     const struct aws_s3_endpoint_options *options) {
     AWS_PRECONDITION(allocator);
@@ -258,7 +258,9 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
 }
 
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
-    AWS_PRECONDITION(endpoint);
+    if (endpoint == NULL) {
+        return;
+    }
 
     aws_ref_count_release(&endpoint->ref_count);
 }
