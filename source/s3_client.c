@@ -114,6 +114,13 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .finish_destroy = s_s3_client_finish_destroy_default,
 };
 
+/* Returns the max number of connections allowed.
+ *
+ * When meta request is NULL, this will return the overall allowed number of connections.
+ *
+ * If meta_request is not NULL, this will give the max number of connections allowed for that meta request type on
+ * thatendpoint.
+ */
 uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request) {
@@ -132,7 +139,7 @@ uint32_t aws_s3_client_get_max_active_connections(
         uint32_t num_known_vips = client->vtable->get_host_address_count(
             client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
 
-        /* If the number of known vips is less than our current VIP counter, clamp it to that known value. */
+        /* If the number of known vips is less than our ideal VIP count, clamp it. */
         if (num_known_vips < num_vips) {
             num_vips = num_known_vips;
         }
@@ -153,11 +160,14 @@ uint32_t aws_s3_client_get_max_active_connections(
     return max_active_connections;
 }
 
+/* Returns the max number of requests allowed to be in memory */
 uint32_t aws_s3_client_get_max_requests_in_flight(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
     return aws_s3_client_get_max_active_connections(client, NULL) * s_max_requests_multiplier;
 }
 
+/* Returns the max number of requests that should be in preparation stage (ie: reading from a stream, being signed,
+ * etc.) */
 uint32_t aws_s3_client_get_max_requests_prepare(struct aws_s3_client *client) {
     return aws_s3_client_get_max_active_connections(client, NULL);
 }
