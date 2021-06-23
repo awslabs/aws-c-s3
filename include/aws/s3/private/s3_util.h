@@ -42,6 +42,9 @@ struct aws_cached_signing_config_aws {
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_content_md5_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_s3_client_version;
 
 AWS_S3_API

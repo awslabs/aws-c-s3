@@ -70,6 +70,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             allocator,
             client,
             part_size,
+            client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
+                aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
@@ -362,7 +364,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                 meta_request->initial_request_message,
                 &request->request_body,
                 request->part_number,
-                auto_ranged_put->upload_id);
+                auto_ranged_put->upload_id,
+                meta_request->should_compute_content_md5);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {

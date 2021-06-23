@@ -180,6 +180,8 @@ struct aws_s3_meta_request {
         bool scheduled;
 
     } client_process_work_threaded_data;
+
+    const bool should_compute_content_md5;
 };
 
 AWS_EXTERN_C_BEGIN
@@ -190,6 +192,7 @@ int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,

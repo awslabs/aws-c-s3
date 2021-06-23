@@ -7,7 +7,9 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
+#include <aws/cal/hash.h>
 #include <aws/common/byte_buf.h>
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
@@ -178,6 +180,12 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         goto error_clean_up;
     }
 
+    if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
+        if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+            goto error_clean_up;
+        }
+    }
+
     aws_http_message_set_request_method(message, g_post_method);
     aws_http_message_set_body_stream(message, NULL);
 
@@ -200,7 +208,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
     uint32_t part_number,
-    const struct aws_string *upload_id) {
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
@@ -220,6 +229,14 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
             goto error_clean_up;
         }
+
+        if (should_compute_content_md5) {
+            if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
+                goto error_clean_up;
+            }
+        }
+    } else {
+        goto error_clean_up;
     }
 
     return message;
@@ -423,6 +440,50 @@ error_clean_up:
 
     aws_input_stream_destroy(input_stream);
     return NULL;
+}
+
+/* Add a content-md5 header. */
+int aws_s3_message_util_add_content_md5_header(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *input_buf,
+    struct aws_http_message *out_message) {
+
+    AWS_PRECONDITION(out_message);
+
+    /* Compute MD5 */
+    struct aws_byte_cursor md5_input = aws_byte_cursor_from_buf(input_buf);
+    uint8_t md5_output[AWS_MD5_LEN];
+    struct aws_byte_buf md5_output_buf = aws_byte_buf_from_empty_array(md5_output, sizeof(md5_output));
+    if (aws_md5_compute(allocator, &md5_input, &md5_output_buf, 0)) {
+        return AWS_OP_ERR;
+    }
+
+    /* Compute Base64 encoding of MD5 */
+    struct aws_byte_cursor base64_input = aws_byte_cursor_from_buf(&md5_output_buf);
+    size_t base64_output_size = 0;
+    if (aws_base64_compute_encoded_len(md5_output_buf.len, &base64_output_size)) {
+        return AWS_OP_ERR;
+    }
+    struct aws_byte_buf base64_output_buf;
+    if (aws_byte_buf_init(&base64_output_buf, allocator, base64_output_size)) {
+        return AWS_OP_ERR;
+    }
+    if (aws_base64_encode(&base64_input, &base64_output_buf)) {
+        goto error_clean_up;
+    }
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
+    if (aws_http_headers_set(headers, g_content_md5_header_name, aws_byte_cursor_from_buf(&base64_output_buf))) {
+        goto error_clean_up;
+    }
+
+    aws_byte_buf_clean_up(&base64_output_buf);
+    return AWS_OP_SUCCESS;
+
+error_clean_up:
+
+    aws_byte_buf_clean_up(&base64_output_buf);
+    return AWS_OP_ERR;
 }
 
 /* Copy an existing HTTP message's headers and body. */
