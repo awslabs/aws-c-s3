@@ -44,7 +44,7 @@ static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 static const uint32_t s_max_requests_multiplier = 4;
 
 /* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 3.33;
+static const double s_throughput_per_vip_gbps = 4.0;
 
 /* Preferred amount of active vip connections per meta request type. */
 const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE_MAX] = {
