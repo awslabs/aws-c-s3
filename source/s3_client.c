@@ -1305,8 +1305,7 @@ static void s_s3_client_create_connection_for_request_default(
 
     aws_atomic_fetch_add(&client->stats.num_requests_network_io[meta_request->type], 1);
 
-    struct aws_s3_connection *connection =
-        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_connection));
+    struct aws_s3_connection *connection = aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_connection));
 
     connection->request = request;
 
@@ -1392,8 +1391,7 @@ static void s_s3_client_acquired_retry_token(
 
 error_clean_up:
 
-    aws_s3_client_notify_connection_finished(
-        client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
+    aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
 }
 
 static void s_s3_client_on_acquire_http_connection(
@@ -1437,14 +1435,12 @@ static void s_s3_client_on_acquire_http_connection(
 
 error_retry:
 
-    aws_s3_client_notify_connection_finished(
-        client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_RETRY);
+    aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_RETRY);
     return;
 
 error_fail:
 
-    aws_s3_client_notify_connection_finished(
-        client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
+    aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
 }
 
 /* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
@@ -1571,8 +1567,7 @@ reset_connection:
     if (connection->http_connection != NULL) {
         AWS_ASSERT(endpoint->http_connection_manager);
 
-        aws_http_connection_manager_release_connection(
-            endpoint->http_connection_manager, connection->http_connection);
+        aws_http_connection_manager_release_connection(endpoint->http_connection_manager, connection->http_connection);
 
         connection->http_connection = NULL;
     }
@@ -1649,8 +1644,7 @@ static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_cod
 
 error_clean_up:
 
-    aws_s3_client_notify_connection_finished(
-        client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
+    aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
 }
 
 static void s_s3_client_prepare_request_callback_retry_request(
@@ -1679,8 +1673,7 @@ static void s_s3_client_prepare_request_callback_retry_request(
         s_s3_client_acquired_retry_token(
             client->retry_strategy, AWS_ERROR_SUCCESS, connection->retry_token, connection);
     } else {
-        aws_s3_client_notify_connection_finished(
-            client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
+        aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
     }
 }
 

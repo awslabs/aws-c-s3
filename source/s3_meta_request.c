@@ -597,9 +597,7 @@ finish:
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
-void aws_s3_meta_request_send_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_connection *connection) {
+void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(connection);
     AWS_PRECONDITION(connection->http_connection);
