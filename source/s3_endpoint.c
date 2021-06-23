@@ -85,14 +85,21 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     host_resolver_config.max_ttl = s_dns_host_address_ttl_seconds;
     host_resolver_config.impl_data = NULL;
 
-    /* It's okay if this fails. Fatal resolution errors will also be encountered by the connection manager, causing
-     * requests to fail and everything to clean up. What we want to do here is to establish the host address TTL. */
-    aws_host_resolver_resolve_host(
-        options->client_bootstrap->host_resolver,
-        endpoint->host_name,
-        s_s3_endpoint_on_host_resolver_address_resolved,
-        &host_resolver_config,
-        endpoint);
+    if (aws_host_resolver_resolve_host(
+            options->client_bootstrap->host_resolver,
+            endpoint->host_name,
+            s_s3_endpoint_on_host_resolver_address_resolved,
+            &host_resolver_config,
+            NULL)) {
+
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_ENDPOINT,
+            "id=%p: Error trying to resolve host for endpoint %s",
+            (void *)endpoint,
+            (const char *)endpoint->host_name->bytes);
+
+        goto error_cleanup;
+    }
 
     endpoint->http_connection_manager = s_s3_endpoint_create_http_connection_manager(
         endpoint,
@@ -296,8 +303,9 @@ static void s_s3_endpoint_ref_count_zero(void *user_data) {
     }
 
     if (endpoint->http_connection_manager != NULL) {
-        aws_http_connection_manager_release(endpoint->http_connection_manager);
+        struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
         endpoint->http_connection_manager = NULL;
+        aws_http_connection_manager_release(http_connection_manager);
     } else {
         s_s3_endpoint_http_connection_manager_shutdown_callback(endpoint->user_data);
     }

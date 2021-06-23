@@ -893,8 +893,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     AWS_PRECONDITION(client->vtable);
     AWS_PRECONDITION(client->vtable->finish_destroy);
 
-    bool client_active = false;
-
     struct aws_linked_list meta_request_work_list;
     aws_linked_list_init(&meta_request_work_list);
 
@@ -906,8 +904,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         "id=%p s_s3_client_process_work_default - Moving relevant synced_data into threaded_data.",
         (void *)client);
     aws_s3_client_lock_synced_data(client);
-
-    client_active = client->synced_data.active != 0;
 
     /* Once we exit this mutex, someone can reschedule this task. */
     client->synced_data.process_work_task_scheduled = false;
