@@ -67,8 +67,8 @@ enum aws_s3_meta_request_tls_mode {
 };
 
 enum aws_s3_meta_request_compute_content_md5 {
-    AWS_MR_CONTENT_MD5_ENABLED,
     AWS_MR_CONTENT_MD5_DISABLED,
+    AWS_MR_CONTENT_MD5_ENABLED,
 };
 
 /* Options for a new client. */

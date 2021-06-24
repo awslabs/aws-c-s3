@@ -170,7 +170,8 @@ struct aws_s3_client {
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
-     * For single-part upload, keep the content-md5 in the initial request unchanged. */
+     * For single-part upload, if the content-md5 header is specified, it will remain unchanged. If the header is not
+     *     specified, and this is set to AWS_MR_CONTENT_MD5_ENABLED, it will be calculated. */
     const enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
     /* Hard limit on max connections set through the client config. */
