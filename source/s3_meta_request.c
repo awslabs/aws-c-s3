@@ -817,9 +817,6 @@ void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_endpoint *endpoint = meta_request->endpoint;
-    AWS_PRECONDITION(endpoint);
-
     struct aws_s3_client *client = meta_request->client;
     AWS_PRECONDITION(client);
 
