@@ -978,6 +978,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         (void)sub_result;
     }
 
+    uint32_t num_endpoints_in_table = (uint32_t)aws_hash_table_get_entry_count(&client->synced_data.endpoints);
+    uint32_t num_endpoints_allocated = client->synced_data.num_endpoints_allocated;
+
     aws_s3_client_unlock_synced_data(client);
 
     /*******************/
@@ -1047,8 +1050,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
-            "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  Requests-network "
-            "(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  Requests-streaming:%d",
+            "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  "
+            "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  Requests-streaming:%d "
+            " Endpoints(in-table/allocated):%d/%d",
             (void *)client,
             total_approx_requests,
             num_requests_tracked_requests,
@@ -1059,7 +1063,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             num_auto_default_network_io,
             num_requests_network_io,
             num_requests_stream_queued_waiting,
-            num_requests_streaming);
+            num_requests_streaming,
+            num_endpoints_in_table,
+            num_endpoints_allocated);
     }
 
     /*******************/
