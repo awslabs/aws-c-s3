@@ -1218,11 +1218,11 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
-    /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message =
-        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
-
     for (size_t i = 0; i < num_meta_requests; ++i) {
+        /* Put together a simple S3 Get Object request. */
+        struct aws_http_message *message =
+            aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+
         AWS_ZERO_STRUCT(meta_request_test_results[i]);
 
         struct aws_s3_meta_request_options options;
@@ -1236,6 +1236,8 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
         meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
 
         ASSERT_TRUE(meta_requests[i] != NULL);
+
+        aws_http_message_release(message);
     }
 
     /* Wait for the request to finish. */
@@ -1256,9 +1258,6 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
         aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
     }
-
-    aws_http_message_release(message);
-    message = NULL;
 
     aws_string_destroy(host_name);
     host_name = NULL;
