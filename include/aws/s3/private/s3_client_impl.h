@@ -55,6 +55,9 @@ struct aws_s3_endpoint_options {
     /* TLS connection options to be used for the connection manager. */
     const struct aws_tls_connection_options *tls_connection_options;
 
+    /* DNS TTL to use for addresses for this endpoint. */
+    size_t dns_host_address_ttl_seconds;
+
     /* User data to be passed around with the endpoint. */
     void *user_data;
 

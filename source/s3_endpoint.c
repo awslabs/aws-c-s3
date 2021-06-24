@@ -38,8 +38,6 @@ static const uint32_t s_connection_timeout_ms = 3000;
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
-static size_t s_dns_host_address_ttl_seconds = 5 * 60;
-
 AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
 
 static int s_s3_endpoint_get_proxy_uri(struct aws_s3_endpoint *endpoint, struct aws_uri *proxy_uri);
@@ -62,10 +60,6 @@ static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_d
 
 static void s_s3_endpoint_ref_count_zero(void *user_data);
 
-void aws_s3_set_dns_ttl(size_t ttl) {
-    s_dns_host_address_ttl_seconds = ttl;
-}
-
 struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_allocator *allocator,
     const struct aws_s3_endpoint_options *options) {
@@ -82,7 +76,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);
     host_resolver_config.impl = aws_default_dns_resolve;
-    host_resolver_config.max_ttl = s_dns_host_address_ttl_seconds;
+    host_resolver_config.max_ttl = options->dns_host_address_ttl_seconds;
     host_resolver_config.impl_data = NULL;
 
     if (aws_host_resolver_resolve_host(

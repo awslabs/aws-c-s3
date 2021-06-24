@@ -61,6 +61,7 @@ static const size_t s_default_part_size = 8 * 1024 * 1024;
 static const size_t s_default_max_part_size = 32 * 1024 * 1024;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
+static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -113,6 +114,10 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
 };
+
+void aws_s3_set_dns_ttl(size_t ttl) {
+    s_dns_host_address_ttl_seconds = ttl;
+}
 
 /* Returns the max number of connections allowed.
  *
@@ -640,6 +645,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             .shutdown_callback = client->vtable->endpoint_shutdown_callback,
             .client_bootstrap = client->client_bootstrap,
             .tls_connection_options = client->tls_connection_options,
+            .dns_host_address_ttl_seconds = s_dns_host_address_ttl_seconds,
             .user_data = client,
             .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
         };

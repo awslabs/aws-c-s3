@@ -32,8 +32,8 @@ static int s_test_s3_endpoint_ref(struct aws_allocator *allocator, void *ctx) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     aws_s3_tester_set_counter1_desired(&tester, 3);
 
-    struct aws_byte_cursor empty_cursor = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("");
-    struct aws_string *host_name = aws_string_new_from_cursor(allocator, &empty_cursor);
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_public_bucket_name, &g_test_s3_region);
 
     struct aws_s3_endpoint_options endpoint_options = {
         .host_name = host_name,
@@ -41,6 +41,7 @@ static int s_test_s3_endpoint_ref(struct aws_allocator *allocator, void *ctx) {
         .shutdown_callback = s_test_s3_endpoint_ref_shutdown,
         .client_bootstrap = tester.client_bootstrap,
         .tls_connection_options = NULL,
+        .dns_host_address_ttl_seconds = 1,
         .user_data = &tester,
         .max_connections = 4,
     };
