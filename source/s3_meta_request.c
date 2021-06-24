@@ -264,6 +264,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    aws_s3_endpoint_release(meta_request->endpoint);
     aws_s3_client_release(meta_request->client);
 
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
@@ -809,16 +810,15 @@ void aws_s3_meta_request_send_request_finish_default(
     struct aws_http_stream *stream,
     int error_code) {
     AWS_PRECONDITION(vip_connection);
-    AWS_PRECONDITION(vip_connection->owning_vip);
-
-    struct aws_s3_client *client = vip_connection->owning_vip->owning_client;
-    AWS_PRECONDITION(client);
 
     struct aws_s3_request *request = vip_connection->request;
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
 
     int response_status = request->send_data.response_status;
 
@@ -1141,8 +1141,12 @@ unlock:
 
     aws_s3_meta_request_result_clean_up(meta_request, &finish_result);
 
+    aws_s3_endpoint_release(meta_request->endpoint);
+    meta_request->endpoint = NULL;
+
     aws_s3_client_release(meta_request->client);
     meta_request->client = NULL;
+
     meta_request->io_event_loop = NULL;
 }
 

@@ -12,6 +12,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
 #include <aws/common/ref_count.h>
+#include <aws/http/connection_manager.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
@@ -19,14 +20,14 @@
 #include <inttypes.h>
 
 static void s_s3_client_acquire_http_connection_exceed_retries(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
+    struct aws_http_connection_manager *conn_manager,
+    aws_http_connection_manager_on_connection_setup_fn *callback,
+    void *user_data) {
     AWS_ASSERT(callback);
-    (void)client;
-    (void)vip_connection;
+    (void)conn_manager;
+
     aws_raise_error(AWS_ERROR_UNKNOWN);
-    callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
+    callback(NULL, AWS_ERROR_UNKNOWN, user_data);
 }
 
 AWS_TEST_CASE(test_s3_client_exceed_retries, s_test_s3_client_exceed_retries)
@@ -66,10 +67,14 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
 }
 
 static void s_s3_client_acquire_http_connection_fail_first(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
+    struct aws_http_connection_manager *conn_manager,
+    aws_http_connection_manager_on_connection_setup_fn *callback,
+    void *user_data) {
     AWS_ASSERT(callback);
+
+    struct aws_s3_vip_connection *vip_connection = user_data;
+
+    struct aws_s3_client *client = vip_connection->request->meta_request->endpoint->user_data;
     AWS_ASSERT(client);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
@@ -84,7 +89,7 @@ static void s_s3_client_acquire_http_connection_fail_first(
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
 
-    original_client_vtable->acquire_http_connection(client, vip_connection, callback);
+    original_client_vtable->acquire_http_connection(conn_manager, callback, user_data);
 }
 
 AWS_TEST_CASE(test_s3_client_acquire_connection_fail, s_test_s3_client_acquire_connection_fail)

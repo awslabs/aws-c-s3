@@ -27,7 +27,6 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_PROXY_PARSE_FAILED, "Could not parse proxy URI"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_UNSUPPORTED_PROXY_SCHEME, "Given Proxy URI has an unsupported scheme"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_CANCELED, "Request successfully cancelled"),
-    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS, "Invalid S3 endpoint"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_RANGE_HEADER, "Range header has invalid syntax"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MULTIRANGE_HEADER_UNSUPPORTED, "Range header specifies multiple ranges which is unsupported"),
 };
@@ -50,11 +49,8 @@ static struct aws_log_subject_info s_s3_log_subject_infos[] = {
         AWS_LS_S3_META_REQUEST,
         "S3MetaRequest",
         "Subject for aws-c-s3 logging from an aws_s3_meta_request."),
-    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_VIP, "S3VIP", "Subject for aws-c-s3 logging from an aws_s3_vip."),
-    DEFINE_LOG_SUBJECT_INFO(
-        AWS_LS_S3_VIP_CONNECTION,
-        "S3VIPConnection",
-        "Subject for aws-c-s3 logging from an aws_s3_vip_connection.")};
+    DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_ENDPOINT, "S3Endpoint", "Subject for aws-c-s3 logging from an aws_s3_endpoint."),
+};
 
 static struct aws_log_subject_info_list s_s3_log_subject_list = {
     .subject_list = s_s3_log_subject_infos,

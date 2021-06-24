@@ -122,45 +122,131 @@ static int s_test_s3_client_byo_crypto_with_options(struct aws_allocator *alloca
     return 0;
 }
 
+size_t s_test_max_active_connections_host_count = 0;
+
+size_t s_test_get_max_active_connections_host_address_count(
+    struct aws_host_resolver *host_resolver,
+    const struct aws_string *host_name,
+    uint32_t flags) {
+    (void)host_resolver;
+    (void)host_name;
+    (void)flags;
+
+    return s_test_max_active_connections_host_count;
+}
+
 AWS_TEST_CASE(test_s3_client_get_max_active_connections, s_test_s3_client_get_max_active_connections)
 static int s_test_s3_client_get_max_active_connections(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
     (void)ctx;
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    const uint32_t num_connections_per_vip_override = 5;
+    struct aws_client_bootstrap mock_client_bootstrap;
+    AWS_ZERO_STRUCT(mock_client_bootstrap);
 
     struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
-    *((uint32_t *)&mock_client->ideal_vip_count) = 5;
     *((uint32_t *)&mock_client->max_active_connections_override) = 0;
+    *((uint32_t *)&mock_client->ideal_vip_count) = 10;
+    mock_client->client_bootstrap = &mock_client_bootstrap;
+    mock_client->vtable->get_host_address_count = s_test_get_max_active_connections_host_address_count;
 
-    /* Behavior should not be affected by max_active_connections_override since it is 0. */
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, 0) ==
-        mock_client->ideal_vip_count * g_max_num_connections_per_vip);
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, num_connections_per_vip_override) ==
-        mock_client->ideal_vip_count * num_connections_per_vip_override);
+    struct aws_s3_meta_request *mock_meta_requests[AWS_S3_META_REQUEST_TYPE_MAX];
 
-    *((uint32_t *)&mock_client->max_active_connections_override) = 3;
+    for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+        /* Verify that g_max_num_connections_per_vip and g_num_conns_per_vip_meta_request_look_up are set up
+         * correctly.*/
+        ASSERT_TRUE(g_max_num_connections_per_vip >= g_num_conns_per_vip_meta_request_look_up[i]);
+
+        /* Setup test data. */
+        mock_meta_requests[i] = aws_s3_tester_mock_meta_request_new(&tester);
+        mock_meta_requests[i]->type = i;
+        mock_meta_requests[i]->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
+    }
+
+    /* With host count at 0, we should allow for one VIP worth of max-active-connections. */
+    {
+        s_test_max_active_connections_host_count = 0;
+
+        ASSERT_TRUE(
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                g_num_conns_per_vip_meta_request_look_up[i]);
+        }
+    }
+
+    s_test_max_active_connections_host_count = 2;
+
+    /* Behavior should not be affected by max_active_connections_override since it is 0, and should just be in relation
+     * to ideal-vip-count and host-count. */
+    {
+        ASSERT_TRUE(
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+        }
+    }
 
     /* Max active connections override should now cap the calculated amount of active connections. */
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, 0) == mock_client->max_active_connections_override);
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, num_connections_per_vip_override) ==
-        mock_client->max_active_connections_override);
+    {
+        *((uint32_t *)&mock_client->max_active_connections_override) = 3;
 
-    /* Max active connections override should be ignored since the calculated amount of connections is less. */
-    *((uint32_t *)&mock_client->max_active_connections_override) = 100;
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, 0) ==
-        mock_client->ideal_vip_count * g_max_num_connections_per_vip);
-    ASSERT_TRUE(
-        aws_s3_client_get_max_active_connections(mock_client, num_connections_per_vip_override) ==
-        mock_client->ideal_vip_count * num_connections_per_vip_override);
+        ASSERT_TRUE(
+            mock_client->max_active_connections_override <
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        ASSERT_TRUE(
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
+            mock_client->max_active_connections_override);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                mock_client->max_active_connections_override <
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                mock_client->max_active_connections_override);
+        }
+    }
+
+    /* Max active connections override should be ignored since the calculated amount of max connections is less. */
+    {
+        *((uint32_t *)&mock_client->max_active_connections_override) = 100000;
+
+        ASSERT_TRUE(
+            mock_client->max_active_connections_override >
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        ASSERT_TRUE(
+            aws_s3_client_get_max_active_connections(mock_client, NULL) ==
+            mock_client->ideal_vip_count * g_max_num_connections_per_vip);
+
+        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+            ASSERT_TRUE(
+                mock_client->max_active_connections_override >
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+
+            ASSERT_TRUE(
+                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
+                s_test_max_active_connections_host_count * g_num_conns_per_vip_meta_request_look_up[i]);
+        }
+    }
+
+    for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
+        aws_s3_meta_request_release(mock_meta_requests[i]);
+        mock_meta_requests[i] = NULL;
+    }
 
     aws_s3_client_release(mock_client);
     aws_s3_tester_clean_up(&tester);
@@ -552,189 +638,54 @@ static void s_s3_test_work_meta_request_schedule_prepare_request(
     aws_s3_request_release(request);
 }
 
-/* Test that the client's meta-request-update function handles the case of the client not having been able to establish
- * any connections. */
-AWS_TEST_CASE(test_s3_update_meta_requests_no_endpoint_conns, s_test_s3_update_meta_requests_no_endpoint_conns)
-static int s_test_s3_update_meta_requests_no_endpoint_conns(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
+static size_t s_test_s3_update_meta_request_trigger_prepare_host_address_count = 0;
 
-    struct aws_s3_tester tester;
-    aws_s3_tester_init(allocator, &tester);
-
-    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
-
-    aws_linked_list_init(&mock_client->threaded_data.request_queue);
-    aws_linked_list_init(&mock_client->threaded_data.meta_requests);
-
-    ///////////////////////////////////
-
-    struct aws_s3_meta_request *mock_meta_request_0 = aws_s3_tester_mock_meta_request_new(&tester);
-    struct test_work_meta_request_update_user_data mock_meta_request_0_data = {
-        .has_work_remaining = false,
-    };
-
-    mock_meta_request_0->user_data = &mock_meta_request_0_data;
-
-    struct aws_s3_meta_request_vtable *meta_request_vtable_0 =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_0, NULL);
-    meta_request_vtable_0->update = s_s3_test_work_meta_request_update;
-    meta_request_vtable_0->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
-
-    /* Intentionally push this meta request first to test that it's properly removed from the list when the list has
-     * items after it. */
-    aws_linked_list_push_back(
-        &mock_client->threaded_data.meta_requests, &mock_meta_request_0->client_process_work_threaded_data.node);
-
-    aws_s3_meta_request_acquire(mock_meta_request_0);
-
-    const uint32_t num_requests_to_queue = 10;
-
-    for (uint32_t i = 0; i < num_requests_to_queue; ++i) {
-        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request_0, 0, 0, 0);
-        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
-        ++mock_client->threaded_data.request_queue_size;
-    }
-
-    ///////////////////////////////////
-
-    struct aws_s3_meta_request *mock_meta_request_1 = aws_s3_tester_mock_meta_request_new(&tester);
-    struct test_work_meta_request_update_user_data mock_meta_request_1_data = {
-        .has_work_remaining = true,
-    };
-
-    mock_meta_request_1->user_data = &mock_meta_request_1_data;
-
-    struct aws_s3_meta_request_vtable *meta_request_vtable_1 =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_1, NULL);
-    meta_request_vtable_1->update = s_s3_test_work_meta_request_update;
-    meta_request_vtable_1->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
-
-    aws_linked_list_push_back(
-        &mock_client->threaded_data.meta_requests, &mock_meta_request_1->client_process_work_threaded_data.node);
-    aws_s3_meta_request_acquire(mock_meta_request_1);
-
-    ///////////////////////////////////
-
-    aws_s3_client_update_meta_requests_threaded(mock_client, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS);
-
-    /* Make sure that no requests have been prepared. */
-    {
-        ASSERT_TRUE(mock_client->threaded_data.num_requests_being_prepared == 0);
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-
-        uint32_t num_meta_requests_in_list = 0;
-        bool meta_request_1_found = false;
-
-        for (struct aws_linked_list_node *node = aws_linked_list_begin(&mock_client->threaded_data.meta_requests);
-             node != aws_linked_list_end(&mock_client->threaded_data.meta_requests);
-             node = aws_linked_list_next(node)) {
-
-            struct aws_s3_meta_request *meta_request =
-                AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
-
-            if (meta_request == mock_meta_request_1) {
-                meta_request_1_found = true;
-            }
-
-            ++num_meta_requests_in_list;
-        }
-
-        ASSERT_TRUE(meta_request_1_found);
-        ASSERT_TRUE(num_meta_requests_in_list == 1);
-    }
-
-    mock_meta_request_1_data.has_work_remaining = false;
-
-    aws_s3_client_update_meta_requests_threaded(mock_client, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS);
-
-    /* Because the meta request has no work left, it should no longer be in the list. */
-    {
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.meta_requests));
-        ASSERT_TRUE(mock_client->threaded_data.num_requests_being_prepared == 0);
-    }
-
-    aws_s3_meta_request_release(mock_meta_request_0);
-    aws_s3_meta_request_release(mock_meta_request_1);
-    aws_s3_client_release(mock_client);
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
+static size_t s_test_s3_update_meta_request_trigger_prepare_get_host_address_count(
+    struct aws_host_resolver *host_resolver,
+    const struct aws_string *host_name,
+    uint32_t flags) {
+    (void)host_resolver;
+    (void)host_name;
+    return s_test_s3_update_meta_request_trigger_prepare_host_address_count;
 }
 
-/* Test that the client will not start preparing requests if no connections have been established yet. */
-AWS_TEST_CASE(test_s3_update_meta_requests_no_conns_yet, s_test_s3_update_meta_requests_no_conns_yet)
-static int s_test_s3_update_meta_requests_no_conns_yet(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
+static int s_validate_prepared_requests(
+    struct aws_s3_client *client,
+    size_t expected_num_being_prepared,
+    struct aws_s3_meta_request *meta_request_with_work,
+    struct aws_s3_meta_request *meta_request_without_work) {
 
-    struct aws_s3_tester tester;
-    aws_s3_tester_init(allocator, &tester);
+    ASSERT_TRUE(client->threaded_data.request_queue_size == 0);
+    ASSERT_TRUE(aws_linked_list_empty(&client->threaded_data.request_queue));
+    ASSERT_TRUE(client->threaded_data.num_requests_being_prepared == expected_num_being_prepared);
+    ASSERT_TRUE(aws_atomic_load_int(&client->stats.num_requests_in_flight) == expected_num_being_prepared);
 
-    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+    uint32_t num_meta_requests_in_list = 0;
+    bool meta_request_with_work_found = false;
 
-    aws_linked_list_init(&mock_client->threaded_data.request_queue);
-    aws_linked_list_init(&mock_client->threaded_data.meta_requests);
-    aws_linked_list_init(&mock_client->threaded_data.idle_vip_connections);
-
-    ///////////////////////////////////
-
-    struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
-
-    struct test_work_meta_request_update_user_data mock_meta_request_data = {
-        .has_work_remaining = true,
-    };
-
-    mock_meta_request->user_data = &mock_meta_request_data;
-
-    struct aws_s3_meta_request_vtable *meta_request_vtable_1 =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request, NULL);
-    meta_request_vtable_1->update = s_s3_test_work_meta_request_update;
-    meta_request_vtable_1->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
-
-    aws_linked_list_push_back(
-        &mock_client->threaded_data.meta_requests, &mock_meta_request->client_process_work_threaded_data.node);
-
-    aws_s3_meta_request_acquire(mock_meta_request);
-
-    ///////////////////////////////////
-
-    aws_s3_client_update_meta_requests_threaded(mock_client, AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE);
-
-    {
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(mock_client->threaded_data.num_requests_being_prepared == 0);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_requests_in_flight) == 0);
-    }
-
-    aws_s3_client_update_meta_requests_threaded(mock_client, 0);
-
-    {
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(mock_client->threaded_data.num_requests_being_prepared == 0);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_requests_in_flight) == 0);
-    }
-
-    while (!aws_linked_list_empty(&mock_client->threaded_data.meta_requests)) {
-        struct aws_linked_list_node *meta_request_node =
-            aws_linked_list_pop_front(&mock_client->threaded_data.meta_requests);
+    for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
+         node != aws_linked_list_end(&client->threaded_data.meta_requests);
+         node = aws_linked_list_next(node)) {
 
         struct aws_s3_meta_request *meta_request =
-            AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
+            AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
-        aws_s3_meta_request_release(meta_request);
+        if (meta_request == meta_request_with_work) {
+            meta_request_with_work_found = true;
+        }
+
+        ASSERT_TRUE(meta_request != meta_request_without_work);
+
+        ++num_meta_requests_in_list;
     }
 
-    aws_s3_meta_request_release(mock_meta_request);
-    aws_s3_client_release(mock_client);
-    aws_s3_tester_clean_up(&tester);
+    ASSERT_TRUE(meta_request_with_work_found);
+    ASSERT_TRUE(num_meta_requests_in_list == 1);
 
-    return 0;
+    return AWS_OP_SUCCESS;
 }
 
-/* Test that the client will prepare requests under the correct conditions. */
+/* Test that the client will prepare requests correctly. */
 AWS_TEST_CASE(test_s3_update_meta_requests_trigger_prepare, s_test_s3_update_meta_requests_trigger_prepare)
 static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -742,98 +693,82 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
 
-    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+    struct aws_client_bootstrap mock_bootstrap;
+    AWS_ZERO_STRUCT(mock_bootstrap);
 
-    *((uint32_t *)&mock_client->ideal_vip_count) = 1;
+    const uint32_t ideal_vip_count = 10;
+
+    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+    mock_client->client_bootstrap = &mock_bootstrap;
+    mock_client->vtable->get_host_address_count = s_test_s3_update_meta_request_trigger_prepare_get_host_address_count;
+    *((uint32_t *)&mock_client->ideal_vip_count) = ideal_vip_count;
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
     aws_linked_list_init(&mock_client->threaded_data.meta_requests);
 
-    const uint32_t max_requests_prepare = aws_s3_client_get_max_requests_prepare(mock_client);
+    struct aws_s3_meta_request *mock_meta_request_without_work = aws_s3_tester_mock_meta_request_new(&tester);
+    mock_meta_request_without_work->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
 
-    /* Mock that there is one active connection so that the update meta requests function doesn't early out due to no
-     * connections being established yet. */
-    aws_atomic_store_int(&mock_client->stats.num_active_vip_connections, 1);
-
-    ///////////////////////////////////
-
-    struct aws_s3_meta_request *mock_meta_request_0 = aws_s3_tester_mock_meta_request_new(&tester);
-    struct test_work_meta_request_update_user_data mock_meta_request_0_data = {
+    struct test_work_meta_request_update_user_data mock_meta_request_without_work_data = {
         .has_work_remaining = false,
     };
 
-    mock_meta_request_0->user_data = &mock_meta_request_0_data;
+    mock_meta_request_without_work->user_data = &mock_meta_request_without_work_data;
 
-    struct aws_s3_meta_request_vtable *meta_request_vtable_0 =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_0, NULL);
-    meta_request_vtable_0->update = s_s3_test_work_meta_request_update;
-    meta_request_vtable_0->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
+    struct aws_s3_meta_request_vtable *meta_request_without_work_vtable =
+        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_without_work, NULL);
+    meta_request_without_work_vtable->update = s_s3_test_work_meta_request_update;
+    meta_request_without_work_vtable->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
 
-    /* Intentionally push this meta request first to test that it's properly removed from the list when the list has
-     * items after it. */
+    /* Intentionally push this meta request first to test that it's properly removed from the list. */
     aws_linked_list_push_back(
-        &mock_client->threaded_data.meta_requests, &mock_meta_request_0->client_process_work_threaded_data.node);
+        &mock_client->threaded_data.meta_requests,
+        &mock_meta_request_without_work->client_process_work_threaded_data.node);
 
-    aws_s3_meta_request_acquire(mock_meta_request_0);
+    aws_s3_meta_request_acquire(mock_meta_request_without_work);
 
-    ///////////////////////////////////
-
-    struct aws_s3_meta_request *mock_meta_request_1 = aws_s3_tester_mock_meta_request_new(&tester);
-    struct test_work_meta_request_update_user_data mock_meta_request_1_data = {
+    struct aws_s3_meta_request *mock_meta_request_with_work = aws_s3_tester_mock_meta_request_new(&tester);
+    struct test_work_meta_request_update_user_data mock_meta_request_with_work_data = {
         .has_work_remaining = true,
     };
 
-    mock_meta_request_1->user_data = &mock_meta_request_1_data;
+    mock_meta_request_with_work->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
+    mock_meta_request_with_work->user_data = &mock_meta_request_with_work_data;
 
-    struct aws_s3_meta_request_vtable *meta_request_vtable_1 =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_1, NULL);
-    meta_request_vtable_1->update = s_s3_test_work_meta_request_update;
-    meta_request_vtable_1->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
+    struct aws_s3_meta_request_vtable *mock_meta_request_with_work_vtable =
+        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request_with_work, NULL);
+    mock_meta_request_with_work_vtable->update = s_s3_test_work_meta_request_update;
+    mock_meta_request_with_work_vtable->schedule_prepare_request = s_s3_test_work_meta_request_schedule_prepare_request;
 
     aws_linked_list_push_back(
-        &mock_client->threaded_data.meta_requests, &mock_meta_request_1->client_process_work_threaded_data.node);
-    aws_s3_meta_request_acquire(mock_meta_request_1);
+        &mock_client->threaded_data.meta_requests,
+        &mock_meta_request_with_work->client_process_work_threaded_data.node);
+    aws_s3_meta_request_acquire(mock_meta_request_with_work);
 
-    ///////////////////////////////////
-
-    aws_s3_client_update_meta_requests_threaded(mock_client, 0);
-
-    /* After the update, the max number of requests that can be prepared should have been triggered. */
+    /* With no known addresses, the amount of requests that can be prepared should only be enough for one VIP. */
     {
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(mock_client->threaded_data.num_requests_being_prepared == max_requests_prepare);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_requests_in_flight) == max_requests_prepare);
+        s_test_s3_update_meta_request_trigger_prepare_host_address_count = 0;
+        aws_s3_client_update_meta_requests_threaded(mock_client);
 
-        uint32_t num_meta_requests_in_list = 0;
-        bool meta_request_1_found = false;
-
-        for (struct aws_linked_list_node *node = aws_linked_list_begin(&mock_client->threaded_data.meta_requests);
-             node != aws_linked_list_end(&mock_client->threaded_data.meta_requests);
-             node = aws_linked_list_next(node)) {
-
-            struct aws_s3_meta_request *meta_request =
-                AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
-
-            if (meta_request == mock_meta_request_1) {
-                meta_request_1_found = true;
-            }
-
-            ++num_meta_requests_in_list;
-        }
-
-        ASSERT_TRUE(meta_request_1_found);
-        ASSERT_TRUE(num_meta_requests_in_list == 1);
+        ASSERT_SUCCESS(s_validate_prepared_requests(
+            mock_client, g_max_num_connections_per_vip, mock_meta_request_with_work, mock_meta_request_without_work));
     }
 
-    mock_meta_request_1_data.has_work_remaining = false;
-
-    aws_s3_client_update_meta_requests_threaded(mock_client, AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS);
-
+    /* When the number of known addresses is greater than or equal to the ideal vip count, the max number of requests
+     * should be reached. */
     {
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.meta_requests));
-        ASSERT_TRUE(mock_client->threaded_data.num_requests_being_prepared == max_requests_prepare);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_requests_in_flight) == max_requests_prepare);
+        const uint32_t max_requests_prepare = aws_s3_client_get_max_requests_prepare(mock_client);
+
+        s_test_s3_update_meta_request_trigger_prepare_host_address_count = (size_t)(ideal_vip_count);
+        aws_s3_client_update_meta_requests_threaded(mock_client);
+
+        ASSERT_SUCCESS(s_validate_prepared_requests(
+            mock_client, max_requests_prepare, mock_meta_request_with_work, mock_meta_request_without_work));
+
+        s_test_s3_update_meta_request_trigger_prepare_host_address_count = (size_t)(ideal_vip_count + 1);
+        aws_s3_client_update_meta_requests_threaded(mock_client);
+
+        ASSERT_SUCCESS(s_validate_prepared_requests(
+            mock_client, max_requests_prepare, mock_meta_request_with_work, mock_meta_request_without_work));
     }
 
     while (!aws_linked_list_empty(&mock_client->threaded_data.meta_requests)) {
@@ -846,225 +781,19 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
         aws_s3_meta_request_release(meta_request);
     }
 
-    aws_s3_meta_request_release(mock_meta_request_0);
-    aws_s3_meta_request_release(mock_meta_request_1);
+    aws_s3_meta_request_release(mock_meta_request_without_work);
+    aws_s3_meta_request_release(mock_meta_request_with_work);
     aws_s3_client_release(mock_client);
     aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
-/* Test that queued requests will be assigned to connnections properly. */
-AWS_TEST_CASE(test_s3_client_update_connections_request_assign, s_test_s3_client_update_connections_request_assign)
-static int s_test_s3_client_update_connections_request_assign(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    aws_s3_tester_init(allocator, &tester);
-
-    struct aws_s3_vip *mock_vip = aws_s3_tester_mock_vip_new(&tester);
-    aws_atomic_init_int(&mock_vip->active, 1);
-
-    struct aws_s3_vip_connection *vip_connection_0 = aws_s3_tester_mock_vip_connection_new(&tester);
-    vip_connection_0->owning_vip = mock_vip;
-
-    struct aws_s3_vip_connection *vip_connection_1 = aws_s3_tester_mock_vip_connection_new(&tester);
-    vip_connection_1->owning_vip = mock_vip;
-
-    struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
-    struct aws_s3_request *request_0 = aws_s3_request_new(mock_meta_request, 0, 0, 0);
-    struct aws_s3_request *request_1 = aws_s3_request_new(mock_meta_request, 0, 0, 0);
-    struct aws_s3_request *request_2 = aws_s3_request_new(mock_meta_request, 0, 0, 0);
-
-    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
-    *((uint32_t *)&mock_client->ideal_vip_count) = 1;
-    aws_linked_list_init(&mock_client->threaded_data.idle_vip_connections);
-    aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection_0->node);
-    aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection_1->node);
-
-    aws_linked_list_init(&mock_client->threaded_data.request_queue);
-
-    /* Push one request into the request queue. First connection in the list should get the request. */
-    {
-        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request_0->node);
-        ++mock_client->threaded_data.request_queue_size;
-
-        aws_s3_client_update_connections_threaded(mock_client, true);
-
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 1);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 1);
-
-        ASSERT_TRUE(vip_connection_0->is_warm);
-        ASSERT_TRUE(vip_connection_0->is_active);
-        ASSERT_TRUE(vip_connection_0->request == request_0);
-
-        ASSERT_FALSE(vip_connection_1->is_warm);
-        ASSERT_FALSE(vip_connection_1->is_active);
-        ASSERT_TRUE(vip_connection_1->request == NULL);
-
-        vip_connection_0->request = NULL;
-    }
-
-    /* Push vip_connection_0 back into the list and requeue the request.  Even though vip_connection_0 is last in the
-     * list, it should get the request because it is the only warm connection. */
-    {
-        aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection_0->node);
-        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request_0->node);
-        ++mock_client->threaded_data.request_queue_size;
-
-        aws_s3_client_update_connections_threaded(mock_client, true);
-
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 1);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 1);
-
-        ASSERT_TRUE(vip_connection_0->is_warm);
-        ASSERT_TRUE(vip_connection_0->is_active);
-        ASSERT_TRUE(vip_connection_0->request == request_0);
-
-        ASSERT_FALSE(vip_connection_1->is_warm);
-        ASSERT_FALSE(vip_connection_1->is_active);
-        ASSERT_TRUE(vip_connection_1->request == NULL);
-
-        vip_connection_0->request = NULL;
-    }
-
-    /* Requeue vip_connection_0 but don't queue any requests. Both connections should become inactive. */
-    {
-        aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection_0->node);
-        aws_s3_client_update_connections_threaded(mock_client, true);
-
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 0);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 1);
-
-        ASSERT_TRUE(vip_connection_0->is_warm);
-        ASSERT_FALSE(vip_connection_0->is_active);
-        ASSERT_TRUE(vip_connection_0->request == NULL);
-
-        ASSERT_FALSE(vip_connection_1->is_warm);
-        ASSERT_FALSE(vip_connection_1->is_active);
-        ASSERT_TRUE(vip_connection_1->request == NULL);
-    }
-
-    /* Queue three requests. Both connections should get a request, and one should be left in the queue*/
-    {
-        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request_0->node);
-        ++mock_client->threaded_data.request_queue_size;
-
-        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request_1->node);
-        ++mock_client->threaded_data.request_queue_size;
-
-        aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request_2->node);
-        ++mock_client->threaded_data.request_queue_size;
-
-        aws_s3_client_update_connections_threaded(mock_client, true);
-
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 1);
-        ASSERT_FALSE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 2);
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_warm_vip_connections) == 2);
-
-        ASSERT_TRUE(vip_connection_0->is_warm);
-        ASSERT_TRUE(vip_connection_0->is_active);
-        ASSERT_TRUE(vip_connection_0->request == request_0);
-
-        ASSERT_TRUE(vip_connection_1->is_warm);
-        ASSERT_TRUE(vip_connection_1->is_active);
-        ASSERT_TRUE(vip_connection_1->request == request_1);
-    }
-
-    aws_s3_request_release(request_0);
-    aws_s3_request_release(request_1);
-    aws_s3_request_release(request_2);
-    aws_s3_meta_request_release(mock_meta_request);
-
-    aws_mem_release(tester.allocator, vip_connection_0);
-    aws_mem_release(tester.allocator, vip_connection_1);
-    aws_mem_release(tester.allocator, mock_vip);
-
-    aws_s3_client_release(mock_client);
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
-/* Test that queued requests will not spin up new connections if the owning meta request prefers a smaller amount of
- * active connections. */
-AWS_TEST_CASE(test_s3_client_update_connections_too_many_conns, s_test_s3_client_update_connections_too_many_conns)
-static int s_test_s3_client_update_connections_too_many_conns(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    aws_s3_tester_init(allocator, &tester);
-
-    struct aws_s3_vip *mock_vip = aws_s3_tester_mock_vip_new(&tester);
-    aws_atomic_init_int(&mock_vip->active, 1);
-
-    struct aws_s3_vip_connection *vip_connection = aws_s3_tester_mock_vip_connection_new(&tester);
-    vip_connection->owning_vip = mock_vip;
-
-    struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
-    struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, 0);
-
-    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
-    *((uint32_t *)&mock_client->ideal_vip_count) = 1;
-    aws_linked_list_init(&mock_client->threaded_data.idle_vip_connections);
-    aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection->node);
-
-    aws_linked_list_init(&mock_client->threaded_data.request_queue);
-
-    aws_atomic_store_int(
-        &mock_client->stats.num_active_vip_connections, aws_s3_client_get_max_active_connections(mock_client, 0));
-    aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
-    ++mock_client->threaded_data.request_queue_size;
-
-    /* Request should stay in queue due to more active connections than the meta request wants, and there not being any
-     * warm connections. */
-    {
-        aws_s3_client_update_connections_threaded(mock_client, true);
-
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 1);
-        ASSERT_TRUE(!aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-
-        ASSERT_FALSE(vip_connection->is_warm);
-        ASSERT_FALSE(vip_connection->is_active);
-        ASSERT_TRUE(vip_connection->request == NULL);
-    }
-
-    /* Make the vip connection warm, which should cause the request to dequeue. */
-    {
-        aws_s3_client_set_vip_connection_warm(mock_client, vip_connection, true);
-
-        aws_s3_client_update_connections_threaded(mock_client, true);
-
-        ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
-        ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-
-        ASSERT_TRUE(vip_connection->is_warm);
-        ASSERT_TRUE(vip_connection->is_active);
-        ASSERT_TRUE(vip_connection->request == request);
-    }
-
-    aws_s3_request_release(request);
-    aws_s3_meta_request_release(mock_meta_request);
-
-    aws_mem_release(tester.allocator, vip_connection);
-    aws_mem_release(tester.allocator, mock_vip);
-
-    aws_s3_client_release(mock_client);
-    aws_s3_tester_clean_up(&tester);
-
     return 0;
 }
 
 struct s3_test_update_connections_finish_result_user_data {
-    struct aws_s3_request *request;
-    uint32_t call_counter;
+    struct aws_s3_request *finished_request;
+    struct aws_s3_request *create_connection_request;
+
+    uint32_t finished_request_call_counter;
+    uint32_t create_connection_request_call_counter;
 };
 
 static void s_s3_test_meta_request_has_finish_result_finished_request(
@@ -1076,8 +805,34 @@ static void s_s3_test_meta_request_has_finish_result_finished_request(
     (void)error_code;
 
     struct s3_test_update_connections_finish_result_user_data *user_data = meta_request->user_data;
-    user_data->request = request;
-    ++user_data->call_counter;
+    user_data->finished_request = request;
+    ++user_data->finished_request_call_counter;
+}
+
+static void s_s3_test_meta_request_has_finish_result_client_create_connection_for_request(
+    struct aws_s3_client *client,
+    struct aws_s3_request *request) {
+    (void)client;
+    (void)request;
+    AWS_ASSERT(client);
+    AWS_ASSERT(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    struct s3_test_update_connections_finish_result_user_data *user_data = meta_request->user_data;
+    user_data->create_connection_request = request;
+    ++user_data->create_connection_request_call_counter;
+}
+
+size_t s_test_update_conns_finish_result_host_address_count(
+    struct aws_host_resolver *host_resolver,
+    const struct aws_string *host_name,
+    uint32_t flags) {
+    (void)host_resolver;
+    (void)host_name;
+    (void)flags;
+
+    return 1;
 }
 
 /* Test that the client will correctly discard requests for meta requests that are trying to finish. */
@@ -1088,189 +843,76 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
 
-    struct aws_s3_vip *mock_vip = aws_s3_tester_mock_vip_new(&tester);
-    aws_atomic_init_int(&mock_vip->active, 1);
-
-    struct aws_s3_vip_connection *vip_connection = aws_s3_tester_mock_vip_connection_new(&tester);
-    vip_connection->owning_vip = mock_vip;
-
     struct s3_test_update_connections_finish_result_user_data test_update_connections_finish_result_user_data;
     AWS_ZERO_STRUCT(test_update_connections_finish_result_user_data);
 
+    /* Put together a mock meta request that is finished. */
     struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     mock_meta_request->synced_data.finish_result_set = true;
     mock_meta_request->user_data = &test_update_connections_finish_result_user_data;
+    mock_meta_request->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
 
     struct aws_s3_meta_request_vtable *mock_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request, NULL);
     mock_meta_request_vtable->finished_request = s_s3_test_meta_request_has_finish_result_finished_request;
 
+    struct aws_client_bootstrap mock_client_bootstrap;
+    AWS_ZERO_STRUCT(mock_client_bootstrap);
+
     struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
+    mock_client->client_bootstrap = &mock_client_bootstrap;
+    mock_client->vtable->get_host_address_count = s_test_update_conns_finish_result_host_address_count;
+    mock_client->vtable->create_connection_for_request =
+        s_s3_test_meta_request_has_finish_result_client_create_connection_for_request;
 
     *((uint32_t *)&mock_client->ideal_vip_count) = 1;
-    aws_linked_list_init(&mock_client->threaded_data.idle_vip_connections);
-    aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection->node);
 
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
 
-    /* Verify that the request does not get sent. */
+    /* Verify that the request does not get sent because the meta request has finish-result. */
     {
         struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, 0);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
         ++mock_client->threaded_data.request_queue_size;
 
-        aws_s3_client_update_connections_threaded(mock_client, true);
+        aws_s3_client_update_connections_threaded(mock_client);
 
+        /* Request should still have been dequeued, but immediately passed to the meta request finish function. */
         ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
         ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 0);
 
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.request == request);
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.call_counter == 1);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request == request);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request_call_counter == 1);
 
-        ASSERT_FALSE(vip_connection->is_warm);
-        ASSERT_FALSE(vip_connection->is_active);
-        ASSERT_TRUE(vip_connection->request == NULL);
-
-        test_update_connections_finish_result_user_data.request = 0;
-        test_update_connections_finish_result_user_data.call_counter = 0;
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request == NULL);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request_call_counter == 0);
     }
 
-    /* Verify that the request still gets sent because it has the 'always send' flag. */
+    AWS_ZERO_STRUCT(test_update_connections_finish_result_user_data);
+
+    /* Verify that a request with the 'always send' flag still gets sent when the meta request has a finish-result. */
     {
         struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
         ++mock_client->threaded_data.request_queue_size;
 
-        aws_s3_client_update_connections_threaded(mock_client, true);
+        aws_s3_client_update_connections_threaded(mock_client);
 
+        /* Request should have been dequeued, and then sent on a connection. */
         ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
         ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_active_vip_connections) == 1);
 
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.request == NULL);
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.call_counter == 0);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request == NULL);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request_call_counter == 0);
 
-        ASSERT_TRUE(vip_connection->is_warm);
-        ASSERT_TRUE(vip_connection->is_active);
-        ASSERT_TRUE(vip_connection->request == request);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request == request);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request_call_counter == 1);
 
         aws_s3_request_release(request);
     }
 
     aws_s3_meta_request_release(mock_meta_request);
 
-    aws_mem_release(tester.allocator, vip_connection);
-    aws_mem_release(tester.allocator, mock_vip);
-
-    aws_s3_client_release(mock_client);
-    aws_s3_tester_clean_up(&tester);
-    return 0;
-}
-
-struct s3_test_update_connections_clean_up_user_data {
-    uint32_t call_count;
-};
-
-static void s_s3_test_update_connections_vip_connection_destroy(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection) {
-    (void)vip_connection;
-
-    struct s3_test_update_connections_clean_up_user_data *test_data = client->shutdown_callback_user_data;
-
-    ++test_data->call_count;
-}
-
-static bool s_http_connection_is_open_return_true(const struct aws_http_connection *http_connection) {
-    (void)http_connection;
-    return true;
-}
-
-static bool s_http_connection_is_open_return_false(const struct aws_http_connection *http_connection) {
-    (void)http_connection;
-    return false;
-}
-
-/* Test that connections are cleaned up by the update connections function given the correct conditions. */
-AWS_TEST_CASE(test_s3_client_update_connections_clean_up, s_test_s3_client_update_connections_clean_up)
-static int s_test_s3_client_update_connections_clean_up(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    aws_s3_tester_init(allocator, &tester);
-
-    struct s3_test_update_connections_clean_up_user_data test_data;
-    AWS_ZERO_STRUCT(test_data);
-
-    struct aws_s3_vip *mock_vip = aws_s3_tester_mock_vip_new(&tester);
-    aws_atomic_init_int(&mock_vip->active, 1);
-
-    struct aws_s3_vip_connection *vip_connection = aws_s3_tester_mock_vip_connection_new(&tester);
-    vip_connection->owning_vip = mock_vip;
-
-    struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
-    struct aws_s3_client_vtable *mock_client_vtable = aws_s3_tester_patch_client_vtable(&tester, mock_client, NULL);
-    mock_client->vtable->vip_connection_destroy = s_s3_test_update_connections_vip_connection_destroy;
-    mock_client->shutdown_callback_user_data = &test_data;
-
-    struct aws_http_connection *mock_http_connection = (struct aws_http_connection *)1;
-
-    aws_linked_list_init(&mock_client->threaded_data.request_queue);
-    aws_linked_list_init(&mock_client->threaded_data.idle_vip_connections);
-
-    aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection->node);
-
-    for (uint32_t test_truth_value = 0; test_truth_value < 32; ++test_truth_value) {
-        bool vip_is_active = (test_truth_value & 0x01) != 0;
-        bool client_is_active = (test_truth_value & 0x02) != 0;
-        bool http_connection_null = (test_truth_value & 0x04) != 0;
-        bool http_connection_open = (test_truth_value & 0x08) != 0;
-        bool request_count_at_max = (test_truth_value & 0x10) != 0;
-
-        if (vip_is_active) {
-            aws_atomic_store_int(&mock_vip->active, 1);
-        } else {
-            aws_atomic_store_int(&mock_vip->active, 0);
-        }
-
-        if (http_connection_null) {
-            vip_connection->http_connection = NULL;
-        } else {
-            vip_connection->http_connection = mock_http_connection;
-        }
-
-        if (http_connection_open) {
-            mock_client_vtable->http_connection_is_open = s_http_connection_is_open_return_true;
-        } else {
-            mock_client_vtable->http_connection_is_open = s_http_connection_is_open_return_false;
-        }
-
-        if (request_count_at_max) {
-            vip_connection->request_count = INT_MAX;
-        } else {
-            vip_connection->request_count = 0;
-        }
-
-        aws_s3_client_update_connections_threaded(mock_client, client_is_active);
-
-        if (!vip_is_active &&
-            (!client_is_active || (http_connection_null || !http_connection_open || request_count_at_max))) {
-
-            ASSERT_TRUE(test_data.call_count == 1);
-            test_data.call_count = 0;
-
-            aws_linked_list_push_back(&mock_client->threaded_data.idle_vip_connections, &vip_connection->node);
-
-        } else {
-
-            ASSERT_TRUE(test_data.call_count == 0);
-            test_data.call_count = 0;
-        }
-    }
-
-    aws_mem_release(allocator, vip_connection);
-    aws_mem_release(allocator, mock_vip);
     aws_s3_client_release(mock_client);
     aws_s3_tester_clean_up(&tester);
 
@@ -1576,11 +1218,11 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
-    /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message =
-        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
-
     for (size_t i = 0; i < num_meta_requests; ++i) {
+        /* Put together a simple S3 Get Object request. */
+        struct aws_http_message *message =
+            aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+
         AWS_ZERO_STRUCT(meta_request_test_results[i]);
 
         struct aws_s3_meta_request_options options;
@@ -1594,6 +1236,8 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
         meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
 
         ASSERT_TRUE(meta_requests[i] != NULL);
+
+        aws_http_message_release(message);
     }
 
     /* Wait for the request to finish. */
@@ -1614,9 +1258,6 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
         aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
     }
-
-    aws_http_message_release(message);
-    message = NULL;
 
     aws_string_destroy(host_name);
     host_name = NULL;
@@ -2707,7 +2348,7 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -2987,69 +2628,6 @@ static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocat
     ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_IO_STREAM_READ_FAILED);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_different_endpoints, s_test_s3_different_endpoints)
-static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client *client = NULL;
-    struct aws_s3_tester_client_options client_options;
-
-    AWS_ZERO_STRUCT(client_options);
-    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
-
-    {
-        struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
-
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .get_options =
-                {
-                    .object_path = g_s3_path_get_object_test_1MB,
-                },
-        };
-
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-    }
-
-    {
-        struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
-
-        struct aws_byte_cursor bucket_without_file = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff");
-
-        struct aws_s3_tester_meta_request_options options = {
-            .allocator = allocator,
-            .client = client,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
-            .bucket_name = &bucket_without_file,
-            .get_options =
-                {
-                    .object_path = g_s3_path_get_object_test_1MB,
-                },
-        };
-
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_INVALID_ARGUMENT);
-
-        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-    }
-
-    aws_s3_client_release(client);
-
-    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
