@@ -141,12 +141,12 @@ uint32_t aws_s3_client_get_max_active_connections(
         AWS_ASSERT(endpoint != NULL);
 
         AWS_ASSERT(client->vtable->get_host_address_count);
-        uint32_t num_known_vips = client->vtable->get_host_address_count(
+        size_t num_known_vips = client->vtable->get_host_address_count(
             client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
 
         /* If the number of known vips is less than our ideal VIP count, clamp it. */
-        if (num_known_vips < num_vips) {
-            num_vips = num_known_vips;
+        if (num_known_vips < (size_t)num_vips) {
+            num_vips = (uint32_t)num_known_vips;
         }
     }
 
@@ -186,10 +186,11 @@ static uint32_t s_s3_client_get_num_requests_network_io(
 
     if (meta_request_type == AWS_S3_META_REQUEST_TYPE_MAX) {
         for (uint32_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
-            num_requests_network_io += aws_atomic_load_int(&client->stats.num_requests_network_io[i]);
+            num_requests_network_io += (uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_io[i]);
         }
     } else {
-        num_requests_network_io = aws_atomic_load_int(&client->stats.num_requests_network_io[meta_request_type]);
+        num_requests_network_io =
+            (uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_io[meta_request_type]);
     }
 
     return num_requests_network_io;
@@ -1159,7 +1160,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             AWS_ASSERT(endpoint != NULL);
 
             AWS_ASSERT(client->vtable->get_host_address_count);
-            uint32_t num_known_vips = client->vtable->get_host_address_count(
+            size_t num_known_vips = client->vtable->get_host_address_count(
                 client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
 
             /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
