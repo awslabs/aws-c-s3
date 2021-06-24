@@ -789,8 +789,11 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
 }
 
 struct s3_test_update_connections_finish_result_user_data {
-    struct aws_s3_request *request;
-    uint32_t call_counter;
+    struct aws_s3_request *finished_request;
+    struct aws_s3_request *create_connection_request;
+
+    uint32_t finished_request_call_counter;
+    uint32_t create_connection_request_call_counter;
 };
 
 static void s_s3_test_meta_request_has_finish_result_finished_request(
@@ -802,8 +805,8 @@ static void s_s3_test_meta_request_has_finish_result_finished_request(
     (void)error_code;
 
     struct s3_test_update_connections_finish_result_user_data *user_data = meta_request->user_data;
-    user_data->request = request;
-    ++user_data->call_counter;
+    user_data->finished_request = request;
+    ++user_data->finished_request_call_counter;
 }
 
 static void s_s3_test_meta_request_has_finish_result_client_create_connection_for_request(
@@ -811,16 +814,14 @@ static void s_s3_test_meta_request_has_finish_result_client_create_connection_fo
     struct aws_s3_request *request) {
     (void)client;
     (void)request;
-    /*
     AWS_ASSERT(client);
     AWS_ASSERT(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
     struct s3_test_update_connections_finish_result_user_data *user_data = meta_request->user_data;
-    user_data->request = request;
-    ++user_data->call_counter;
-    */
+    user_data->create_connection_request = request;
+    ++user_data->create_connection_request_call_counter;
 }
 
 size_t s_test_update_conns_finish_result_host_address_count(
@@ -845,6 +846,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
     struct s3_test_update_connections_finish_result_user_data test_update_connections_finish_result_user_data;
     AWS_ZERO_STRUCT(test_update_connections_finish_result_user_data);
 
+    /* Put together a mock meta request that is finished. */
     struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     mock_meta_request->synced_data.finish_result_set = true;
     mock_meta_request->user_data = &test_update_connections_finish_result_user_data;
@@ -867,7 +869,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
 
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
 
-    /* Verify that the request does not get sent. */
+    /* Verify that the request does not get sent because the meta request has finish-result. */
     {
         struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, 0);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
@@ -875,20 +877,20 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
 
         aws_s3_client_update_connections_threaded(mock_client);
 
+        /* Request should still have been dequeued, but immediately passed to the meta request finish function. */
         ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
         ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
-        ASSERT_TRUE(aws_atomic_load_int(&mock_client->stats.num_requests_in_flight) == 0);
 
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.request == request);
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.call_counter == 1);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request == request);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request_call_counter == 1);
 
-        /* ASSERT_TRUE(vip_connection->request == NULL); */
-
-        test_update_connections_finish_result_user_data.request = 0;
-        test_update_connections_finish_result_user_data.call_counter = 0;
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request == NULL);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request_call_counter == 0);
     }
 
-    /* Verify that the request still gets sent because it has the 'always send' flag. */
+    AWS_ZERO_STRUCT(test_update_connections_finish_result_user_data);
+
+    /* Verify that a request with the 'always send' flag still gets sent when the meta request has a finish-result. */
     {
         struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
@@ -896,11 +898,15 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
 
         aws_s3_client_update_connections_threaded(mock_client);
 
+        /* Request should have been dequeued, and then sent on a connection. */
         ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
         ASSERT_TRUE(aws_linked_list_empty(&mock_client->threaded_data.request_queue));
 
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.request == NULL);
-        ASSERT_TRUE(test_update_connections_finish_result_user_data.call_counter == 0);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request == NULL);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.finished_request_call_counter == 0);
+
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request == request);
+        ASSERT_TRUE(test_update_connections_finish_result_user_data.create_connection_request_call_counter == 1);
 
         aws_s3_request_release(request);
     }
