@@ -426,7 +426,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
     int error_code = AWS_ERROR_SUCCESS;
 
-    if (aws_s3_meta_request_has_finish_result(meta_request)) {
+    if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
         goto error_clean_up;
     }
 
