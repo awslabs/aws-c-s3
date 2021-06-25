@@ -1307,6 +1307,7 @@ static void s_s3_client_create_connection_for_request_default(
 
     struct aws_s3_connection *connection = aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_connection));
 
+    connection->endpoint = aws_s3_endpoint_acquire(meta_request->endpoint);
     connection->request = request;
 
     struct aws_byte_cursor host_header_value;
@@ -1579,6 +1580,9 @@ reset_connection:
 
     aws_retry_token_release(connection->retry_token);
     connection->retry_token = NULL;
+
+    aws_s3_endpoint_release(connection->endpoint);
+    connection->endpoint = NULL;
 
     aws_mem_release(client->sba_allocator, connection);
     connection = NULL;

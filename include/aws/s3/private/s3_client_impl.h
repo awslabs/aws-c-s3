@@ -92,6 +92,9 @@ struct aws_s3_endpoint {
 
 /* Represents one connection on a particular VIP. */
 struct aws_s3_connection {
+    /* Endpoint that this connection is connected to. */
+    struct aws_s3_endpoint *endpoint;
+
     /* The underlying, currently in-use HTTP connection. */
     struct aws_http_connection *http_connection;
 
