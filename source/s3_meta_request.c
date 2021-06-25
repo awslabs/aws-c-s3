@@ -743,7 +743,7 @@ static int s_s3_meta_request_incoming_body(
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p Incoming body for request %p. Response status: %d. Data Size: %" PRIu64 ". VIP connection: %p.",
+        "id=%p Incoming body for request %p. Response status: %d. Data Size: %" PRIu64 ". connection: %p.",
         (void *)meta_request,
         (void *)request,
         request->send_data.response_status,

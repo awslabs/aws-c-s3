@@ -1443,7 +1443,7 @@ error_fail:
     aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
 }
 
-/* Called by aws_s3_meta_request when it has finished using this VIP connection for a single request. */
+/* Called by aws_s3_meta_request when it has finished using this connection for a single request. */
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
     struct aws_s3_connection *connection,
