@@ -407,7 +407,7 @@ static int s_test_s3_cancel_prepare_meta_request_prepare_request(
         return AWS_OP_ERR;
     }
 
-    struct test_s3_cancel_prepare_user_data* test_user_data = tester->user_data;
+    struct test_s3_cancel_prepare_user_data *test_user_data = tester->user_data;
     ++test_user_data->prepare_counter;
 
     aws_s3_meta_request_cancel(meta_request);
