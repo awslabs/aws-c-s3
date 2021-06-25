@@ -385,7 +385,7 @@ static int s_test_s3_cancel_mpd_get_without_range_completed(struct aws_allocator
 }
 
 struct test_s3_cancel_prepare_user_data {
-    uint32_t prepare_counter;
+    uint32_t request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_MAX];
 };
 
 static int s_test_s3_cancel_prepare_meta_request_prepare_request(
@@ -408,9 +408,13 @@ static int s_test_s3_cancel_prepare_meta_request_prepare_request(
     }
 
     struct test_s3_cancel_prepare_user_data *test_user_data = tester->user_data;
-    ++test_user_data->prepare_counter;
+    ++test_user_data->request_prepare_counters[request->request_tag];
 
-    aws_s3_meta_request_cancel(meta_request);
+    /* Cancel after the first part is prepared, preventing any additional parts from being prepared. */
+    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
+        test_user_data->request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 1) {
+        aws_s3_meta_request_cancel(meta_request);
+    }
 
     return AWS_OP_SUCCESS;
 }
@@ -471,7 +475,13 @@ static int s_test_s3_cancel_prepare(struct aws_allocator *allocator, void *ctx) 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
     }
 
-    ASSERT_TRUE(test_user_data.prepare_counter == 1);
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD] == 1);
+    ASSERT_TRUE(test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 1);
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD] == 1);
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD] == 0);
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
