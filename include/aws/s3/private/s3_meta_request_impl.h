@@ -18,7 +18,7 @@
 #include "aws/s3/private/s3_request.h"
 
 struct aws_s3_client;
-struct aws_s3_vip_connection;
+struct aws_s3_connection;
 struct aws_s3_meta_request;
 struct aws_s3_request;
 struct aws_s3_request_options;
@@ -69,7 +69,7 @@ struct aws_s3_meta_request_vtable {
 
     void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
 
-    /* Sign the request on the given VIP Connection. */
+    /* Sign the given request. */
     void (*sign_request)(
         struct aws_s3_meta_request *meta_request,
         struct aws_s3_request *request,
@@ -77,10 +77,7 @@ struct aws_s3_meta_request_vtable {
         void *user_data);
 
     /* Called when any sending of the request is finished, including for each retry. */
-    void (*send_request_finish)(
-        struct aws_s3_vip_connection *vip_connection,
-        struct aws_http_stream *stream,
-        int error_code);
+    void (*send_request_finish)(struct aws_s3_connection *connection, struct aws_http_stream *stream, int error_code);
 
     /* Called when the request is done being sent, and will not be retried/sent again. */
     void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
@@ -233,9 +230,7 @@ void aws_s3_meta_request_prepare_request(
     void *user_data);
 
 AWS_S3_API
-void aws_s3_meta_request_send_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
+void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection);
 
 AWS_S3_API
 void aws_s3_meta_request_init_signing_date_time_default(
@@ -253,7 +248,7 @@ void aws_s3_meta_request_sign_request_default(
  */
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code);
 

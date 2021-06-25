@@ -72,9 +72,9 @@ static void s_s3_client_acquire_http_connection_fail_first(
     void *user_data) {
     AWS_ASSERT(callback);
 
-    struct aws_s3_vip_connection *vip_connection = user_data;
+    struct aws_s3_connection *connection = user_data;
 
-    struct aws_s3_client *client = vip_connection->request->meta_request->endpoint->user_data;
+    struct aws_s3_client *client = connection->request->meta_request->endpoint->user_data;
     AWS_ASSERT(client);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
@@ -82,7 +82,7 @@ static void s_s3_client_acquire_http_connection_fail_first(
 
     if (aws_s3_tester_inc_counter1(tester) == 1) {
         aws_raise_error(AWS_ERROR_UNKNOWN);
-        callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
+        callback(NULL, AWS_ERROR_UNKNOWN, connection);
         return;
     }
 
@@ -315,26 +315,26 @@ static int s_s3_meta_request_prepare_request_fail_first(
 }
 
 static void s_s3_meta_request_send_request_finish_fail_first(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code) {
 
-    struct aws_s3_client *client = vip_connection->request->meta_request->client;
+    struct aws_s3_client *client = connection->request->meta_request->client;
     AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
     AWS_ASSERT(tester != NULL);
 
     if (aws_s3_tester_inc_counter2(tester) == 1) {
-        AWS_ASSERT(vip_connection->request->send_data.response_status == 404);
+        AWS_ASSERT(connection->request->send_data.response_status == 404);
 
-        vip_connection->request->send_data.response_status = AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR;
+        connection->request->send_data.response_status = AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR;
     }
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    original_meta_request_vtable->send_request_finish(vip_connection, stream, error_code);
+    original_meta_request_vtable->send_request_finish(connection, stream, error_code);
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_send_request_finish(

@@ -661,10 +661,10 @@ static bool s_s3_meta_request_update_empty(
 }
 
 void s_s3_meta_request_send_request_finish_empty(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code) {
-    (void)vip_connection;
+    (void)connection;
     (void)stream;
     (void)error_code;
 }

@@ -25,10 +25,10 @@ struct aws_http_connection_manager;
 struct aws_host_resolver;
 struct aws_s3_endpoint;
 
-enum aws_s3_vip_connection_finish_code {
-    AWS_S3_VIP_CONNECTION_FINISH_CODE_SUCCESS,
-    AWS_S3_VIP_CONNECTION_FINISH_CODE_FAILED,
-    AWS_S3_VIP_CONNECTION_FINISH_CODE_RETRY,
+enum aws_s3_connection_finish_code {
+    AWS_S3_CONNECTION_FINISH_CODE_SUCCESS,
+    AWS_S3_CONNECTION_FINISH_CODE_FAILED,
+    AWS_S3_CONNECTION_FINISH_CODE_RETRY,
 };
 
 /* Callback for the owner of the endpoint when the ref count of this endpoint hits zero. This gives the owner a
@@ -91,11 +91,11 @@ struct aws_s3_endpoint {
 };
 
 /* Represents one connection on a particular VIP. */
-struct aws_s3_vip_connection {
+struct aws_s3_connection {
     /* The underlying, currently in-use HTTP connection. */
     struct aws_http_connection *http_connection;
 
-    /* Request currently being processed on the VIP connection. */
+    /* Request currently being processed on this connection. */
     struct aws_s3_request *request;
 
     /* Current retry token for the request. If it has never been retried, this will be NULL. */
@@ -221,7 +221,7 @@ struct aws_s3_client {
         /* Requests that are prepared and ready to be put in the threaded_data request queue. */
         struct aws_linked_list prepared_requests;
 
-        /* Task for processing requests from meta requests on vip connections. */
+        /* Task for processing requests from meta requests on connections. */
         struct aws_task process_work_task;
 
         /* Number of endpoints currently allocated. Used during clean up to know how many endpoints are still in
@@ -250,7 +250,7 @@ struct aws_s3_client {
     } synced_data;
 
     struct {
-        /* Queue of prepared requests that are waiting to be assigned to a VIP connection. */
+        /* Queue of prepared requests that are waiting to be assigned to connections. */
         struct aws_linked_list request_queue;
 
         /* Client list of on going meta requests. */
@@ -267,9 +267,9 @@ struct aws_s3_client {
 
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     int error_code,
-    enum aws_s3_vip_connection_finish_code finish_code);
+    enum aws_s3_connection_finish_code finish_code);
 
 void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request);
 
