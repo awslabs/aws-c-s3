@@ -424,12 +424,16 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
-    int prepare_result = vtable->prepare_request(meta_request, request);
+    int error_code = AWS_ERROR_SUCCESS;
 
-    ++request->num_times_prepared;
+    if (aws_s3_meta_request_has_finish_result(meta_request)) {
+        goto error_clean_up;
+    }
 
-    if (prepare_result == AWS_OP_ERR) {
-        int error_code = aws_last_error_or_unknown();
+    if (vtable->prepare_request(meta_request, request)) {
+        ++request->num_times_prepared;
+
+        error_code = aws_last_error_or_unknown();
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -439,16 +443,23 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
             error_code,
             aws_error_str(error_code));
 
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-
-        s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
-        return;
+        goto error_clean_up;
     }
+
+    ++request->num_times_prepared;
 
     /* Sign the newly created message. */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);
+
+    return;
+
+error_clean_up:
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
 static void s_s3_meta_request_init_signing_date_time(
