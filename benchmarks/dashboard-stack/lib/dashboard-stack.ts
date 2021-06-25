@@ -118,6 +118,42 @@ export class DashboardStack extends cdk.Stack {
                     y += metric_widget_height;
                 }
 
+                const metric_bytes_in = new cloudwatch.Metric({
+                    namespace: metrics_namespace,
+                    metricName: "BytesIn",
+                    dimensions: {
+                        "Project": project_name,
+                        "Branch": branch_name,
+                        "InstanceType": instance_config_name,
+                    },
+                    statistic: "Average",
+                    period: cdk.Duration.seconds(1),
+                });
+
+                const metric_bytes_out = new cloudwatch.Metric({
+                    namespace: metrics_namespace,
+                    metricName: "BytesOut",
+                    dimensions: {
+                        "Project": project_name,
+                        "Branch": branch_name,
+                        "InstanceType": instance_config_name,
+                    },
+                    statistic: "Average",
+                    period: cdk.Duration.seconds(1),
+                });
+                const rate_in = new cloudwatch.MathExpression({
+                    expression: "m1*8/1000/1000/1000",
+                    usingMetrics: {
+                        m1: metric_bytes_in
+                    }
+                })
+
+                const rate_out = new cloudwatch.MathExpression({
+                    expression: "m1*8/1000/1000/1000",
+                    usingMetrics: {
+                        m1: metric_bytes_out
+                    }
+                })
                 let instance_widget = {
                     type: "metric",
                     width: metric_widget_width,
@@ -187,6 +223,14 @@ export class DashboardStack extends cdk.Stack {
             dashboardBody: JSON.stringify(dashboard_body),
             dashboardName: id
         });
+
+        // const alarm = new cloudwatch.CfnAlarm(this, 'Alarm', {
+        //     comparisonOperator: "GreaterThanOrEqualToThreshold",
+        //     evaluationPeriods: 1,
+        //     alarmActions: [
+
+        //     ]
+        // })
 
         // Permission to create CFN stack with ec2,s3, iam and security group in it.
         // TODO: simplify it later. Use admin policy for simplicity now.
