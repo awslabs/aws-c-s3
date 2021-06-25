@@ -427,7 +427,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     int error_code = AWS_ERROR_SUCCESS;
 
     if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
-        goto error_clean_up;
+        goto dont_send_clean_up;
     }
 
     if (vtable->prepare_request(meta_request, request)) {
@@ -443,7 +443,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
             error_code,
             aws_error_str(error_code));
 
-        goto error_clean_up;
+        goto dont_send_clean_up;
     }
 
     ++request->num_times_prepared;
@@ -453,11 +453,13 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
     return;
 
-error_clean_up:
+dont_send_clean_up:
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    if (error_code != AWS_ERROR_SUCCESS) {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
 
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
