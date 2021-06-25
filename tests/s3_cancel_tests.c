@@ -386,7 +386,7 @@ static int s_test_s3_cancel_mpd_get_without_range_completed(struct aws_allocator
 
 struct test_s3_cancel_prepare_user_data {
     uint32_t prepare_counter;
-}
+};
 
 static int s_test_s3_cancel_prepare_meta_request_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -451,9 +451,9 @@ static int s_test_s3_cancel_prepare(struct aws_allocator *allocator, void *ctx) 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
 
-    ASSERT_SUCCESS(aws_s3_tester_client_new(tester, &client_options, &client));
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(tester, *client, NULL);
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_test_s3_cancel_prepare_meta_request_factory;
 
     {
