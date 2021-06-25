@@ -427,22 +427,12 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     int error_code = AWS_ERROR_SUCCESS;
 
     if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
+        aws_raise_error(AWS_ERROR_S3_CANCELED);
         goto dont_send_clean_up;
     }
 
     if (vtable->prepare_request(meta_request, request)) {
         ++request->num_times_prepared;
-
-        error_code = aws_last_error_or_unknown();
-
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not prepare request %p due to error %d (%s).",
-            (void *)meta_request,
-            (void *)request,
-            error_code,
-            aws_error_str(error_code));
-
         goto dont_send_clean_up;
     }
 
@@ -455,11 +445,19 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
 dont_send_clean_up:
 
-    if (error_code != AWS_ERROR_SUCCESS) {
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-    }
+    error_code = aws_last_error_or_unknown();
+
+    AWS_LOGF_ERROR(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Could not prepare request %p due to error %d (%s).",
+        (void *)meta_request,
+        (void *)request,
+        error_code,
+        aws_error_str(error_code));
+
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
