@@ -1,0 +1,30 @@
+aws s3 sync benchmarks-stack/benchmarks-stack s3://dashboardstack-codebucketff4c7ad6-15flqelcxrcos/benchmarks-stack/
+aws s3 cp s3://dashboardstack-codebucketff4c7ad6-7t4tlf3bit4/benchmarks-stack/lib/benchmarks-stack.ts something.ts
+
+    aws lambda invoke \
+        --cli-binary-format raw-in-base64-out \
+        --function-name BenchmarkManager \
+        --invocation-type Event \
+        --payload '{ "action": "test" }' \
+        response.json
+
+
+aws s3 cp s3://dashboardstack-codebucketff4c7ad6-3lcwppqcgi2l/benchmarks-stack/lib/benchmarks-stack.ts
+aws s3 cp s3://dashboardstack-codebucketff4c7ad6-3lcwppqcgi2l/benchmarks-stack/lib/benchmarks-stack.ts
+
+aws s3 cp s3://dashboardstack-codebucketff4c7ad6-3lcwppqcgi2l/benchmarks-stack/lib/benchmarks-stack.ts
+
+aws s3 cp benchmarks-stack/benchmarks-stack/lib/canary-policy-doc.json s3://dashboardstack-codebucketff4c7ad6-1twiwt0bh9fp0/benchmarks-stack/lib/canary-policy-doc.json --profile personal
+
+ssh -i "key.pem" ec2-user@ec2-54-81-31-14.compute-1.amazonaws.com
+
+aws s3 sync benchmarks-stack/benchmarks-stack s3://dashboardstack-codebucketff4c7ad6-1twiwt0bh9fp0/benchmarks-stack/
+
+ssh -i "key.pem" ec2-user@ec2-54-245-159-30.us-west-2.compute.amazonaws.com
+
+    aws lambda invoke \
+        --cli-binary-format raw-in-base64-out \
+        --function-name BenchmarkManager \
+        --invocation-type Event \
+        --payload '{ "action": "test", "project_name": "aws-crt-java", "branch_name": "upload_test" }' \
+        response.json
