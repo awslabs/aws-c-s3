@@ -114,8 +114,6 @@ int aws_s3_meta_request_init_base(
     meta_request->initial_request_message = options->message;
     aws_http_message_acquire(options->message);
 
-    aws_s3_add_user_agent_header(meta_request->allocator, meta_request->initial_request_message);
-
     if (aws_mutex_init(&meta_request->synced_data.lock)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not initialize mutex for meta request", (void *)meta_request);
@@ -437,6 +435,8 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     }
 
     ++request->num_times_prepared;
+
+    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message);
 
     /* Sign the newly created message. */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);

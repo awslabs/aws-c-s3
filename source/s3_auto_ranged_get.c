@@ -148,6 +148,7 @@ static bool s_s3_auto_ranged_get_update(
     uint32_t flags,
     struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_request);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     struct aws_s3_request *request = NULL;
@@ -185,10 +186,6 @@ static bool s_s3_auto_ranged_get_update(
             bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0;
 
             if (head_object_required) {
-                if (out_request == NULL) {
-                    goto has_work_remaining;
-                }
-
                 /* If the head object request hasn't been sent yet, then send it now. */
                 if (!auto_ranged_get->synced_data.head_object_sent) {
                     request = aws_s3_request_new(
@@ -203,11 +200,6 @@ static bool s_s3_auto_ranged_get_update(
                 }
 
             } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
-
-                if (out_request == NULL) {
-                    goto has_work_remaining;
-                }
-
                 /* If we aren't using a head object, then discover the size of the object while trying to get the first
                  * part. */
                 request = aws_s3_request_new(
@@ -236,11 +228,6 @@ static bool s_s3_auto_ranged_get_update(
                     goto has_work_remaining;
                 }
             }
-
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE,
@@ -252,10 +239,6 @@ static bool s_s3_auto_ranged_get_update(
         }
 
         if (auto_ranged_get->synced_data.num_parts_requested < auto_ranged_get->synced_data.total_num_parts) {
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
@@ -329,10 +312,7 @@ no_work_remaining:
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (work_remaining) {
-        if (request != NULL) {
-            AWS_ASSERT(out_request != NULL);
-            *out_request = request;
-        }
+        *out_request = request;
     } else {
         AWS_ASSERT(request == NULL);
         aws_s3_meta_request_finish(meta_request);
