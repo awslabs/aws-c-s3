@@ -31,6 +31,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     uint64_t content_length,
+    bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options);
 
 #endif

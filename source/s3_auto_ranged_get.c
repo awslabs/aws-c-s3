@@ -79,6 +79,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             allocator,
             client,
             part_size,
+            false,
             options,
             auto_ranged_get,
             &s_s3_auto_ranged_get_vtable,
@@ -153,11 +154,6 @@ static bool s_s3_auto_ranged_get_update(
     bool work_remaining = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
-        /* If there isn't a connection, then fail the meta request now if it hasn't been already. */
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
-    }
 
     /* If nothing has set the the "finish result" then this meta request is still in progress and we can potentially
      * send additional requests. */

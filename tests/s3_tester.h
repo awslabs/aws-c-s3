@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_request_messages.h"
 #include <aws/s3/private/s3_auto_ranged_put.h>
 #include <aws/s3/private/s3_client_impl.h>
 #include <aws/s3/private/s3_meta_request_impl.h>
@@ -37,6 +38,8 @@ enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256 = 0x00000010,
     /* Testing put object with x-amz-acl: bucket-owner-read */
     AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL = 0x00000020,
+    AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 = 0x00000040,
+    AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5 = 0x00000080,
 };
 
 enum aws_s3_tester_sse_type {
@@ -131,7 +134,7 @@ struct aws_s3_tester_meta_request_options {
     struct aws_s3_client *client;
 
     /* Optional. Bucket for this request. If NULL, g_test_bucket_name will be used. */
-    struct aws_byte_cursor *bucket_name;
+    const struct aws_byte_cursor *bucket_name;
 
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
@@ -237,15 +240,7 @@ struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_test
 
 struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester);
 
-struct aws_s3_vip *aws_s3_tester_mock_vip_new(struct aws_s3_tester *tester);
-
-void aws_s3_tester_mock_vip_destroy(struct aws_s3_tester *tester, struct aws_s3_vip *vip);
-
-struct aws_s3_vip_connection *aws_s3_tester_mock_vip_connection_new(struct aws_s3_tester *tester);
-
-void aws_s3_tester_mock_vip_connection_destroy(
-    struct aws_s3_tester *tester,
-    struct aws_s3_vip_connection *vip_connection);
+struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *tester);
 
 /* Create a new meta request for testing meta request functionality in isolation. test_results and client are optional.
  * If client is not specified, a new mock client will be created for the meta request. */

@@ -706,7 +706,7 @@ static int s_test_s3_upload_part_message_new(struct aws_allocator *allocator, vo
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, UPLOAD_ID);
 
     struct aws_http_message *upload_part_message =
-        aws_s3_upload_part_message_new(allocator, original_message, &part_buffer, PART_NUMBER, upload_id);
+        aws_s3_upload_part_message_new(allocator, original_message, &part_buffer, PART_NUMBER, upload_id, false);
     ASSERT_TRUE(upload_part_message != NULL);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(upload_part_message, "PUT"));

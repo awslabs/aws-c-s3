@@ -70,6 +70,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             allocator,
             client,
             part_size,
+            client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
+                aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
@@ -135,11 +137,6 @@ static bool s_s3_auto_ranged_put_update(
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
-        /* If there isn't a connection, then fail the meta request now if it hasn't been already. */
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
-    }
 
     if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
@@ -265,12 +262,6 @@ static bool s_s3_auto_ranged_put_update(
             goto no_work_remaining;
         }
 
-        /* If there are no endpoint connections to send requests on, then we can't send an abort message, so there is no
-         * work remaining. */
-        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
-            goto no_work_remaining;
-        }
-
         /* If we made it here, and the abort-multipart-upload message hasn't been sent yet, then do so now. */
         if (!auto_ranged_put->synced_data.abort_multipart_upload_sent) {
             if (auto_ranged_put->upload_id == NULL) {
@@ -373,7 +364,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                 meta_request->initial_request_message,
                 &request->request_body,
                 request->part_number,
-                auto_ranged_put->upload_id);
+                auto_ranged_put->upload_id,
+                meta_request->should_compute_content_md5);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {

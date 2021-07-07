@@ -7,7 +7,7 @@ struct aws_s3_bad_input_stream_impl {
 
 static int s_aws_s3_bad_input_stream_seek(
     struct aws_input_stream *stream,
-    int64_t offset,
+    aws_off_t offset,
     enum aws_stream_seek_basis basis) {
     (void)stream;
     (void)offset;

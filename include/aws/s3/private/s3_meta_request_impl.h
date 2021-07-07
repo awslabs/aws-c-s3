@@ -18,7 +18,7 @@
 #include "aws/s3/private/s3_request.h"
 
 struct aws_s3_client;
-struct aws_s3_vip_connection;
+struct aws_s3_connection;
 struct aws_s3_meta_request;
 struct aws_s3_request;
 struct aws_s3_request_options;
@@ -33,10 +33,6 @@ enum aws_s3_meta_request_state {
 };
 
 enum aws_s3_meta_request_update_flags {
-    /* There are no connections available. Meta request can wait for anything in progress to finish up, but shouldn't
-       expect that there will be any connections for issuing requests. */
-    AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS = 0x00000001,
-
     /* The client potentially has multiple meta requests that it can spread across connections, and the given meta
        request can selectively not return a request if there is a performance reason to do so.*/
     AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE = 0x00000002,
@@ -73,7 +69,7 @@ struct aws_s3_meta_request_vtable {
 
     void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
 
-    /* Sign the request on the given VIP Connection. */
+    /* Sign the given request. */
     void (*sign_request)(
         struct aws_s3_meta_request *meta_request,
         struct aws_s3_request *request,
@@ -81,10 +77,7 @@ struct aws_s3_meta_request_vtable {
         void *user_data);
 
     /* Called when any sending of the request is finished, including for each retry. */
-    void (*send_request_finish)(
-        struct aws_s3_vip_connection *vip_connection,
-        struct aws_http_stream *stream,
-        int error_code);
+    void (*send_request_finish)(struct aws_s3_connection *connection, struct aws_http_stream *stream, int error_code);
 
     /* Called when the request is done being sent, and will not be retried/sent again. */
     void (*finished_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code);
@@ -120,6 +113,8 @@ struct aws_s3_meta_request {
     /* Client that created this meta request which also processes this request. After the meta request is finished, this
      * reference is removed.*/
     struct aws_s3_client *client;
+
+    struct aws_s3_endpoint *endpoint;
 
     /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc..
      * After the meta request is finished, this will be reset along with the client reference.*/
@@ -182,6 +177,8 @@ struct aws_s3_meta_request {
         bool scheduled;
 
     } client_process_work_threaded_data;
+
+    const bool should_compute_content_md5;
 };
 
 AWS_EXTERN_C_BEGIN
@@ -192,6 +189,7 @@ int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -232,9 +230,7 @@ void aws_s3_meta_request_prepare_request(
     void *user_data);
 
 AWS_S3_API
-void aws_s3_meta_request_send_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_vip_connection *vip_connection);
+void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection);
 
 AWS_S3_API
 void aws_s3_meta_request_init_signing_date_time_default(
@@ -252,7 +248,7 @@ void aws_s3_meta_request_sign_request_default(
  */
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code);
 

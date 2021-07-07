@@ -43,6 +43,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     uint64_t content_length,
+    bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
@@ -77,6 +78,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
             allocator,
             client,
             0,
+            should_compute_content_md5,
             options,
             meta_request_default,
             &s_s3_meta_request_default_vtable,
@@ -116,6 +118,8 @@ static bool s_s3_meta_request_default_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
     struct aws_s3_request **out_request) {
+    (void)flags;
+
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_request);
 
@@ -124,12 +128,6 @@ static bool s_s3_meta_request_default_update(
     bool work_remaining = false;
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
-        if (!meta_request_default->synced_data.request_sent) {
-            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
-        }
-    }
 
     if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
@@ -228,6 +226,10 @@ static int s_s3_meta_request_default_prepare_request(
 
     struct aws_http_message *message =
         aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message, NULL, 0);
+
+    if (meta_request->should_compute_content_md5) {
+        aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
+    }
 
     aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
 

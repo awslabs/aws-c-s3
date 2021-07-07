@@ -63,7 +63,14 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
     uint32_t part_number,
-    const struct aws_string *upload_id);
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5);
+
+/* Create an HTTP request for an S3 Create-Multipart-Upload request. */
+AWS_S3_API
+struct aws_http_message *aws_s3_create_multipart_upload_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message);
 
 /* Create an HTTP request for an S3 Complete-Multipart-Upload request. Creates the necessary XML payload using the
  * passed in array list of ETags.  (Each ETag is assumed to be an aws_string*)  Buffer passed in will be used to store
@@ -81,6 +88,13 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     const struct aws_string *upload_id);
+
+/* Add content-md5 header to the http message passed in. The MD5 will be computed from the input_buf */
+AWS_S3_API
+int aws_s3_message_util_add_content_md5_header(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *input_buf,
+    struct aws_http_message *message);
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[];
