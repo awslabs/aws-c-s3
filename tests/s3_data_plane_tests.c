@@ -2777,9 +2777,6 @@ static void s_s3_test_user_agent_meta_request_finished_request(
     struct aws_byte_buf expected_user_agent_value_buf;
     s_get_expected_user_agent(meta_request->allocator, &expected_user_agent_value_buf);
 
-    const struct aws_byte_cursor null_terminator = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\0");
-    AWS_ASSERT(aws_byte_buf_append_dynamic(&expected_user_agent_value_buf, &null_terminator) == AWS_OP_SUCCESS);
-
     struct aws_byte_cursor expected_user_agent_value = aws_byte_cursor_from_buf(&expected_user_agent_value_buf);
 
     struct aws_http_message *message = request->send_data.message;
@@ -2789,11 +2786,7 @@ static void s_s3_test_user_agent_meta_request_finished_request(
     AWS_ZERO_STRUCT(user_agent_value);
 
     AWS_ASSERT(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value) == AWS_OP_SUCCESS);
-
-    const char *find_result = strstr((const char *)user_agent_value.ptr, (const char *)expected_user_agent_value.ptr);
-
-    AWS_ASSERT(find_result != NULL);
-    AWS_ASSERT(find_result < (const char *)(user_agent_value.ptr + user_agent_value.len));
+    AWS_ASSERT(aws_byte_cursor_eq(&user_agent_value, &expected_user_agent_value));
     aws_byte_buf_clean_up(&expected_user_agent_value_buf);
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
