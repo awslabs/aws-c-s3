@@ -130,6 +130,7 @@ static bool s_s3_auto_ranged_put_update(
     uint32_t flags,
     struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_request);
 
     struct aws_s3_request *request = NULL;
     bool work_remaining = false;
@@ -142,11 +143,6 @@ static bool s_s3_auto_ranged_put_update(
 
         /* If we haven't already sent a create-multipart-upload message, do so now. */
         if (!auto_ranged_put->synced_data.create_multipart_upload_sent) {
-
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
@@ -166,10 +162,6 @@ static bool s_s3_auto_ranged_put_update(
 
         /* If we haven't sent all of the parts yet, then set up to send a new part now. */
         if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
-
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
 
             if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
                 uint32_t num_parts_in_flight =
@@ -209,11 +201,6 @@ static bool s_s3_auto_ranged_put_update(
 
         /* If the complete-multipart-upload request hasn't been set yet, then send it now. */
         if (!auto_ranged_put->synced_data.complete_multipart_upload_sent) {
-
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
@@ -268,10 +255,6 @@ static bool s_s3_auto_ranged_put_update(
                 goto no_work_remaining;
             }
 
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
@@ -303,10 +286,7 @@ no_work_remaining:
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (work_remaining) {
-        if (request != NULL) {
-            AWS_ASSERT(out_request);
-            *out_request = request;
-        }
+        *out_request = request;
     } else {
         AWS_ASSERT(request == NULL);
 
