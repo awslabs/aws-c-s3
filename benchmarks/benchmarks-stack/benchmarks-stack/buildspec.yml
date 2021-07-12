@@ -1,0 +1,15 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - echo Build started on `date`
+      - node --version
+      - npm i -g npm
+      - npm --version
+      - npm install
+      - npm run build
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - node ./deploy/benchmarks_deploy.js
