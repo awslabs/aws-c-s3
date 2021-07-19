@@ -408,6 +408,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     return client;
 
+#ifndef BYO_CRYPTO
 on_error:
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
@@ -416,6 +417,7 @@ on_error:
         aws_mem_release(client->allocator, client->tls_connection_options);
         client->tls_connection_options = NULL;
     }
+#endif
 elg_create_fail:
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
