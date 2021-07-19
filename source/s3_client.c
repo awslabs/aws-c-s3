@@ -337,6 +337,7 @@ struct aws_s3_client *aws_s3_client_new(
         } else {
 #ifdef BYO_CRYPTO
             AWS_ASSERT(false);
+            goto on_error;
 #else
             struct aws_tls_ctx_options default_tls_ctx_options;
             AWS_ZERO_STRUCT(default_tls_ctx_options);
@@ -408,7 +409,6 @@ struct aws_s3_client *aws_s3_client_new(
 
     return client;
 
-#ifndef BYO_CRYPTO
 on_error:
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
@@ -417,7 +417,6 @@ on_error:
         aws_mem_release(client->allocator, client->tls_connection_options);
         client->tls_connection_options = NULL;
     }
-#endif
 elg_create_fail:
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
@@ -754,14 +753,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
     /* Call the appropriate meta-request new function. */
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-
-        /* If the initial request already has partNumber, the request is not splittable(?). Treat it as a Default
-         * request.
-         * TODO: Still need tests to verify that the request of a part is splittable or not */
-        if (aws_http_headers_has(initial_message_headers, aws_byte_cursor_from_c_str("partNumber"))) {
-            return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
-        }
-
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
 
