@@ -336,7 +336,8 @@ struct aws_s3_client *aws_s3_client_new(
             aws_tls_connection_options_copy(client->tls_connection_options, client_config->tls_connection_options);
         } else {
 #ifdef BYO_CRYPTO
-            AWS_ASSERT(false);
+            AWS_FATAL_ASSERT(false);
+            goto on_error;
 #else
             struct aws_tls_ctx_options default_tls_ctx_options;
             AWS_ZERO_STRUCT(default_tls_ctx_options);
