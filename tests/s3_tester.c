@@ -604,8 +604,6 @@ static void s_s3_mock_client_start_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_ASSERT(client);
 
-    aws_small_block_allocator_destroy(client->sba_allocator);
-
     aws_mem_release(client->allocator, client);
 }
 
@@ -620,8 +618,6 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
         &mock_client->ref_count, mock_client, (aws_simple_completion_callback *)s_s3_mock_client_start_destroy);
 
     aws_mutex_init(&mock_client->synced_data.lock);
-
-    mock_client->sba_allocator = aws_small_block_allocator_new(allocator, false);
 
     aws_atomic_init_int(&mock_client->stats.num_requests_in_flight, 0);
 

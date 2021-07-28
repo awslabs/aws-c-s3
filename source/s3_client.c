@@ -242,11 +242,6 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
-    client->sba_allocator = aws_small_block_allocator_new(allocator, true);
-    if (!client->sba_allocator) {
-        goto sba_allocator_fail;
-    }
-
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
@@ -396,7 +391,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_hash_table_init(
         &client->synced_data.endpoints,
-        client->sba_allocator,
+        client->allocator,
         10,
         aws_hash_string,
         aws_hash_callback_string_eq,
@@ -422,8 +417,6 @@ elg_create_fail:
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
 lock_init_fail:
-    aws_small_block_allocator_destroy(client->sba_allocator);
-sba_allocator_fail:
     aws_mem_release(client->allocator, client);
     return NULL;
 }
@@ -497,8 +490,6 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_cached_signing_config_destroy(client->cached_signing_config);
-
-    aws_small_block_allocator_destroy(client->sba_allocator);
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
@@ -627,7 +618,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     aws_s3_client_lock_synced_data(client);
 
-    struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->sba_allocator, &host_header_value);
+    struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, &host_header_value);
 
     struct aws_s3_endpoint *endpoint = NULL;
     struct aws_hash_element *endpoint_hash_element = NULL;
@@ -652,7 +643,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
         };
 
-        endpoint = aws_s3_endpoint_new(client->sba_allocator, &endpoint_options);
+        endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
 
         if (endpoint == NULL) {
             aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
@@ -871,7 +862,7 @@ static void s_s3_client_push_meta_request_synced(
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     struct aws_s3_meta_request_work *meta_request_work =
-        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_meta_request_work));
+        aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_meta_request_work));
 
     aws_s3_meta_request_acquire(meta_request);
     meta_request_work->meta_request = meta_request;
@@ -1019,7 +1010,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             meta_request = NULL;
         }
 
-        aws_mem_release(client->sba_allocator, meta_request_work);
+        aws_mem_release(client->allocator, meta_request_work);
     }
 
     /*******************/
@@ -1314,7 +1305,7 @@ static void s_s3_client_create_connection_for_request_default(
 
     aws_atomic_fetch_add(&client->stats.num_requests_network_io[meta_request->type], 1);
 
-    struct aws_s3_connection *connection = aws_mem_calloc(client->sba_allocator, 1, sizeof(struct aws_s3_connection));
+    struct aws_s3_connection *connection = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_connection));
 
     connection->endpoint = aws_s3_endpoint_acquire(meta_request->endpoint);
     connection->request = request;
@@ -1593,7 +1584,7 @@ reset_connection:
     aws_s3_endpoint_release(connection->endpoint);
     connection->endpoint = NULL;
 
-    aws_mem_release(client->sba_allocator, connection);
+    aws_mem_release(client->allocator, connection);
     connection = NULL;
 
     aws_s3_client_lock_synced_data(client);
