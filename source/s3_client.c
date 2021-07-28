@@ -490,6 +490,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_request_work));
     AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));
+    aws_hash_table_clean_up(&client->synced_data.endpoints);
 
     aws_retry_strategy_release(client->retry_strategy);
 
