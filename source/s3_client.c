@@ -652,7 +652,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
         };
 
-        endpoint = aws_s3_endpoint_new(client->sba_allocator, &endpoint_options);
+        endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
 
         if (endpoint == NULL) {
             aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
