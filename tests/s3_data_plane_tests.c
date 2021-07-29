@@ -306,7 +306,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
 
 struct s3_test_body_streaming_user_data {
     struct aws_s3_tester *tester;
-    struct aws_allocator *sba_allocator;
+    struct aws_allocator *allocator;
     uint64_t expected_range_start;
     uint64_t received_body_size;
 };

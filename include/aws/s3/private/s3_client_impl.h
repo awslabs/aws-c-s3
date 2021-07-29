@@ -137,9 +137,6 @@ struct aws_s3_client_vtable {
 struct aws_s3_client {
     struct aws_allocator *allocator;
 
-    /* Small block allocator for our small allocations. */
-    struct aws_allocator *sba_allocator;
-
     struct aws_s3_client_vtable *vtable;
 
     struct aws_ref_count ref_count;

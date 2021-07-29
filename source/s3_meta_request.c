@@ -341,18 +341,16 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
     struct aws_s3_client *client = meta_request->client;
     AWS_PRECONDITION(client);
 
-    struct aws_allocator *sba_allocator = client->sba_allocator;
-    AWS_PRECONDITION(sba_allocator);
+    struct aws_allocator *allocator = client->allocator;
+    AWS_PRECONDITION(allocator);
 
-    /* Acquire a reference to the client pointer just be to safe, so that we know the callback won't trigger a clean up
-     * of the client and cause the sba_allocator to go away. */
     aws_s3_client_acquire(client);
 
     if (payload->callback != NULL) {
         payload->callback(meta_request, payload->request, error_code, payload->user_data);
     }
 
-    aws_mem_release(sba_allocator, payload);
+    aws_mem_release(allocator, payload);
     aws_s3_client_release(client);
 }
 
@@ -388,11 +386,11 @@ static void s_s3_meta_request_schedule_prepare_request_default(
     struct aws_s3_client *client = meta_request->client;
     AWS_PRECONDITION(client);
 
-    struct aws_allocator *sba_allocator = client->sba_allocator;
-    AWS_PRECONDITION(sba_allocator);
+    struct aws_allocator *allocator = client->allocator;
+    AWS_PRECONDITION(allocator);
 
     struct aws_s3_prepare_request_payload *payload =
-        aws_mem_calloc(sba_allocator, 1, sizeof(struct aws_s3_prepare_request_payload));
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_request_payload));
 
     payload->request = request;
     payload->callback = callback;
@@ -970,7 +968,7 @@ void aws_s3_meta_request_stream_response_body_synced(
     meta_request->synced_data.num_parts_delivery_sent += num_streaming_requests;
 
     struct s3_stream_response_body_payload *payload =
-        aws_mem_calloc(client->sba_allocator, 1, sizeof(struct s3_stream_response_body_payload));
+        aws_mem_calloc(client->allocator, 1, sizeof(struct s3_stream_response_body_payload));
 
     aws_s3_meta_request_acquire(meta_request);
     payload->meta_request = meta_request;
@@ -1046,7 +1044,7 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
     meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    aws_mem_release(client->sba_allocator, payload);
+    aws_mem_release(client->allocator, payload);
     payload = NULL;
 
     aws_s3_client_schedule_process_work(client);
