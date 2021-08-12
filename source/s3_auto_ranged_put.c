@@ -70,6 +70,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             allocator,
             client,
             part_size,
+            client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
+                aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
@@ -128,6 +130,7 @@ static bool s_s3_auto_ranged_put_update(
     uint32_t flags,
     struct aws_s3_request **out_request) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_request);
 
     struct aws_s3_request *request = NULL;
     bool work_remaining = false;
@@ -136,25 +139,15 @@ static bool s_s3_auto_ranged_put_update(
 
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
-        /* If there isn't a connection, then fail the meta request now if it hasn't been already. */
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_NO_ENDPOINT_CONNECTIONS);
-    }
-
     if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
         /* If we haven't already sent a create-multipart-upload message, do so now. */
         if (!auto_ranged_put->synced_data.create_multipart_upload_sent) {
-
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_put->synced_data.create_multipart_upload_sent = true;
 
@@ -170,10 +163,6 @@ static bool s_s3_auto_ranged_put_update(
         /* If we haven't sent all of the parts yet, then set up to send a new part now. */
         if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
 
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
                 uint32_t num_parts_in_flight =
                     (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_completed);
@@ -187,7 +176,7 @@ static bool s_s3_auto_ranged_put_update(
 
             /* Allocate a request for another part. */
             request = aws_s3_request_new(
-                meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART, 0, AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                meta_request, AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART, 0, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
@@ -212,16 +201,11 @@ static bool s_s3_auto_ranged_put_update(
 
         /* If the complete-multipart-upload request hasn't been set yet, then send it now. */
         if (!auto_ranged_put->synced_data.complete_multipart_upload_sent) {
-
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             auto_ranged_put->synced_data.complete_multipart_upload_sent = true;
 
@@ -265,27 +249,17 @@ static bool s_s3_auto_ranged_put_update(
             goto no_work_remaining;
         }
 
-        /* If there are no endpoint connections to send requests on, then we can't send an abort message, so there is no
-         * work remaining. */
-        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_NO_ENDPOINT_CONNECTIONS) > 0) {
-            goto no_work_remaining;
-        }
-
         /* If we made it here, and the abort-multipart-upload message hasn't been sent yet, then do so now. */
         if (!auto_ranged_put->synced_data.abort_multipart_upload_sent) {
             if (auto_ranged_put->upload_id == NULL) {
                 goto no_work_remaining;
             }
 
-            if (out_request == NULL) {
-                goto has_work_remaining;
-            }
-
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
                 0,
-                AWS_S3_REQUEST_DESC_RECORD_RESPONSE_HEADERS);
+                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
 
             auto_ranged_put->synced_data.abort_multipart_upload_sent = true;
 
@@ -312,10 +286,7 @@ no_work_remaining:
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (work_remaining) {
-        if (request != NULL) {
-            AWS_ASSERT(out_request);
-            *out_request = request;
-        }
+        *out_request = request;
     } else {
         AWS_ASSERT(request == NULL);
 
@@ -368,12 +339,13 @@ static int s_s3_auto_ranged_put_prepare_request(
             }
 
             /* Create a new put-object message to upload a part. */
-            message = aws_s3_put_object_message_new(
+            message = aws_s3_upload_part_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,
                 request->part_number,
-                auto_ranged_put->upload_id);
+                auto_ranged_put->upload_id,
+                meta_request->should_compute_content_md5);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
@@ -557,16 +529,16 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
             }
 
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            ++auto_ranged_put->synced_data.num_parts_completed;
+
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p: %d out of %d parts have completed.",
                 (void *)meta_request,
                 auto_ranged_put->synced_data.num_parts_completed,
                 auto_ranged_put->synced_data.total_num_parts);
-
-            aws_s3_meta_request_lock_synced_data(meta_request);
-
-            ++auto_ranged_put->synced_data.num_parts_completed;
 
             if (error_code == AWS_ERROR_SUCCESS) {
                 AWS_ASSERT(etag != NULL);

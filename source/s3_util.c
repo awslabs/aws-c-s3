@@ -11,6 +11,12 @@
 #include <aws/http/request_response.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
+#include <inttypes.h>
+
+#ifdef _MSC_VER
+/* sscanf warning (not currently scanning for strings) */
+#    pragma warning(disable : 4996)
+#endif
 
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
@@ -20,9 +26,11 @@ const struct aws_byte_cursor g_etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_
 const struct aws_byte_cursor g_content_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Range");
 const struct aws_byte_cursor g_content_type_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type");
 const struct aws_byte_cursor g_content_length_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
+const struct aws_byte_cursor g_content_md5_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
 const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
+const struct aws_byte_cursor g_head_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("HEAD");
 const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DELETE");
 
 const struct aws_byte_cursor g_user_agent_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("User-Agent");
@@ -216,7 +224,6 @@ void aws_s3_init_default_signing_config(
     signing_config->service = g_s3_service_name;
     signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
-    signing_config->flags.should_normalize_uri_path = true;
 }
 
 void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf) {
@@ -275,7 +282,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     struct aws_byte_buf user_agent_buffer;
     AWS_ZERO_STRUCT(user_agent_buffer);
 
-    if (!aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header)) {
+    if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
         /* If the header was found, then create a buffer with the total size we'll need, and append the curent user
          * agent header with a trailing space. */
         aws_byte_buf_init(
@@ -307,4 +314,166 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
 
     /* Clean up the scratch buffer. */
     aws_byte_buf_clean_up(&user_agent_buffer);
+}
+
+int aws_s3_parse_content_range_response_header(
+    struct aws_allocator *allocator,
+    struct aws_http_headers *response_headers,
+    uint64_t *out_range_start,
+    uint64_t *out_range_end,
+    uint64_t *out_object_size) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(response_headers);
+
+    struct aws_byte_cursor content_range_header_value;
+
+    if (aws_http_headers_get(response_headers, g_content_range_header_name, &content_range_header_value)) {
+        aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
+        return AWS_OP_ERR;
+    }
+
+    int result = AWS_OP_ERR;
+
+    uint64_t range_start = 0;
+    uint64_t range_end = 0;
+    uint64_t object_size = 0;
+
+    struct aws_string *content_range_header_value_str =
+        aws_string_new_from_cursor(allocator, &content_range_header_value);
+
+    /* Expected Format of header is: "bytes StartByte-EndByte/TotalObjectSize" */
+    int num_fields_found = sscanf(
+        (const char *)content_range_header_value_str->bytes,
+        "bytes %" PRIu64 "-%" PRIu64 "/%" PRIu64,
+        &range_start,
+        &range_end,
+        &object_size);
+
+    if (num_fields_found < 3) {
+        aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+        goto clean_up;
+    }
+
+    if (out_range_start != NULL) {
+        *out_range_start = range_start;
+    }
+
+    if (out_range_end != NULL) {
+        *out_range_end = range_end;
+    }
+
+    if (out_object_size != NULL) {
+        *out_object_size = object_size;
+    }
+
+    result = AWS_OP_SUCCESS;
+
+clean_up:
+    aws_string_destroy(content_range_header_value_str);
+    content_range_header_value_str = NULL;
+
+    return result;
+}
+
+int aws_s3_parse_content_length_response_header(
+    struct aws_allocator *allocator,
+    struct aws_http_headers *response_headers,
+    uint64_t *out_content_length) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(response_headers);
+    AWS_PRECONDITION(out_content_length);
+
+    struct aws_byte_cursor content_length_header_value;
+
+    if (aws_http_headers_get(response_headers, g_content_length_header_name, &content_length_header_value)) {
+        aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_LENGTH_HEADER);
+        return AWS_OP_ERR;
+    }
+
+    struct aws_string *content_length_header_value_str =
+        aws_string_new_from_cursor(allocator, &content_length_header_value);
+
+    int result = AWS_OP_ERR;
+
+    if (sscanf((const char *)content_length_header_value_str->bytes, "%" PRIu64, out_content_length) == 1) {
+        result = AWS_OP_SUCCESS;
+    } else {
+        aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
+    }
+
+    aws_string_destroy(content_length_header_value_str);
+    return result;
+}
+
+uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
+    if ((object_range_start - object_range_end) == 0ULL) {
+        return 0;
+    }
+
+    uint32_t num_parts = 1;
+
+    uint64_t first_part_size = part_size;
+    uint64_t first_part_alignment_offset = object_range_start % part_size;
+
+    /* If the first part size isn't aligned on the assumed part boundary, make it smaller so that it is. */
+    if (first_part_alignment_offset > 0) {
+        first_part_size = part_size - first_part_alignment_offset;
+    }
+
+    uint64_t second_part_start = object_range_start + first_part_size;
+
+    /* If the range has room for a second part, calculate the additional amount of parts. */
+    if (second_part_start <= object_range_end) {
+        uint64_t aligned_range_remainder = object_range_end - second_part_start;
+        num_parts += (uint32_t)(aligned_range_remainder / (uint64_t)part_size);
+
+        if ((aligned_range_remainder % part_size) > 0) {
+            ++num_parts;
+        }
+    }
+
+    return num_parts;
+}
+
+void aws_s3_get_part_range(
+    uint64_t object_range_start,
+    uint64_t object_range_end,
+    size_t part_size,
+    uint32_t part_number,
+    uint64_t *out_part_range_start,
+    uint64_t *out_part_range_end) {
+    AWS_PRECONDITION(out_part_range_start);
+    AWS_PRECONDITION(out_part_range_end);
+
+    AWS_ASSERT(part_number > 0);
+
+    const uint32_t part_index = part_number - 1;
+
+    /* Part index is assumed to be in a valid range. */
+    AWS_ASSERT(part_index < aws_s3_get_num_parts(part_size, object_range_start, object_range_end));
+
+    uint64_t part_size_uint64 = (uint64_t)part_size;
+    uint64_t first_part_size = part_size_uint64;
+    uint64_t first_part_alignment_offset = object_range_start % part_size_uint64;
+
+    /* Shrink the part to a smaller size if need be to align to the assumed part boundary. */
+    if (first_part_alignment_offset > 0) {
+        first_part_size = part_size_uint64 - first_part_alignment_offset;
+    }
+
+    if (part_index == 0) {
+        /* If this is the first part, then use the first part size. */
+        *out_part_range_start = object_range_start;
+        *out_part_range_end = *out_part_range_start + first_part_size - 1;
+    } else {
+        /* Else, find the next part by adding the object range + total number of whole parts before this one + initial
+         * part size*/
+        *out_part_range_start = object_range_start + ((uint64_t)(part_index - 1)) * part_size_uint64 + first_part_size;
+        *out_part_range_end = *out_part_range_start + part_size_uint64 - 1;
+    }
+
+    /* Cap the part's range end using the object's range end. */
+    if (*out_part_range_end > object_range_end) {
+        *out_part_range_end = object_range_end;
+    }
 }

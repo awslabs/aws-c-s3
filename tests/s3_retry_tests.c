@@ -12,6 +12,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
 #include <aws/common/ref_count.h>
+#include <aws/http/connection_manager.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
@@ -19,14 +20,14 @@
 #include <inttypes.h>
 
 static void s_s3_client_acquire_http_connection_exceed_retries(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
+    struct aws_http_connection_manager *conn_manager,
+    aws_http_connection_manager_on_connection_setup_fn *callback,
+    void *user_data) {
     AWS_ASSERT(callback);
-    (void)client;
-    (void)vip_connection;
+    (void)conn_manager;
+
     aws_raise_error(AWS_ERROR_UNKNOWN);
-    callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
+    callback(NULL, AWS_ERROR_UNKNOWN, user_data);
 }
 
 AWS_TEST_CASE(test_s3_client_exceed_retries, s_test_s3_client_exceed_retries)
@@ -66,10 +67,14 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
 }
 
 static void s_s3_client_acquire_http_connection_fail_first(
-    struct aws_s3_client *client,
-    struct aws_s3_vip_connection *vip_connection,
-    aws_http_connection_manager_on_connection_setup_fn *callback) {
+    struct aws_http_connection_manager *conn_manager,
+    aws_http_connection_manager_on_connection_setup_fn *callback,
+    void *user_data) {
     AWS_ASSERT(callback);
+
+    struct aws_s3_connection *connection = user_data;
+
+    struct aws_s3_client *client = connection->request->meta_request->endpoint->user_data;
     AWS_ASSERT(client);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
@@ -77,14 +82,14 @@ static void s_s3_client_acquire_http_connection_fail_first(
 
     if (aws_s3_tester_inc_counter1(tester) == 1) {
         aws_raise_error(AWS_ERROR_UNKNOWN);
-        callback(NULL, AWS_ERROR_UNKNOWN, vip_connection);
+        callback(NULL, AWS_ERROR_UNKNOWN, connection);
         return;
     }
 
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
 
-    original_client_vtable->acquire_http_connection(client, vip_connection, callback);
+    original_client_vtable->acquire_http_connection(conn_manager, callback, user_data);
 }
 
 AWS_TEST_CASE(test_s3_client_acquire_connection_fail, s_test_s3_client_acquire_connection_fail)
@@ -114,25 +119,18 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
     return 0;
 }
 
-static int s_s3_fail_first_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+struct s3_fail_prepare_test_data {
+    uint32_t num_requests_being_prepared_is_correct : 1;
+};
 
+static int s_s3_fail_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    (void)meta_request;
+    (void)request;
+    AWS_ASSERT(meta_request != NULL);
     AWS_ASSERT(request != NULL);
 
-    struct aws_s3_client *client = meta_request->client;
-    AWS_ASSERT(client != NULL);
-
-    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
-    AWS_ASSERT(tester != NULL);
-
-    if (aws_s3_tester_inc_counter1(tester) == 1) {
-        aws_raise_error(AWS_ERROR_UNKNOWN);
-        return AWS_OP_ERR;
-    }
-
-    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
-        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
-
-    return original_meta_request_vtable->prepare_request(meta_request, request);
+    aws_raise_error(AWS_ERROR_UNKNOWN);
+    return AWS_OP_ERR;
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_prepare_request(
@@ -151,9 +149,26 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_prepare_request(
 
     struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
-    patched_meta_request_vtable->prepare_request = s_s3_fail_first_prepare_request;
+    patched_meta_request_vtable->prepare_request = s_s3_fail_prepare_request;
 
     return meta_request;
+}
+
+static void s_s3_fail_prepare_finish_destroy(struct aws_s3_client *client) {
+    AWS_ASSERT(client);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    struct s3_fail_prepare_test_data *test_data = tester->user_data;
+    AWS_ASSERT(test_data != NULL);
+
+    test_data->num_requests_being_prepared_is_correct = client->threaded_data.num_requests_being_prepared == 0;
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    original_client_vtable->finish_destroy(client);
 }
 
 /* Test recovery when prepare request fails. */
@@ -164,6 +179,10 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
+    struct s3_fail_prepare_test_data test_data;
+    AWS_ZERO_STRUCT(test_data);
+    tester.user_data = &test_data;
+
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
 
@@ -173,13 +192,18 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_prepare_request;
+    patched_client_vtable->finish_destroy = s_s3_fail_prepare_finish_destroy;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
+
+    aws_s3_tester_wait_for_counters(&tester);
 
     aws_s3_client_release(client);
     client = NULL;
 
     aws_s3_tester_clean_up(&tester);
+
+    ASSERT_TRUE(test_data.num_requests_being_prepared_is_correct);
 
     return 0;
 }
@@ -291,26 +315,26 @@ static int s_s3_meta_request_prepare_request_fail_first(
 }
 
 static void s_s3_meta_request_send_request_finish_fail_first(
-    struct aws_s3_vip_connection *vip_connection,
+    struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code) {
 
-    struct aws_s3_client *client = vip_connection->request->meta_request->client;
+    struct aws_s3_client *client = connection->request->meta_request->client;
     AWS_ASSERT(client != NULL);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
     AWS_ASSERT(tester != NULL);
 
     if (aws_s3_tester_inc_counter2(tester) == 1) {
-        AWS_ASSERT(vip_connection->request->send_data.response_status == 404);
+        AWS_ASSERT(connection->request->send_data.response_status == 404);
 
-        vip_connection->request->send_data.response_status = AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR;
+        connection->request->send_data.response_status = AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR;
     }
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    original_meta_request_vtable->send_request_finish(vip_connection, stream, error_code);
+    original_meta_request_vtable->send_request_finish(connection, stream, error_code);
 }
 
 static struct aws_s3_meta_request *s_meta_request_factory_patch_send_request_finish(

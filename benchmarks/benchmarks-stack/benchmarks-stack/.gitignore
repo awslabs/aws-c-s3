@@ -1,0 +1,13 @@
+*.js
+!benchmarks_deploy.js
+!jest.config.js
+*.d.ts
+node_modules
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+
+# The config will be copied from upper level
+lib/benchmark-config.json
+cdk.context.json

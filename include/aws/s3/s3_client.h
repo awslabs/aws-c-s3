@@ -39,9 +39,17 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
     void *user_data);
 
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
+    /* The meta request that the callback is being issued for. */
     struct aws_s3_meta_request *meta_request,
+
+    /* The body data for this chunk of the object. */
     const struct aws_byte_cursor *body,
+
+    /* The byte index of the object that this refers to. For example, for an HTTP message that has a range header, the
+       first chunk received will have a range_start that matches the range header's range-start.*/
     uint64_t range_start,
+
+    /* User data specified by aws_s3_meta_request_options.*/
     void *user_data);
 
 typedef void(aws_s3_meta_request_finish_fn)(
@@ -58,8 +66,17 @@ enum aws_s3_meta_request_tls_mode {
     AWS_MR_TLS_DISABLED,
 };
 
+enum aws_s3_meta_request_compute_content_md5 {
+    AWS_MR_CONTENT_MD5_DISABLED,
+    AWS_MR_CONTENT_MD5_ENABLED,
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
+
+    /* When set, this will cap the number of active connections. When 0, the client will determine this value based on
+     * throughput_target_gbps. (Recommended) */
+    uint32_t max_active_connections_override;
 
     /* Region that the S3 bucket lives in. */
     struct aws_byte_cursor region;
@@ -76,7 +93,8 @@ struct aws_s3_client_config {
      */
     enum aws_s3_meta_request_tls_mode tls_mode;
 
-    /* TLS Options to be used for each connection, if tls_mode is ENABLED */
+    /* TLS Options to be used for each connection, if tls_mode is ENABLED. When compiling with BYO_CRYPTO, and tls_mode
+     * is ENABLED, this is required. Otherwise, this is optional. */
     struct aws_tls_connection_options *tls_connection_options;
 
     /* Signing options to be used for each request. Specify NULL to not sign requests. */
@@ -93,6 +111,12 @@ struct aws_s3_client_config {
 
     /* Retry strategy to use. If NULL, a default retry strategy will be used. */
     struct aws_retry_strategy *retry_strategy;
+
+    /**
+     * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
+     *     or initial request has content-md5 header.
+     * For single-part upload, keep the content-md5 in the initial request unchanged. */
+    enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
