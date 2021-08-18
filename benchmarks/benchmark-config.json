@@ -2,7 +2,7 @@
   "projects": {
     "aws-crt-java": {
       "shell_script": "project_scripts/run_java_crt.sh",
-      "branch": "upload_test"
+      "branch": "main"
     }
   },
   "instances": {

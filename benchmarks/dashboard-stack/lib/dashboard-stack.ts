@@ -185,7 +185,7 @@ export class DashboardStack extends cdk.Stack {
 
         const dashboard = new cloudwatch.CfnDashboard(this, id, {
             dashboardBody: JSON.stringify(dashboard_body),
-            dashboardName: id
+            dashboardName: id + "_" + region
         });
 
         // Permission to create CFN stack with ec2,s3, iam and security group in it.
@@ -213,7 +213,7 @@ export class DashboardStack extends cdk.Stack {
 
         new s3deploy.BucketDeployment(this, 'DeployCodeBase', {
             sources: [s3deploy.Source.asset('../benchmarks-stack')],
-            destinationBucket: code_bucket,
+            destinationBucket: code_bucket
         });
 
         new codebuild.Project(this, 'S3BenchmarksDeploy', {
