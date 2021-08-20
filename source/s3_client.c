@@ -34,6 +34,10 @@
 #include <inttypes.h>
 #include <math.h>
 
+#if _MSC_VER
+#    pragma warning(disable : 4232) /* function pointer to dll symbol */
+#endif                              /* _MSC_VER */
+
 struct aws_s3_meta_request_work {
     struct aws_linked_list_node node;
     struct aws_s3_meta_request *meta_request;
