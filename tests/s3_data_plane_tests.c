@@ -646,6 +646,7 @@ static size_t s_test_s3_update_meta_request_trigger_prepare_get_host_address_cou
     uint32_t flags) {
     (void)host_resolver;
     (void)host_name;
+    (void)flags;
     return s_test_s3_update_meta_request_trigger_prepare_host_address_count;
 }
 
@@ -2936,6 +2937,8 @@ static int s_range_requests_headers_callback(
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
+    (void)meta_request;
+    (void)response_status;
 
     struct aws_s3_meta_request_test_results *test_results = user_data;
     struct range_requests_test_user_data *test_user_data = test_results->tester->user_data;
@@ -2950,6 +2953,9 @@ static int s_range_requests_receive_body_callback(
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     void *user_data) {
+
+    (void)meta_request;
+    (void)range_start;
 
     struct aws_s3_meta_request_test_results *test_results = user_data;
     struct range_requests_test_user_data *test_user_data = test_results->tester->user_data;

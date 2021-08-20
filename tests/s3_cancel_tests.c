@@ -77,19 +77,19 @@ static bool s_s3_meta_request_update_cancel_test(
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_SENT:
-            call_cancel = auto_ranged_get->synced_data.head_object_sent;
+            call_cancel = auto_ranged_get->synced_data.head_object_sent != 0;
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_COMPLETED:
-            call_cancel = auto_ranged_get->synced_data.head_object_completed;
+            call_cancel = auto_ranged_get->synced_data.head_object_completed != 0;
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT:
-            call_cancel = auto_ranged_get->synced_data.get_without_range_sent;
+            call_cancel = auto_ranged_get->synced_data.get_without_range_sent != 0;
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED:
-            call_cancel = auto_ranged_get->synced_data.get_without_range_completed;
+            call_cancel = auto_ranged_get->synced_data.get_without_range_completed != 0;
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_SENT:

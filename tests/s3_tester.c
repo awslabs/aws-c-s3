@@ -111,7 +111,7 @@ static int s_s3_test_meta_request_body_callback(
         struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
         AWS_PRECONDITION(auto_ranged_get);
 
-        bool object_range_known = auto_ranged_get->synced_data.object_range_known;
+        bool object_range_known = auto_ranged_get->synced_data.object_range_known != 0;
         object_range_start = auto_ranged_get->synced_data.object_range_start;
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -541,12 +541,19 @@ struct aws_s3_meta_request *s_s3_client_meta_request_factory_empty(
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
+
+    (void)client;
+    (void)options;
+
     return NULL;
 }
 
 void s_s3_client_create_connection_for_request_empty(struct aws_s3_client *client, struct aws_s3_request *request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
+
+    (void)client;
+    (void)request;
 }
 
 static void s_s3_client_acquire_http_connection_empty(
@@ -564,6 +571,7 @@ size_t s_s3_client_get_host_address_count_empty(
     uint32_t flags) {
     (void)host_resolver;
     (void)host_name;
+    (void)flags;
     return 0;
 }
 
@@ -573,19 +581,23 @@ static void s_s3_client_schedule_process_work_synced_empty(struct aws_s3_client 
 
 static void s_s3_client_process_work_empty(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
+    (void)client;
 }
 
 static bool s_s3_client_endpoint_ref_count_zero_empty(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
+    (void)endpoint;
     return true;
 }
 
 static void s_s3_client_endpoint_shutdown_callback_empty(void *user_data) {
     AWS_PRECONDITION(user_data);
+    (void)user_data;
 }
 
 static void s_s3_client_finish_destroy_empty(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
+    (void)client;
 }
 
 struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
