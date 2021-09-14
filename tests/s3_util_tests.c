@@ -82,6 +82,7 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
 
 AWS_TEST_CASE(test_s3_parse_content_range_response_header, s_test_s3_parse_content_range_response_header)
 static int s_test_s3_parse_content_range_response_header(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     const struct aws_http_header content_range_header = {
         .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Range"),
@@ -143,6 +144,7 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
 
 AWS_TEST_CASE(test_s3_parse_content_length_response_header, s_test_s3_parse_content_length_response_header)
 static int s_test_s3_parse_content_length_response_header(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_http_headers *response_headers = aws_http_headers_new(allocator);
 
@@ -210,6 +212,8 @@ static int s_validate_part_ranges(
 
 AWS_TEST_CASE(test_s3_get_num_parts_and_get_part_range, s_test_s3_get_num_parts_and_get_part_range)
 static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
 
     const size_t part_size = 16 * 1024;
 
