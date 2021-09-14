@@ -71,7 +71,8 @@ int aws_crc32_checksum_update(struct aws_checksum *checksum, const struct aws_by
     if (!checksum->good) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
-    checksum->impl = (void *)(uintptr_t)aws_crc32_common((uint32_t)checksum->impl, buf, aws_checksums_crc32);
+    checksum->impl =
+        (void *)(uintptr_t)aws_crc32_common((uint32_t)(uint32_t *)checksum->impl, buf, aws_checksums_crc32);
     return AWS_OP_SUCCESS;
 }
 
@@ -79,7 +80,8 @@ int aws_crc32c_checksum_update(struct aws_checksum *checksum, const struct aws_b
     if (!checksum->good) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
-    checksum->impl = (void *)(uintptr_t)aws_crc32_common((uint32_t)checksum->impl, buf, aws_checksums_crc32c);
+    checksum->impl =
+        (void *)(uintptr_t)aws_crc32_common((uint32_t)(uint32_t *)checksum->impl, buf, aws_checksums_crc32c);
     return AWS_OP_SUCCESS;
 }
 
@@ -97,7 +99,7 @@ int aws_crc_finalize(struct aws_checksum *checksum, struct aws_byte_buf *out, si
         return aws_raise_error(AWS_ERROR_SHORT_BUFFER);
     }
     AWS_PRECONDITION(aws_byte_buf_is_valid(out));
-    uint32_t tmp = aws_hton32((uint32_t)checksum->impl);
+    uint32_t tmp = aws_hton32((uint32_t)(uint32_t *)checksum->impl);
     if (aws_byte_buf_write(out, (uint8_t *)&tmp, len)) {
         return AWS_OP_SUCCESS;
     }
