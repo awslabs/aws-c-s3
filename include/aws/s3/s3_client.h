@@ -71,6 +71,25 @@ enum aws_s3_meta_request_compute_content_md5 {
     AWS_MR_CONTENT_MD5_ENABLED,
 };
 
+enum aws_s3_checksum_algorithm {
+    AWS_SHA1,
+    AWS_SHA256,
+    AWS_MD5,
+    AWS_CRC32,
+    AWS_CRC32C,
+};
+
+enum aws_s3_meta_request_flexible_checksum_location {
+    AWS_MR_FC_HEADER,
+    AWS_MR_FC_TRAILER,
+};
+
+struct aws_s3_meta_request_flexible_checksums_options {
+    enum aws_s3_checksum_algorithm checksum_algorithm;
+    enum aws_s3_meta_request_flexible_checksum_location checksum_location;
+    struct aws_string *checksum_name;
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
 
@@ -117,6 +136,10 @@ struct aws_s3_client_config {
      *     or initial request has content-md5 header.
      * For single-part upload, keep the content-md5 in the initial request unchanged. */
     enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
+
+    /**
+     * If a flexible checksum is specified it will replace compute_content_md5 */
+    struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
