@@ -29,22 +29,27 @@ struct aws_checksum {
 /**
  * Allocates and initializes a sha256 checksum instance.
  */
+AWS_S3_API
 struct aws_checksum *aws_sha256_checksum_new(struct aws_allocator *allocator);
 /**
  * Allocates and initializes a sha1 checksum instance.
  */
+AWS_S3_API
 struct aws_checksum *aws_sha1_checksum_new(struct aws_allocator *allocator);
 /**
  * Allocates and initializes an md5 checksum instance.
  */
+AWS_S3_API
 struct aws_checksum *aws_md5_checksum_new(struct aws_allocator *allocator);
 /**
  * Allocates and initializes an crc32 checksum instance.
  */
+AWS_S3_API
 struct aws_checksum *aws_crc32_checksum_new(struct aws_allocator *allocator);
 /**
  * Allocates and initializes an crc32c checksum instance.
  */
+AWS_S3_API
 struct aws_checksum *aws_crc32c_checksum_new(struct aws_allocator *allocator);
 
 /**
@@ -52,6 +57,7 @@ struct aws_checksum *aws_crc32c_checksum_new(struct aws_allocator *allocator);
  * conditional would be faster, but would be a negligble improvment compared to the cost of processing data twice which
  * would be the only time this function would be used, and would be harder to follow.
  */
+AWS_S3_API
 int aws_checksum_compute(
     struct aws_allocator *allocator,
     enum aws_s3_checksum_algorithm algorithm,
@@ -62,14 +68,17 @@ int aws_checksum_compute(
 /**
  * Cleans up and deallocates checksum.
  */
+AWS_S3_API
 void aws_checksum_destroy(struct aws_checksum *checksum);
 /**
  * Updates the running checksum with to_checksum. this can be called multiple times.
  */
+AWS_S3_API
 int aws_checksum_update(struct aws_checksum *checksum, const struct aws_byte_cursor *to_checksum);
 /**
  * Completes the checksum computation and writes the final digest to output.
  * Allocation of output is the caller's responsibility.
  */
+AWS_S3_API
 int aws_checksum_finalize(struct aws_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
 #endif
