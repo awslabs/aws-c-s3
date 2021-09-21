@@ -150,10 +150,6 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.shutdown_complete_user_data = endpoint;
     manager_options.proxy_ev_settings = &proxy_ev_settings;
 
-    struct aws_uri proxy_uri;
-    AWS_ZERO_STRUCT(proxy_uri);
-    struct aws_http_proxy_options *proxy_options = NULL;
-    struct aws_tls_connection_options *proxy_tls_options = NULL;
     struct aws_tls_connection_options *manager_tls_options = NULL;
 
     if (tls_connection_options != NULL) {
@@ -182,19 +178,6 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         aws_mem_release(endpoint->allocator, manager_tls_options);
         manager_tls_options = NULL;
     }
-
-    if (proxy_tls_options != NULL) {
-        aws_tls_connection_options_clean_up(proxy_tls_options);
-        aws_mem_release(endpoint->allocator, proxy_tls_options);
-        proxy_tls_options = NULL;
-    }
-
-    if (proxy_options != NULL) {
-        aws_mem_release(endpoint->allocator, proxy_options);
-        proxy_options = NULL;
-    }
-
-    aws_uri_clean_up(&proxy_uri);
 
     if (http_connection_manager == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "id=%p: Could not create http connection manager.", (void *)endpoint);
