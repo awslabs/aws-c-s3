@@ -137,9 +137,9 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     socket_options.connect_timeout_ms = s_connection_timeout_ms;
     struct proxy_env_var_settings proxy_ev_settings;
     AWS_ZERO_STRUCT(proxy_ev_settings);
-#ifndef BYO_CRYPTO
+    /* Turn on envrionment variable for proxy by default */
     proxy_ev_settings.env_var_type = AWS_HPEV_ENABLE;
-#endif // BYO_CRYPTO
+
     struct aws_http_connection_manager_options manager_options;
     AWS_ZERO_STRUCT(manager_options);
     manager_options.bootstrap = client_bootstrap;
