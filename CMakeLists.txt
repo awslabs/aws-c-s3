@@ -117,6 +117,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake"
         COMPONENT Development)
 
 include(CTest)
-if (NOT BYO_CRYPTO AND BUILD_TESTING)
+if (BUILD_TESTING)
     add_subdirectory(tests)
 endif()
