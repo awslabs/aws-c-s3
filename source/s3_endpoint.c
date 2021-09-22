@@ -38,10 +38,6 @@ static const uint32_t s_connection_timeout_ms = 3000;
 static const uint16_t s_http_port = 80;
 static const uint16_t s_https_port = 443;
 
-AWS_STATIC_STRING_FROM_LITERAL(s_http_proxy_env_var, "HTTP_PROXY");
-
-static int s_s3_endpoint_get_proxy_uri(struct aws_s3_endpoint *endpoint, struct aws_uri *proxy_uri);
-
 static void s_s3_endpoint_on_host_resolver_address_resolved(
     struct aws_host_resolver *resolver,
     const struct aws_string *host_name,
@@ -139,6 +135,10 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     socket_options.type = AWS_SOCKET_STREAM;
     socket_options.domain = AWS_SOCKET_IPV4;
     socket_options.connect_timeout_ms = s_connection_timeout_ms;
+    struct proxy_env_var_settings proxy_ev_settings;
+    AWS_ZERO_STRUCT(proxy_ev_settings);
+    /* Turn on envrionment variable for proxy by default */
+    proxy_ev_settings.env_var_type = AWS_HPEV_ENABLE;
 
     struct aws_http_connection_manager_options manager_options;
     AWS_ZERO_STRUCT(manager_options);
@@ -149,22 +149,9 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.max_connections = max_connections;
     manager_options.shutdown_complete_callback = s_s3_endpoint_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = endpoint;
+    manager_options.proxy_ev_settings = &proxy_ev_settings;
 
-    struct aws_uri proxy_uri;
-    AWS_ZERO_STRUCT(proxy_uri);
-    struct aws_http_proxy_options *proxy_options = NULL;
-    struct aws_tls_connection_options *proxy_tls_options = NULL;
     struct aws_tls_connection_options *manager_tls_options = NULL;
-
-    if (s_s3_endpoint_get_proxy_uri(endpoint, &proxy_uri) == AWS_OP_SUCCESS) {
-        proxy_options = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_http_proxy_options));
-        proxy_options->host = proxy_uri.host_name;
-        proxy_options->port = proxy_uri.port;
-
-        manager_options.proxy_options = proxy_options;
-    } else if (aws_last_error() != AWS_ERROR_S3_PROXY_ENV_NOT_FOUND) {
-        return NULL;
-    }
 
     if (tls_connection_options != NULL) {
         manager_tls_options = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_tls_connection_options));
@@ -193,19 +180,6 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         manager_tls_options = NULL;
     }
 
-    if (proxy_tls_options != NULL) {
-        aws_tls_connection_options_clean_up(proxy_tls_options);
-        aws_mem_release(endpoint->allocator, proxy_tls_options);
-        proxy_tls_options = NULL;
-    }
-
-    if (proxy_options != NULL) {
-        aws_mem_release(endpoint->allocator, proxy_options);
-        proxy_options = NULL;
-    }
-
-    aws_uri_clean_up(&proxy_uri);
-
     if (http_connection_manager == NULL) {
         AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "id=%p: Could not create http connection manager.", (void *)endpoint);
         return NULL;
@@ -218,58 +192,6 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         (void *)endpoint->http_connection_manager);
 
     return http_connection_manager;
-}
-
-static int s_s3_endpoint_get_proxy_uri(struct aws_s3_endpoint *endpoint, struct aws_uri *proxy_uri) {
-    AWS_PRECONDITION(endpoint);
-    AWS_PRECONDITION(proxy_uri);
-
-    struct aws_allocator *allocator = endpoint->allocator;
-    AWS_PRECONDITION(allocator);
-
-    struct aws_string *proxy_uri_string = NULL;
-
-    int result = AWS_OP_ERR;
-    const struct aws_string *env_variable_name = NULL;
-
-    if (aws_get_environment_value(allocator, s_http_proxy_env_var, &proxy_uri_string) == AWS_OP_SUCCESS &&
-        proxy_uri_string != NULL) {
-        env_variable_name = s_http_proxy_env_var;
-    } else {
-        aws_raise_error(AWS_ERROR_S3_PROXY_ENV_NOT_FOUND);
-        goto clean_up;
-    }
-
-    AWS_LOGF_INFO(
-        AWS_LS_S3_ENDPOINT,
-        "id=%p Found proxy URI %s in environment variable %s",
-        (void *)endpoint,
-        (const char *)proxy_uri_string->bytes,
-        (const char *)env_variable_name->bytes);
-
-    struct aws_byte_cursor proxy_uri_cursor = aws_byte_cursor_from_string(proxy_uri_string);
-
-    if (aws_uri_init_parse(proxy_uri, allocator, &proxy_uri_cursor)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "id=%p Could not parse found proxy URI.", (void *)endpoint);
-        aws_raise_error(AWS_ERROR_S3_PROXY_PARSE_FAILED);
-        goto clean_up;
-    }
-
-    if (aws_byte_cursor_eq_ignore_case(&proxy_uri->scheme, &aws_http_scheme_http)) {
-        /* Nothing to do. */
-    } else if (proxy_uri->scheme.len > 0) {
-        AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "id=%p Proxy URI contains unsupported scheme.", (void *)endpoint);
-
-        aws_raise_error(AWS_ERROR_S3_UNSUPPORTED_PROXY_SCHEME);
-        goto clean_up;
-    }
-
-    result = AWS_OP_SUCCESS;
-
-clean_up:
-
-    aws_string_destroy(proxy_uri_string);
-    return result;
 }
 
 struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint) {
