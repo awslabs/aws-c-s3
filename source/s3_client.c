@@ -781,7 +781,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         size_t client_max_part_size = client->max_part_size;
 
         if (client_part_size < g_s3_min_upload_part_size) {
-            AWS_LOGF_ERROR(
+            AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
                 "Client config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
                 ". Using to the minimum part-size for upload.",
@@ -792,7 +792,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
 
         if (client_max_part_size < g_s3_min_upload_part_size) {
-            AWS_LOGF_ERROR(
+            AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
                 "Client config max part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
                 ". Clamping to the minimum part-size for upload.",
