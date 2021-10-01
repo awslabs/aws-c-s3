@@ -61,8 +61,13 @@ const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE
 const uint32_t g_max_num_connections_per_vip = 10;
 
 /* TODO Provide more information on these values. */
+/**
+ * Default part size is 8 MB to reach the best performance from the experiments we had.
+ * Default max part size it 5 GB, which is the limit from service side.
+ *      For upload, the max number of parts is 10000, which will limits the object size to 50 TB.
+ */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const size_t s_default_max_part_size = 32 * 1024 * 1024;
+static const size_t s_default_max_part_size = 5 * 1024 * 1024 * 1024;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
