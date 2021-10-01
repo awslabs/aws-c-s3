@@ -62,13 +62,13 @@ const uint32_t g_max_num_connections_per_vip = 10;
 
 /**
  * Default part size is 8 MB to reach the best performance from the experiments we had.
- * Default max part size it SIZE_MAX, which is around 4GB.
+ * Default max part size is SIZE_MAX at 32bit build, which is around 4GB, which is 5GB at 64bit build.
  *      The server limit is 5GB, but object size limit is 5TB for now. We should be good enough for all the case.
  *      For upload, the max number of parts is 10000, which will limits the object size to 40 TB.
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const size_t s_default_max_part_size = SIZE_MAX;
+static const size_t s_default_max_part_size = SIZE_MAX < 5000000000000ULL ? SIZE_MAX : 5000000000000ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
