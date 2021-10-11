@@ -334,7 +334,7 @@ static int s_s3_auto_ranged_get_prepare_request(
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
             /* A head object will be a copy of the original headers but with a HEAD request method. */
-            message = aws_s3_message_util_copy_http_message(
+            message = aws_s3_message_util_copy_http_message_no_body(
                 meta_request->allocator, meta_request->initial_request_message, NULL, 0);
             aws_http_message_set_request_method(message, g_head_method);
             break;
@@ -346,7 +346,7 @@ static int s_s3_auto_ranged_get_prepare_request(
                 request->part_range_end);
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
-            message = aws_s3_message_util_copy_http_message(
+            message = aws_s3_message_util_copy_http_message_no_body(
                 meta_request->allocator, meta_request->initial_request_message, NULL, 0);
             break;
     }

@@ -131,7 +131,7 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, NULL, 0);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(allocator, base_message, NULL, 0);
 
     if (message == NULL) {
         return NULL;
@@ -160,7 +160,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     AWS_PRECONDITION(allocator);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
         base_message,
         g_s3_create_multipart_upload_excluded_headers,
@@ -214,7 +214,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator, base_message, g_s3_upload_part_excluded_headers, AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers));
 
     if (message == NULL) {
@@ -281,7 +281,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
         base_message,
         g_s3_complete_multipart_upload_excluded_headers,
@@ -375,7 +375,7 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_http_message *base_message,
     const struct aws_string *upload_id) {
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
         base_message,
         g_s3_abort_multipart_upload_excluded_headers,
@@ -486,8 +486,8 @@ error_clean_up:
     return AWS_OP_ERR;
 }
 
-/* Copy an existing HTTP message's headers and body. */
-struct aws_http_message *aws_s3_message_util_copy_http_message(
+/* Copy an existing HTTP message's headers, method, and path. */
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     const struct aws_byte_cursor *excluded_header_array,
