@@ -60,9 +60,16 @@ const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE
 /* Should be max of s_num_conns_per_vip_meta_request_look_up */
 const uint32_t g_max_num_connections_per_vip = 10;
 
-/* TODO Provide more information on these values. */
+/**
+ * Default part size is 8 MB to reach the best performance from the experiments we had.
+ * Default max part size is SIZE_MAX at 32bit build, which is around 4GB, which is 5GB at 64bit build.
+ *      The server limit is 5GB, but object size limit is 5TB for now. We should be good enough for all the case.
+ *      For upload, the max number of parts is 10000, which will limits the object size to 40TB for 32bit and 50TB for
+ *      64bit.
+ * TODO Provide more information on other values.
+ */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const size_t s_default_max_part_size = 32 * 1024 * 1024;
+static const size_t s_default_max_part_size = SIZE_MAX < 5000000000000ULL ? SIZE_MAX : 5000000000000ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
@@ -781,7 +788,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         size_t client_max_part_size = client->max_part_size;
 
         if (client_part_size < g_s3_min_upload_part_size) {
-            AWS_LOGF_ERROR(
+            AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
                 "Client config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
                 ". Using to the minimum part-size for upload.",
@@ -792,7 +799,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
 
         if (client_max_part_size < g_s3_min_upload_part_size) {
-            AWS_LOGF_ERROR(
+            AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
                 "Client config max part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
                 ". Clamping to the minimum part-size for upload.",
