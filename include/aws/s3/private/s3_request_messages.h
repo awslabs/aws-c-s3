@@ -20,7 +20,7 @@ struct aws_array_list;
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
-struct aws_http_message *aws_s3_message_util_copy_http_message(
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
     const struct aws_byte_cursor *excluded_headers_arrays,

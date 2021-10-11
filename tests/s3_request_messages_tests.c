@@ -479,7 +479,7 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
     ASSERT_SUCCESS(aws_http_headers_add(message_headers, excluded_header.name, excluded_header.value));
 
     struct aws_http_message *copied_message =
-        aws_s3_message_util_copy_http_message(allocator, message, &excluded_header.name, 1);
+        aws_s3_message_util_copy_http_message_no_body(allocator, message, &excluded_header.name, 1);
     ASSERT_TRUE(copied_message != NULL);
 
     ASSERT_SUCCESS(s_test_http_messages_match(allocator, message, copied_message, &excluded_header.name, 1));
