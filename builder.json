@@ -9,7 +9,8 @@
     "upstream": [
         { "name": "aws-c-auth" },
         { "name": "aws-c-http" },
-        { "name": "aws-checksums" }
+        { "name": "aws-checksums" },
+        { "name": "aws-c-sdkutils"}
     ],
     "downstream": [
     ],
