@@ -66,4 +66,4 @@ cmake-build*
 
 # js package locks irrelevant to the overall package's security
 benchmarks/benchmarks-stack/benchmarks-stack/package-lock.json
-
+benchmarks/dashboard-stack/package-lock.json
