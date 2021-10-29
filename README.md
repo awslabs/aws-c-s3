@@ -51,6 +51,10 @@ git clone git@github.com:awslabs/aws-c-http.git
 cmake -S aws-c-http -B aws-c-http/build -DCMAKE_INSTALL_PREFIX=<install-path> -DCMAKE_PREFIX_PATH=<install-path>
 cmake --build aws-c-http/build --target install
 
+git clone git@github.com:awslabs/aws-c-sdkutils.git
+cmake -S aws-c-sdkutils -B aws-c-sdkutils/build -DCMAKE_INSTALL_PREFIX=<install-path> -DCMAKE_PREFIX_PATH=<install-path>
+cmake --build aws-c-sdkutils/build --target install
+
 git clone git@github.com:awslabs/aws-c-auth.git
 cmake -S aws-c-auth -B aws-c-auth/build -DCMAKE_INSTALL_PREFIX=<install-path> -DCMAKE_PREFIX_PATH=<install-path>
 cmake --build aws-c-auth/build --target install
