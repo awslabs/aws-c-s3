@@ -69,7 +69,7 @@ const uint32_t g_max_num_connections_per_vip = 10;
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const size_t s_default_max_part_size = SIZE_MAX < 5000000000000ULL ? SIZE_MAX : 5000000000000ULL;
+static const uint64_t s_default_max_part_size = SIZE_MAX < 5000000000000ULL ? SIZE_MAX : 5000000000000ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
@@ -327,7 +327,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->max_part_size != 0) {
         *((size_t *)&client->max_part_size) = client_config->max_part_size;
     } else {
-        *((size_t *)&client->max_part_size) = s_default_max_part_size;
+        *((size_t *)&client->max_part_size) = (size_t)s_default_max_part_size;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
