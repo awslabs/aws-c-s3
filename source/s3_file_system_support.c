@@ -12,6 +12,8 @@
 #include <aws/common/ref_count.h>
 #include <aws/common/xml_parser.h>
 
+#include <aws/io/uri.h>
+
 #include <aws/http/http.h>
 #include <aws/http/request_response.h>
 
@@ -130,8 +132,11 @@ static inline int s_set_paginator_state_if_legal(
 }
 
 static void s_list_bucket_shutdown(void *user_data) {
-    struct aws_s3_paginator *paginator = user_data;
-    aws_ref_count_release(&paginator->ref_count);
+    (void) user_data;
+
+    // TODO: check if required, already released on s_list_bucket_request_finished callback
+    //struct aws_s3_paginator *paginator = user_data;
+    //aws_ref_count_release(&paginator->ref_count);
 }
 
 struct fs_parser_wrapper {
@@ -316,6 +321,15 @@ static void s_list_bucket_request_finished(
             .max_depth = 16U,
         };
 
+        // clears previous continuation token
+        aws_mutex_lock(&paginator->shared_mt_state.lock);
+        if (paginator->shared_mt_state.continuation_token) {
+            aws_string_destroy(paginator->shared_mt_state.continuation_token);
+            paginator->shared_mt_state.continuation_token = NULL;
+            paginator->shared_mt_state.has_more_results = false;
+        }
+        aws_mutex_unlock(&paginator->shared_mt_state.lock);
+
         struct aws_xml_parser *parser = aws_xml_parser_new(paginator->allocator, &parser_options);
         aws_xml_parser_parse(parser, s_on_root_node_encountered, paginator);
         aws_xml_parser_destroy(parser);
@@ -325,7 +339,9 @@ static void s_list_bucket_request_finished(
         has_more_results = paginator->shared_mt_state.has_more_results;
         aws_mutex_unlock(&paginator->shared_mt_state.lock);
 
-        if (!has_more_results) {
+        if (has_more_results) {
+            s_set_paginator_state_if_legal(paginator, OS_INITIATED, OS_NOT_STARTED);
+        } else {
             s_set_paginator_state_if_legal(paginator, OS_INITIATED, OS_COMPLETED);
         }
 
@@ -340,7 +356,8 @@ static void s_list_bucket_request_finished(
     aws_s3_paginator_release(paginator);
 }
 
-int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, struct aws_signing_config_aws *signing_config) {
+int aws_s3_paginator_continue(struct aws_s3_paginator *paginator,
+                              const struct aws_signing_config_aws *signing_config) {
     AWS_PRECONDITION(paginator);
 
     if (s_set_paginator_state_if_legal(paginator, OS_NOT_STARTED, OS_INITIATED)) {
@@ -351,33 +368,33 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, struct aws_sig
     struct aws_byte_buf request_path;
     aws_byte_buf_init_copy_from_cursor(&request_path, paginator->allocator, s_path_start);
 
-    /* TODO: do not forget to come back and URL encode these. */
     if (paginator->prefix) {
         struct aws_byte_cursor s_prefix = aws_byte_cursor_from_c_str("&prefix=");
         aws_byte_buf_append_dynamic(&request_path, &s_prefix);
         struct aws_byte_cursor s_prefix_val = aws_byte_cursor_from_string(paginator->prefix);
-        aws_byte_buf_append_dynamic(&request_path, &s_prefix_val);
+        aws_byte_buf_append_encoding_uri_param(&request_path, &s_prefix_val);
     }
 
     if (paginator->delimiter) {
         struct aws_byte_cursor s_delimiter = aws_byte_cursor_from_c_str("&delimiter=");
         aws_byte_buf_append_dynamic(&request_path, &s_delimiter);
         struct aws_byte_cursor s_delimiter_val = aws_byte_cursor_from_string(paginator->delimiter);
-        aws_byte_buf_append_dynamic(&request_path, &s_delimiter_val);
+        aws_byte_buf_append_encoding_uri_param(&request_path, &s_delimiter_val);
     }
 
     aws_mutex_lock(&paginator->shared_mt_state.lock);
     if (paginator->shared_mt_state.continuation_token) {
-        struct aws_byte_cursor s_continuation = aws_byte_cursor_from_c_str("&continuation_token=");
+        struct aws_byte_cursor s_continuation = aws_byte_cursor_from_c_str("&continuation-token=");
         aws_byte_buf_append_dynamic(&request_path, &s_continuation);
         struct aws_byte_cursor s_continuation_val =
             aws_byte_cursor_from_string(paginator->shared_mt_state.continuation_token);
-        aws_byte_buf_append_dynamic(&request_path, &s_continuation_val);
+        aws_byte_buf_append_encoding_uri_param(&request_path, &s_continuation_val);
     }
     aws_mutex_unlock(&paginator->shared_mt_state.lock);
 
     struct aws_http_message *list_bucket_v2_request = aws_http_message_new_request(paginator->allocator);
     aws_http_message_set_request_path(list_bucket_v2_request, aws_byte_cursor_from_buf(&request_path));
+
     aws_byte_buf_clean_up(&request_path);
 
     struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(paginator->bucket_name);
@@ -416,6 +433,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, struct aws_sig
     };
 
     aws_s3_paginator_acquire(paginator);
+    aws_byte_buf_reset(&paginator->result_body, false); // clear body of previous request
     paginator->current_request = aws_s3_client_make_meta_request(paginator->client, &request_options);
     aws_http_message_release(list_bucket_v2_request);
 
@@ -446,7 +464,7 @@ static bool s_run_all_on_object(const struct aws_s3_object_file_system_info *inf
 }
 
 static void s_run_all_on_object_list_finished(
-    const struct aws_s3_paginator *paginator,
+    struct aws_s3_paginator *paginator,
     int error_code,
     void *user_data) {
     struct list_bucket_wrapper *wrapper = user_data;
@@ -460,8 +478,9 @@ static void s_run_all_on_object_list_finished(
 
 static bool s_run_all_completion_check(void *arg) {
     struct list_bucket_wrapper *wrapper = arg;
-    return wrapper->paginator->shared_mt_state.operation_state >= OS_COMPLETED &&
-           wrapper->paginator->shared_mt_state.has_more_results == false;
+    return wrapper->paginator->shared_mt_state.operation_state >= OS_COMPLETED
+        //&& wrapper->paginator->shared_mt_state.has_more_results == false
+        ;
 }
 
 int aws_s3_list_bucket_and_run_all_pages(
@@ -503,5 +522,13 @@ int aws_s3_list_bucket_and_run_all_pages(
         }
     }
 
+    aws_s3_paginator_release(wrapper.paginator);
     return ret_val;
+}
+
+int aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator, bool* has_more_results) {
+    AWS_PRECONDITION(paginator);
+    AWS_PRECONDITION(has_more_results);
+    *has_more_results = paginator->shared_mt_state.has_more_results;
+    return AWS_OP_SUCCESS;
 }

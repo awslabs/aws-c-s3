@@ -22,7 +22,7 @@ struct aws_s3_object_file_system_info {
 struct aws_s3_paginator;
 
 typedef bool(aws_s3_on_object_fn)(const struct aws_s3_object_file_system_info *info, void *user_data);
-typedef void(aws_s3_on_object_list_finished)(const struct aws_s3_paginator *paginator, int error_code, void *user_data);
+typedef void(aws_s3_on_object_list_finished)(struct aws_s3_paginator *paginator, int error_code, void *user_data);
 
 struct aws_s3_list_bucket_v2_params {
     struct aws_s3_client *client;
@@ -45,11 +45,13 @@ AWS_S3_API void aws_s3_paginator_acquire(struct aws_s3_paginator *paginator);
 AWS_S3_API void aws_s3_paginator_release(struct aws_s3_paginator *paginator);
 AWS_S3_API int aws_s3_paginator_continue(
     struct aws_s3_paginator *paginator,
-    struct aws_signing_config_aws *signing_config);
+    const struct aws_signing_config_aws *signing_config);
 AWS_S3_API int aws_s3_list_bucket_and_run_all_pages(
     struct aws_allocator *allocator,
     const struct aws_s3_list_bucket_v2_params *params,
     struct aws_signing_config_aws *signing_config);
+
+AWS_S3_API int aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator, bool* has_more_results);
 
 AWS_EXTERN_C_END
 
