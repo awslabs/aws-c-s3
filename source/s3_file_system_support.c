@@ -47,6 +47,8 @@ struct aws_s3_paginator {
     struct aws_byte_buf result_body;
 };
 
+static const size_t s_dynamic_body_initial_buf_size = 1024;
+
 static void s_ref_count_zero_callback(void *arg) {
     struct aws_s3_paginator *paginator = arg;
 
@@ -94,6 +96,7 @@ struct aws_s3_paginator *aws_s3_initiate_list_bucket(
     paginator->on_object = params->on_object;
     paginator->on_list_finished = params->on_list_finished;
     paginator->user_data = params->user_data;
+    aws_byte_buf_init(&paginator->result_body, allocator, s_dynamic_body_initial_buf_size);
     aws_ref_count_init(&paginator->ref_count, paginator, s_ref_count_zero_callback);
     aws_mutex_init(&paginator->shared_mt_state.lock);
     paginator->shared_mt_state.operation_state = OS_NOT_STARTED;
