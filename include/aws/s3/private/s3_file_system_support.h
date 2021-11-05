@@ -46,10 +46,6 @@ AWS_S3_API void aws_s3_paginator_release(struct aws_s3_paginator *paginator);
 AWS_S3_API int aws_s3_paginator_continue(
     struct aws_s3_paginator *paginator,
     const struct aws_signing_config_aws *signing_config);
-AWS_S3_API int aws_s3_list_bucket_and_run_all_pages(
-    struct aws_allocator *allocator,
-    const struct aws_s3_list_bucket_v2_params *params,
-    struct aws_signing_config_aws *signing_config);
 
 AWS_S3_API int aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator, bool* has_more_results);
 

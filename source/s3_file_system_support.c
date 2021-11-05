@@ -476,56 +476,6 @@ static void s_run_all_on_object_list_finished(
     aws_condition_variable_notify_one(&wrapper->c_var);
 }
 
-static bool s_run_all_completion_check(void *arg) {
-    struct list_bucket_wrapper *wrapper = arg;
-    return wrapper->paginator->shared_mt_state.operation_state >= OS_COMPLETED
-        //&& wrapper->paginator->shared_mt_state.has_more_results == false
-        ;
-}
-
-int aws_s3_list_bucket_and_run_all_pages(
-    struct aws_allocator *allocator,
-    const struct aws_s3_list_bucket_v2_params *params,
-    struct aws_signing_config_aws *signing_config) {
-    struct list_bucket_wrapper wrapper = {
-        .user_data = params->user_data,
-        .on_object = params->on_object,
-        .on_list_finished = params->on_list_finished,
-        .c_var = AWS_CONDITION_VARIABLE_INIT,
-    };
-
-    struct aws_s3_list_bucket_v2_params params_cpy = *params;
-    params_cpy.on_object = s_run_all_on_object;
-    params_cpy.on_list_finished = s_run_all_on_object_list_finished;
-    params_cpy.user_data = &wrapper;
-
-    wrapper.paginator = aws_s3_initiate_list_bucket(allocator, &params_cpy);
-
-    if (!wrapper.paginator) {
-        return AWS_OP_ERR;
-    }
-
-    bool continue_paging = true;
-    int ret_val = AWS_OP_SUCCESS;
-
-    while (continue_paging && ret_val == AWS_OP_SUCCESS) {
-
-        if (aws_s3_paginator_continue(wrapper.paginator, signing_config)) {
-            continue_paging = false;
-            ret_val = AWS_OP_ERR;
-        } else {
-            aws_mutex_lock(&wrapper.paginator->shared_mt_state.lock);
-            aws_condition_variable_wait_pred(
-                &wrapper.c_var, &wrapper.paginator->shared_mt_state.lock, s_run_all_completion_check, &wrapper);
-            continue_paging = wrapper.paginator->shared_mt_state.has_more_results;
-            aws_mutex_unlock(&wrapper.paginator->shared_mt_state.lock);
-        }
-    }
-
-    aws_s3_paginator_release(wrapper.paginator);
-    return ret_val;
-}
-
 int aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator, bool* has_more_results) {
     AWS_PRECONDITION(paginator);
     AWS_PRECONDITION(has_more_results);
