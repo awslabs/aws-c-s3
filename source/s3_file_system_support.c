@@ -77,6 +77,8 @@ static void s_ref_count_zero_callback(void *arg) {
         aws_string_destroy(paginator->endpoint);
     }
 
+    aws_byte_buf_clean_up(&paginator->result_body);
+
     aws_mem_release(paginator->allocator, paginator);
 }
 
@@ -133,11 +135,11 @@ static inline int s_set_paginator_state_if_legal(
 }
 
 static void s_list_bucket_shutdown(void *user_data) {
-    (void) user_data;
+    (void)user_data;
 
     // TODO: check if required, already released on s_list_bucket_request_finished callback
-    //struct aws_s3_paginator *paginator = user_data;
-    //aws_ref_count_release(&paginator->ref_count);
+    // struct aws_s3_paginator *paginator = user_data;
+    // aws_ref_count_release(&paginator->ref_count);
 }
 
 struct fs_parser_wrapper {
@@ -300,8 +302,8 @@ static bool s_on_root_node_encountered(struct aws_xml_parser *parser, struct aws
 }
 
 /**
- * On a successful operation, this is an xml document. Just copy the buffers over until we're ready to parse (upon completion)
- * of the response body.
+ * On a successful operation, this is an xml document. Just copy the buffers over until we're ready to parse (upon
+ * completion) of the response body.
  */
 static int s_list_bucket_receive_body_callback(
     struct aws_s3_meta_request *meta_request,
@@ -372,8 +374,7 @@ static void s_list_bucket_request_finished(
     aws_s3_paginator_release(paginator);
 }
 
-int aws_s3_paginator_continue(struct aws_s3_paginator *paginator,
-                              const struct aws_signing_config_aws *signing_config) {
+int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct aws_signing_config_aws *signing_config) {
     AWS_PRECONDITION(paginator);
 
     if (s_set_paginator_state_if_legal(paginator, OS_NOT_STARTED, OS_INITIATED)) {
@@ -483,10 +484,7 @@ static bool s_run_all_on_object(const struct aws_s3_object_file_system_info *inf
     return false;
 }
 
-static void s_run_all_on_object_list_finished(
-    struct aws_s3_paginator *paginator,
-    int error_code,
-    void *user_data) {
+static void s_run_all_on_object_list_finished(struct aws_s3_paginator *paginator, int error_code, void *user_data) {
     struct list_bucket_wrapper *wrapper = user_data;
 
     if (wrapper->on_list_finished) {

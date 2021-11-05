@@ -131,6 +131,8 @@ add_test_case(test_add_user_agent_header)
 add_test_case(test_get_existing_compute_platform_info)
 add_test_case(test_get_nonexistent_compute_platform_info)
 
+add_test_case(test_s3_list_bucket_init_mem_safety)
+add_test_case(test_s3_list_bucket_init_mem_safety_optional_copies)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
