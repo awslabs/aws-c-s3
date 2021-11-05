@@ -29,6 +29,7 @@ enum operation_state {
 struct aws_s3_paginator {
     struct aws_allocator *allocator;
     struct aws_s3_client *client;
+    /** The current, in-flight paginated request to s3. */
     struct aws_s3_meta_request *current_request;
     struct aws_string *bucket_name;
     struct aws_string *prefix;
@@ -144,10 +145,12 @@ struct fs_parser_wrapper {
     struct aws_s3_object_file_system_info fs_info;
 };
 
+/* invoked when the ListBucketResult/Contents node is iterated. */
 static bool s_on_contents_node(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
     struct fs_parser_wrapper *fs_wrapper = user_data;
     struct aws_s3_object_file_system_info *fs_info = &fs_wrapper->fs_info;
 
+    /* for each Contents node, get the info from it and send it off as an object we've encountered */
     struct aws_byte_cursor node_name;
     aws_xml_node_get_name(node, &node_name);
 
@@ -193,6 +196,7 @@ static bool s_on_contents_node(struct aws_xml_parser *parser, struct aws_xml_nod
     return true;
 }
 
+/* invoked when the ListBucketResult/CommonPrefixes node is iterated. */
 static bool s_on_common_prefixes_node(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
     struct fs_parser_wrapper *fs_wrapper = user_data;
 
@@ -220,6 +224,8 @@ static bool s_on_list_bucket_result_node_encountered(
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Contents")) {
         fs_wrapper.allocator = paginator->allocator;
+        /* this will traverse the current Contents node, get the metadata necessary to construct
+         * an instance of fs_info so we can invoke the callback on it. This happens once per object. */
         bool ret_val = aws_xml_node_traverse(parser, node, s_on_contents_node, &fs_wrapper) == AWS_OP_SUCCESS;
 
         if (paginator->prefix) {
@@ -234,6 +240,8 @@ static bool s_on_list_bucket_result_node_encountered(
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "CommonPrefixes")) {
+        /* this will traverse the current CommonPrefixes node, get the metadata necessary to construct
+         * an instance of fs_info so we can invoke the callback on it. This happens once per prefix. */
         bool ret_val = aws_xml_node_traverse(parser, node, s_on_common_prefixes_node, paginator) == AWS_OP_SUCCESS;
 
         if (ret_val && paginator->on_object) {
@@ -291,6 +299,10 @@ static bool s_on_root_node_encountered(struct aws_xml_parser *parser, struct aws
     return false;
 }
 
+/**
+ * On a successful operation, this is an xml document. Just copy the buffers over until we're ready to parse (upon completion)
+ * of the response body.
+ */
 static int s_list_bucket_receive_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -321,7 +333,7 @@ static void s_list_bucket_request_finished(
             .max_depth = 16U,
         };
 
-        // clears previous continuation token
+        /* clears previous continuation token */
         aws_mutex_lock(&paginator->shared_mt_state.lock);
         if (paginator->shared_mt_state.continuation_token) {
             aws_string_destroy(paginator->shared_mt_state.continuation_token);
@@ -330,6 +342,8 @@ static void s_list_bucket_request_finished(
         }
         aws_mutex_unlock(&paginator->shared_mt_state.lock);
 
+        /* we've got a full xml document now and the request succeeded, parse the document and fire all the callbacks
+         * for each object and prefix. All of that happens in these three lines. */
         struct aws_xml_parser *parser = aws_xml_parser_new(paginator->allocator, &parser_options);
         aws_xml_parser_parse(parser, s_on_root_node_encountered, paginator);
         aws_xml_parser_destroy(parser);
@@ -353,6 +367,8 @@ static void s_list_bucket_request_finished(
         paginator->on_list_finished(paginator, meta_request_result->error_code, paginator->user_data);
     }
 
+    /* this ref count was done right before we kicked off the request to keep the paginator object alive. Release it now
+     * that the operation has completed. */
     aws_s3_paginator_release(paginator);
 }
 
@@ -424,7 +440,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator,
 
     struct aws_s3_meta_request_options request_options = {
         .user_data = paginator,
-        .signing_config = signing_config,
+        .signing_config = (struct aws_signing_config_aws *)signing_config,
         .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .shutdown_callback = s_list_bucket_shutdown,
         .body_callback = s_list_bucket_receive_body_callback,
@@ -432,9 +448,13 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator,
         .message = list_bucket_v2_request,
     };
 
+    /* re-use the current buffer. */
+    aws_byte_buf_reset(&paginator->result_body, false);
+
+    /* we're kicking off an asynchronous request. ref-count the paginator to keep it alive until we finish. */
     aws_s3_paginator_acquire(paginator);
-    aws_byte_buf_reset(&paginator->result_body, false); // clear body of previous request
     paginator->current_request = aws_s3_client_make_meta_request(paginator->client, &request_options);
+    /* make_meta_request() above, ref counted the http request, so go ahead and release */
     aws_http_message_release(list_bucket_v2_request);
 
     if (!paginator->current_request) {
@@ -476,9 +496,12 @@ static void s_run_all_on_object_list_finished(
     aws_condition_variable_notify_one(&wrapper->c_var);
 }
 
-int aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator, bool* has_more_results) {
+bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator) {
     AWS_PRECONDITION(paginator);
-    AWS_PRECONDITION(has_more_results);
-    *has_more_results = paginator->shared_mt_state.has_more_results;
-    return AWS_OP_SUCCESS;
+    bool has_more_results = false;
+    struct aws_s3_paginator *paginator_mut = (struct aws_s3_paginator *)paginator;
+    aws_mutex_lock(&paginator_mut->shared_mt_state.lock);
+    has_more_results = paginator->shared_mt_state.has_more_results;
+    aws_mutex_unlock(&paginator_mut->shared_mt_state.lock);
+    return has_more_results;
 }

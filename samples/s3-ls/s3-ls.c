@@ -50,8 +50,8 @@ void s_on_list_finished(struct aws_s3_paginator* paginator, int error_code, void
     struct app_ctx *app_ctx = user_data;
 
     if (error_code == 0) {
-        bool has_more_results;
-        aws_s3_paginator_has_more_results(paginator, &has_more_results);
+
+        bool has_more_results = aws_s3_paginator_has_more_results(paginator);
 
         printf("______ has_more_results=%d\n", has_more_results);
         if (has_more_results) {
