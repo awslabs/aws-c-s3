@@ -134,14 +134,6 @@ static inline int s_set_paginator_state_if_legal(
     return AWS_OP_SUCCESS;
 }
 
-static void s_list_bucket_shutdown(void *user_data) {
-    (void)user_data;
-
-    // TODO: check if required, already released on s_list_bucket_request_finished callback
-    // struct aws_s3_paginator *paginator = user_data;
-    // aws_ref_count_release(&paginator->ref_count);
-}
-
 struct fs_parser_wrapper {
     struct aws_allocator *allocator;
     struct aws_s3_object_file_system_info fs_info;
@@ -179,15 +171,9 @@ static bool s_on_contents_node(struct aws_xml_parser *parser, struct aws_xml_nod
 
         if (aws_xml_node_as_body(parser, node, &size_cur) == AWS_OP_SUCCESS) {
             struct aws_string *size_str = aws_string_new_from_cursor(fs_wrapper->allocator, &size_cur);
-
-            bool result = false;
-
-            if (sscanf((const char *)size_str->bytes, "%" PRIu64, &fs_info->size) == 1) {
-                result = true;
-            }
-
+            fs_info->size = strtoull((const char*) size_str->bytes, NULL, 10);
             aws_string_destroy(size_str);
-            return result;
+            return true;
         }
     }
 
@@ -443,7 +429,6 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         .user_data = paginator,
         .signing_config = (struct aws_signing_config_aws *)signing_config,
         .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-        .shutdown_callback = s_list_bucket_shutdown,
         .body_callback = s_list_bucket_receive_body_callback,
         .finish_callback = s_list_bucket_request_finished,
         .message = list_bucket_v2_request,
@@ -464,34 +449,6 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     }
 
     return AWS_OP_SUCCESS;
-}
-
-struct list_bucket_wrapper {
-    struct aws_s3_paginator *paginator;
-    aws_s3_on_object_fn *on_object;
-    aws_s3_on_object_list_finished *on_list_finished;
-    struct aws_condition_variable c_var;
-    void *user_data;
-};
-
-static bool s_run_all_on_object(const struct aws_s3_object_file_system_info *info, void *user_data) {
-    struct list_bucket_wrapper *wrapper = user_data;
-
-    if (wrapper->on_object) {
-        return wrapper->on_object(info, wrapper->user_data);
-    }
-
-    return false;
-}
-
-static void s_run_all_on_object_list_finished(struct aws_s3_paginator *paginator, int error_code, void *user_data) {
-    struct list_bucket_wrapper *wrapper = user_data;
-
-    if (wrapper->on_list_finished) {
-        wrapper->on_list_finished(paginator, error_code, wrapper->user_data);
-    }
-
-    aws_condition_variable_notify_one(&wrapper->c_var);
 }
 
 bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator) {
