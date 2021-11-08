@@ -4,6 +4,7 @@
  */
 
 #include <aws/s3/private/s3_file_system_support.h>
+#include <aws/s3/private/s3_util.h>
 
 #include <aws/common/condition_variable.h>
 #include <aws/common/linked_list.h>
@@ -171,14 +172,10 @@ static bool s_on_contents_node(struct aws_xml_parser *parser, struct aws_xml_nod
 
         if (aws_xml_node_as_body(parser, node, &size_cur) == AWS_OP_SUCCESS) {
             struct aws_string *size_str = aws_string_new_from_cursor(fs_wrapper->allocator, &size_cur);
-            fs_info->size = strtoull((const char*) size_str->bytes, NULL, 10);
+            fs_info->size = strtoull((const char *)size_str->bytes, NULL, 10);
             aws_string_destroy(size_str);
             return true;
         }
-    }
-
-    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ETag")) {
-        return aws_xml_node_as_body(parser, node, &fs_info->e_tag) == AWS_OP_SUCCESS;
     }
 
     return true;
@@ -220,8 +217,23 @@ static bool s_on_list_bucket_result_node_encountered(
             fs_wrapper.fs_info.prefix = aws_byte_cursor_from_string(paginator->prefix);
         }
 
+        struct aws_byte_buf trimmed_etag;
+        AWS_ZERO_STRUCT(trimmed_etag);
+
+        if (fs_wrapper.fs_info.e_tag.len) {
+            struct aws_string *quoted_etag_str =
+                aws_string_new_from_cursor(fs_wrapper.allocator, &fs_wrapper.fs_info.e_tag);
+            replace_quote_entities(fs_wrapper.allocator, quoted_etag_str, &trimmed_etag);
+            fs_wrapper.fs_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
+            aws_string_destroy(quoted_etag_str);
+        }
+
         if (ret_val && paginator->on_object) {
             ret_val |= paginator->on_object(&fs_wrapper.fs_info, paginator->user_data);
+        }
+
+        if (trimmed_etag.len) {
+            aws_byte_buf_clean_up(&trimmed_etag);
         }
 
         return ret_val;

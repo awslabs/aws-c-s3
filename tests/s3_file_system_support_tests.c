@@ -7,9 +7,9 @@
 #include "aws/s3/private/s3_file_system_support.h"
 #include "s3_tester.h"
 
+#include <aws/auth/credentials.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/tls_channel_handler.h>
-#include <aws/auth/credentials.h>
 #include <aws/testing/aws_test_harness.h>
 
 static int s_test_s3_list_bucket_init_mem_safety(struct aws_allocator *allocator, void *ctx) {
@@ -78,6 +78,7 @@ struct list_bucket_test_data {
     struct aws_mutex mutex;
     struct aws_condition_variable c_var;
     bool done;
+    int error_code;
 };
 
 static bool s_on_paginator_finished_predicate(void *arg) {
@@ -86,13 +87,18 @@ static bool s_on_paginator_finished_predicate(void *arg) {
 }
 
 static bool s_on_list_bucket_valid_object_fn(const struct aws_s3_object_file_system_info *info, void *user_data) {
+    (void)info;
     struct list_bucket_test_data *test_data = user_data;
+    (void)test_data;
 
     return true;
 }
 
 static void s_on_list_bucket_page_finished_fn(struct aws_s3_paginator *paginator, int error_code, void *user_data) {
+
     struct list_bucket_test_data *test_data = user_data;
+
+    test_data->error_code = error_code;
 
     if (aws_s3_paginator_has_more_results(paginator)) {
         aws_s3_paginator_continue(paginator, test_data->signing_config);
@@ -105,6 +111,8 @@ static void s_on_list_bucket_page_finished_fn(struct aws_s3_paginator *paginator
 }
 
 static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
@@ -118,7 +126,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
     AWS_ZERO_STRUCT(signing_config);
     aws_s3_init_default_signing_config(&signing_config, g_test_s3_region, tester.credentials_provider);
 
-    struct list_bucket_test_data test_data ={
+    struct list_bucket_test_data test_data = {
         .signing_config = &signing_config,
         .mutex = AWS_MUTEX_INIT,
         .c_var = AWS_CONDITION_VARIABLE_INIT,
