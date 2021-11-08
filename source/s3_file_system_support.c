@@ -439,6 +439,12 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
 
     /* we're kicking off an asynchronous request. ref-count the paginator to keep it alive until we finish. */
     aws_s3_paginator_acquire(paginator);
+
+    if (paginator->current_request) {
+        /* release request from previous page */
+        aws_s3_meta_request_release(paginator->current_request);
+    }
+
     paginator->current_request = aws_s3_client_make_meta_request(paginator->client, &request_options);
     /* make_meta_request() above, ref counted the http request, so go ahead and release */
     aws_http_message_release(list_bucket_v2_request);

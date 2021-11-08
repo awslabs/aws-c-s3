@@ -4,18 +4,18 @@
  */
 
 #include <aws/auth/credentials.h>
-#include <aws/common/zero.h>
 #include <aws/common/condition_variable.h>
 #include <aws/common/mutex.h>
+#include <aws/common/zero.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/logging.h>
+#include <aws/s3/private/s3_file_system_support.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
-#include <aws/s3/private/s3_file_system_support.h>
 
-#include <stdio.h>
 #include <inttypes.h>
+#include <stdio.h>
 
 struct app_ctx {
     struct aws_allocator *allocator;
@@ -31,7 +31,7 @@ struct app_ctx {
  * The corresponding condition variable is set when the last
  * page of ListObjects is received.
  */
-static bool s_app_completion_predicate(void* arg) {
+static bool s_app_completion_predicate(void *arg) {
     struct app_ctx *app_ctx = arg;
     return app_ctx->execution_completed;
 }
@@ -39,7 +39,7 @@ static bool s_app_completion_predicate(void* arg) {
 /**
  * Called once for each object returned in the ListObjectsV2 responses.
  */
-bool s_on_object(const struct aws_s3_object_file_system_info* info, void* user_data) {
+bool s_on_object(const struct aws_s3_object_file_system_info *info, void *user_data) {
     (void) user_data;
 
     printf("%-18" PRIu64 " %.*s\n", info->size, (int) info->key.len, info->key.ptr);
@@ -51,7 +51,7 @@ bool s_on_object(const struct aws_s3_object_file_system_info* info, void* user_d
  * If the response contains a continuation token indicating there are more results to be fetched,
  * requests the next page using aws_s3_paginator_continue.
  */
-void s_on_list_finished(struct aws_s3_paginator* paginator, int error_code, void *user_data) {
+void s_on_list_finished(struct aws_s3_paginator *paginator, int error_code, void *user_data) {
     struct app_ctx *app_ctx = user_data;
 
     if (error_code == 0) {
@@ -78,7 +78,7 @@ void s_on_list_finished(struct aws_s3_paginator* paginator, int error_code, void
 /**
  * optionally called to enable logs.
  */
-void setup_logger(struct app_ctx* app_ctx) {
+void setup_logger(struct app_ctx *app_ctx) {
     struct aws_logger_standard_options logger_options = {
             .level = AWS_LOG_LEVEL_INFO,
             .file = stderr,
@@ -91,28 +91,29 @@ void setup_logger(struct app_ctx* app_ctx) {
 /**
  * gets the bucket name and prefix from the command line parameter.
  */
-int get_bucket_and_prefix_from_command_line(const char* input, struct aws_byte_cursor* bucket, struct aws_byte_cursor* prefix) {
+int get_bucket_and_prefix_from_command_line(const char *input, struct aws_byte_cursor *bucket,
+                                            struct aws_byte_cursor *prefix) {
     AWS_PRECONDITION(input);
     AWS_PRECONDITION(bucket);
     AWS_PRECONDITION(prefix);
 
-    const char* delimiter_pos = strchr(input, '/');
+    const char *delimiter_pos = strchr(input, '/');
     if (delimiter_pos == NULL) {
-        bucket->ptr = (uint8_t*) input;
+        bucket->ptr = (uint8_t *) input;
         bucket->len = strlen(input);
         prefix->ptr = NULL;
         prefix->len = 0;
     } else {
-        bucket->ptr = (uint8_t*) input;
+        bucket->ptr = (uint8_t *) input;
         bucket->len = delimiter_pos - input;
-        prefix->ptr = (uint8_t*) (delimiter_pos + 1);
+        prefix->ptr = (uint8_t *) (delimiter_pos + 1);
         prefix->len = strlen(input) - bucket->len - 1;
     }
 
     return 0;
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
 
     if (argc < 3) {
         printf("Usage: s3-ls {bucket} region\n");
@@ -125,50 +126,29 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    const char* input = argv[1];
+    const char *input = argv[1];
     struct aws_byte_cursor bucket;
     struct aws_byte_cursor prefix;
     get_bucket_and_prefix_from_command_line(input, &bucket, &prefix);
 
-    const char* region = argv[2];
+    const char *region = argv[2];
     const bool enable_logs = false;
+
+    struct aws_allocator *allocator = aws_default_allocator();
+    aws_s3_library_init(allocator);
 
     struct app_ctx app_ctx;
     AWS_ZERO_STRUCT(app_ctx);
-
-    struct aws_allocator *allocator = aws_default_allocator();
     app_ctx.allocator = allocator;
-    app_ctx.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
+    app_ctx.c_var = (struct aws_condition_variable) AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&app_ctx.mutex);
-
-    aws_s3_library_init(allocator);
 
     if (enable_logs) {
         setup_logger(&app_ctx);
     }
 
-    /* credentials */
-    const char* access_key_id = getenv("AWS_ACCESS_KEY_ID");
-    struct aws_credentials_provider* credentials_provider = NULL;
-
-    if (access_key_id != NULL) {
-        /* use credentials from environment variables */
-        struct aws_credentials_provider_environment_options environmentOptions;
-        AWS_ZERO_STRUCT(environmentOptions);
-        credentials_provider = aws_credentials_provider_new_environment(allocator, &environmentOptions);
-    }
-
-    if (credentials_provider == NULL) {
-        printf("ERROR: no credentials found. This sample currently requires the credentials to be specified in environment variables.\n");
-        return -1;
-    }
-
-    /* signing config */
-    aws_s3_init_default_signing_config(&app_ctx.signing_config, aws_byte_cursor_from_c_str(region), credentials_provider);
-    app_ctx.signing_config.flags.use_double_uri_encode = false;
-
     /* event loop */
-    struct aws_event_loop_group* event_loop_group = aws_event_loop_group_new_default(allocator, 0, NULL);
+    struct aws_event_loop_group *event_loop_group = aws_event_loop_group_new_default(allocator, 0, NULL);
 
     /* resolver */
     struct aws_host_resolver_default_options resolver_options = {
@@ -182,11 +162,22 @@ int main(int argc, char* argv[]) {
             .event_loop_group = event_loop_group,
             .host_resolver = resolver,
     };
-    struct aws_client_bootstrap* client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+    struct aws_client_bootstrap *client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
     if (client_bootstrap == NULL) {
         printf("ERROR initializing client bootstrap\n");
         return -1;
     }
+
+    /* credentials */
+    struct aws_credentials_provider_chain_default_options credentials_provider_options;
+    AWS_ZERO_STRUCT(credentials_provider_options);
+    credentials_provider_options.bootstrap = client_bootstrap;
+    struct aws_credentials_provider *credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_provider_options);
+
+    /* signing config */
+    aws_s3_init_default_signing_config(&app_ctx.signing_config, aws_byte_cursor_from_c_str(region),
+                                       credentials_provider);
+    app_ctx.signing_config.flags.use_double_uri_encode = false;
 
     /* s3 client */
     struct aws_s3_client_config client_config;
@@ -194,7 +185,7 @@ int main(int argc, char* argv[]) {
     client_config.client_bootstrap = client_bootstrap;
     client_config.region = aws_byte_cursor_from_c_str(region);
     client_config.signing_config = &app_ctx.signing_config;
-    struct aws_s3_client* client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     /* listObjects */
     struct aws_s3_list_bucket_v2_params params;
@@ -210,7 +201,7 @@ int main(int argc, char* argv[]) {
     params.on_object = &s_on_object;
     params.on_list_finished = &s_on_list_finished;
 
-    struct aws_s3_paginator* paginator = aws_s3_initiate_list_bucket(allocator, &params);
+    struct aws_s3_paginator *paginator = aws_s3_initiate_list_bucket(allocator, &params);
     int paginator_result = aws_s3_paginator_continue(paginator, &app_ctx.signing_config);
     if (paginator_result) {
         printf("ERROR returned from initial call to aws_s3_paginator_continue: %d \n", paginator_result);
@@ -225,12 +216,12 @@ int main(int argc, char* argv[]) {
 
     /* release resources */
     aws_s3_client_release(client);
+    aws_credentials_provider_release(credentials_provider);
     aws_client_bootstrap_release(client_bootstrap);
     aws_host_resolver_release(resolver);
     aws_event_loop_group_release(event_loop_group);
-    aws_credentials_provider_release(credentials_provider);
-    aws_s3_library_clean_up();
     aws_mutex_clean_up(&app_ctx.mutex);
+    aws_s3_library_clean_up();
 
     return 0;
 }
