@@ -414,6 +414,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     };
 
     aws_http_message_add_header(list_bucket_v2_request, host_header);
+    aws_byte_buf_clean_up(&host_buf);
 
     struct aws_http_header accept_header = {
         .name = aws_byte_cursor_from_c_str("accept"),
