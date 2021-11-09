@@ -433,7 +433,6 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         .value = aws_byte_cursor_from_c_str("application/xml"),
     };
 
-    aws_http_message_add_header(list_bucket_v2_request, host_header);
     aws_http_message_add_header(list_bucket_v2_request, accept_header);
 
     aws_http_message_set_request_method(list_bucket_v2_request, aws_http_method_get);
