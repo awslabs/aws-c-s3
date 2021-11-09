@@ -40,9 +40,9 @@ static bool s_app_completion_predicate(void *arg) {
  * Called once for each object returned in the ListObjectsV2 responses.
  */
 bool s_on_object(const struct aws_s3_object_file_system_info *info, void *user_data) {
-    (void) user_data;
+    (void)user_data;
 
-    printf("%-18" PRIu64 " %.*s\n", info->size, (int) info->key.len, info->key.ptr);
+    printf("%-18" PRIu64 " %.*s\n", info->size, (int)info->key.len, info->key.ptr);
     return true;
 }
 
@@ -80,8 +80,8 @@ void s_on_list_finished(struct aws_s3_paginator *paginator, int error_code, void
  */
 void setup_logger(struct app_ctx *app_ctx) {
     struct aws_logger_standard_options logger_options = {
-            .level = AWS_LOG_LEVEL_INFO,
-            .file = stderr,
+        .level = AWS_LOG_LEVEL_INFO,
+        .file = stderr,
     };
 
     aws_logger_init_standard(&app_ctx->logger, app_ctx->allocator, &logger_options);
@@ -91,22 +91,24 @@ void setup_logger(struct app_ctx *app_ctx) {
 /**
  * gets the bucket name and prefix from the command line parameter.
  */
-int get_bucket_and_prefix_from_command_line(const char *input, struct aws_byte_cursor *bucket,
-                                            struct aws_byte_cursor *prefix) {
+int get_bucket_and_prefix_from_command_line(
+    const char *input,
+    struct aws_byte_cursor *bucket,
+    struct aws_byte_cursor *prefix) {
     AWS_PRECONDITION(input);
     AWS_PRECONDITION(bucket);
     AWS_PRECONDITION(prefix);
 
     const char *delimiter_pos = strchr(input, '/');
     if (delimiter_pos == NULL) {
-        bucket->ptr = (uint8_t *) input;
+        bucket->ptr = (uint8_t *)input;
         bucket->len = strlen(input);
         prefix->ptr = NULL;
         prefix->len = 0;
     } else {
-        bucket->ptr = (uint8_t *) input;
+        bucket->ptr = (uint8_t *)input;
         bucket->len = delimiter_pos - input;
-        prefix->ptr = (uint8_t *) (delimiter_pos + 1);
+        prefix->ptr = (uint8_t *)(delimiter_pos + 1);
         prefix->len = strlen(input) - bucket->len - 1;
     }
 
@@ -140,7 +142,7 @@ int main(int argc, char *argv[]) {
     struct app_ctx app_ctx;
     AWS_ZERO_STRUCT(app_ctx);
     app_ctx.allocator = allocator;
-    app_ctx.c_var = (struct aws_condition_variable) AWS_CONDITION_VARIABLE_INIT;
+    app_ctx.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&app_ctx.mutex);
 
     if (enable_logs) {
@@ -152,15 +154,15 @@ int main(int argc, char *argv[]) {
 
     /* resolver */
     struct aws_host_resolver_default_options resolver_options = {
-            .el_group = event_loop_group,
-            .max_entries = 8,
+        .el_group = event_loop_group,
+        .max_entries = 8,
     };
     struct aws_host_resolver *resolver = aws_host_resolver_new_default(allocator, &resolver_options);
 
     /* client bootstrap */
     struct aws_client_bootstrap_options bootstrap_options = {
-            .event_loop_group = event_loop_group,
-            .host_resolver = resolver,
+        .event_loop_group = event_loop_group,
+        .host_resolver = resolver,
     };
     struct aws_client_bootstrap *client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
     if (client_bootstrap == NULL) {
@@ -172,11 +174,12 @@ int main(int argc, char *argv[]) {
     struct aws_credentials_provider_chain_default_options credentials_provider_options;
     AWS_ZERO_STRUCT(credentials_provider_options);
     credentials_provider_options.bootstrap = client_bootstrap;
-    struct aws_credentials_provider *credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_provider_options);
+    struct aws_credentials_provider *credentials_provider =
+        aws_credentials_provider_new_chain_default(allocator, &credentials_provider_options);
 
     /* signing config */
-    aws_s3_init_default_signing_config(&app_ctx.signing_config, aws_byte_cursor_from_c_str(region),
-                                       credentials_provider);
+    aws_s3_init_default_signing_config(
+        &app_ctx.signing_config, aws_byte_cursor_from_c_str(region), credentials_provider);
     app_ctx.signing_config.flags.use_double_uri_encode = false;
 
     /* s3 client */
