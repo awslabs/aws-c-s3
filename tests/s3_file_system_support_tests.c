@@ -174,7 +174,6 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
         for (size_t i = 0; i < length; ++i) {
             aws_array_list_get_at(&test_data.entries_found, &path, i);
             ASSERT_TRUE(path->len > 0);
-            fprintf(stdout, "path: %s\n", aws_string_c_str(path));
             aws_string_destroy(path);
         }
         ASSERT_TRUE(length > 0);
