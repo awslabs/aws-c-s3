@@ -242,7 +242,7 @@ static bool s_on_list_bucket_result_node_encountered(
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "CommonPrefixes")) {
         /* this will traverse the current CommonPrefixes node, get the metadata necessary to construct
          * an instance of fs_info so we can invoke the callback on it. This happens once per prefix. */
-        bool ret_val = aws_xml_node_traverse(parser, node, s_on_common_prefixes_node, paginator) == AWS_OP_SUCCESS;
+        bool ret_val = aws_xml_node_traverse(parser, node, s_on_common_prefixes_node, &fs_wrapper) == AWS_OP_SUCCESS;
 
         if (ret_val && paginator->on_object) {
             ret_val |= paginator->on_object(&fs_wrapper.fs_info, paginator->user_data);

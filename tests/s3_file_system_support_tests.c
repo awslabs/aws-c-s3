@@ -75,7 +75,7 @@ AWS_TEST_CASE(
 
 struct list_bucket_test_data {
     struct aws_allocator *allocator;
-    struct aws_signing_config_aws *signing_config;
+    struct aws_signing_config_aws signing_config;
     struct aws_mutex mutex;
     struct aws_condition_variable c_var;
     bool done;
@@ -95,7 +95,7 @@ static bool s_on_list_bucket_valid_object_fn(const struct aws_s3_object_file_sys
 
     if (info->key.len) {
         path = aws_string_new_from_cursor(test_data->allocator, &info->key);
-    } else {
+    } else if (info->prefix.len) {
         path = aws_string_new_from_cursor(test_data->allocator, &info->prefix);
     }
 
@@ -111,7 +111,7 @@ static void s_on_list_bucket_page_finished_fn(struct aws_s3_paginator *paginator
     test_data->error_code = error_code;
 
     if (!error_code && aws_s3_paginator_has_more_results(paginator)) {
-        aws_s3_paginator_continue(paginator, test_data->signing_config);
+        aws_s3_paginator_continue(paginator, &test_data->signing_config);
     } else {
         aws_mutex_lock(&test_data->mutex);
         test_data->done = true;
@@ -138,7 +138,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
 
     struct list_bucket_test_data test_data = {
         .allocator = allocator,
-        .signing_config = &signing_config,
+        .signing_config = signing_config,
         .mutex = AWS_MUTEX_INIT,
         .c_var = AWS_CONDITION_VARIABLE_INIT,
         .done = false,
@@ -174,6 +174,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
         for (size_t i = 0; i < length; ++i) {
             aws_array_list_get_at(&test_data.entries_found, &path, i);
             ASSERT_TRUE(path->len > 0);
+            fprintf(stdout, "path: %s\n", aws_string_c_str(path));
             aws_string_destroy(path);
         }
         ASSERT_TRUE(length > 0);
