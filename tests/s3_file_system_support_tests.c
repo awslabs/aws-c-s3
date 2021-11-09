@@ -74,11 +74,13 @@ AWS_TEST_CASE(
     s_test_s3_list_bucket_init_mem_safety_optional_copies)
 
 struct list_bucket_test_data {
+    struct aws_allocator *allocator;
     struct aws_signing_config_aws *signing_config;
     struct aws_mutex mutex;
     struct aws_condition_variable c_var;
     bool done;
     int error_code;
+    struct aws_array_list entries_found;
 };
 
 static bool s_on_paginator_finished_predicate(void *arg) {
@@ -89,7 +91,15 @@ static bool s_on_paginator_finished_predicate(void *arg) {
 static bool s_on_list_bucket_valid_object_fn(const struct aws_s3_object_file_system_info *info, void *user_data) {
     (void)info;
     struct list_bucket_test_data *test_data = user_data;
-    (void)test_data;
+    struct aws_string *path = NULL;
+
+    if (info->key.len) {
+        path = aws_string_new_from_cursor(test_data->allocator, &info->key);
+    } else {
+        path = aws_string_new_from_cursor(test_data->allocator, &info->prefix);
+    }
+
+    aws_array_list_push_back(&test_data->entries_found, &path);
 
     return true;
 }
@@ -100,7 +110,7 @@ static void s_on_list_bucket_page_finished_fn(struct aws_s3_paginator *paginator
 
     test_data->error_code = error_code;
 
-    if (aws_s3_paginator_has_more_results(paginator)) {
+    if (!error_code && aws_s3_paginator_has_more_results(paginator)) {
         aws_s3_paginator_continue(paginator, test_data->signing_config);
     } else {
         aws_mutex_lock(&test_data->mutex);
@@ -127,11 +137,14 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
     aws_s3_init_default_signing_config(&signing_config, g_test_s3_region, tester.credentials_provider);
 
     struct list_bucket_test_data test_data = {
+        .allocator = allocator,
         .signing_config = &signing_config,
         .mutex = AWS_MUTEX_INIT,
         .c_var = AWS_CONDITION_VARIABLE_INIT,
         .done = false,
     };
+
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&test_data.entries_found, allocator, 16, sizeof(struct aws_string *)));
 
     struct aws_byte_cursor endpoint = aws_byte_cursor_from_c_str("s3.us-west-2.amazonaws.com");
 
@@ -142,6 +155,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
         .on_object = s_on_list_bucket_valid_object_fn,
         .on_list_finished = s_on_list_bucket_page_finished_fn,
         .user_data = &test_data,
+        .delimiter = aws_byte_cursor_from_c_str("/"),
     };
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_list_bucket(allocator, &params);
@@ -152,6 +166,25 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
     aws_condition_variable_wait_pred(&test_data.c_var, &test_data.mutex, s_on_paginator_finished_predicate, &test_data);
     aws_mutex_unlock(&test_data.mutex);
 
+    if (test_data.error_code == AWS_OP_SUCCESS) {
+        struct aws_string *path = NULL;
+        /* don't have a great path for testing thoroughly since these are live service calls, but at least sanity check
+         */
+        size_t length = aws_array_list_length(&test_data.entries_found);
+        for (size_t i = 0; i < length; ++i) {
+            aws_array_list_get_at(&test_data.entries_found, &path, i);
+            ASSERT_TRUE(path->len > 0);
+            aws_string_destroy(path);
+        }
+        ASSERT_TRUE(length > 0);
+    } else {
+        ASSERT_TRUE(
+            false,
+            "Failing test because the operation failed with error %s\n",
+            aws_error_debug_str(test_data.error_code));
+    }
+
+    aws_array_list_clean_up(&test_data.entries_found);
     aws_s3_paginator_release(paginator);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);

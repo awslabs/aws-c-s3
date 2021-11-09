@@ -213,7 +213,7 @@ static bool s_on_list_bucket_result_node_encountered(
          * an instance of fs_info so we can invoke the callback on it. This happens once per object. */
         bool ret_val = aws_xml_node_traverse(parser, node, s_on_contents_node, &fs_wrapper) == AWS_OP_SUCCESS;
 
-        if (paginator->prefix) {
+        if (paginator->prefix && !fs_wrapper.fs_info.prefix.len) {
             fs_wrapper.fs_info.prefix = aws_byte_cursor_from_string(paginator->prefix);
         }
 
@@ -394,7 +394,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         struct aws_byte_cursor s_delimiter = aws_byte_cursor_from_c_str("&delimiter=");
         aws_byte_buf_append_dynamic(&request_path, &s_delimiter);
         struct aws_byte_cursor s_delimiter_val = aws_byte_cursor_from_string(paginator->delimiter);
-        aws_byte_buf_append_encoding_uri_param(&request_path, &s_delimiter_val);
+        aws_byte_buf_append_dynamic(&request_path, &s_delimiter_val);
     }
 
     aws_mutex_lock(&paginator->shared_mt_state.lock);
