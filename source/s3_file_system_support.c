@@ -31,7 +31,7 @@ struct aws_s3_paginator {
     struct aws_allocator *allocator;
     struct aws_s3_client *client;
     /** The current, in-flight paginated request to s3. */
-    struct aws_s3_meta_request *current_request;
+    struct aws_atomic_var current_request;
     struct aws_string *bucket_name;
     struct aws_string *prefix;
     struct aws_string *delimiter;
@@ -58,8 +58,9 @@ static void s_ref_count_zero_callback(void *arg) {
 
     aws_s3_client_release(paginator->client);
 
-    if (paginator->current_request) {
-        aws_s3_meta_request_release(paginator->current_request);
+    struct aws_s3_meta_request *previous_request = aws_atomic_exchange_ptr(&paginator->current_request, NULL);
+    if (previous_request != NULL) {
+        aws_s3_meta_request_release(previous_request);
     }
 
     if (paginator->bucket_name) {
@@ -105,6 +106,7 @@ struct aws_s3_paginator *aws_s3_initiate_list_bucket(
     aws_byte_buf_init(&paginator->result_body, allocator, s_dynamic_body_initial_buf_size);
     aws_ref_count_init(&paginator->ref_count, paginator, s_ref_count_zero_callback);
     aws_mutex_init(&paginator->shared_mt_state.lock);
+    aws_atomic_init_ptr(&paginator->current_request, NULL);
     paginator->shared_mt_state.operation_state = OS_NOT_STARTED;
 
     return paginator;
@@ -452,16 +454,19 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     /* we're kicking off an asynchronous request. ref-count the paginator to keep it alive until we finish. */
     aws_s3_paginator_acquire(paginator);
 
-    if (paginator->current_request) {
+    struct aws_s3_meta_request *previous_request = aws_atomic_exchange_ptr(&paginator->current_request, NULL);
+    if (previous_request != NULL) {
         /* release request from previous page */
-        aws_s3_meta_request_release(paginator->current_request);
+        aws_s3_meta_request_release(previous_request);
     }
 
-    paginator->current_request = aws_s3_client_make_meta_request(paginator->client, &request_options);
+    struct aws_s3_meta_request *new_request = aws_s3_client_make_meta_request(paginator->client, &request_options);
+    aws_atomic_store_ptr(&paginator->current_request, new_request);
+
     /* make_meta_request() above, ref counted the http request, so go ahead and release */
     aws_http_message_release(list_bucket_v2_request);
 
-    if (!paginator->current_request) {
+    if (new_request == NULL) {
         s_set_paginator_state_if_legal(paginator, OS_INITIATED, OS_ERROR);
         return AWS_OP_ERR;
     }
