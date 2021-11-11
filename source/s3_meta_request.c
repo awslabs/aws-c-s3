@@ -606,6 +606,50 @@ finish:
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
+static int s_content_length_from_headers(struct aws_http_headers *headers, uint64_t *out_length) {
+    struct aws_byte_cursor content_length_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
+    struct aws_byte_cursor content_length_cursor;
+    if (aws_http_headers_get(headers, content_length_name, &content_length_cursor)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "could not get content_length from request headers");
+        return AWS_ERROR_HTTP_HEADER_NOT_FOUND;
+    }
+    struct aws_string *content_length_str = aws_string_new_from_cursor(aws_default_allocator(), &content_length_cursor);
+    uint64_t content_length = strtoul(aws_string_c_str(content_length_str), NULL, 10);
+    aws_string_destroy(content_length_str);
+    if (content_length == UINT64_MAX) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "extracted invalid content length from header");
+        return AWS_ERROR_INVALID_BUFFER_SIZE;
+    }
+    *out_length = content_length;
+    return AWS_ERROR_SUCCESS;
+}
+
+// /* extract checksum here? */
+static void s_destroy_stream_on_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
+    (void)stream;
+    (void)error_code;
+    struct aws_input_stream *data_stream = user_data;
+    aws_input_stream_destroy(data_stream);
+}
+
+static struct aws_http1_chunk_options s_default_chunk_options(struct aws_input_stream *stream, size_t stream_size) {
+    struct aws_http1_chunk_options options;
+    AWS_ZERO_STRUCT(options);
+    options.chunk_data = stream;
+    options.chunk_data_size = stream_size;
+    options.on_complete = s_destroy_stream_on_complete;
+    options.user_data = stream;
+    return options;
+}
+
+static int s_write_termination_chunk(struct aws_allocator *allocator, struct aws_http_stream *stream) {
+    static const struct aws_byte_cursor empty_str = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("");
+    struct aws_input_stream *termination_marker = aws_input_stream_new_from_cursor(allocator, &empty_str);
+    struct aws_http1_chunk_options options = s_default_chunk_options(termination_marker, empty_str.len);
+    aws_http1_stream_write_chunk(stream, &options);
+    return AWS_OP_SUCCESS;
+}
+
 /************************************************** edit here *********************************************************/
 void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
@@ -616,18 +660,52 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     AWS_PRECONDITION(request);
 
     /* Now that we have a signed request and a connection, go ahead and issue the request. */
-    struct aws_http_make_request_options options;
-    AWS_ZERO_STRUCT(options);
+    struct aws_http_make_request_options request_options;
+    struct aws_http1_chunk_options chunk_options;
 
-    options.self_size = sizeof(struct aws_http_make_request_options);
-    options.request = request->send_data.message;
-    options.user_data = connection;
-    options.on_response_headers = s_s3_meta_request_incoming_headers;
-    options.on_response_header_block_done = NULL;
-    options.on_response_body = s_s3_meta_request_incoming_body;
-    options.on_complete = s_s3_meta_request_stream_complete;
+    AWS_ZERO_STRUCT(request_options);
+    AWS_ZERO_STRUCT(chunk_options);
 
-    struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
+    request_options.self_size = sizeof(struct aws_http_make_request_options);
+    request_options.request = request->send_data.message;
+    request_options.user_data = connection;
+    request_options.on_response_headers = s_s3_meta_request_incoming_headers;
+    request_options.on_response_header_block_done = NULL;
+    request_options.on_response_body = s_s3_meta_request_incoming_body;
+    request_options.on_complete = s_s3_meta_request_stream_complete;
+
+    uint64_t chunk_size;
+    struct aws_input_stream *chunk_stream = aws_http_message_get_body_stream(request->send_data.message);
+    if (chunk_stream) {
+        struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
+
+        struct aws_byte_cursor content_length_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
+        struct aws_byte_cursor transfer_encoding = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Transfer-Encoding");
+        struct aws_byte_cursor chunked = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("chunked");
+
+        int error = s_content_length_from_headers(headers, &chunk_size);
+        if (error) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "s_content_length_from_headers failed with error %s",
+                aws_error_debug_str(error));
+            goto error_finish;
+        }
+        /* watch out for chunk_size 0 */
+        if (aws_http_headers_erase(headers, content_length_name)) {
+            goto error_finish;
+        }
+        if (aws_http_headers_add(headers, transfer_encoding, chunked)) {
+            goto error_finish;
+        }
+        aws_http_message_set_body_stream(request->send_data.message, NULL);
+
+        chunk_options.chunk_data = chunk_stream;
+        chunk_options.chunk_data_size = chunk_size;
+        chunk_options.on_complete = s_destroy_stream_on_complete;
+        chunk_options.user_data = chunk_stream;
+    }
+    struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &request_options);
 
     if (stream == NULL) {
         AWS_LOGF_ERROR(
@@ -646,6 +724,11 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
             AWS_LS_S3_META_REQUEST, "id=%p: Could not activate HTTP stream %p", (void *)meta_request, (void *)request);
 
         goto error_finish;
+    }
+
+    if (chunk_stream) {
+        aws_http1_stream_write_chunk(stream, &chunk_options);
+        s_write_termination_chunk(aws_default_allocator(), stream);
     }
 
     return;
@@ -843,10 +926,11 @@ void aws_s3_meta_request_send_request_finish_default(
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: Request %p finished with error code %d and response status %d",
+        "id=%p: Request %p finished with error code %d (%s) and response status %d",
         (void *)meta_request,
         (void *)request,
         error_code,
+        aws_error_debug_str(error_code),
         response_status);
 
     enum aws_s3_connection_finish_code finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;

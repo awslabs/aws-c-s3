@@ -6,6 +6,7 @@
  */
 #include "aws/s3/s3_client.h"
 #include <aws/cal/hash.h>
+#include <aws/io/stream.h>
 
 #define AWS_CRC32_LEN 4
 #define AWS_CRC32C_LEN 4
@@ -26,11 +27,15 @@ struct aws_checksum {
     bool good;
 };
 
+struct aws_input_stream *aws_chunk_stream_new(
+    struct aws_allocator *alloc,
+    struct aws_input_stream *existing_stream,
+    struct aws_checksum *checksum);
+
 /**
  * Allocates and initializes a sha256 checksum instance.
  */
-AWS_S3_API
-struct aws_checksum *aws_sha256_checksum_new(struct aws_allocator *allocator);
+AWS_S3_API struct aws_checksum *aws_sha256_checksum_new(struct aws_allocator *allocator);
 /**
  * Allocates and initializes a sha1 checksum instance.
  */
