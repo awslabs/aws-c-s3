@@ -121,4 +121,6 @@ if (BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-add_subdirectory(samples)
+if (NOT BYO_CRYPTO)
+    add_subdirectory(samples)
+endif()
