@@ -1101,9 +1101,10 @@ int aws_s3_tester_client_new(
 
 #ifndef BYO_CRYPTO
     aws_tls_ctx_release(context);
-    aws_tls_connection_options_clean_up(&tls_connection_options);
     aws_tls_ctx_options_clean_up(&tls_context_options);
 #endif
+
+    aws_tls_connection_options_clean_up(&tls_connection_options);
 
     return AWS_OP_SUCCESS;
 }
