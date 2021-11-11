@@ -13,6 +13,7 @@
 #include <aws/testing/aws_test_harness.h>
 
 static int s_test_s3_list_bucket_init_mem_safety(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
@@ -41,6 +42,7 @@ static int s_test_s3_list_bucket_init_mem_safety(struct aws_allocator *allocator
 AWS_TEST_CASE(test_s3_list_bucket_init_mem_safety, s_test_s3_list_bucket_init_mem_safety)
 
 static int s_test_s3_list_bucket_init_mem_safety_optional_copies(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
