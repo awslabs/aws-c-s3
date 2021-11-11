@@ -19,6 +19,7 @@ static int s_test_s3_list_bucket_init_mem_safety(struct aws_allocator *allocator
 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
+    client_options.tls_usage = AWS_S3_TLS_ENABLED;
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -48,6 +49,7 @@ static int s_test_s3_list_bucket_init_mem_safety_optional_copies(struct aws_allo
 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
+    client_options.tls_usage = AWS_S3_TLS_ENABLED;
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -130,6 +132,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
+    client_options.tls_usage = AWS_S3_TLS_ENABLED;
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
