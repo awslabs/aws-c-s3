@@ -137,13 +137,11 @@ void s_on_list_finished(struct aws_s3_paginator *paginator, int error_code, void
 
     if (error_code == 0) {
         bool has_more_results = aws_s3_paginator_has_more_results(paginator);
-
-        printf("______ has_more_results=%d\n", has_more_results);
         if (has_more_results) {
             /* get next page */
             int result = aws_s3_paginator_continue(paginator, &app_ctx->signing_config);
             if (result) {
-                printf("ERROR returned by aws_s3_paginator_continue from s_on_list_finished: %d\n", result);
+                fprintf(stderr, "ERROR returned by aws_s3_paginator_continue from s_on_list_finished: %d\n", result);
             }
             return;
         }
