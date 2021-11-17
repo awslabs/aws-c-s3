@@ -12,7 +12,7 @@
 #include <aws/common/string.h>
 
 /** Struct representing the file system relevant data for an object returned from a ListObjectsV2 API call. */
-struct aws_s3_object_file_system_info {
+struct aws_s3_object_info {
     /**
      * When a delimiter is specified in the request, S3 groups the common prefixes that contain the delimiter.
      * This member is set to the prefix substring ending at the first occurrence of the specified delimiter,
@@ -44,7 +44,7 @@ struct aws_s3_paginator;
  * Invoked when an object or prefix is encountered during a ListObjectsV2 API call. Return false, to immediately
  * terminate the list operation. Returning true will continue until at least the current page is iterated.
  */
-typedef bool(aws_s3_on_object_fn)(const struct aws_s3_object_file_system_info *info, void *user_data);
+typedef bool(aws_s3_on_object_fn)(const struct aws_s3_object_info *info, void *user_data);
 
 /**
  * Invoked upon the complete fetch and parsing of a page. If error_code is AWS_OP_SUCCESS and

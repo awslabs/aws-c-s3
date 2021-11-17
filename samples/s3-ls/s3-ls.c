@@ -120,7 +120,7 @@ static bool s_app_completion_predicate(void *arg) {
 /**
  * Called once for each object returned in the ListObjectsV2 responses.
  */
-bool s_on_object(const struct aws_s3_object_file_system_info *info, void *user_data) {
+bool s_on_object(const struct aws_s3_object_info *info, void *user_data) {
     (void)user_data;
 
     printf("%-18" PRIu64 " %.*s\n", info->size, (int)info->key.len, info->key.ptr);

@@ -138,13 +138,13 @@ static inline int s_set_paginator_state_if_legal(
 
 struct fs_parser_wrapper {
     struct aws_allocator *allocator;
-    struct aws_s3_object_file_system_info fs_info;
+    struct aws_s3_object_info fs_info;
 };
 
 /* invoked when the ListBucketResult/Contents node is iterated. */
 static bool s_on_contents_node(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
     struct fs_parser_wrapper *fs_wrapper = user_data;
-    struct aws_s3_object_file_system_info *fs_info = &fs_wrapper->fs_info;
+    struct aws_s3_object_info *fs_info = &fs_wrapper->fs_info;
 
     /* for each Contents node, get the info from it and send it off as an object we've encountered */
     struct aws_byte_cursor node_name;
