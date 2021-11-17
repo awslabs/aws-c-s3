@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/private/s3_file_system_support.h>
+#include <aws/s3/private/s3_list_objects.h>
 #include <aws/s3/private/s3_util.h>
 
-#include <aws/common/condition_variable.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/macros.h>
 #include <aws/common/mutex.h>
@@ -84,9 +83,9 @@ static void s_ref_count_zero_callback(void *arg) {
     aws_mem_release(paginator->allocator, paginator);
 }
 
-struct aws_s3_paginator *aws_s3_initiate_list_bucket(
+struct aws_s3_paginator *aws_s3_initiate_list_objects(
     struct aws_allocator *allocator,
-    const struct aws_s3_list_bucket_v2_params *params) {
+    const struct aws_s3_list_objects_params *params) {
     AWS_FATAL_PRECONDITION(params);
     AWS_FATAL_PRECONDITION(params->client);
     AWS_FATAL_PRECONDITION(params->bucket_name.len);
@@ -409,8 +408,8 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     }
     aws_mutex_unlock(&paginator->shared_mt_state.lock);
 
-    struct aws_http_message *list_bucket_v2_request = aws_http_message_new_request(paginator->allocator);
-    aws_http_message_set_request_path(list_bucket_v2_request, aws_byte_cursor_from_buf(&request_path));
+    struct aws_http_message *list_objects_v2_request = aws_http_message_new_request(paginator->allocator);
+    aws_http_message_set_request_path(list_objects_v2_request, aws_byte_cursor_from_buf(&request_path));
 
     aws_byte_buf_clean_up(&request_path);
 
@@ -427,7 +426,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         .value = aws_byte_cursor_from_buf(&host_buf),
     };
 
-    aws_http_message_add_header(list_bucket_v2_request, host_header);
+    aws_http_message_add_header(list_objects_v2_request, host_header);
     aws_byte_buf_clean_up(&host_buf);
 
     struct aws_http_header accept_header = {
@@ -435,9 +434,9 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         .value = aws_byte_cursor_from_c_str("application/xml"),
     };
 
-    aws_http_message_add_header(list_bucket_v2_request, accept_header);
+    aws_http_message_add_header(list_objects_v2_request, accept_header);
 
-    aws_http_message_set_request_method(list_bucket_v2_request, aws_http_method_get);
+    aws_http_message_set_request_method(list_objects_v2_request, aws_http_method_get);
 
     struct aws_s3_meta_request_options request_options = {
         .user_data = paginator,
@@ -445,7 +444,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .body_callback = s_list_bucket_receive_body_callback,
         .finish_callback = s_list_bucket_request_finished,
-        .message = list_bucket_v2_request,
+        .message = list_objects_v2_request,
     };
 
     /* re-use the current buffer. */
@@ -464,7 +463,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     aws_atomic_store_ptr(&paginator->current_request, new_request);
 
     /* make_meta_request() above, ref counted the http request, so go ahead and release */
-    aws_http_message_release(list_bucket_v2_request);
+    aws_http_message_release(list_objects_v2_request);
 
     if (new_request == NULL) {
         s_set_paginator_state_if_legal(paginator, OS_INITIATED, OS_ERROR);

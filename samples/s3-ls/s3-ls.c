@@ -12,7 +12,7 @@
 #include <aws/io/event_loop.h>
 #include <aws/io/logging.h>
 #include <aws/io/uri.h>
-#include <aws/s3/private/s3_file_system_support.h>
+#include <aws/s3/private/s3_list_objects.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
 
@@ -183,8 +183,9 @@ int main(int argc, char *argv[]) {
         prefix.len = 0;
         prefix.ptr = NULL;
     } else {
-        /* sets prefix only if uri path is specified and not root / */
-        prefix = app_ctx.uri.path;
+        /* skips the initial / in the path */
+        prefix.len = app_ctx.uri.path.len - 1;
+        prefix.ptr = app_ctx.uri.path.ptr + 1;
     }
 
     if (app_ctx.log_level != AWS_LOG_LEVEL_NONE) {
@@ -233,11 +234,7 @@ int main(int argc, char *argv[]) {
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     /* listObjects */
-    struct aws_s3_list_bucket_v2_params params;
-    AWS_ZERO_STRUCT(params);
-    params.client = client;
-    params.bucket_name = bucket;
-    params.prefix = prefix;
+    struct aws_s3_list_objects_params params = {.client = client, .bucket_name = bucket, .prefix = prefix};
 
     char endpoint[1024];
     snprintf(endpoint, sizeof(endpoint), "s3.%s.amazonaws.com", app_ctx.region);
@@ -246,7 +243,7 @@ int main(int argc, char *argv[]) {
     params.on_object = &s_on_object;
     params.on_list_finished = &s_on_list_finished;
 
-    struct aws_s3_paginator *paginator = aws_s3_initiate_list_bucket(allocator, &params);
+    struct aws_s3_paginator *paginator = aws_s3_initiate_list_objects(allocator, &params);
     int paginator_result = aws_s3_paginator_continue(paginator, &app_ctx.signing_config);
     if (paginator_result) {
         printf("ERROR returned from initial call to aws_s3_paginator_continue: %d \n", paginator_result);

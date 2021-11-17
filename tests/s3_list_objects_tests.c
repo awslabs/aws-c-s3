@@ -4,7 +4,7 @@
  */
 
 #include "aws/s3/private/s3_client_impl.h"
-#include "aws/s3/private/s3_file_system_support.h"
+#include "aws/s3/private/s3_list_objects.h"
 #include "s3_tester.h"
 
 #include <aws/auth/credentials.h>
@@ -24,13 +24,13 @@ static int s_test_s3_list_bucket_init_mem_safety(struct aws_allocator *allocator
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_s3_list_bucket_v2_params params = {
+    struct aws_s3_list_objects_params params = {
         .client = client,
         .endpoint = aws_byte_cursor_from_c_str("test-endpoint.com"),
         .bucket_name = aws_byte_cursor_from_c_str("test-bucket"),
     };
 
-    struct aws_s3_paginator *paginator = aws_s3_initiate_list_bucket(allocator, &params);
+    struct aws_s3_paginator *paginator = aws_s3_initiate_list_objects(allocator, &params);
     ASSERT_NOT_NULL(paginator);
 
     aws_s3_paginator_release(paginator);
@@ -54,7 +54,7 @@ static int s_test_s3_list_bucket_init_mem_safety_optional_copies(struct aws_allo
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_s3_list_bucket_v2_params params = {
+    struct aws_s3_list_objects_params params = {
         .client = client,
         .endpoint = aws_byte_cursor_from_c_str("test-endpoint.com"),
         .bucket_name = aws_byte_cursor_from_c_str("test-bucket"),
@@ -63,7 +63,7 @@ static int s_test_s3_list_bucket_init_mem_safety_optional_copies(struct aws_allo
         .continuation_token = aws_byte_cursor_from_c_str("base64_encrypted_thing"),
     };
 
-    struct aws_s3_paginator *paginator = aws_s3_initiate_list_bucket(allocator, &params);
+    struct aws_s3_paginator *paginator = aws_s3_initiate_list_objects(allocator, &params);
     ASSERT_NOT_NULL(paginator);
 
     aws_s3_paginator_release(paginator);
@@ -153,7 +153,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
 
     struct aws_byte_cursor endpoint = aws_byte_cursor_from_c_str("s3.us-west-2.amazonaws.com");
 
-    struct aws_s3_list_bucket_v2_params params = {
+    struct aws_s3_list_objects_params params = {
         .client = client,
         .endpoint = endpoint,
         .bucket_name = g_test_bucket_name,
@@ -163,7 +163,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
         .delimiter = aws_byte_cursor_from_c_str("/"),
     };
 
-    struct aws_s3_paginator *paginator = aws_s3_initiate_list_bucket(allocator, &params);
+    struct aws_s3_paginator *paginator = aws_s3_initiate_list_objects(allocator, &params);
     ASSERT_NOT_NULL(paginator);
 
     aws_mutex_lock(&test_data.mutex);

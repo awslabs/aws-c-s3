@@ -1,5 +1,5 @@
-#ifndef AWS_S3_FILE_SYSTEM_SUPPORT_H
-#define AWS_S3_FILE_SYSTEM_SUPPORT_H
+#ifndef AWS_S3_LIST_OBJECTS_H
+#define AWS_S3_LIST_OBJECTS_H
 
 /**
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -11,11 +11,12 @@
 #include <aws/common/date_time.h>
 #include <aws/common/string.h>
 
-/** Struct representing the file system relevant data for an object returned from a ListBucketV2 API call. */
+/** Struct representing the file system relevant data for an object returned from a ListObjectsV2 API call. */
 struct aws_s3_object_file_system_info {
     /**
-     * Prefix is analagous to a directory if S3 was a file system. This will be the location of the object relative to
-     * the root of the bucket.
+     * When a delimiter is specified in the request, S3 groups the common prefixes that contain the delimiter.
+     * This member is set to the prefix substring ending at the first occurrence of the specified delimiter,
+     * analogous to a directory entry of a file system.
      */
     struct aws_byte_cursor prefix;
     /**
@@ -40,7 +41,7 @@ struct aws_s3_object_file_system_info {
 struct aws_s3_paginator;
 
 /**
- * Invoked when an object or prefix is encountered in during a ListBucketV2 API call. Return false, to immediately
+ * Invoked when an object or prefix is encountered during a ListObjectsV2 API call. Return false, to immediately
  * terminate the list operation. Returning true will continue until at least the current page is iterated.
  */
 typedef bool(aws_s3_on_object_fn)(const struct aws_s3_object_file_system_info *info, void *user_data);
@@ -53,9 +54,9 @@ typedef bool(aws_s3_on_object_fn)(const struct aws_s3_object_file_system_info *i
 typedef void(aws_s3_on_object_list_finished)(struct aws_s3_paginator *paginator, int error_code, void *user_data);
 
 /**
- * Parameters for calling aws_s3_initiate_list_bucket(). All values are copied out or re-seated and reference counted.
+ * Parameters for calling aws_s3_initiate_list_objects(). All values are copied out or re-seated and reference counted.
  */
-struct aws_s3_list_bucket_v2_params {
+struct aws_s3_list_objects_params {
     /**
      * Must not be NULL. The internal call will increment the reference count on client.
      */
@@ -96,7 +97,7 @@ struct aws_s3_list_bucket_v2_params {
 AWS_EXTERN_C_BEGIN
 
 /**
- * Initiates a list bucket command (without executing it), and returns a paginator object to iterate the bucket with if
+ * Initiates a list objects command (without executing it), and returns a paginator object to iterate the bucket with if
  * successful.
  *
  * Returns NULL on failure. Check aws_last_error() for details on the error that occurred.
@@ -107,9 +108,9 @@ AWS_EXTERN_C_BEGIN
  * This does not start the actual list operation. You need to call aws_s3_paginator_continue() to start
  * the operation.
  */
-AWS_S3_API struct aws_s3_paginator *aws_s3_initiate_list_bucket(
+AWS_S3_API struct aws_s3_paginator *aws_s3_initiate_list_objects(
     struct aws_allocator *allocator,
-    const struct aws_s3_list_bucket_v2_params *params);
+    const struct aws_s3_list_objects_params *params);
 AWS_S3_API void aws_s3_paginator_acquire(struct aws_s3_paginator *paginator);
 AWS_S3_API void aws_s3_paginator_release(struct aws_s3_paginator *paginator);
 
