@@ -606,24 +606,6 @@ finish:
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
-static int s_content_length_from_headers(struct aws_http_headers *headers, uint64_t *out_length) {
-    struct aws_byte_cursor content_length_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
-    struct aws_byte_cursor content_length_cursor;
-    if (aws_http_headers_get(headers, content_length_name, &content_length_cursor)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "could not get content_length from request headers");
-        return AWS_ERROR_HTTP_HEADER_NOT_FOUND;
-    }
-    struct aws_string *content_length_str = aws_string_new_from_cursor(aws_default_allocator(), &content_length_cursor);
-    uint64_t content_length = strtoul(aws_string_c_str(content_length_str), NULL, 10);
-    aws_string_destroy(content_length_str);
-    if (content_length == UINT64_MAX) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "extracted invalid content length from header");
-        return AWS_ERROR_INVALID_BUFFER_SIZE;
-    }
-    *out_length = content_length;
-    return AWS_ERROR_SUCCESS;
-}
-
 void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(connection);
@@ -633,21 +615,18 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     AWS_PRECONDITION(request);
 
     /* Now that we have a signed request and a connection, go ahead and issue the request. */
-    struct aws_http_make_request_options request_options;
-    struct aws_http1_chunk_options chunk_options;
+    struct aws_http_make_request_options options;
+    AWS_ZERO_STRUCT(options);
 
-    AWS_ZERO_STRUCT(request_options);
-    AWS_ZERO_STRUCT(chunk_options);
+    options.self_size = sizeof(struct aws_http_make_request_options);
+    options.request = request->send_data.message;
+    options.user_data = connection;
+    options.on_response_headers = s_s3_meta_request_incoming_headers;
+    options.on_response_header_block_done = NULL;
+    options.on_response_body = s_s3_meta_request_incoming_body;
+    options.on_complete = s_s3_meta_request_stream_complete;
 
-    request_options.self_size = sizeof(struct aws_http_make_request_options);
-    request_options.request = request->send_data.message;
-    request_options.user_data = connection;
-    request_options.on_response_headers = s_s3_meta_request_incoming_headers;
-    request_options.on_response_header_block_done = NULL;
-    request_options.on_response_body = s_s3_meta_request_incoming_body;
-    request_options.on_complete = s_s3_meta_request_stream_complete;
-
-    struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &request_options);
+    struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
 
     if (stream == NULL) {
         AWS_LOGF_ERROR(
@@ -666,11 +645,6 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
             AWS_LS_S3_META_REQUEST, "id=%p: Could not activate HTTP stream %p", (void *)meta_request, (void *)request);
 
         goto error_finish;
-    }
-
-    if (chunk_stream) {
-        aws_http1_stream_write_chunk(stream, &chunk_options);
-        s_write_termination_chunk(aws_default_allocator(), stream);
     }
 
     return;
