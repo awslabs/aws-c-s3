@@ -1387,8 +1387,6 @@ int aws_s3_tester_send_meta_request(
     aws_s3_tester_lock_synced_data(tester);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_GENERAL, "finish error code is: %s", aws_error_debug_str(tester->synced_data.finish_error_code));
         ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
         ASSERT_TRUE(tester->synced_data.finish_error_code == AWS_ERROR_S3_CANCELED);
