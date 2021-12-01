@@ -871,7 +871,6 @@ static void s_s3_client_push_meta_request_synced(
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(meta_request);
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     struct aws_s3_meta_request_work *meta_request_work =
         aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_meta_request_work));
@@ -886,13 +885,11 @@ static void s_s3_client_schedule_process_work_synced(struct aws_s3_client *clien
     AWS_PRECONDITION(client->vtable);
     AWS_PRECONDITION(client->vtable->schedule_process_work_synced);
 
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     client->vtable->schedule_process_work_synced(client);
 }
 
 static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_client *client) {
-    ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     if (client->synced_data.process_work_task_scheduled) {
         return;
