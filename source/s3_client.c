@@ -885,7 +885,6 @@ static void s_s3_client_schedule_process_work_synced(struct aws_s3_client *clien
     AWS_PRECONDITION(client->vtable);
     AWS_PRECONDITION(client->vtable->schedule_process_work_synced);
 
-
     client->vtable->schedule_process_work_synced(client);
 }
 
