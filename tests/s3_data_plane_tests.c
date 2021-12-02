@@ -2519,6 +2519,58 @@ static int s_test_s3_default_fail_headers_callback(struct aws_allocator *allocat
     return 0;
 }
 
+static struct aws_atomic_var s_test_headers_callback_invoked;
+
+static int s_s3_test_headers_callback_check(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+    (void)meta_request;
+    (void)headers;
+    (void)response_status;
+    (void)user_data;
+
+    /* sets flag used to check if callback was invoked */
+    aws_atomic_store_int(&s_test_headers_callback_invoked, 1);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_default_invoke_headers_callback_on_error, s_test_s3_default_invoke_headers_callback_on_error)
+static int s_test_s3_default_invoke_headers_callback_on_error(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_atomic_init_int(&s_test_headers_callback_invoked, 0);
+
+    struct aws_byte_cursor invalid_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("___INVALID_PATH___");
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .headers_callback = s_s3_test_headers_callback_check,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+        .get_options =
+            {
+                .object_path = invalid_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+    ASSERT_TRUE(aws_atomic_load_int(&s_test_headers_callback_invoked));
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_default_fail_body_callback, s_test_s3_default_fail_body_callback)
 static int s_test_s3_default_fail_body_callback(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
