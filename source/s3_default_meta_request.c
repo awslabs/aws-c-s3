@@ -254,7 +254,7 @@ static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
-    if (meta_request->headers_callback != NULL &&
+    if (meta_request->headers_callback != NULL && request->send_data.response_headers != NULL &&
         meta_request->headers_callback(
             meta_request,
             request->send_data.response_headers,
