@@ -110,11 +110,11 @@ enum aws_s3_meta_request_compute_content_md5 {
 };
 
 enum aws_s3_checksum_algorithm {
+    AWS_CRC32C,
+    AWS_CRC32,
     AWS_SHA1,
     AWS_SHA256,
     AWS_MD5,
-    AWS_CRC32,
-    AWS_CRC32C,
 };
 
 enum aws_s3_meta_request_flexible_checksum_location {

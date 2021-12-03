@@ -1,6 +1,23 @@
 #include "aws/s3/private/s3_checksums.h"
 #include <aws/checksums/crc.h>
 
+size_t digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
+    switch (algorithm) {
+        case AWS_CRC32C:
+            return AWS_CRC32C_LEN;
+        case AWS_CRC32:
+            return AWS_CRC32_LEN;
+        case AWS_SHA1:
+            return AWS_SHA1_LEN;
+        case AWS_SHA256:
+            return AWS_SHA256_LEN;
+        case AWS_MD5:
+            return AWS_MD5_LEN;
+        default:
+            return -1;
+    }
+}
+
 void s3_hash_destroy(struct aws_checksum *checksum) {
     struct aws_hash *hash = (struct aws_hash *)checksum->impl;
     aws_hash_destroy(hash);
@@ -44,6 +61,21 @@ struct aws_checksum *aws_sha1_checksum_new(struct aws_allocator *allocator) {
 
 struct aws_checksum *aws_md5_checksum_new(struct aws_allocator *allocator) {
     return aws_hash_new(allocator, aws_md5_new);
+}
+
+struct aws_checksum *aws_checksum_new(struct aws_allocator *allocator, enum aws_s3_checksum_algorithm algorithm) {
+    switch (algorithm) {
+        case AWS_CRC32C:
+            return aws_crc32c_checksum_new(allocator);
+        case AWS_CRC32:
+            return aws_crc32_checksum_new(allocator);
+        case AWS_SHA1:
+            return aws_sha1_checksum_new(allocator);
+        case AWS_SHA256:
+            return aws_sha256_checksum_new(allocator);
+        case AWS_MD5:
+            return aws_md5_checksum_new(allocator);
+    }
 }
 
 void aws_crc_destroy(struct aws_checksum *checksum) {
