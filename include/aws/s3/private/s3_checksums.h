@@ -27,10 +27,18 @@ struct aws_checksum {
     bool good;
 };
 
-struct aws_input_stream *aws_chunk_stream_new(
-    struct aws_allocator *alloc,
+struct aws_input_stream *aws_checksum_stream_new(
+    struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
-    struct aws_checksum *checksum);
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *checksum_result);
+
+struct aws_input_stream *aws_chunk_stream_new(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *existing_stream,
+    enum aws_s3_checksum_algorithm algorithm);
+
+size_t digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * Allocates and initializes a sha256 checksum instance.
@@ -57,13 +65,15 @@ struct aws_checksum *aws_crc32_checksum_new(struct aws_allocator *allocator);
 AWS_S3_API
 struct aws_checksum *aws_crc32c_checksum_new(struct aws_allocator *allocator);
 
+AWS_S3_API
+struct aws_checksum *aws_checksum_new(struct aws_allocator *allocator, enum aws_s3_checksum_algorithm algorithm);
+
 /**
  * Compute an aws_checksum corresponding to the provided enum, passing a function pointer around instead of using a
- * conditional would be faster, but would be a negligble improvment compared to the cost of processing data twice which
- * would be the only time this function would be used, and would be harder to follow.
+ * conditional would be faster, but would be a negligble improvment compared to the cost of processing data twice
+ * which would be the only time this function would be used, and would be harder to follow.
  */
-AWS_S3_API
-int aws_checksum_compute(
+AWS_S3_API int aws_checksum_compute(
     struct aws_allocator *allocator,
     enum aws_s3_checksum_algorithm algorithm,
     const struct aws_byte_cursor *input,
