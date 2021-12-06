@@ -520,6 +520,15 @@ static void s_s3_auto_ranged_get_request_finished(
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
 
+    if (meta_request->headers_callback != NULL && request_failed && request->send_data.response_headers != NULL) {
+        /* invoke headers callback for failed request */
+        meta_request->headers_callback(
+            meta_request,
+            request->send_data.response_headers,
+            request->send_data.response_status,
+            meta_request->user_data);
+    }
+
     if (request->discovers_object_size) {
 
         /* Try to discover the object-range and content length.*/
@@ -621,15 +630,6 @@ update_synced_data:
 
     if (error_code != AWS_ERROR_SUCCESS) {
         aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-    }
-
-    if (meta_request->headers_callback != NULL && request_failed && request->send_data.response_headers != NULL) {
-        /* invoke headers callback for failed request */
-        meta_request->headers_callback(
-            meta_request,
-            request->send_data.response_headers,
-            request->send_data.response_status,
-            meta_request->user_data);
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
