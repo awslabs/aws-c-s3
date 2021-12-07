@@ -10,6 +10,7 @@ struct aws_checksum_stream {
     struct aws_input_stream *old_stream;
     struct aws_checksum *checksum;
     struct aws_byte_buf *checksum_result;
+    bool did_seek;
 };
 
 static int s_aws_input_checksum_stream_seek(
@@ -18,6 +19,7 @@ static int s_aws_input_checksum_stream_seek(
     enum aws_stream_seek_basis basis) {
 
     struct aws_checksum_stream *impl = stream->impl;
+    impl->did_seek = true;
     return aws_input_stream_seek(impl->old_stream, offset, basis);
 }
 
@@ -31,17 +33,23 @@ static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, str
     to_sum.ptr += start;
     to_sum.len = end - start;
     if (!err) {
-        // if this fails the previous cursor stream would have updated which violates the stream contract. Todo fix
-        // fix might not be possible, might just have to set valid to false.
-        return aws_checksum_update(impl->checksum, &to_sum);
+        int checksum_res = aws_checksum_update(impl->checksum, &to_sum);
+        if (checksum_res) {
+            dest->len = start;
+            impl->did_seek = true;
+        }
+        return checksum_res;
     }
     return err;
 }
 
 static int s_aws_input_checksum_stream_get_status(struct aws_input_stream *stream, struct aws_stream_status *status) {
-    // TODO add check for use of seek function
     struct aws_checksum_stream *impl = stream->impl;
-    return aws_input_stream_get_status(impl->old_stream, status);
+    int err = aws_input_stream_get_status(impl->old_stream, status);
+    if (!err) {
+        status->is_valid &= !impl->did_seek;
+    }
+    return err;
 }
 
 static int s_aws_input_checksum_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
@@ -54,7 +62,6 @@ static void s_aws_input_checksum_stream_destroy(struct aws_input_stream *stream)
         struct aws_checksum_stream *impl = stream->impl;
         aws_checksum_finalize(impl->checksum, impl->checksum_result, 0);
         aws_checksum_destroy(impl->checksum);
-        aws_input_stream_destroy(impl->old_stream);
         aws_mem_release(stream->allocator, stream);
     }
 }
@@ -92,6 +99,7 @@ struct aws_input_stream *aws_checksum_stream_new(
         goto on_error;
     }
     impl->checksum_result = checksum_result;
+    impl->did_seek = false;
     AWS_FATAL_ASSERT(impl->old_stream);
 
     return stream;
