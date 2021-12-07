@@ -2354,6 +2354,7 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_http_message_release(message);
+
     aws_s3_client_release(client);
     client = NULL;
 

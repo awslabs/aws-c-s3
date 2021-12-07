@@ -1397,6 +1397,9 @@ static void s_s3_client_acquired_retry_token(
 
     AWS_ASSERT(client->vtable->acquire_http_connection);
 
+    /* client needs to be kept alive until s_s3_client_on_acquire_http_connection completes */
+    aws_s3_client_acquire(client);
+
     client->vtable->acquire_http_connection(
         endpoint->http_connection_manager, s_s3_client_on_acquire_http_connection, connection);
 
@@ -1444,16 +1447,19 @@ static void s_s3_client_on_acquire_http_connection(
 
     connection->http_connection = incoming_http_connection;
     aws_s3_meta_request_send_request(meta_request, connection);
+    aws_s3_client_release(client); /* kept since this callback was registered */
     return;
 
 error_retry:
 
     aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_RETRY);
+    aws_s3_client_release(client); /* kept since this callback was registered */
     return;
 
 error_fail:
 
     aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
+    aws_s3_client_release(client); /* kept since this callback was registered */
 }
 
 /* Called by aws_s3_meta_request when it has finished using this connection for a single request. */
