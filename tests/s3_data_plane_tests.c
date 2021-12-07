@@ -3058,7 +3058,9 @@ static int s_range_requests_headers_callback(
     struct aws_s3_meta_request_test_results *test_results = user_data;
     struct range_requests_test_user_data *test_user_data = test_results->tester->user_data;
 
-    copy_http_headers(headers, test_user_data->headers);
+    if (test_user_data != NULL) {
+        copy_http_headers(headers, test_user_data->headers);
+    }
 
     return AWS_OP_SUCCESS;
 }
