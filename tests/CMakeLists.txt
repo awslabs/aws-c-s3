@@ -188,6 +188,7 @@ add_test_case(crc32c_test_oneshot)
 add_test_case(crc32c_test_invalid_state)
 
 add_net_test_case(verify_checksum_stream)
+add_net_test_case(verify_chunk_stream)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
