@@ -2532,8 +2532,8 @@ static int s_s3_test_headers_callback_check(
     (void)response_status;
     (void)user_data;
 
-    /* sets flag used to check if callback was invoked */
-    aws_atomic_store_int(&s_test_headers_callback_invoked, 1);
+    /* increments counter to check if callback was invoked exactly once */
+    aws_atomic_fetch_add(&s_test_headers_callback_invoked, 1);
 
     return AWS_OP_SUCCESS;
 }
@@ -2564,7 +2564,7 @@ static int s_test_s3_default_invoke_headers_callback_on_error(struct aws_allocat
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
-    ASSERT_TRUE(aws_atomic_load_int(&s_test_headers_callback_invoked));
+    ASSERT_TRUE(aws_atomic_load_int(&s_test_headers_callback_invoked) == 1);
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -2596,7 +2596,7 @@ static int s_test_s3_get_object_invoke_headers_callback_on_error(struct aws_allo
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
-    ASSERT_TRUE(aws_atomic_load_int(&s_test_headers_callback_invoked));
+    ASSERT_TRUE(aws_atomic_load_int(&s_test_headers_callback_invoked) == 1);
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -2627,7 +2627,7 @@ static int s_test_s3_put_object_invoke_headers_callback_on_error(struct aws_allo
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
-    ASSERT_TRUE(aws_atomic_load_int(&s_test_headers_callback_invoked));
+    ASSERT_TRUE(aws_atomic_load_int(&s_test_headers_callback_invoked) == 1);
     ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);

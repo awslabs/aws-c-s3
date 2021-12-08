@@ -1398,6 +1398,7 @@ static void s_s3_client_acquired_retry_token(
     AWS_ASSERT(client->vtable->acquire_http_connection);
 
     /* client needs to be kept alive until s_s3_client_on_acquire_http_connection completes */
+    /* TODO: not a blocker, consider managing the life time of aws_s3_client from aws_s3_endpoint to simplify usage */
     aws_s3_client_acquire(client);
 
     client->vtable->acquire_http_connection(

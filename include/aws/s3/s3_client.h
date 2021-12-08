@@ -55,10 +55,8 @@ enum aws_s3_meta_request_type {
 };
 
 /**
- * Invoked to provide response headers received during execution of the meta request.
- * If an error prevents the execution of the HTTP request (e.g. error codes like
- * AWS_IO_DNS_INVALID_NAME), the callback won't be invoked. Otherwise the callback will be invoked,
- * both for success and error HTTP status codes.
+ * Invoked to provide response headers received during execution of the meta request, both for
+ * success and error HTTP status codes.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
  * Return AWS_OP_ERR to indicate failure and cancel the request.
@@ -179,13 +177,11 @@ struct aws_s3_meta_request_options {
     /* User data for all callbacks. */
     void *user_data;
 
-    /* Invoked to provide response headers received during execution of the meta request.
-     * If an error prevents the execution of the HTTP request (e.g. error codes like
-     * AWS_IO_DNS_INVALID_NAME), the callback won't be invoked. Otherwise the callback will be invoked,
-     * both for success and error HTTP status codes.
-     *
-     * Return AWS_OP_SUCCESS to continue processing the request.
-     * Return AWS_OP_ERR to indicate failure and cancel the request. */
+    /**
+     * Optional.
+     * Invoked to provide response headers received during execution of the meta request.
+     * See `aws_s3_meta_request_headers_callback_fn`.
+     */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
 
     /*
