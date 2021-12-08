@@ -2621,7 +2621,7 @@ static int s_test_s3_put_object_invoke_headers_callback_on_error(struct aws_allo
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
-                .object_size_mb = 1,
+                .object_size_mb = 10,
                 .invalid_request = true,
             },
     };

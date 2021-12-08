@@ -520,15 +520,6 @@ static void s_s3_auto_ranged_get_request_finished(
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
 
-    if (meta_request->headers_callback != NULL && request_failed && request->send_data.response_headers != NULL) {
-        /* invoke headers callback for failed request */
-        meta_request->headers_callback(
-            meta_request,
-            request->send_data.response_headers,
-            request->send_data.response_status,
-            meta_request->user_data);
-    }
-
     if (request->discovers_object_size) {
 
         /* Try to discover the object-range and content length.*/

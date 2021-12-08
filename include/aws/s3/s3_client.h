@@ -184,14 +184,16 @@ struct aws_s3_meta_request_options {
      */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
 
-    /*
+    /**
      * Invoked to provide the request body as it is received.
-     *
-     * Return AWS_OP_SUCCESS to continue processing the request.
-     * Return AWS_OP_ERR to indicate failure and cancel the request. */
+     * See `aws_s3_meta_request_receive_body_callback_fn`.
+     */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
 
-    /* Invoked when the entire meta request execution is complete. */
+    /**
+     * Invoked when the entire meta request execution is complete.
+     * See `aws_s3_meta_request_finish_fn`.
+     */
     aws_s3_meta_request_finish_fn *finish_callback;
 
     /* Callback for when the meta request has completely cleaned up. */
