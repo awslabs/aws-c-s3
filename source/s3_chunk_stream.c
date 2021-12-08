@@ -4,6 +4,7 @@
  */
 
 #include "aws/s3/private/s3_checksums.h"
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
 #include <inttypes.h>
@@ -54,6 +55,7 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
 static int s_set_chunk_stream(struct aws_chunk_stream *parent_stream) {
     aws_input_stream_destroy(parent_stream->current_stream);
     parent_stream->current_stream = parent_stream->checksum_stream;
+    parent_stream->checksum_stream = NULL;
     parent_stream->set_current_stream_fn = s_set_post_chunk_stream;
     return AWS_OP_SUCCESS;
 }
@@ -115,7 +117,7 @@ static void s_aws_input_chunk_stream_destroy(struct aws_input_stream *stream) {
         if (impl->current_stream) {
             aws_input_stream_destroy(impl->current_stream);
         }
-        if (impl->checksum_stream && impl->checksum_stream != impl->current_stream) {
+        if (impl->checksum_stream) {
             aws_input_stream_destroy(impl->checksum_stream);
         }
         aws_byte_buf_clean_up(&impl->checksum_result);
@@ -158,8 +160,8 @@ struct aws_input_stream *aws_chunk_stream_new(
     char stream_length_string[32];
     AWS_ZERO_ARRAY(stream_length_string);
     sprintf(stream_length_string, "%" PRId64, stream_length);
-    struct aws_byte_cursor stream_length_cursor =
-        aws_byte_cursor_from_string(aws_string_new_from_c_str(allocator, stream_length_string));
+    struct aws_string *stream_length_aws_string = aws_string_new_from_c_str(allocator, stream_length_string);
+    struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_string(stream_length_aws_string);
     struct aws_byte_buf pre_chunk_buffer;
     if (aws_byte_buf_init(&pre_chunk_buffer, allocator, stream_length_cursor.len + pre_chunk_cursor.len)) {
         goto error3;
@@ -167,6 +169,7 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_byte_buf_append(&pre_chunk_buffer, &stream_length_cursor)) {
         goto error2;
     }
+    aws_string_destroy(stream_length_aws_string);
     if (aws_byte_buf_append(&pre_chunk_buffer, &pre_chunk_cursor)) {
         goto error2;
     }
@@ -175,8 +178,12 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (impl->current_stream == NULL) {
         goto error2;
     }
-    int64_t checksum_len = digest_size_from_algorithm(algorithm);
-    if (aws_byte_buf_init(&impl->checksum_result, allocator, checksum_len)) {
+    size_t checksum_len = digest_size_from_algorithm(algorithm);
+    size_t encoded_checksum_len = 0;
+    if (aws_base64_compute_encoded_len(checksum_len, &encoded_checksum_len)) {
+        goto error2;
+    }
+    if (aws_byte_buf_init(&impl->checksum_result, allocator, encoded_checksum_len)) {
         goto error2;
     }
     impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_result);
@@ -190,7 +197,7 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_input_stream_get_length(impl->current_stream, &prechunk_stream_len)) {
         goto error;
     }
-    impl->length = stream_length + prechunk_stream_len + final_chunk_len + post_trailer_len + checksum_len;
+    impl->length = stream_length + prechunk_stream_len + final_chunk_len + post_trailer_len + encoded_checksum_len;
     AWS_FATAL_ASSERT(impl->current_stream);
     AWS_FATAL_ASSERT(impl->checksum_stream);
     aws_byte_buf_clean_up(&pre_chunk_buffer);
