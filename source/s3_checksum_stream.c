@@ -4,12 +4,14 @@
  */
 
 #include "aws/s3/private/s3_checksums.h"
+#include <aws/common/encoding.h>
 #include <aws/io/stream.h>
 
 struct aws_checksum_stream {
     struct aws_input_stream *old_stream;
     struct aws_checksum *checksum;
-    struct aws_byte_buf *checksum_result;
+    struct aws_byte_buf checksum_result;
+    struct aws_byte_buf *encoded_checksum_result;
     bool did_seek;
 };
 
@@ -60,8 +62,11 @@ static int s_aws_input_checksum_stream_get_length(struct aws_input_stream *strea
 static void s_aws_input_checksum_stream_destroy(struct aws_input_stream *stream) {
     if (stream) {
         struct aws_checksum_stream *impl = stream->impl;
-        aws_checksum_finalize(impl->checksum, impl->checksum_result, 0);
+        aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0);
+        struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&impl->checksum_result);
+        aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_result);
         aws_checksum_destroy(impl->checksum);
+        aws_byte_buf_clean_up(&impl->checksum_result);
         aws_mem_release(stream->allocator, stream);
     }
 }
@@ -98,7 +103,8 @@ struct aws_input_stream *aws_checksum_stream_new(
     if (impl->checksum == NULL) {
         goto on_error;
     }
-    impl->checksum_result = checksum_result;
+    aws_byte_buf_init(&impl->checksum_result, allocator, impl->checksum->digest_size);
+    impl->encoded_checksum_result = checksum_result;
     impl->did_seek = false;
     AWS_FATAL_ASSERT(impl->old_stream);
 
