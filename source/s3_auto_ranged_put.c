@@ -612,6 +612,7 @@ static void s_s3_auto_ranged_put_request_finished(
 
                     error_code = aws_last_error_or_unknown();
                 }
+                meta_request->headers_callback = NULL;
 
                 aws_http_headers_release(final_response_headers);
             }

@@ -1151,7 +1151,6 @@ unlock:
                 finish_result.error_response_headers,
                 finish_result.response_status,
                 meta_request->user_data)) {
-            /* TODO: decide whether to override the existing error code */
             finish_result.error_code = aws_last_error_or_unknown();
         }
         meta_request->headers_callback = NULL;
