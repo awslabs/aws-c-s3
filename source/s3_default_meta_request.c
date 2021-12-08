@@ -258,10 +258,10 @@ static void s_s3_meta_request_default_request_finished(
         request->send_data.response_headers != NULL) {
 
         if (meta_request->headers_callback(
-            meta_request,
-            request->send_data.response_headers,
-            request->send_data.response_status,
-            meta_request->user_data)) {
+                meta_request,
+                request->send_data.response_headers,
+                request->send_data.response_status,
+                meta_request->user_data)) {
             error_code = aws_last_error_or_unknown();
         }
 

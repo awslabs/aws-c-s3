@@ -2589,7 +2589,9 @@ static int s_test_s3_default_invoke_headers_callback_on_error(struct aws_allocat
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_default_invoke_headers_callback_cancels_on_error, s_test_s3_default_invoke_headers_callback_cancels_on_error)
+AWS_TEST_CASE(
+    test_s3_default_invoke_headers_callback_cancels_on_error,
+    s_test_s3_default_invoke_headers_callback_cancels_on_error)
 static int s_test_s3_default_invoke_headers_callback_cancels_on_error(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
@@ -2689,7 +2691,9 @@ static int s_test_s3_put_object_invoke_headers_callback_on_error(struct aws_allo
 AWS_TEST_CASE(
     test_s3_put_object_invoke_headers_callback_on_error_with_user_cancellation,
     s_test_s3_put_object_invoke_headers_callback_on_error_with_user_cancellation)
-static int s_test_s3_put_object_invoke_headers_callback_on_error_with_user_cancellation(struct aws_allocator *allocator, void *ctx) {
+static int s_test_s3_put_object_invoke_headers_callback_on_error_with_user_cancellation(
+    struct aws_allocator *allocator,
+    void *ctx) {
     (void)ctx;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
