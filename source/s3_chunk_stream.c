@@ -160,8 +160,7 @@ struct aws_input_stream *aws_chunk_stream_new(
     char stream_length_string[32];
     AWS_ZERO_ARRAY(stream_length_string);
     sprintf(stream_length_string, "%" PRId64, stream_length);
-    struct aws_string *stream_length_aws_string = aws_string_new_from_c_str(allocator, stream_length_string);
-    struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_string(stream_length_aws_string);
+    struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_c_str(stream_length_string);
     struct aws_byte_buf pre_chunk_buffer;
     if (aws_byte_buf_init(&pre_chunk_buffer, allocator, stream_length_cursor.len + pre_chunk_cursor.len)) {
         goto error3;
@@ -169,7 +168,6 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_byte_buf_append(&pre_chunk_buffer, &stream_length_cursor)) {
         goto error2;
     }
-    aws_string_destroy(stream_length_aws_string);
     if (aws_byte_buf_append(&pre_chunk_buffer, &pre_chunk_cursor)) {
         goto error2;
     }
