@@ -24,20 +24,55 @@ struct aws_s3_request;
 struct aws_s3_meta_request;
 struct aws_s3_meta_request_result;
 
+/**
+ * A Meta Request represents a group of generated requests that are being done on behalf of the
+ * original request. For example, one large GetObject request can be transformed into a series
+ * of ranged GetObject requests that are executed in parallel to improve throughput.
+ *
+ * The aws_s3_meta_request_type is a hint of transformation to be applied.
+ */
 enum aws_s3_meta_request_type {
+
+    /**
+     * The Default meta request type sends any request to S3 as-is (with no transformation). For example,
+     * it can be used to pass a CreateBucket request.
+     */
     AWS_S3_META_REQUEST_TYPE_DEFAULT,
+
+    /**
+     * The GetObject request will be split into a series of ranged GetObject requests that are
+     * executed in parallel to improve throughput, when possible.
+     */
     AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+
+    /**
+     * The PutObject request will be split into MultiPart uploads that are executed in parallel
+     * to improve throughput, when possible.
+     */
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
 
     AWS_S3_META_REQUEST_TYPE_MAX,
 };
 
+/**
+ * Invoked to provide response headers received during execution of the meta request, both for
+ * success and error HTTP status codes.
+ *
+ * Return AWS_OP_SUCCESS to continue processing the request.
+ * Return AWS_OP_ERR to indicate failure and cancel the request.
+ */
 typedef int(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data);
 
+/**
+ * Invoked to provide the request body as it is received.
+ *
+ * Return AWS_OP_SUCCESS to continue processing the request.
+ * Return AWS_OP_ERR to indicate failure and cancel the request.
+ */
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     /* The meta request that the callback is being issued for. */
     struct aws_s3_meta_request *meta_request,
@@ -52,6 +87,9 @@ typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     /* User data specified by aws_s3_meta_request_options.*/
     void *user_data);
 
+/**
+ * Invoked when the entire meta request execution is complete.
+ */
 typedef void(aws_s3_meta_request_finish_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
@@ -162,13 +200,23 @@ struct aws_s3_meta_request_options {
     /* User data for all callbacks. */
     void *user_data;
 
-    /* Callback for receiving incoming headers. */
+    /**
+     * Optional.
+     * Invoked to provide response headers received during execution of the meta request.
+     * See `aws_s3_meta_request_headers_callback_fn`.
+     */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
 
-    /* Callback for incoming body data. */
+    /**
+     * Invoked to provide the request body as it is received.
+     * See `aws_s3_meta_request_receive_body_callback_fn`.
+     */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
 
-    /* Callback for when the meta request is completely finished. */
+    /**
+     * Invoked when the entire meta request execution is complete.
+     * See `aws_s3_meta_request_finish_fn`.
+     */
     aws_s3_meta_request_finish_fn *finish_callback;
 
     /* Callback for when the meta request has completely cleaned up. */

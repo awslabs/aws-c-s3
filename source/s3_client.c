@@ -69,7 +69,7 @@ const uint32_t g_max_num_connections_per_vip = 10;
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const size_t s_default_max_part_size = SIZE_MAX < 5000000000000ULL ? SIZE_MAX : 5000000000000ULL;
+static const uint64_t s_default_max_part_size = SIZE_MAX < 5000000000000ULL ? SIZE_MAX : 5000000000000ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
@@ -327,7 +327,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->max_part_size != 0) {
         *((size_t *)&client->max_part_size) = client_config->max_part_size;
     } else {
-        *((size_t *)&client->max_part_size) = s_default_max_part_size;
+        *((size_t *)&client->max_part_size) = (size_t)s_default_max_part_size;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
@@ -1397,6 +1397,10 @@ static void s_s3_client_acquired_retry_token(
 
     AWS_ASSERT(client->vtable->acquire_http_connection);
 
+    /* client needs to be kept alive until s_s3_client_on_acquire_http_connection completes */
+    /* TODO: not a blocker, consider managing the life time of aws_s3_client from aws_s3_endpoint to simplify usage */
+    aws_s3_client_acquire(client);
+
     client->vtable->acquire_http_connection(
         endpoint->http_connection_manager, s_s3_client_on_acquire_http_connection, connection);
 
@@ -1444,16 +1448,19 @@ static void s_s3_client_on_acquire_http_connection(
 
     connection->http_connection = incoming_http_connection;
     aws_s3_meta_request_send_request(meta_request, connection);
+    aws_s3_client_release(client); /* kept since this callback was registered */
     return;
 
 error_retry:
 
     aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_RETRY);
+    aws_s3_client_release(client); /* kept since this callback was registered */
     return;
 
 error_fail:
 
     aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
+    aws_s3_client_release(client); /* kept since this callback was registered */
 }
 
 /* Called by aws_s3_meta_request when it has finished using this connection for a single request. */
