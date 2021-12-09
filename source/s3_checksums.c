@@ -75,6 +75,8 @@ struct aws_checksum *aws_checksum_new(struct aws_allocator *allocator, enum aws_
             return aws_sha256_checksum_new(allocator);
         case AWS_MD5:
             return aws_md5_checksum_new(allocator);
+        default:
+            return NULL;
     }
 }
 
