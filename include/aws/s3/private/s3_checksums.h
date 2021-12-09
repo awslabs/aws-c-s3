@@ -27,17 +27,20 @@ struct aws_checksum {
     bool good;
 };
 
+AWS_S3_API
 struct aws_input_stream *aws_checksum_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
     enum aws_s3_checksum_algorithm algorithm,
     struct aws_byte_buf *checksum_result);
 
+AWS_S3_API
 struct aws_input_stream *aws_chunk_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
     enum aws_s3_checksum_algorithm algorithm);
 
+AWS_S3_API
 size_t digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
