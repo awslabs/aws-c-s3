@@ -14,7 +14,7 @@ size_t digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
         case AWS_MD5:
             return AWS_MD5_LEN;
         default:
-            return -1;
+            AWS_ASSERT(false);
     }
 }
 
