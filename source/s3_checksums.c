@@ -209,20 +209,15 @@ int aws_checksum_compute(
     switch (algorithm) {
         case AWS_SHA1:
             return aws_sha1_compute(allocator, input, output, truncate_to);
-            break;
         case AWS_SHA256:
             return aws_sha256_compute(allocator, input, output, truncate_to);
-            break;
         case AWS_MD5:
             return aws_md5_compute(allocator, input, output, truncate_to);
-            break;
         case AWS_CRC32:
             return aws_checksum_compute_fn(allocator, input, output, aws_crc32_checksum_new, truncate_to);
         case AWS_CRC32C:
             return aws_checksum_compute_fn(allocator, input, output, aws_crc32c_checksum_new, truncate_to);
-            break;
         default:
             return AWS_OP_ERR;
-            break;
     }
 }

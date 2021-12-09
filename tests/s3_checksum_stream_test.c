@@ -139,6 +139,7 @@ static int compare_chunk_stream(
 static int s_verify_checksum_stream_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    aws_s3_library_init(allocator);
     struct aws_byte_cursor input0 = aws_byte_cursor_from_c_str("");
     struct aws_byte_cursor input1 = aws_byte_cursor_from_c_str("abc");
     struct aws_byte_cursor input2 =
@@ -158,6 +159,7 @@ static int s_verify_checksum_stream_fn(struct aws_allocator *allocator, void *ct
     for (int buffer_size = 1; buffer_size < input2.len + 3; buffer_size++) {
         ASSERT_SUCCESS(compare_checksum_stream(allocator, &input3, buffer_size));
     }
+    aws_s3_library_clean_up();
     return AWS_OP_SUCCESS;
 }
 AWS_TEST_CASE(verify_checksum_stream, s_verify_checksum_stream_fn)
@@ -165,6 +167,7 @@ AWS_TEST_CASE(verify_checksum_stream, s_verify_checksum_stream_fn)
 static int s_verify_chunk_stream_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    aws_s3_library_init(allocator);
     struct aws_byte_cursor input0 = aws_byte_cursor_from_c_str("");
     struct aws_byte_cursor input1 = aws_byte_cursor_from_c_str("abc");
     struct aws_byte_cursor input2 =
@@ -184,6 +187,7 @@ static int s_verify_chunk_stream_fn(struct aws_allocator *allocator, void *ctx) 
     for (int buffer_size = 1; buffer_size < input3.len + 70; buffer_size++) {
         ASSERT_SUCCESS(compare_chunk_stream(allocator, s_113pre_chunk, &input3, buffer_size));
     }
+    aws_s3_library_clean_up();
     return AWS_OP_SUCCESS;
 }
 AWS_TEST_CASE(verify_chunk_stream, s_verify_chunk_stream_fn)
