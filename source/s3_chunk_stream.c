@@ -23,6 +23,7 @@ struct aws_chunk_stream {
     struct aws_input_stream *checksum_stream;
     struct aws_byte_buf checksum_result;
     struct aws_byte_buf pre_chunk_buffer;
+    struct aws_byte_buf post_chunk_buffer;
     int64_t length;
     set_stream_fn *set_current_stream_fn;
 };
@@ -31,6 +32,7 @@ static int s_set_null_stream(struct aws_chunk_stream *parent_stream) {
     aws_input_stream_destroy(parent_stream->current_stream);
     parent_stream->current_stream = NULL;
     parent_stream->set_current_stream_fn = NULL;
+    aws_byte_buf_clean_up(&parent_stream->post_chunk_buffer);
     return AWS_OP_SUCCESS;
 }
 
@@ -39,15 +41,14 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     struct aws_byte_cursor final_chunk_cursor = aws_byte_cursor_from_string(s_final_chunk);
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&parent_stream->checksum_result);
-    struct aws_byte_buf post_chunk_buffer;
     aws_byte_buf_init(
-        &post_chunk_buffer,
+        &parent_stream->post_chunk_buffer,
         aws_default_allocator(),
         final_chunk_cursor.len + checksum_result_cursor.len + post_trailer_cursor.len);
-    aws_byte_buf_append(&post_chunk_buffer, &final_chunk_cursor);
-    aws_byte_buf_append(&post_chunk_buffer, &checksum_result_cursor);
-    aws_byte_buf_append(&post_chunk_buffer, &post_trailer_cursor);
-    struct aws_byte_cursor post_chunk_cursor = aws_byte_cursor_from_buf(&post_chunk_buffer);
+    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &final_chunk_cursor);
+    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &checksum_result_cursor);
+    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &post_trailer_cursor);
+    struct aws_byte_cursor post_chunk_cursor = aws_byte_cursor_from_buf(&parent_stream->post_chunk_buffer);
     parent_stream->current_stream = aws_input_stream_new_from_cursor(aws_default_allocator(), &post_chunk_cursor);
     parent_stream->set_current_stream_fn = s_set_null_stream;
     return AWS_OP_SUCCESS;
@@ -124,6 +125,7 @@ static void s_aws_input_chunk_stream_destroy(struct aws_input_stream *stream) {
         }
         aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
         aws_byte_buf_clean_up(&impl->checksum_result);
+        aws_byte_buf_clean_up(&impl->post_chunk_buffer);
         aws_mem_release(stream->allocator, stream);
     }
 }
