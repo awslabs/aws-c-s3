@@ -164,6 +164,9 @@ struct aws_input_stream *aws_chunk_stream_new(
     // 2^64 is 20 digits long so if this overflows so do our int_64 lengths.
     char stream_length_string[32];
     AWS_ZERO_ARRAY(stream_length_string);
+    #if _MSC_VER
+    #    pragma warning(disable : 4996) /* sprintf */
+    #endif
     sprintf(stream_length_string, "%" PRId64, stream_length);
     struct aws_string *stream_length_aws_string = aws_string_new_from_c_str(allocator, stream_length_string);
     struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_string(stream_length_aws_string);
