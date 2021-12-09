@@ -22,6 +22,7 @@ struct aws_chunk_stream {
     struct aws_input_stream *current_stream;
     struct aws_input_stream *checksum_stream;
     struct aws_byte_buf checksum_result;
+    struct aws_byte_buf pre_chunk_buffer;
     int64_t length;
     set_stream_fn *set_current_stream_fn;
 };
@@ -55,6 +56,7 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
 static int s_set_chunk_stream(struct aws_chunk_stream *parent_stream) {
     aws_input_stream_destroy(parent_stream->current_stream);
     parent_stream->current_stream = parent_stream->checksum_stream;
+    aws_byte_buf_clean_up(&parent_stream->pre_chunk_buffer);
     parent_stream->checksum_stream = NULL;
     parent_stream->set_current_stream_fn = s_set_post_chunk_stream;
     return AWS_OP_SUCCESS;
@@ -120,6 +122,7 @@ static void s_aws_input_chunk_stream_destroy(struct aws_input_stream *stream) {
         if (impl->checksum_stream) {
             aws_input_stream_destroy(impl->checksum_stream);
         }
+        aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
         aws_byte_buf_clean_up(&impl->checksum_result);
         aws_mem_release(stream->allocator, stream);
     }
@@ -160,18 +163,19 @@ struct aws_input_stream *aws_chunk_stream_new(
     char stream_length_string[32];
     AWS_ZERO_ARRAY(stream_length_string);
     sprintf(stream_length_string, "%" PRId64, stream_length);
-    struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_c_str(stream_length_string);
-    struct aws_byte_buf pre_chunk_buffer;
-    if (aws_byte_buf_init(&pre_chunk_buffer, allocator, stream_length_cursor.len + pre_chunk_cursor.len)) {
+    struct aws_string *stream_length_aws_string = aws_string_new_from_c_str(allocator, stream_length_string);
+    struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_string(stream_length_aws_string);
+    if (aws_byte_buf_init(&impl->pre_chunk_buffer, allocator, stream_length_cursor.len + pre_chunk_cursor.len)) {
         goto error3;
     }
-    if (aws_byte_buf_append(&pre_chunk_buffer, &stream_length_cursor)) {
+    if (aws_byte_buf_append(&impl->pre_chunk_buffer, &stream_length_cursor)) {
         goto error2;
     }
-    if (aws_byte_buf_append(&pre_chunk_buffer, &pre_chunk_cursor)) {
+    aws_string_destroy(stream_length_aws_string);
+    if (aws_byte_buf_append(&impl->pre_chunk_buffer, &pre_chunk_cursor)) {
         goto error2;
     }
-    struct aws_byte_cursor complete_pre_chunk_cursor = aws_byte_cursor_from_buf(&pre_chunk_buffer);
+    struct aws_byte_cursor complete_pre_chunk_cursor = aws_byte_cursor_from_buf(&impl->pre_chunk_buffer);
     impl->current_stream = aws_input_stream_new_from_cursor(allocator, &complete_pre_chunk_cursor);
     if (impl->current_stream == NULL) {
         goto error2;
@@ -198,7 +202,6 @@ struct aws_input_stream *aws_chunk_stream_new(
     impl->length = stream_length + prechunk_stream_len + final_chunk_len + post_trailer_len + encoded_checksum_len;
     AWS_FATAL_ASSERT(impl->current_stream);
     AWS_FATAL_ASSERT(impl->checksum_stream);
-    aws_byte_buf_clean_up(&pre_chunk_buffer);
     return stream;
 
 error:
@@ -206,7 +209,7 @@ error:
 error1:
     aws_input_stream_destroy(impl->current_stream);
 error2:
-    aws_byte_buf_clean_up(&pre_chunk_buffer);
+    aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
 error3:
     aws_mem_release(stream->allocator, stream);
     return NULL;
