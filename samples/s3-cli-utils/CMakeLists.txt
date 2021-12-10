@@ -7,7 +7,7 @@ file(GLOB S3_CLI_UTIL_SRC
         )
 
 set(S3_CLI_UTIL_PROJECT_NAME s3-cli-utils)
-add_library(${S3_CLI_UTIL_PROJECT_NAME} ${S3_CLI_UTIL_SRC})
+add_executable(${S3_CLI_UTIL_PROJECT_NAME} ${S3_CLI_UTIL_SRC})
 aws_set_common_properties(${S3_CLI_UTIL_PROJECT_NAME})
 
 target_include_directories(${S3_CLI_UTIL_PROJECT_NAME} PUBLIC
