@@ -5,7 +5,11 @@
 #include "cli_progress_bar.h"
 
 #include <aws/common/array_list.h>
+#include <aws/common/clock.h>
 #include <aws/common/mutex.h>
+#include <aws/common/thread_scheduler.h>
+#include <aws/common/thread.h>
+#include <aws/common/task_scheduler.h>
 
 #include <inttypes.h>
 
@@ -14,6 +18,8 @@ struct progress_listener_group {
     struct aws_array_list listeners;
     struct aws_mutex mutex;
     FILE *render_sink;
+    struct aws_thread_scheduler *scheduler;
+    bool run_in_background;
 };
 
 struct progress_listener {
@@ -39,11 +45,19 @@ struct progress_listener_group *progress_listener_group_new(struct aws_allocator
     aws_mutex_init(&group->mutex);
     group->render_sink = stdout;
     aws_array_list_init_dynamic(&group->listeners, allocator, 16, sizeof(struct progress_listener *));
+    struct aws_thread_options options;
+    AWS_ZERO_STRUCT(options);
 
+    group->scheduler = aws_thread_scheduler_new(allocator, &options);
     return group;
 }
 
 void progress_listener_group_delete(struct progress_listener_group *group) {
+    aws_mutex_lock(&group->mutex);
+    group->run_in_background = false;
+    aws_mutex_unlock(&group->mutex);
+    aws_thread_scheduler_release(group->scheduler);
+
     size_t listeners_len = aws_array_list_length(&group->listeners);
     for (size_t i = 0; i < listeners_len; ++i) {
         struct progress_listener *listener;
@@ -84,6 +98,46 @@ void progress_listener_group_render(struct progress_listener_group *group) {
     }
 
     aws_mutex_unlock(&group->mutex);
+}
+
+static void s_render_task(struct aws_task * task, void *arg, enum aws_task_status status) {
+    struct progress_listener_group *group = arg;
+    struct aws_allocator *allocator = group->allocator;
+
+    if (status == AWS_TASK_STATUS_RUN_READY) {
+        progress_listener_group_render(group);
+
+        bool run_again = false;
+        aws_mutex_lock(&group->mutex);
+        run_again = group->run_in_background;
+        aws_mutex_unlock(&group->mutex);
+
+        if (run_again) {
+            struct aws_task *new_task = aws_mem_calloc(group->allocator, 1, sizeof(struct aws_task));
+            new_task->arg = group;
+            new_task->fn = s_render_task;
+
+            uint64_t run_at = 0;
+            aws_high_res_clock_get_ticks(&run_at);
+            /* run at TV framerate */
+            run_at += (AWS_TIMESTAMP_NANOS / 25);
+            aws_thread_scheduler_schedule_future(group->scheduler, new_task, run_at);
+        }
+    }
+
+    aws_mem_release(allocator, task);
+}
+
+void progress_listener_group_run_background_render_thread(struct progress_listener_group *group) {
+    aws_mutex_lock(&group->mutex);
+    group->run_in_background = true;
+    aws_mutex_unlock(&group->mutex);
+
+    struct aws_task *task = aws_mem_calloc(group->allocator, 1, sizeof(struct aws_task));
+    task->arg = group;
+    task->fn = s_render_task;
+
+    aws_thread_scheduler_schedule_now(group->scheduler, task);
 }
 
 struct progress_listener *progress_listener_new(
@@ -155,5 +209,5 @@ void progress_listener_render(struct progress_listener *listener) {
     }
 
     fprintf(group->render_sink, "]");
-    fprintf(group->render_sink, " %zu%%\n\n", completion);
+    fprintf(group->render_sink, " %llu/%llu (%zu%%)\n\n", listener->current, listener->max, completion);
 }
