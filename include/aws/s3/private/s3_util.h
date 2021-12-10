@@ -12,7 +12,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/s3/s3.h>
 
-#if DEBUG_BUILD
+#if ASSERT_LOCK_HELD
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)                                                                       \
         {                                                                                                              \
             int cached_error = aws_last_error();                                                                       \

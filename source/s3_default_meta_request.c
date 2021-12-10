@@ -255,13 +255,17 @@ static void s_s3_meta_request_default_request_finished(
     AWS_PRECONDITION(meta_request_default);
 
     if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL &&
-        meta_request->headers_callback(
-            meta_request,
-            request->send_data.response_headers,
-            request->send_data.response_status,
-            meta_request->user_data)) {
+        request->send_data.response_headers != NULL) {
 
-        error_code = aws_last_error_or_unknown();
+        if (meta_request->headers_callback(
+                meta_request,
+                request->send_data.response_headers,
+                request->send_data.response_status,
+                meta_request->user_data)) {
+            error_code = aws_last_error_or_unknown();
+        }
+
+        meta_request->headers_callback = NULL;
     }
 
     aws_s3_meta_request_lock_synced_data(meta_request);

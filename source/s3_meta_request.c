@@ -1145,6 +1145,17 @@ unlock:
         aws_s3_request_release(release_request);
     }
 
+    if (meta_request->headers_callback && finish_result.error_response_headers) {
+        if (meta_request->headers_callback(
+                meta_request,
+                finish_result.error_response_headers,
+                finish_result.response_status,
+                meta_request->user_data)) {
+            finish_result.error_code = aws_last_error_or_unknown();
+        }
+        meta_request->headers_callback = NULL;
+    }
+
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Meta request finished with error code %d (%s)",
