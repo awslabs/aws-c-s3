@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 #include "aws/s3/private/s3_checksums.h"
+#include <aws/cal/hash.h>
 #include <aws/common/byte_buf.h>
 #include <aws/testing/aws_test_harness.h>
 
@@ -36,7 +37,7 @@ static int s_md5_rfc1321_test_case_1_fn(struct aws_allocator *allocator, void *c
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_1, s_md5_rfc1321_test_case_1_fn)
@@ -65,7 +66,7 @@ static int s_md5_rfc1321_test_case_2_fn(struct aws_allocator *allocator, void *c
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_2, s_md5_rfc1321_test_case_2_fn)
@@ -94,7 +95,7 @@ static int s_md5_rfc1321_test_case_3_fn(struct aws_allocator *allocator, void *c
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_3, s_md5_rfc1321_test_case_3_fn)
@@ -123,7 +124,7 @@ static int s_md5_rfc1321_test_case_4_fn(struct aws_allocator *allocator, void *c
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_4, s_md5_rfc1321_test_case_4_fn)
@@ -152,7 +153,7 @@ static int s_md5_rfc1321_test_case_5_fn(struct aws_allocator *allocator, void *c
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_5, s_md5_rfc1321_test_case_5_fn)
@@ -182,7 +183,7 @@ static int s_md5_rfc1321_test_case_6_fn(struct aws_allocator *allocator, void *c
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_6, s_md5_rfc1321_test_case_6_fn)
@@ -212,7 +213,7 @@ static int s_md5_rfc1321_test_case_7_fn(struct aws_allocator *allocator, void *c
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_7, s_md5_rfc1321_test_case_7_fn)
@@ -234,7 +235,7 @@ static int s_md5_rfc1321_test_case_7_truncated_fn(struct aws_allocator *allocato
     };
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_md5_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_MD5);
 }
 
 AWS_TEST_CASE(md5_rfc1321_test_case_7_truncated, s_md5_rfc1321_test_case_7_truncated_fn)
@@ -291,7 +292,7 @@ static int s_md5_verify_known_collision_fn(struct aws_allocator *allocator, void
 
     struct aws_byte_cursor message_1_buf = aws_byte_cursor_from_array(message_1, sizeof(message_1));
 
-    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_MD5, &message_1_buf, &output1_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_SCA_MD5, &message_1_buf, &output1_buf, 0));
     ASSERT_BIN_ARRAYS_EQUALS(collision_result, sizeof(collision_result), output1, sizeof(output1));
 
     uint8_t output2[AWS_MD5_LEN] = {0};
@@ -300,7 +301,7 @@ static int s_md5_verify_known_collision_fn(struct aws_allocator *allocator, void
 
     struct aws_byte_cursor message_2_buf = aws_byte_cursor_from_array(message_2, sizeof(message_2));
 
-    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_MD5, &message_2_buf, &output2_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_SCA_MD5, &message_2_buf, &output2_buf, 0));
     ASSERT_BIN_ARRAYS_EQUALS(collision_result, sizeof(collision_result), output2, sizeof(output2));
 
     aws_s3_library_clean_up();
@@ -322,7 +323,7 @@ static int s_md5_invalid_buffer_size_fn(struct aws_allocator *allocator, void *c
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 1;
 
-    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_MD5, &input, &output_buf, 0));
+    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_SCA_MD5, &input, &output_buf, 0));
 
     aws_s3_library_clean_up();
 
@@ -339,7 +340,7 @@ static int s_md5_test_invalid_state_fn(struct aws_allocator *allocator, void *ct
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("123456789012345678901234567890123456789012345"
                                                               "67890123456789012345678901234567890");
 
-    struct aws_checksum *checksum = aws_md5_checksum_new(allocator);
+    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_MD5);
     ASSERT_NOT_NULL(checksum);
 
     uint8_t output[AWS_MD5_LEN] = {0};

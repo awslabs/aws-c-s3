@@ -7,6 +7,7 @@
 #include "s3_tester.h"
 #include <aws/common/byte_buf.h>
 #include <aws/common/encoding.h>
+#include <aws/io/stream.h>
 #include <aws/testing/aws_test_harness.h>
 
 static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_byte_cursor *input, size_t buffer_size) {
@@ -16,9 +17,9 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
     struct aws_byte_buf read_buf;
     size_t encoded_len = 0;
     aws_byte_buf_init(&read_buf, allocator, buffer_size);
-    for (int algorithm = AWS_CRC32C; algorithm <= AWS_MD5; algorithm++) {
-        aws_base64_compute_encoded_len(digest_size_from_algorithm(algorithm), &encoded_len);
-        aws_byte_buf_init(&compute_checksum_output, allocator, digest_size_from_algorithm(algorithm));
+    for (int algorithm = AWS_SCA_CRC32C; algorithm <= AWS_SCA_MD5; algorithm++) {
+        aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len);
+        aws_byte_buf_init(&compute_checksum_output, allocator, aws_get_digest_size_from_algorithm(algorithm));
         aws_byte_buf_init(&stream_checksum_output, allocator, encoded_len);
         aws_byte_buf_init(&compute_encoded_checksum_output, allocator, encoded_len);
         aws_checksum_compute(allocator, algorithm, input, &compute_checksum_output, 0);
@@ -62,7 +63,7 @@ static int s_compute_chunk_stream(
     struct aws_byte_cursor final_chunk = aws_byte_cursor_from_string(s_final_chunk);
     struct aws_byte_cursor post_trailer = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_buf checksum_result;
-    aws_byte_buf_init(&checksum_result, allocator, digest_size_from_algorithm(algorithm));
+    aws_byte_buf_init(&checksum_result, allocator, aws_get_digest_size_from_algorithm(algorithm));
     if (aws_byte_buf_append(output, &pre_chunk_cursor)) {
         return AWS_OP_ERR;
     }
@@ -121,8 +122,8 @@ static int compare_chunk_stream(
     size_t encoded_len = 0;
     struct aws_byte_buf read_buf;
     aws_byte_buf_init(&read_buf, allocator, buffer_size);
-    for (int algorithm = AWS_CRC32C; algorithm <= AWS_MD5; algorithm++) {
-        aws_base64_compute_encoded_len(digest_size_from_algorithm(algorithm), &encoded_len);
+    for (int algorithm = AWS_SCA_CRC32C; algorithm <= AWS_SCA_MD5; algorithm++) {
+        aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len);
         size_t total_len = len_no_checksum + encoded_len;
         aws_byte_buf_init(&compute_chunk_output, allocator, total_len);
         aws_byte_buf_init(&stream_chunk_output, allocator, total_len);

@@ -157,45 +157,44 @@ struct aws_input_stream *aws_chunk_stream_new(
     stream->vtable = &s_aws_input_chunk_stream_vtable;
     int64_t stream_length = 0;
     if (aws_input_stream_get_length(existing_stream, &stream_length)) {
-        goto error3;
+        goto error;
     }
     struct aws_byte_cursor pre_chunk_cursor = aws_byte_cursor_from_string(s_pre_chunk);
-    // Should a claculate the length here with a log algirthm?
-    // 2^64 is 20 digits long so if this overflows so do our int_64 lengths.
+    /*
+     * Should I claculate the length here with a log algirthm?
+     * 2^64 is 20 digits long so if this overflows so do our int_64 lengths.
+     */
     char stream_length_string[32];
     AWS_ZERO_ARRAY(stream_length_string);
-    // #if _MSC_VER
-    // #    pragma warning(disable : 4996) /* sprintf */
-    // #endif
-    snprintf(stream_length_string, 31, "%" PRId64, stream_length);
+    snprintf(stream_length_string, AWS_ARRAY_SIZE(stream_length_string), "%" PRId64, stream_length);
     struct aws_string *stream_length_aws_string = aws_string_new_from_c_str(allocator, stream_length_string);
     struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_string(stream_length_aws_string);
     if (aws_byte_buf_init(&impl->pre_chunk_buffer, allocator, stream_length_cursor.len + pre_chunk_cursor.len)) {
-        goto error3;
+        goto error;
     }
     if (aws_byte_buf_append(&impl->pre_chunk_buffer, &stream_length_cursor)) {
-        goto error2;
+        goto error;
     }
     aws_string_destroy(stream_length_aws_string);
     if (aws_byte_buf_append(&impl->pre_chunk_buffer, &pre_chunk_cursor)) {
-        goto error2;
+        goto error;
     }
     struct aws_byte_cursor complete_pre_chunk_cursor = aws_byte_cursor_from_buf(&impl->pre_chunk_buffer);
     impl->current_stream = aws_input_stream_new_from_cursor(allocator, &complete_pre_chunk_cursor);
     if (impl->current_stream == NULL) {
-        goto error2;
+        goto error;
     }
-    size_t checksum_len = digest_size_from_algorithm(algorithm);
+    size_t checksum_len = aws_get_digest_size_from_algorithm(algorithm);
     size_t encoded_checksum_len = 0;
     if (aws_base64_compute_encoded_len(checksum_len, &encoded_checksum_len)) {
-        goto error2;
+        goto error;
     }
     if (aws_byte_buf_init(&impl->checksum_result, allocator, encoded_checksum_len)) {
-        goto error2;
+        goto error;
     }
     impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_result);
     if (impl->checksum_stream == NULL) {
-        goto error1;
+        goto error;
     }
     impl->set_current_stream_fn = s_set_chunk_stream;
     int64_t prechunk_stream_len = 0;
@@ -211,11 +210,8 @@ struct aws_input_stream *aws_chunk_stream_new(
 
 error:
     aws_input_stream_destroy(impl->checksum_stream);
-error1:
     aws_input_stream_destroy(impl->current_stream);
-error2:
     aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
-error3:
     aws_mem_release(stream->allocator, stream);
     return NULL;
 }

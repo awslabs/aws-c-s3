@@ -7,6 +7,8 @@
 #include <aws/testing/aws_test_harness.h>
 
 #include <s3_checksums_test_case_helper.h>
+
+#define AWS_CRC32_LEN 4
 /*
  * these are the NIST test vectors, as compiled here:
  * https://www.di-mgt.com.au/sha_testvectors.html
@@ -19,7 +21,7 @@ static int s_crc32_nist_test_case_1_fn(struct aws_allocator *allocator, void *ct
     uint8_t expected[] = {0x35, 0x24, 0x41, 0xc2};
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_crc32_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_CRC32);
 }
 
 AWS_TEST_CASE(crc32_nist_test_case_1, s_crc32_nist_test_case_1_fn)
@@ -31,7 +33,7 @@ static int s_crc32_nist_test_case_2_fn(struct aws_allocator *allocator, void *ct
     uint8_t expected[] = {0x00, 0x00, 0x00, 0x00};
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_crc32_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_CRC32);
 }
 
 AWS_TEST_CASE(crc32_nist_test_case_2, s_crc32_nist_test_case_2_fn)
@@ -44,7 +46,7 @@ static int s_crc32_nist_test_case_3_fn(struct aws_allocator *allocator, void *ct
     uint8_t expected[] = {0x17, 0x1a, 0x3f, 0x5f};
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_crc32_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_CRC32);
 }
 
 AWS_TEST_CASE(crc32_nist_test_case_3, s_crc32_nist_test_case_3_fn)
@@ -58,7 +60,7 @@ static int s_crc32_nist_test_case_4_fn(struct aws_allocator *allocator, void *ct
     uint8_t expected[] = {0x19, 0x1f, 0x33, 0x49};
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
 
-    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_crc32_checksum_new);
+    return s_verify_checksum_test_case(allocator, &input, &expected_buf, aws_checksum_new, AWS_SCA_CRC32);
 }
 
 AWS_TEST_CASE(crc32_nist_test_case_4, s_crc32_nist_test_case_4_fn)
@@ -68,7 +70,7 @@ static int s_crc32_nist_test_case_5_fn(struct aws_allocator *allocator, void *ct
 
     aws_s3_library_init(allocator);
 
-    struct aws_checksum *checksum = aws_crc32_checksum_new(allocator);
+    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_CRC32);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
 
@@ -99,7 +101,7 @@ static int s_crc32_nist_test_case_5_truncated_fn(struct aws_allocator *allocator
 
     aws_s3_library_init(allocator);
 
-    struct aws_checksum *checksum = aws_crc32_checksum_new(allocator);
+    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_CRC32);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
 
@@ -130,7 +132,7 @@ static int s_crc32_nist_test_case_6_fn(struct aws_allocator *allocator, void *ct
 
     aws_s3_library_init(allocator);
 
-    struct aws_checksum *checksum = aws_crc32_checksum_new(allocator);
+    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_CRC32);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input =
         aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno");
@@ -170,7 +172,7 @@ static int s_crc32_test_invalid_buffer_fn(struct aws_allocator *allocator, void 
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 1;
 
-    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_CRC32, &input, &output_buf, 0));
+    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_SCA_CRC32, &input, &output_buf, 0));
 
     aws_s3_library_clean_up();
 
@@ -193,7 +195,7 @@ static int s_crc32_test_oneshot_fn(struct aws_allocator *allocator, void *ctx) {
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 0;
 
-    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_CRC32, &input, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_SCA_CRC32, &input, &output_buf, 0));
     ASSERT_BIN_ARRAYS_EQUALS(expected, sizeof(expected), output_buf.buffer, output_buf.len);
 
     aws_s3_library_clean_up();
@@ -212,7 +214,7 @@ static int s_crc32_test_invalid_state_fn(struct aws_allocator *allocator, void *
                                                               "klmghijklmnhijklmnoijklmnopjklmnopqklm"
                                                               "nopqrlmnopqrsmnopqrstnopqrstu");
 
-    struct aws_checksum *checksum = aws_crc32_checksum_new(allocator);
+    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_CRC32);
     ASSERT_NOT_NULL(checksum);
 
     uint8_t output[AWS_CRC32_LEN] = {0};

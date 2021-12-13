@@ -4,13 +4,15 @@
  */
 #include "aws/s3/private/s3_checksums.h"
 
-typedef struct aws_checksum *(aws_checksum_new_fn)(struct aws_allocator *allocator);
+typedef struct aws_checksum *(
+    aws_checksum_new_fn)(struct aws_allocator *allocator, enum aws_s3_checksum_algorithm algorithm);
 
 static inline int s_verify_checksum_test_case(
     struct aws_allocator *allocator,
     struct aws_byte_cursor *input,
     struct aws_byte_cursor *expected,
-    aws_checksum_new_fn *new_fn) {
+    aws_checksum_new_fn *new_fn,
+    enum aws_s3_checksum_algorithm algorithm) {
 
     aws_s3_library_init(allocator);
 
@@ -21,7 +23,7 @@ static inline int s_verify_checksum_test_case(
         struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, expected->len);
         output_buf.len = 0;
 
-        struct aws_checksum *checksum = new_fn(allocator);
+        struct aws_checksum *checksum = new_fn(allocator, algorithm);
         ASSERT_NOT_NULL(checksum);
 
         struct aws_byte_cursor input_cpy = *input;
