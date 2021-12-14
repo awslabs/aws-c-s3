@@ -156,6 +156,14 @@ static void s_meta_request_finish(
 
     (void)meta_request;
 
+    if (meta_request_result->error_code != AWS_ERROR_SUCCESS) {
+        fprintf(
+            stderr,
+            "Meta request failed with error '%s', response status code: %d\n",
+            aws_error_debug_str(meta_request_result->error_code),
+            meta_request_result->response_status);
+    }
+
     /* copy finished. triggers the condition variable to exit the application. */
     struct app_ctx *app_ctx = user_data;
     aws_mutex_lock(&app_ctx->mutex);
@@ -173,6 +181,7 @@ static int s_meta_request_headers(
     (void)meta_request;
     (void)headers;
     (void)user_data;
+    (void)response_status;
 
     return 0;
 }

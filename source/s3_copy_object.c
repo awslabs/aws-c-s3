@@ -405,19 +405,6 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
             break;
         }
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY: {
-
-            size_t request_body_size = copy_object->synced_data.part_size;
-
-            /* Last part--adjust size to match remaining content length. */
-            if (request->part_number == copy_object->synced_data.total_num_parts) {
-                size_t content_remainder =
-                    (size_t)(copy_object->synced_data.content_length % (uint64_t)copy_object->synced_data.part_size);
-
-                if (content_remainder > 0) {
-                    request_body_size = content_remainder;
-                }
-            }
-
             /* Create a new uploadPartCopy message to upload a part. */
             /* compute sub-request range */
             size_t range_start = (request->part_number - 1) * copy_object->synced_data.part_size;
