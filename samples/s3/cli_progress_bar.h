@@ -1,5 +1,5 @@
-#ifndef CLI_PROGRESS_BAR
-#define CLI_PROGRESS_BAR
+#ifndef CLI_PROGRESS_BAR_H
+#define CLI_PROGRESS_BAR_H
 
 /**
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -68,4 +68,4 @@ void progress_listener_update_label(struct progress_listener *listener, struct a
  */
 void progress_listener_render(struct progress_listener *listener);
 
-#endif /* CLI_PROGRESS_BAR */
+#endif /* CLI_PROGRESS_BAR_H */
