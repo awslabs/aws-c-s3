@@ -454,7 +454,8 @@ int aws_s3_message_util_add_checksum_header(
 
     /* Compute MD5 */
     struct aws_byte_cursor checksum_input = aws_byte_cursor_from_buf(input_buf);
-    uint8_t checksum_output[aws_get_digest_size_from_algorithm(algorithm)];
+    size_t output_size = aws_get_digest_size_from_algorithm(algorithm);
+    uint8_t checksum_output[output_size];
     struct aws_byte_buf checksum_output_buf = aws_byte_buf_from_empty_array(checksum_output, sizeof(checksum_output));
     if (aws_checksum_compute(allocator, algorithm, &checksum_input, &checksum_output_buf, 0)) {
         return AWS_OP_ERR;
