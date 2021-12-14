@@ -263,8 +263,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
     uint32_t part_number,
-    size_t range_start,
-    size_t range_end,
+    uint64_t range_start,
+    uint64_t range_end,
     const struct aws_string *upload_id,
     bool should_compute_content_md5) {
     AWS_PRECONDITION(allocator);
@@ -295,7 +295,7 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     }
 
     char source_range[1024];
-    snprintf(source_range, sizeof(source_range), "bytes=%zu-%zu", range_start, range_end);
+    snprintf(source_range, sizeof(source_range), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end);
 
     struct aws_http_header source_range_header = {
         .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),

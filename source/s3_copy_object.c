@@ -407,8 +407,8 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY: {
             /* Create a new uploadPartCopy message to upload a part. */
             /* compute sub-request range */
-            size_t range_start = (request->part_number - 1) * copy_object->synced_data.part_size;
-            size_t range_end = range_start + copy_object->synced_data.part_size - 1;
+            uint64_t range_start = (request->part_number - 1) * copy_object->synced_data.part_size;
+            uint64_t range_end = range_start + copy_object->synced_data.part_size - 1;
             if (range_end >= copy_object->synced_data.content_length) {
                 /* adjust size of last part */
                 range_end = copy_object->synced_data.content_length - 1;

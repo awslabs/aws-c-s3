@@ -75,8 +75,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
     uint32_t part_number,
-    size_t range_start,
-    size_t range_end,
+    uint64_t range_start,
+    uint64_t range_end,
     const struct aws_string *upload_id,
     bool should_compute_content_md5);
 
