@@ -51,6 +51,14 @@ enum aws_s3_meta_request_type {
      */
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
 
+    /**
+     * The CopyObject meta request performs a multi-part copy
+     * using multiple S3 UploadPartCopy requests in parallel, or bypasses
+     * a CopyObject request to S3 if the object size is not large enough for
+     * a multipart upload.
+     */
+    AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
+
     AWS_S3_META_REQUEST_TYPE_MAX,
 };
 

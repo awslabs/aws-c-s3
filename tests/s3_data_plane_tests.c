@@ -3431,3 +3431,23 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
 
     return 0;
 }
+
+AWS_TEST_CASE(test_s3_copy_small_object, s_test_s3_copy_small_object)
+static int s_test_s3_copy_small_object(struct aws_allocator *allocator, void *ctx) {
+
+    /* TODO: work in progress */
+    (void)ctx;
+    (void)allocator;
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_multipart_copy_large_object, s_test_s3_multipart_copy_large_object)
+static int s_test_s3_multipart_copy_large_object(struct aws_allocator *allocator, void *ctx) {
+
+    /* TODO: work in progress */
+    (void)ctx;
+    (void)allocator;
+
+    return 0;
+}
