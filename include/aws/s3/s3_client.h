@@ -118,6 +118,7 @@ enum aws_s3_checksum_algorithm {
 };
 
 enum aws_s3_meta_request_flexible_checksum_location {
+    AWS_MR_FC_NONE,
     AWS_MR_FC_HEADER,
     AWS_MR_FC_TRAILER,
 };
@@ -125,7 +126,6 @@ enum aws_s3_meta_request_flexible_checksum_location {
 struct aws_s3_meta_request_flexible_checksums_options {
     enum aws_s3_checksum_algorithm checksum_algorithm;
     enum aws_s3_meta_request_flexible_checksum_location checksum_location;
-    struct aws_string *checksum_name;
 };
 
 /* Options for a new client. */

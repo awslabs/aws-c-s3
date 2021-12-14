@@ -6,6 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 #include "aws/s3/s3.h"
+/* is this appropriate to include here? */
+#include "aws/s3/s3_client.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -91,10 +93,11 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
 
 /* Add content-md5 header to the http message passed in. The MD5 will be computed from the input_buf */
 AWS_S3_API
-int aws_s3_message_util_add_content_md5_header(
+int aws_s3_message_util_add_checksum_header(
     struct aws_allocator *allocator,
     struct aws_byte_buf *input_buf,
-    struct aws_http_message *message);
+    struct aws_http_message *message,
+    enum aws_s3_checksum_algorithm algorithm);
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[];

@@ -1,4 +1,5 @@
 #include "aws/s3/private/s3_checksums.h"
+#include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
 #include <aws/checksums/crc.h>
 #include <aws/io/stream.h>
@@ -21,6 +22,26 @@ size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorit
         default:
             AWS_ASSERT(false);
             return 0;
+    }
+}
+
+struct aws_byte_cursor aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
+    switch (algorithm) {
+        case AWS_SCA_CRC32C:
+            return g_crc32c_header_name;
+        case AWS_SCA_CRC32:
+            return g_crc32_header_name;
+        case AWS_SCA_SHA1:
+            return g_sha1_header_name;
+        case AWS_SCA_SHA256:
+            return g_sha256_header_name;
+        case AWS_SCA_MD5:
+            return g_content_md5_header_name;
+        default:
+            AWS_ASSERT(false);
+            struct aws_byte_cursor invalid_algorithm_enum_val;
+            AWS_ZERO_STRUCT(invalid_algorithm_enum_val);
+            return invalid_algorithm_enum_val;
     }
 }
 

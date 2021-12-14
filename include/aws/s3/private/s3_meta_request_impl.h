@@ -177,6 +177,8 @@ struct aws_s3_meta_request {
     } client_process_work_threaded_data;
 
     const bool should_compute_content_md5;
+
+    struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options;
 };
 
 AWS_EXTERN_C_BEGIN

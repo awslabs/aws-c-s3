@@ -109,8 +109,8 @@ static int s_aws_input_chunk_stream_get_status(struct aws_input_stream *stream, 
 }
 
 static int s_aws_input_chunk_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
-    (void)stream;
-    (void)out_length;
+    struct aws_chunk_stream *impl = stream->impl;
+    *out_length = impl->length;
     return AWS_OP_SUCCESS;
 }
 

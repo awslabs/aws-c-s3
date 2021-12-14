@@ -228,7 +228,7 @@ static int s_s3_meta_request_default_prepare_request(
         meta_request->allocator, meta_request->initial_request_message, NULL, 0);
 
     if (meta_request->should_compute_content_md5) {
-        aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
+        aws_s3_message_util_add_checksum_header(meta_request->allocator, &request->request_body, message, AWS_SCA_MD5);
     }
 
     aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);

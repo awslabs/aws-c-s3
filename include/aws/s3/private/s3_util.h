@@ -54,6 +54,18 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_content_md5_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_crc32c_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha1_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha256_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_s3_client_version;
 
 AWS_S3_API
