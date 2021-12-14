@@ -253,7 +253,9 @@ struct aws_http_message *copy_object_request_new(
     aws_byte_buf_append_encoding_uri_param(&copy_source_value_encoded, &copy_source_cursor);
 
     struct aws_http_header copy_source_header = {
-        .name = g_x_amz_copy_source_name, .value = aws_byte_cursor_from_buf(&copy_source_value_encoded)};
+        .name = g_x_amz_copy_source_name,
+        .value = aws_byte_cursor_from_buf(&copy_source_value_encoded),
+    };
     if (aws_http_message_add_header(message, copy_source_header)) {
         goto error_clean_up_message;
     }
@@ -290,12 +292,14 @@ int main(int argc, char *argv[]) {
     struct aws_byte_cursor source_bucket = app_ctx.source_uri.host_name;
     struct aws_byte_cursor source_key = {
         .ptr = app_ctx.source_uri.path.ptr + 1, /* skips the initial / */
-        .len = app_ctx.source_uri.path.len - 1};
+        .len = app_ctx.source_uri.path.len - 1,
+    };
 
     struct aws_byte_cursor destination_bucket = app_ctx.destination_uri.host_name;
     struct aws_byte_cursor destination_key = {
         .ptr = app_ctx.destination_uri.path.ptr + 1, /* skips the initial / */
-        .len = app_ctx.destination_uri.path.len - 1};
+        .len = app_ctx.destination_uri.path.len - 1,
+    };
 
     /* TODO: remove debug messages below */
     printf("source bucket: %.*s\n", (int)source_bucket.len, source_bucket.ptr);
@@ -370,7 +374,8 @@ int main(int argc, char *argv[]) {
         .headers_callback = s_meta_request_headers,
         .message = message,
         .shutdown_callback = s_meta_request_shutdown,
-        .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT};
+        .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
+    };
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
     if (meta_request == NULL) {

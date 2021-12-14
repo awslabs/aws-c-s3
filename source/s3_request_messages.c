@@ -299,7 +299,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
 
     struct aws_http_header source_range_header = {
         .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
-        .value = aws_byte_cursor_from_c_str(source_range)};
+        .value = aws_byte_cursor_from_c_str(source_range),
+    };
 
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     aws_http_headers_add_header(headers, &source_range_header);
@@ -354,7 +355,9 @@ struct aws_http_message *aws_s3_get_object_size_message_new(
         (int)source_bucket.len,
         source_bucket.ptr);
     struct aws_http_header host_header = {
-        .name = g_host_header_name, .value = aws_byte_cursor_from_c_str(host_header_value)};
+        .name = g_host_header_name,
+        .value = aws_byte_cursor_from_c_str(host_header_value),
+    };
     aws_http_message_add_header(message, host_header);
 
     aws_http_message_set_body_stream(message, NULL);
