@@ -224,7 +224,7 @@ struct aws_http_message *copy_object_request_new(
         return NULL;
     }
 
-    // the URI path is / followed by the key
+    /* the URI path is / followed by the key */
     char destination_path[1024];
     snprintf(destination_path, sizeof(destination_path), "/%.*s", (int)destination_key.len, destination_key.ptr);
 
@@ -264,10 +264,12 @@ struct aws_http_message *copy_object_request_new(
         goto error_clean_up_message;
     }
 
+    aws_byte_buf_clean_up(&copy_source_value_encoded);
     return message;
 
 error_clean_up_message:
 
+    aws_byte_buf_clean_up(&copy_source_value_encoded);
     if (message != NULL) {
         aws_http_message_release(message);
         message = NULL;
@@ -382,7 +384,7 @@ int main(int argc, char *argv[]) {
         printf("*** meta_request IS NULL\n");
     }
 
-    /* wait completion of last page */
+    /* wait completion of the meta request */
     aws_mutex_lock(&app_ctx.mutex);
     aws_condition_variable_wait_pred(&app_ctx.c_var, &app_ctx.mutex, s_app_completion_predicate, &app_ctx);
     aws_mutex_unlock(&app_ctx.mutex);

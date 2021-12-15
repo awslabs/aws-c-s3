@@ -625,6 +625,7 @@ static void s_s3_copy_object_request_finished(
                 }
 
                 etag = aws_string_new_from_cursor(meta_request->allocator, &etag_within_quotes_byte_cursor);
+                aws_byte_buf_clean_up(&etag_within_quotes_byte_buf);
                 aws_string_destroy(etag_within_xml_quotes);
             }
 
