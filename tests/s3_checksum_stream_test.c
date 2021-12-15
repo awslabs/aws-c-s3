@@ -35,7 +35,6 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
             read_buf.len = 0;
             ASSERT_TRUE(aws_input_stream_get_status(stream, &status) == 0);
         }
-        aws_input_stream_destroy(cursor_stream);
         aws_input_stream_destroy(stream);
         ASSERT_TRUE(aws_byte_buf_eq(&compute_encoded_checksum_output, &stream_checksum_output));
         aws_byte_buf_clean_up(&compute_checksum_output);
@@ -51,6 +50,7 @@ AWS_STATIC_STRING_FROM_LITERAL(s_3pre_chunk, "3;\r\n");
 AWS_STATIC_STRING_FROM_LITERAL(s_57pre_chunk, "56;\r\n");
 AWS_STATIC_STRING_FROM_LITERAL(s_113pre_chunk, "112;\r\n");
 AWS_STATIC_STRING_FROM_LITERAL(s_final_chunk, "\r\n0;\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_colon, ":");
 AWS_STATIC_STRING_FROM_LITERAL(s_post_trailer, "\r\n\r\n");
 
 static int s_compute_chunk_stream(
@@ -61,6 +61,8 @@ static int s_compute_chunk_stream(
     enum aws_s3_checksum_algorithm algorithm) {
     struct aws_byte_cursor pre_chunk_cursor = aws_byte_cursor_from_string(pre_chunk);
     struct aws_byte_cursor final_chunk = aws_byte_cursor_from_string(s_final_chunk);
+    struct aws_byte_cursor checksum_header_name = aws_get_http_header_name_from_algorithm(algorithm);
+    struct aws_byte_cursor colon = aws_byte_cursor_from_string(s_colon);
     struct aws_byte_cursor post_trailer = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_buf checksum_result;
     aws_byte_buf_init(&checksum_result, allocator, aws_get_digest_size_from_algorithm(algorithm));
@@ -71,6 +73,12 @@ static int s_compute_chunk_stream(
         return AWS_OP_ERR;
     }
     if (aws_byte_buf_append(output, &final_chunk)) {
+        return AWS_OP_ERR;
+    }
+    if (aws_byte_buf_append(output, &checksum_header_name)) {
+        return AWS_OP_ERR;
+    }
+    if (aws_byte_buf_append(output, &colon)) {
         return AWS_OP_ERR;
     }
     if (aws_checksum_compute(allocator, algorithm, input, &checksum_result, 0)) {
@@ -104,8 +112,6 @@ static int s_stream_chunk(
         read_buf->len = 0;
         ASSERT_TRUE(aws_input_stream_get_status(stream, &status) == 0);
     }
-    aws_input_stream_destroy(cursor_stream);
-    // make sure cursor stream isn't also destroyed by chunk_stream.
     aws_input_stream_destroy(stream);
     return AWS_OP_SUCCESS;
 }
@@ -118,13 +124,13 @@ static int compare_chunk_stream(
 
     struct aws_byte_buf compute_chunk_output;
     struct aws_byte_buf stream_chunk_output;
-    size_t len_no_checksum = pre_chunk->len + input->len + s_final_chunk->len + s_post_trailer->len;
+    size_t len_no_checksum = pre_chunk->len + input->len + s_final_chunk->len + s_post_trailer->len + s_colon->len;
     size_t encoded_len = 0;
     struct aws_byte_buf read_buf;
     aws_byte_buf_init(&read_buf, allocator, buffer_size);
     for (int algorithm = AWS_SCA_CRC32C; algorithm <= AWS_SCA_MD5; algorithm++) {
         aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len);
-        size_t total_len = len_no_checksum + encoded_len;
+        size_t total_len = len_no_checksum + encoded_len + aws_get_http_header_name_from_algorithm(algorithm).len;
         aws_byte_buf_init(&compute_chunk_output, allocator, total_len);
         aws_byte_buf_init(&stream_chunk_output, allocator, total_len);
         ASSERT_SUCCESS(s_compute_chunk_stream(allocator, pre_chunk, input, &compute_chunk_output, algorithm));

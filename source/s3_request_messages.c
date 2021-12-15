@@ -210,7 +210,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_byte_buf *buffer,
     uint32_t part_number,
     const struct aws_string *upload_id,
-    bool should_compute_content_md5) {
+    bool should_compute_content_md5,
+    struct aws_s3_meta_request_flexible_checksums_options *checksum_options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
@@ -227,11 +228,18 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     }
 
     if (buffer != NULL) {
-        if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
-            goto error_clean_up;
+        if (checksum_options->checksum_algorithm && checksum_options->checksum_location == AWS_MR_FC_TRAILER) {
+            if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_options->checksum_algorithm) ==
+                NULL) {
+                goto error_clean_up;
+            }
+        } else {
+            if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE) == NULL) {
+                goto error_clean_up;
+            }
         }
 
-        if (should_compute_content_md5) {
+        if (!checksum_options->checksum_algorithm && should_compute_content_md5) {
             if (aws_s3_message_util_add_checksum_header(allocator, buffer, message, AWS_SCA_MD5)) {
                 goto error_clean_up;
             }
@@ -354,7 +362,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        aws_s3_message_util_assign_body(allocator, body_buffer, message);
+        /* come back to this to see what needs to be done */
+        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE);
     }
 
     return message;
@@ -402,10 +411,13 @@ error_clean_up:
 }
 
 /* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
+/* TODO chunk-stream needs to add header name to
+ * stream, content length needs to use the input_stream get-length function */
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
-    struct aws_http_message *out_message) {
+    struct aws_http_message *out_message,
+    enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
     AWS_PRECONDITION(byte_buf);
@@ -422,9 +434,18 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     if (input_stream == NULL) {
         goto error_clean_up;
     }
-
+    if (algorithm) {
+        input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm);
+        if (input_stream) {
+            goto error_clean_up;
+        }
+    }
+    int64_t stream_length = 0;
+    if (aws_input_stream_get_length(input_stream, &stream_length)) {
+        goto error_clean_up;
+    }
     char content_length_buffer[64] = "";
-    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)buffer_byte_cursor.len);
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)stream_length);
     struct aws_byte_cursor content_length_cursor =
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
 
@@ -452,7 +473,7 @@ int aws_s3_message_util_add_checksum_header(
 
     AWS_PRECONDITION(out_message);
 
-    /* Compute MD5 */
+    /* Compute checksum */
     struct aws_byte_cursor checksum_input = aws_byte_cursor_from_buf(input_buf);
     const size_t output_size = aws_get_digest_size_from_algorithm(algorithm);
     struct aws_byte_buf checksum_output_buf;
@@ -461,7 +482,7 @@ int aws_s3_message_util_add_checksum_header(
         return AWS_OP_ERR;
     }
 
-    /* Compute Base64 encoding of MD5 */
+    /* Compute Base64 encoding of checksum */
     struct aws_byte_cursor base64_input = aws_byte_cursor_from_buf(&checksum_output_buf);
     size_t base64_output_size = 0;
     if (aws_base64_compute_encoded_len(checksum_output_buf.len, &base64_output_size)) {

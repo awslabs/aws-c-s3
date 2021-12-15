@@ -227,11 +227,20 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         meta_request->allocator, meta_request->initial_request_message, NULL, 0);
 
-    if (meta_request->should_compute_content_md5) {
+    enum aws_s3_meta_request_flexible_checksum_location checksum_location =
+        meta_request->flexible_checksum_options.checksum_location;
+    enum aws_s3_checksum_algorithm checksum_algorithm = meta_request->flexible_checksum_options.checksum_algorithm;
+    if (checksum_algorithm && checksum_location == AWS_MR_FC_HEADER) {
+        aws_s3_message_util_add_checksum_header(
+            meta_request->allocator, &request->request_body, message, checksum_algorithm);
+    } else if (!checksum_algorithm && meta_request->should_compute_content_md5) {
         aws_s3_message_util_add_checksum_header(meta_request->allocator, &request->request_body, message, AWS_SCA_MD5);
     }
-
-    aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
+    if (checksum_algorithm && checksum_location == AWS_MR_FC_TRAILER) {
+        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, checksum_algorithm);
+    } else {
+        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, AWS_SCA_NONE);
+    }
 
     aws_s3_request_setup_send_data(request, message);
 

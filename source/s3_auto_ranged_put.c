@@ -345,7 +345,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                 &request->request_body,
                 request->part_number,
                 auto_ranged_put->upload_id,
-                meta_request->should_compute_content_md5);
+                meta_request->should_compute_content_md5,
+                &meta_request->flexible_checksum_options);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {

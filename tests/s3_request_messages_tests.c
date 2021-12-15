@@ -500,7 +500,8 @@ static int s_test_s3_message_util_assign_body(struct aws_allocator *allocator, v
     struct aws_byte_buf test_buffer;
     ASSERT_SUCCESS(s_fill_byte_buf(&test_buffer, allocator, test_buffer_size));
 
-    struct aws_input_stream *input_stream = aws_s3_message_util_assign_body(allocator, &test_buffer, message);
+    struct aws_input_stream *input_stream =
+        aws_s3_message_util_assign_body(allocator, &test_buffer, message, AWS_SCA_NONE);
     ASSERT_TRUE(input_stream != NULL);
 
     ASSERT_TRUE(aws_http_message_get_body_stream(message) == input_stream);
@@ -705,8 +706,11 @@ static int s_test_s3_upload_part_message_new(struct aws_allocator *allocator, vo
 
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, UPLOAD_ID);
 
-    struct aws_http_message *upload_part_message =
-        aws_s3_upload_part_message_new(allocator, original_message, &part_buffer, PART_NUMBER, upload_id, false);
+    struct aws_s3_meta_request_flexible_checksums_options checksum_options;
+    AWS_ZERO_STRUCT(checksum_options);
+
+    struct aws_http_message *upload_part_message = aws_s3_upload_part_message_new(
+        allocator, original_message, &part_buffer, PART_NUMBER, upload_id, false, &checksum_options);
     ASSERT_TRUE(upload_part_message != NULL);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(upload_part_message, "PUT"));

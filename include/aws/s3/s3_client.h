@@ -110,6 +110,7 @@ enum aws_s3_meta_request_compute_content_md5 {
 };
 
 enum aws_s3_checksum_algorithm {
+    AWS_SCA_NONE = 0,
     AWS_SCA_CRC32C,
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
@@ -118,7 +119,6 @@ enum aws_s3_checksum_algorithm {
 };
 
 enum aws_s3_meta_request_flexible_checksum_location {
-    AWS_MR_FC_NONE,
     AWS_MR_FC_HEADER,
     AWS_MR_FC_TRAILER,
 };

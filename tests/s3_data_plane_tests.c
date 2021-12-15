@@ -1894,8 +1894,11 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
     uint32_t part_number = 1;
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
 
+    struct aws_s3_meta_request_flexible_checksums_options checksum_options;
+    AWS_ZERO_STRUCT(checksum_options);
+
     struct aws_http_message *new_message = aws_s3_upload_part_message_new(
-        allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5);
+        allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5, &checksum_options);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     if (should_compute_content_md5) {

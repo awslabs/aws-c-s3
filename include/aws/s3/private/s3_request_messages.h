@@ -32,7 +32,8 @@ AWS_S3_API
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
-    struct aws_http_message *out_message);
+    struct aws_http_message *out_message,
+    enum aws_s3_checksum_algorithm algorithm);
 
 /* Create an HTTP request for an S3 Ranged Get Object Request, using the given request as a basis */
 AWS_S3_API
@@ -66,7 +67,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_byte_buf *buffer,
     uint32_t part_number,
     const struct aws_string *upload_id,
-    bool should_compute_content_md5);
+    bool should_compute_content_md5,
+    struct aws_s3_meta_request_flexible_checksums_options *checksum_options);
 
 /* Create an HTTP request for an S3 Create-Multipart-Upload request. */
 AWS_S3_API
