@@ -3540,7 +3540,9 @@ static int s_test_s3_copy_object_helper(
     struct aws_allocator *allocator,
     void *ctx,
     struct aws_byte_cursor source_key,
-    struct aws_byte_cursor destination_key) {
+    struct aws_byte_cursor destination_key,
+    int expected_error_code,
+    int expected_response_status) {
 
     (void)ctx;
 
@@ -3590,9 +3592,7 @@ static int s_test_s3_copy_object_helper(
     };
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
-    if (meta_request == NULL) {
-        printf("*** meta_request IS NULL\n");
-    }
+    ASSERT_NOT_NULL(meta_request);
 
     /* wait completion of the meta request */
     aws_mutex_lock(&test_data.mutex);
@@ -3600,8 +3600,8 @@ static int s_test_s3_copy_object_helper(
     aws_mutex_unlock(&test_data.mutex);
 
     /* assert error_code and respose_status */
-    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, test_data.meta_request_error_code);
-    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, test_data.response_status_code);
+    ASSERT_INT_EQUALS(expected_error_code, test_data.meta_request_error_code);
+    ASSERT_INT_EQUALS(expected_response_status, test_data.response_status_code);
 
     aws_s3_meta_request_release(meta_request);
     aws_mutex_clean_up(&test_data.mutex);
@@ -3619,7 +3619,8 @@ static int s_test_s3_copy_small_object(struct aws_allocator *allocator, void *ct
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing_object_1MB.txt");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/get_object_test_1MB.txt");
-    return s_test_s3_copy_object_helper(allocator, ctx, source_key, destination_key);
+    return s_test_s3_copy_object_helper(
+        allocator, ctx, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
 }
 
 AWS_TEST_CASE(test_s3_multipart_copy_large_object, s_test_s3_multipart_copy_large_object)
@@ -3627,5 +3628,20 @@ static int s_test_s3_multipart_copy_large_object(struct aws_allocator *allocator
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("put_object_test_5GB_1.txt");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/put_object_test_5GB_1.txt");
-    return s_test_s3_copy_object_helper(allocator, ctx, source_key, destination_key);
+    return s_test_s3_copy_object_helper(
+        allocator, ctx, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+}
+
+AWS_TEST_CASE(test_s3_copy_object_invalid_source_key, s_test_s3_copy_object_invalid_source_key)
+static int s_test_s3_copy_object_invalid_source_key(struct aws_allocator *allocator, void *ctx) {
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("__INVALID__");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/__INVALID__");
+    return s_test_s3_copy_object_helper(
+        allocator,
+        ctx,
+        source_key,
+        destination_key,
+        AWS_ERROR_S3_INVALID_RESPONSE_STATUS,
+        AWS_HTTP_STATUS_CODE_404_NOT_FOUND);
 }

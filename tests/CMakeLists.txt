@@ -138,6 +138,7 @@ add_test_case(test_get_nonexistent_compute_platform_info)
 
 add_net_test_case(test_s3_copy_small_object)
 add_net_test_case(test_s3_multipart_copy_large_object)
+add_net_test_case(test_s3_copy_object_invalid_source_key)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

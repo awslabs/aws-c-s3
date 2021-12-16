@@ -96,10 +96,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
         goto error_clean_up;
     }
 
-    if (aws_array_list_init_dynamic(
-            &copy_object->synced_data.etag_list, allocator, s_etags_initial_capacity, sizeof(struct aws_string *))) {
-        goto error_clean_up;
-    }
+    aws_array_list_init_dynamic(
+        &copy_object->synced_data.etag_list, allocator, s_etags_initial_capacity, sizeof(struct aws_string *));
 
     copy_object->synced_data.content_length = UNKNOWN_CONTENT_LENGTH;
     copy_object->synced_data.total_num_parts = UNKNOWN_NUM_PARTS;
@@ -542,7 +540,6 @@ static void s_s3_copy_object_request_finished(
                     copy_object->synced_data.head_object_completed = true;
                 }
             } else {
-                /* TODO: test failure */
                 aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             }
 
