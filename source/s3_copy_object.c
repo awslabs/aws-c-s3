@@ -48,6 +48,23 @@ static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .finish = aws_s3_meta_request_finish_default,
 };
 
+static bool s_should_compute_content_md5(struct aws_s3_client *client, struct aws_http_message *message) {
+
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(message);
+
+    if (client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED) {
+        return true;
+    }
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    if (aws_http_headers_has(headers, g_content_md5_header_name)) {
+        return true;
+    }
+
+    return false;
+}
+
 /* Allocate a new copy object meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     struct aws_allocator *allocator,
@@ -71,8 +88,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
             allocator,
             client,
             UNKNOWN_PART_SIZE,
-            client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
-                aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
+            s_should_compute_content_md5(client, options->message),
             options,
             copy_object,
             &s_s3_copy_object_vtable,
