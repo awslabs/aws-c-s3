@@ -365,12 +365,14 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
     switch (request->request_tag) {
 
+        /* Prepares the GetObject HEAD request to get the source object size. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE: {
             message = aws_s3_get_source_object_size_message_new(
                 meta_request->allocator, meta_request->initial_request_message);
             break;
         }
 
+        /* The S3 object is not large enough for multi-part copy. Bypasses a copy of the original CopyObject request to S3. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS: {
             message = aws_s3_message_util_copy_http_message(
                 meta_request->allocator, meta_request->initial_request_message, NULL, 0);
@@ -382,6 +384,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
             break;
         }
 
+        /* Prepares the CreateMultipartUpload sub-request. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
             uint64_t part_size_uint64 = copy_object->synced_data.content_length / (uint64_t)g_s3_max_num_upload_parts;
 
@@ -424,6 +427,8 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
             break;
         }
+
+        /* Prepares the UploadPartCopy sub-request. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY: {
             /* Create a new uploadPartCopy message to upload a part. */
             /* compute sub-request range */
@@ -454,6 +459,8 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                 meta_request->should_compute_content_md5);
             break;
         }
+
+        /* Prepares the CompleteMultiPartUpload sub-request. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
 
             if (request->num_times_prepared == 0) {
@@ -478,6 +485,8 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
             break;
         }
+
+        /* Prepares the AbortMultiPartUpload sub-request. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
             AWS_FATAL_ASSERT(copy_object->upload_id);
             AWS_LOGF_DEBUG(
