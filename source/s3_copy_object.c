@@ -552,7 +552,6 @@ static void s_s3_copy_object_request_finished(
                 copy_object->synced_data.copy_request_bypass_completed = true;
             } else {
                 /* Bypassed CopyObject request failed */
-                /* TODO: test failure */
                 aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             }
             break;

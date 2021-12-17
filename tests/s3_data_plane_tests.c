@@ -3523,6 +3523,15 @@ static void s_copy_object_meta_request_finish(
 
     struct copy_object_test_data *test_data = user_data;
 
+    /* if error response body is available, dump it to test result to help investigation of failed tests */
+    if (meta_request_result->error_response_body != NULL && meta_request_result->error_response_body->len > 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Response error body: %.*s",
+            (int)meta_request_result->error_response_body->len,
+            meta_request_result->error_response_body->buffer);
+    }
+
     aws_mutex_lock(&test_data->mutex);
     test_data->meta_request_error_code = meta_request_result->error_code;
     test_data->response_status_code = meta_request_result->response_status;
@@ -3599,7 +3608,7 @@ static int s_test_s3_copy_object_helper(
     aws_condition_variable_wait_pred(&test_data.c_var, &test_data.mutex, s_copy_test_completion_predicate, &test_data);
     aws_mutex_unlock(&test_data.mutex);
 
-    /* assert error_code and respose_status */
+    /* assert error_code and response_status_code */
     ASSERT_INT_EQUALS(expected_error_code, test_data.meta_request_error_code);
     ASSERT_INT_EQUALS(expected_response_status, test_data.response_status_code);
 
