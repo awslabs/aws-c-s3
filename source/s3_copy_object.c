@@ -412,6 +412,12 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
             copy_object->synced_data.total_num_parts = num_parts;
             copy_object->synced_data.part_size = part_size;
 
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "Starting multi-part Copy using part size=%zu, total_num_parts=%zu",
+                part_size,
+                (size_t)num_parts);
+
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
                 meta_request->allocator, meta_request->initial_request_message);
@@ -427,6 +433,15 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                 /* adjust size of last part */
                 range_end = copy_object->synced_data.content_length - 1;
             }
+
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "Starting UploadPartCopy for partition %" PRIu32 ", range_start=%" PRIu64 ", range_end=%" PRIu64
+                ", full object length=%" PRIu64,
+                request->part_number,
+                range_start,
+                range_end,
+                copy_object->synced_data.content_length);
 
             message = aws_s3_upload_part_copy_message_new(
                 meta_request->allocator,
