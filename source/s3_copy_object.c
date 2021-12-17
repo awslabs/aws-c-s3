@@ -7,7 +7,6 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
-#include <aws/http/private/strutil.h>
 #include <aws/io/stream.h>
 
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
@@ -551,7 +550,7 @@ static void s_s3_copy_object_request_finished(
                 if (!aws_http_headers_get(
                         request->send_data.response_headers, g_content_length_header_name, &content_length_cursor)) {
 
-                    if (!aws_strutil_read_unsigned_num(
+                    if (!aws_s3_strutil_read_unsigned_num(
                             content_length_cursor, &copy_object->synced_data.content_length)) {
                         copy_object->synced_data.head_object_completed = true;
                     } else {
