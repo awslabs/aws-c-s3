@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
+#include <aws/http/private/strutil.h>
 #include <aws/io/stream.h>
 
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
@@ -546,13 +547,22 @@ static void s_s3_copy_object_request_finished(
 
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE: {
             if (error_code == AWS_ERROR_SUCCESS) {
-                struct aws_byte_cursor content_length_string;
+                struct aws_byte_cursor content_length_cursor;
                 if (!aws_http_headers_get(
-                        request->send_data.response_headers, g_content_length_header_name, &content_length_string)) {
-                    char *content_length_str_end = NULL;
-                    copy_object->synced_data.content_length =
-                        strtoull((const char *)content_length_string.ptr, &content_length_str_end, 10);
-                    copy_object->synced_data.head_object_completed = true;
+                        request->send_data.response_headers, g_content_length_header_name, &content_length_cursor)) {
+
+                    if (!aws_strutil_read_unsigned_num(
+                            content_length_cursor, &copy_object->synced_data.content_length)) {
+                        copy_object->synced_data.head_object_completed = true;
+                    } else {
+                        /* HEAD request returned an invalid content-length */
+                        aws_s3_meta_request_set_fail_synced(
+                            meta_request, request, AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
+                    }
+                } else {
+                    /* HEAD request didn't return content-length header */
+                    aws_s3_meta_request_set_fail_synced(
+                        meta_request, request, AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
                 }
             } else {
                 aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
