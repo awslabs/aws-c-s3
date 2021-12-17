@@ -172,39 +172,6 @@ static void s_meta_request_finish(
     aws_condition_variable_notify_one(&app_ctx->c_var);
 }
 
-static int s_meta_request_headers(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_http_headers *headers,
-    int response_status,
-    void *user_data) {
-
-    (void)meta_request;
-    (void)headers;
-    (void)user_data;
-    (void)response_status;
-
-    return 0;
-}
-
-static void s_meta_request_shutdown(void *user_data) {
-
-    (void)user_data;
-}
-
-static int s_meta_request_receive_body(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_byte_cursor *body,
-    uint64_t range_start,
-    void *user_data) {
-
-    (void)meta_request;
-    (void)body;
-    (void)range_start;
-    (void)user_data;
-
-    return 0;
-}
-
 static const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
 static const struct aws_byte_cursor g_x_amz_copy_source_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
@@ -370,12 +337,12 @@ int main(int argc, char *argv[]) {
 
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = &app_ctx,
-        .body_callback = s_meta_request_receive_body,
+        .body_callback = NULL,
         .signing_config = &app_ctx.signing_config,
         .finish_callback = s_meta_request_finish,
-        .headers_callback = s_meta_request_headers,
+        .headers_callback = NULL,
         .message = message,
-        .shutdown_callback = s_meta_request_shutdown,
+        .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
     };
 
