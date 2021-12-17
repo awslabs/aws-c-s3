@@ -18,13 +18,16 @@
 #include <stdio.h>
 
 int s3_ls_main(int argc, char *const argv[], const char *command_name, void *user_data);
+int s3_cp_main(int argc, char *const argv[], const char *command_name, void *user_data);
 
-static struct aws_cli_subcommand_dispatch s_dispatch_table[] = {
-    {
-        .command_name = "ls",
-        .subcommand_fn = s3_ls_main,
-    },
-};
+static struct aws_cli_subcommand_dispatch s_dispatch_table[] = {{
+                                                                    .command_name = "ls",
+                                                                    .subcommand_fn = s3_ls_main,
+                                                                },
+                                                                {
+                                                                    .command_name = "cp",
+                                                                    .subcommand_fn = s3_cp_main,
+                                                                }};
 
 static void s_usage(int exit_code) {
 
@@ -32,7 +35,7 @@ static void s_usage(int exit_code) {
     fprintf(output, "usage: s3 <command> <options>\n");
     fprintf(output, " available commands:\n");
 
-    for(size_t i = 0; i < AWS_ARRAY_SIZE(s_dispatch_table); ++i) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_dispatch_table); ++i) {
         fprintf(output, " %s\n", s_dispatch_table[i].command_name);
     }
 
@@ -164,16 +167,14 @@ int main(int argc, char *argv[]) {
     struct aws_credentials_provider_chain_default_options credentials_provider_options;
     AWS_ZERO_STRUCT(credentials_provider_options);
     credentials_provider_options.bootstrap = app_ctx.client_bootstrap;
-    app_ctx.credentials_provider =
-        aws_credentials_provider_new_chain_default(allocator, &credentials_provider_options);
+    app_ctx.credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_provider_options);
 
     s_parse_app_ctx(argc, argv, &app_ctx);
-    int dispatch_return_code = aws_cli_dispatch_on_subcommand(argc, argv, s_dispatch_table,
-                                                              AWS_ARRAY_SIZE(s_dispatch_table), &app_ctx);
+    int dispatch_return_code =
+        aws_cli_dispatch_on_subcommand(argc, argv, s_dispatch_table, AWS_ARRAY_SIZE(s_dispatch_table), &app_ctx);
 
     if (dispatch_return_code &&
-        (aws_last_error() == AWS_ERROR_INVALID_ARGUMENT
-         || aws_last_error() == AWS_ERROR_UNIMPLEMENTED)) {
+        (aws_last_error() == AWS_ERROR_INVALID_ARGUMENT || aws_last_error() == AWS_ERROR_UNIMPLEMENTED)) {
         s_usage(app_ctx.help_requested == true ? 0 : 1);
     }
 

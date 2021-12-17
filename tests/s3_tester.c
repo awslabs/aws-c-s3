@@ -27,7 +27,9 @@
 
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
+
 const struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket");
+
 const struct aws_byte_cursor g_test_public_bucket_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff-us-west-2");
 const struct aws_byte_cursor g_s3_path_get_object_test_1MB =

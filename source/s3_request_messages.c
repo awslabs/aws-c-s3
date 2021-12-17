@@ -13,12 +13,15 @@
 #include <aws/common/string.h>
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
+#include <aws/io/uri.h>
 #include <aws/s3/s3.h>
 #include <inttypes.h>
 
 const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
 };
 
 const size_t g_s3_create_multipart_upload_excluded_headers_count =
@@ -79,6 +82,8 @@ const struct aws_byte_cursor g_s3_complete_multipart_upload_excluded_headers[] =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
 };
 
 const size_t g_s3_complete_multipart_upload_excluded_headers_count =
@@ -111,6 +116,8 @@ const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
 };
 
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
@@ -249,6 +256,181 @@ error_clean_up:
     }
 
     return NULL;
+}
+
+struct aws_http_message *aws_s3_upload_part_copy_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_buf *buffer,
+    uint32_t part_number,
+    uint64_t range_start,
+    uint64_t range_end,
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(base_message);
+    AWS_PRECONDITION(part_number > 0);
+
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+        allocator, base_message, g_s3_upload_part_excluded_headers, AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers));
+
+    if (message == NULL) {
+        goto error_clean_up;
+    }
+
+    if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, false, message)) {
+        goto error_clean_up;
+    }
+
+    if (buffer != NULL) {
+        if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
+            goto error_clean_up;
+        }
+
+        if (should_compute_content_md5) {
+            if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
+                goto error_clean_up;
+            }
+        }
+    }
+
+    char source_range[1024];
+    snprintf(source_range, sizeof(source_range), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end);
+
+    struct aws_http_header source_range_header = {
+        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
+        .value = aws_byte_cursor_from_c_str(source_range),
+    };
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    aws_http_headers_add_header(headers, &source_range_header);
+
+    return message;
+
+error_clean_up:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+/* Creates a HEAD GetObject request to get the size of the specified object. */
+struct aws_http_message *aws_s3_get_object_size_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_cursor source_bucket,
+    struct aws_byte_cursor source_key) {
+
+    (void)base_message;
+
+    AWS_PRECONDITION(allocator);
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    const struct aws_byte_cursor head_operation = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("HEAD");
+    if (aws_http_message_set_request_method(message, head_operation)) {
+        goto error_clean_up;
+    }
+
+    char destination_path[1024];
+    snprintf(destination_path, sizeof(destination_path), "/%.*s", (int)source_key.len, source_key.ptr);
+    /* TODO: url encode */
+
+    if (aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str(destination_path))) {
+        goto error_clean_up;
+    }
+
+    char host_header_value[1024];
+    snprintf(
+        host_header_value,
+        sizeof(host_header_value),
+        "%.*s.s3.us-west-2.amazonaws.com",
+        (int)source_bucket.len,
+        source_bucket.ptr);
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = aws_byte_cursor_from_c_str(host_header_value),
+    };
+    aws_http_message_add_header(message, host_header);
+
+    aws_http_message_set_body_stream(message, NULL);
+
+    return message;
+
+error_clean_up:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+/* Creates a HEAD GetObject request to get the size of the source object. */
+struct aws_http_message *aws_s3_get_source_object_size_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message) {
+    AWS_PRECONDITION(allocator);
+
+    struct aws_http_message *message = NULL;
+
+    /* find the x-amz-copy-source header */
+    struct aws_http_headers *headers = aws_http_message_get_headers(base_message);
+
+    struct aws_byte_cursor source_header_value;
+    AWS_ZERO_STRUCT(source_header_value);
+
+    const struct aws_byte_cursor copy_source_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
+    if (aws_http_headers_get(headers, copy_source_header, &source_header_value) != AWS_OP_SUCCESS) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the x-amz-copy-source header");
+        return NULL;
+    }
+
+    /* url decode */
+    struct aws_byte_buf decode_buffer;
+    AWS_ZERO_STRUCT(decode_buffer);
+    aws_byte_buf_init(&decode_buffer, allocator, 0);
+    if (aws_byte_buf_append_decoding_uri(&decode_buffer, &source_header_value) != AWS_OP_SUCCESS) {
+        goto error_cleanup;
+    }
+
+    struct aws_byte_cursor source_bucket;
+    AWS_ZERO_STRUCT(source_bucket);
+    struct aws_byte_cursor source_key;
+    AWS_ZERO_STRUCT(source_key);
+
+    source_bucket.ptr = decode_buffer.buffer;
+
+    /* source format is {bucket}/{key}. split them */
+    for (size_t i = 0; i < decode_buffer.len; i++) {
+        if (decode_buffer.buffer[i] == '/') {
+            source_bucket.len = i;
+            source_key.ptr = decode_buffer.buffer + i + 1; /* skip the / */
+            source_key.len = decode_buffer.len - i - 1;
+            break;
+        }
+    }
+
+    if (source_bucket.len == 0 || source_key.len <= 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "The CopyRequest x-amz-copy-source header must contain the bucket and object key separated by a slash");
+        goto error_cleanup;
+    }
+
+    message = aws_s3_get_object_size_message_new(allocator, base_message, source_bucket, source_key);
+
+error_cleanup:
+    aws_byte_buf_clean_up(&decode_buffer);
+    return message;
 }
 
 static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(

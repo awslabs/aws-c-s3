@@ -7,9 +7,9 @@
 #include <aws/common/array_list.h>
 #include <aws/common/clock.h>
 #include <aws/common/mutex.h>
-#include <aws/common/thread_scheduler.h>
-#include <aws/common/thread.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/common/thread.h>
+#include <aws/common/thread_scheduler.h>
 
 #include <inttypes.h>
 
@@ -100,7 +100,7 @@ void progress_listener_group_render(struct progress_listener_group *group) {
     aws_mutex_unlock(&group->mutex);
 }
 
-static void s_render_task(struct aws_task * task, void *arg, enum aws_task_status status) {
+static void s_render_task(struct aws_task *task, void *arg, enum aws_task_status status) {
     struct progress_listener_group *group = arg;
     struct aws_allocator *allocator = group->allocator;
 
@@ -177,7 +177,6 @@ void progress_listener_update_state(struct progress_listener *listener, struct a
     listener->render_update_pending = true;
     aws_mutex_unlock(&listener->mutex);
 }
-
 
 void progress_listener_update_label(struct progress_listener *listener, struct aws_string *new_label) {
     aws_mutex_lock(&listener->mutex);

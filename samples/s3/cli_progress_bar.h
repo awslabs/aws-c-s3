@@ -44,7 +44,11 @@ void progress_listener_group_run_background_render_thread(struct progress_listen
  * @param state_name name of the state (In progress, success, failed etc...).
  * @param max_value The 100% value of the progress you're tracking
  */
-struct progress_listener *progress_listener_new(struct progress_listener_group *group, struct aws_string *label, struct aws_string *state_name, uint64_t max_value);
+struct progress_listener *progress_listener_new(
+    struct progress_listener_group *group,
+    struct aws_string *label,
+    struct aws_string *state_name,
+    uint64_t max_value);
 
 /**
  * Update the state of the progress bar.

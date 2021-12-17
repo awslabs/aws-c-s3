@@ -59,8 +59,7 @@ static void s_parse_options(int argc, char **argv, struct s3_ls_app_data *ctx) {
             }
             uri_found = true;
         }
-    }
-    while(opt_val != -1);
+    } while (opt_val != -1);
 
     if (!uri_found) {
         fprintf(stderr, "A URI for the request must be supplied.\n");
@@ -130,7 +129,6 @@ int s3_ls_main(int argc, char *argv[], const char *command_name, void *user_data
     };
 
     app_ctx->sub_command_data = &impl_data;
-
 
     s_parse_options(argc, argv, &impl_data);
 
