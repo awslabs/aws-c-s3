@@ -165,29 +165,6 @@ void aws_s3_get_part_range(
     uint64_t *out_part_range_start,
     uint64_t *out_part_range_end);
 
-/**
- * TODO: Move the function below to aws-c-common. This is a copy from aws-c-http/include/private/strutil.h.
- *
- * Read entire cursor as ASCII/UTF-8 unsigned base-10 number.
- * Stricter than strtoull(), which allows whitespace and inputs that start with "0x"
- *
- * Examples:
- * "0" -> 0
- * "123" -> 123
- * "00004" -> 4 // leading zeros ok
- *
- * Rejects things like:
- * "-1" // negative numbers not allowed
- * "1,000" // only characters 0-9 allowed
- * "" // blank string not allowed
- * " 0 " // whitespace not allowed
- * "0x0" // hex not allowed
- * "FF" // hex not allowed
- * "999999999999999999999999999999999999999999" // larger than max u64
- */
-AWS_S3_API
-int aws_s3_strutil_read_unsigned_num(struct aws_byte_cursor cursor, uint64_t *dst);
-
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_UTIL_H */
