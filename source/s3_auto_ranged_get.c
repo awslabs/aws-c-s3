@@ -80,6 +80,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             client,
             part_size,
             false,
+            client->flexible_checksum_options,
             options,
             auto_ranged_get,
             &s_s3_auto_ranged_get_vtable,

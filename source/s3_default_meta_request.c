@@ -80,6 +80,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
             client,
             0,
             should_compute_content_md5,
+            flexible_checksum_options,
             options,
             meta_request_default,
             &s_s3_meta_request_default_vtable,

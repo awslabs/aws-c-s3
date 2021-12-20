@@ -774,11 +774,17 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         .message = dummy_http_message,
     };
 
+    struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options = {
+        .checksum_algorithm = AWS_SCA_NONE,
+        .checksum_location = AWS_MR_FC_HEADER,
+    };
+
     aws_s3_meta_request_init_base(
         tester->allocator,
         NULL,
         0,
         false,
+        flexible_checksum_options,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
