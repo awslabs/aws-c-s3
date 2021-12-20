@@ -54,6 +54,9 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_content_md5_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_trailer_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_crc32c_header_name;
 
 AWS_S3_API
@@ -84,7 +87,16 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_content_type_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_content_encoding_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_content_encoding_header_value;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_content_length_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_decoded_content_length_header_name;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_etag_header_name;

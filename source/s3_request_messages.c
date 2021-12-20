@@ -435,6 +435,27 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         goto error_clean_up;
     }
     if (algorithm) {
+        /* set Content-Encoding header */
+        if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_value)) {
+            goto error_clean_up;
+        }
+        /* set x-amz-trailer header */
+        if (aws_http_headers_set(headers, g_trailer_header_name, aws_get_http_header_name_from_algorithm(algorithm))) {
+            goto error_clean_up;
+        }
+        /* set x-amz-decoded-content-length header */
+        char decoded_content_length_buffer[64] = "";
+        snprintf(
+            decoded_content_length_buffer,
+            sizeof(decoded_content_length_buffer),
+            "%" PRIu64,
+            (uint64_t)buffer_byte_cursor.len);
+        struct aws_byte_cursor decode_content_length_cursor =
+            aws_byte_cursor_from_array(decoded_content_length_buffer, strlen(decoded_content_length_buffer));
+        if (aws_http_headers_set(headers, g_decoded_content_length_header_name, decode_content_length_cursor)) {
+            goto error_clean_up;
+        }
+        /* set input stream to chunk stream */
         input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm);
         if (input_stream) {
             goto error_clean_up;
@@ -448,9 +469,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)stream_length);
     struct aws_byte_cursor content_length_cursor =
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
-
     if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
-        aws_input_stream_destroy(input_stream);
         goto error_clean_up;
     }
 
