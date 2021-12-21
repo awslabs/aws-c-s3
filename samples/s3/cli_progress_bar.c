@@ -197,7 +197,7 @@ void progress_listener_render(struct progress_listener *listener) {
     struct progress_listener_group *group = listener->owning_group;
 
     fprintf(group->render_sink, "\33[2K");
-    fprintf(group->render_sink, "%s\n", aws_string_c_str(listener->label));
+    fprintf(group->render_sink, "%80s\n", aws_string_c_str(listener->label));
     fprintf(group->render_sink, "\33[2K");
 
     size_t completion = (size_t)(((double)listener->current / (double)listener->max) * 100);
@@ -218,7 +218,7 @@ void progress_listener_render(struct progress_listener *listener) {
     fprintf(group->render_sink, "]");
     fprintf(
         group->render_sink,
-        " %llu/%llu (%zu%%)  %s\n\33[2K\n",
+        " %llu/%llu (%zu%%)  %20s\n\33[2K\n",
         listener->current,
         listener->max,
         completion,

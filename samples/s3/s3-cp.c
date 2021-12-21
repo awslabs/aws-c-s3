@@ -401,8 +401,13 @@ static bool s_on_directory_entry(const struct aws_directory_entry *entry, void *
         transfer_ctx->cp_app_ctx = cp_app_ctx;
 
         struct aws_byte_buf uri_path;
+        struct aws_byte_cursor destination_path = entry->relative_path;
+
+        if (destination_path.len >= 2 && destination_path.ptr[0] == '.') {
+            aws_byte_cursor_advance(&destination_path, 1);
+        }
         aws_byte_buf_init_copy_from_cursor(&uri_path, cp_app_ctx->app_ctx->allocator, cp_app_ctx->destination_uri.path);
-        aws_byte_buf_append_dynamic(&uri_path, &entry->relative_path);
+        aws_byte_buf_append_dynamic(&uri_path, &destination_path);
 
         for (size_t i = 0; i < uri_path.len; ++i) {
             if (uri_path.buffer[i] == '\\') {
@@ -419,7 +424,7 @@ static bool s_on_directory_entry(const struct aws_directory_entry *entry, void *
         struct aws_byte_buf label_buf;
         struct aws_byte_cursor operation_name_cur = aws_byte_cursor_from_c_str("upload: ");
         aws_byte_buf_init_copy_from_cursor(&label_buf, cp_app_ctx->app_ctx->allocator, operation_name_cur);
-        aws_byte_buf_append_dynamic(&label_buf, &entry->path);
+        aws_byte_buf_append_dynamic(&label_buf, &entry->relative_path);
         struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to s3://");
         aws_byte_buf_append_dynamic(&label_buf, &to_cur);
         aws_byte_buf_append_dynamic(&label_buf, &cp_app_ctx->destination_uri.authority);
@@ -543,23 +548,33 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
         }
         aws_string_destroy(dir_path);
 
+        struct aws_byte_cursor trimmed_key = info->key;
+
+        if (info->prefix.len) {
+            aws_byte_cursor_advance(&trimmed_key, info->prefix.len);
+        }
+
         struct aws_array_list splits;
         aws_array_list_init_dynamic(&splits, cp_app_ctx->app_ctx->allocator, 8, sizeof(struct aws_byte_cursor));
-        aws_byte_cursor_split_on_char(&info->key, '/', &splits);
+        aws_byte_cursor_split_on_char(&trimmed_key, '/', &splits);
 
         for (size_t i = 0; i < aws_array_list_length(&splits); ++i) {
             struct aws_byte_cursor path_component;
             aws_array_list_get_at(&splits, &path_component, i);
 
-            struct aws_byte_cursor slash_cur = aws_byte_cursor_from_c_str(AWS_PATH_DELIM_STR);
-            aws_byte_buf_append_dynamic(&dest_directory, &slash_cur);
-            aws_byte_buf_append_dynamic(&dest_directory, &path_component);
+            if (path_component.len > 0) {
+                if (dest_directory.buffer[dest_directory.len - 1] != AWS_PATH_DELIM) {
+                    struct aws_byte_cursor slash_cur = aws_byte_cursor_from_c_str(AWS_PATH_DELIM_STR);
+                    aws_byte_buf_append_dynamic(&dest_directory, &slash_cur);
+                }
+                aws_byte_buf_append_dynamic(&dest_directory, &path_component);
 
-            dir_path = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &dest_directory);
-            if (i < aws_array_list_length(&splits) - 1 && !aws_directory_exists(dir_path)) {
-                aws_directory_create(dir_path);
+                dir_path = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &dest_directory);
+                if (i < aws_array_list_length(&splits) - 1 && !aws_directory_exists(dir_path)) {
+                    aws_directory_create(dir_path);
+                }
+                aws_string_destroy(dir_path);
             }
-            aws_string_destroy(dir_path);
         }
 
         struct single_transfer_ctx *transfer_ctx =
@@ -615,7 +630,7 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
 
         struct aws_http_header user_agent_header = {
             .name = aws_byte_cursor_from_c_str("user-agent"),
-            .value = aws_byte_cursor_from_c_str("AWS common runtime commandline client"),
+            .value = aws_byte_cursor_from_c_str("AWS common runtime command-line client"),
         };
 
         request_options.message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
@@ -668,7 +683,7 @@ void s_dispatch_and_run_transfers(struct cp_app_ctx *cp_app_ctx) {
     if (cp_app_ctx->source_is_directory_or_prefix) {
         if (cp_app_ctx->source_file_system) {
             struct aws_string *path =
-                aws_string_new_from_cursor(cp_app_ctx->app_ctx->allocator, &cp_app_ctx->source_uri.path);
+                aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &cp_app_ctx->source_uri.uri_str);
 
             if (aws_directory_traverse(cp_app_ctx->app_ctx->allocator, path, true, s_on_directory_entry, cp_app_ctx)) {
                 fprintf(

@@ -63,7 +63,6 @@ void progress_listener_update_progress(struct progress_listener *listener, uint6
 
 void progress_listener_reset_progress(struct progress_listener *listener);
 
-
 /**
  * Update the label for the progress bar.
  */
