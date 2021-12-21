@@ -155,162 +155,167 @@ static bool s_s3_auto_ranged_get_update(
     struct aws_s3_request *request = NULL;
     bool work_remaining = false;
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
 
-    /* If nothing has set the the "finish result" then this meta request is still in progress and we can potentially
-     * send additional requests. */
-    if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+        /* If nothing has set the the "finish result" then this meta request is still in progress and we can potentially
+         * send additional requests. */
+        if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
-        if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
-            uint32_t num_requests_in_flight =
-                (auto_ranged_get->synced_data.num_parts_requested - auto_ranged_get->synced_data.num_parts_completed) +
-                (uint32_t)aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests);
+            if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
+                uint32_t num_requests_in_flight =
+                    (auto_ranged_get->synced_data.num_parts_requested -
+                     auto_ranged_get->synced_data.num_parts_completed) +
+                    (uint32_t)aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests);
 
-            /* auto-ranged-gets make use of body streaming, which will hold onto response bodies if parts earlier in
-             * the file haven't arrived yet. This can potentially create a lot of backed up requests, causing us to
-             * hit our global request limit. To help mitigate this, when the "conservative" flag is passed in, we
-             * only allow the total amount of requests being sent/streamed to be inside of a set limit.  */
-            if (num_requests_in_flight > s_conservative_max_requests_in_flight) {
+                /* auto-ranged-gets make use of body streaming, which will hold onto response bodies if parts earlier in
+                 * the file haven't arrived yet. This can potentially create a lot of backed up requests, causing us to
+                 * hit our global request limit. To help mitigate this, when the "conservative" flag is passed in, we
+                 * only allow the total amount of requests being sent/streamed to be inside of a set limit.  */
+                if (num_requests_in_flight > s_conservative_max_requests_in_flight) {
+                    goto has_work_remaining;
+                }
+            }
+
+            /* If the overall range of the object that we are trying to retrieve isn't known yet, then we need to send a
+             * request to figure that out. */
+            if (!auto_ranged_get->synced_data.object_range_known) {
+
+                /* If there exists a range header, we currently always do a head request first. While the range header
+                 * value could be parsed client-side, doing so presents a number of complications. For example, the
+                 * given range could be an unsatisfiable range, and might not even specify a complete range. To keep
+                 * things simple, we are currently relying on the service to handle turning the Range header into a
+                 * Content-Range response header.*/
+                bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0;
+
+                if (head_object_required) {
+                    /* If the head object request hasn't been sent yet, then send it now. */
+                    if (!auto_ranged_get->synced_data.head_object_sent) {
+                        request = aws_s3_request_new(
+                            meta_request,
+                            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
+                            1,
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+
+                        request->discovers_object_size = true;
+
+                        auto_ranged_get->synced_data.head_object_sent = true;
+                    }
+
+                } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
+                    /* If we aren't using a head object, then discover the size of the object while trying to get the
+                     * first part. */
+                    request = aws_s3_request_new(
+                        meta_request,
+                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
+                        1,
+                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+
+                    request->part_range_start = 0;
+                    request->part_range_end = meta_request->part_size - 1;
+                    request->discovers_object_size = true;
+
+                    ++auto_ranged_get->synced_data.num_parts_requested;
+                }
+
+                goto has_work_remaining;
+            }
+
+            /* If the object range is known and that range is empty, then we have an empty file to request. */
+            if (auto_ranged_get->synced_data.object_range_start == 0 &&
+                auto_ranged_get->synced_data.object_range_end == 0) {
+                if (auto_ranged_get->synced_data.get_without_range_sent) {
+                    if (auto_ranged_get->synced_data.get_without_range_completed) {
+                        goto no_work_remaining;
+                    } else {
+                        goto has_work_remaining;
+                    }
+                }
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE,
+                    0,
+                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+
+                auto_ranged_get->synced_data.get_without_range_sent = true;
+                goto has_work_remaining;
+            }
+
+            if (auto_ranged_get->synced_data.num_parts_requested < auto_ranged_get->synced_data.total_num_parts) {
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
+                    auto_ranged_get->synced_data.num_parts_requested + 1,
+                    AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+
+                aws_s3_get_part_range(
+                    auto_ranged_get->synced_data.object_range_start,
+                    auto_ranged_get->synced_data.object_range_end,
+                    meta_request->part_size,
+                    request->part_number,
+                    &request->part_range_start,
+                    &request->part_range_end);
+
+                ++auto_ranged_get->synced_data.num_parts_requested;
+                goto has_work_remaining;
+            }
+
+            /* If there are parts that have not attempted delivery to the caller, then there is still work being done.
+             */
+            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts) {
+                goto has_work_remaining;
+            }
+
+        } else {
+            /* Else, if there is a finish result set, make sure that all work-in-progress winds down before the meta
+             * request completely exits. */
+
+            if (auto_ranged_get->synced_data.head_object_sent && !auto_ranged_get->synced_data.head_object_completed) {
+                goto has_work_remaining;
+            }
+
+            /* Wait for all requests to complete (successfully or unsuccessfully) before finishing.*/
+            if (auto_ranged_get->synced_data.num_parts_completed < auto_ranged_get->synced_data.num_parts_requested) {
+                goto has_work_remaining;
+            }
+
+            if (auto_ranged_get->synced_data.get_without_range_sent &&
+                !auto_ranged_get->synced_data.get_without_range_completed) {
+                goto has_work_remaining;
+            }
+
+            /* If some parts are still being delivered to the caller, then wait for those to finish. */
+            if (meta_request->synced_data.num_parts_delivery_completed <
+                meta_request->synced_data.num_parts_delivery_sent) {
                 goto has_work_remaining;
             }
         }
 
-        /* If the overall range of the object that we are trying to retrieve isn't known yet, then we need to send a
-         * request to figure that out. */
-        if (!auto_ranged_get->synced_data.object_range_known) {
+        goto no_work_remaining;
 
-            /* If there exists a range header, we currently always do a head request first. While the range header value
-             * could be parsed client-side, doing so presents a number of complications. For example, the given range
-             * could be an unsatisfiable range, and might not even specify a complete range. To keep things simple, we
-             * are currently relying on the service to handle turning the Range header into a Content-Range response
-             * header.*/
-            bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0;
+    has_work_remaining:
+        work_remaining = true;
 
-            if (head_object_required) {
-                /* If the head object request hasn't been sent yet, then send it now. */
-                if (!auto_ranged_get->synced_data.head_object_sent) {
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
-                        1,
-                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
-
-                    request->discovers_object_size = true;
-
-                    auto_ranged_get->synced_data.head_object_sent = true;
-                }
-
-            } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
-                /* If we aren't using a head object, then discover the size of the object while trying to get the first
-                 * part. */
-                request = aws_s3_request_new(
-                    meta_request,
-                    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-                    1,
-                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
-
-                request->part_range_start = 0;
-                request->part_range_end = meta_request->part_size - 1;
-                request->discovers_object_size = true;
-
-                ++auto_ranged_get->synced_data.num_parts_requested;
-            }
-
-            goto has_work_remaining;
-        }
-
-        /* If the object range is known and that range is empty, then we have an empty file to request. */
-        if (auto_ranged_get->synced_data.object_range_start == 0 &&
-            auto_ranged_get->synced_data.object_range_end == 0) {
-            if (auto_ranged_get->synced_data.get_without_range_sent) {
-                if (auto_ranged_get->synced_data.get_without_range_completed) {
-                    goto no_work_remaining;
-                } else {
-                    goto has_work_remaining;
-                }
-            }
-            request = aws_s3_request_new(
-                meta_request,
-                AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE,
-                0,
-                AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
-
-            auto_ranged_get->synced_data.get_without_range_sent = true;
-            goto has_work_remaining;
-        }
-
-        if (auto_ranged_get->synced_data.num_parts_requested < auto_ranged_get->synced_data.total_num_parts) {
-            request = aws_s3_request_new(
-                meta_request,
-                AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-                auto_ranged_get->synced_data.num_parts_requested + 1,
-                AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
-
-            aws_s3_get_part_range(
-                auto_ranged_get->synced_data.object_range_start,
-                auto_ranged_get->synced_data.object_range_end,
-                meta_request->part_size,
+        if (request != NULL) {
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Returning request %p for part %d of %d",
+                (void *)meta_request,
+                (void *)request,
                 request->part_number,
-                &request->part_range_start,
-                &request->part_range_end);
-
-            ++auto_ranged_get->synced_data.num_parts_requested;
-            goto has_work_remaining;
+                auto_ranged_get->synced_data.total_num_parts);
         }
 
-        /* If there are parts that have not attempted delivery to the caller, then there is still work being done.
-         */
-        if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts) {
-            goto has_work_remaining;
+    no_work_remaining:
+
+        if (!work_remaining) {
+            aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
         }
 
-    } else {
-        /* Else, if there is a finish result set, make sure that all work-in-progress winds down before the meta request
-         * completely exits. */
-
-        if (auto_ranged_get->synced_data.head_object_sent && !auto_ranged_get->synced_data.head_object_completed) {
-            goto has_work_remaining;
-        }
-
-        /* Wait for all requests to complete (successfully or unsuccessfully) before finishing.*/
-        if (auto_ranged_get->synced_data.num_parts_completed < auto_ranged_get->synced_data.num_parts_requested) {
-            goto has_work_remaining;
-        }
-
-        if (auto_ranged_get->synced_data.get_without_range_sent &&
-            !auto_ranged_get->synced_data.get_without_range_completed) {
-            goto has_work_remaining;
-        }
-
-        /* If some parts are still being delivered to the caller, then wait for those to finish. */
-        if (meta_request->synced_data.num_parts_delivery_completed <
-            meta_request->synced_data.num_parts_delivery_sent) {
-            goto has_work_remaining;
-        }
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-    goto no_work_remaining;
-
-has_work_remaining:
-    work_remaining = true;
-
-    if (request != NULL) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Returning request %p for part %d of %d",
-            (void *)meta_request,
-            (void *)request,
-            request->part_number,
-            auto_ranged_get->synced_data.total_num_parts);
-    }
-
-no_work_remaining:
-
-    if (!work_remaining) {
-        aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
-    }
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     if (work_remaining) {
         *out_request = request;
@@ -578,52 +583,57 @@ static void s_s3_auto_ranged_get_request_finished(
 
 update_synced_data:
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
 
-    /* If the object range was found, then record it. */
-    if (found_object_size) {
-        AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
+        /* If the object range was found, then record it. */
+        if (found_object_size) {
+            AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
 
-        auto_ranged_get->synced_data.object_range_known = true;
-        auto_ranged_get->synced_data.object_range_start = object_range_start;
-        auto_ranged_get->synced_data.object_range_end = object_range_end;
-        auto_ranged_get->synced_data.total_num_parts =
-            aws_s3_get_num_parts(meta_request->part_size, object_range_start, object_range_end);
-    }
+            auto_ranged_get->synced_data.object_range_known = true;
+            auto_ranged_get->synced_data.object_range_start = object_range_start;
+            auto_ranged_get->synced_data.object_range_end = object_range_end;
+            auto_ranged_get->synced_data.total_num_parts =
+                aws_s3_get_num_parts(meta_request->part_size, object_range_start, object_range_end);
+        }
 
-    switch (request->request_tag) {
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
-            auto_ranged_get->synced_data.head_object_completed = true;
-            AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
-            break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
-            ++auto_ranged_get->synced_data.num_parts_completed;
+        switch (request->request_tag) {
+            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
+                auto_ranged_get->synced_data.head_object_completed = true;
+                AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
+                break;
+            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
+                ++auto_ranged_get->synced_data.num_parts_completed;
 
-            if (!request_failed) {
-                ++auto_ranged_get->synced_data.num_parts_successful;
+                if (!request_failed) {
+                    ++auto_ranged_get->synced_data.num_parts_successful;
 
-                aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+                    aws_s3_meta_request_stream_response_body_synced(meta_request, request);
 
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: %d out of %d parts have completed.",
+                        (void *)meta_request,
+                        (auto_ranged_get->synced_data.num_parts_successful +
+                         auto_ranged_get->synced_data.num_parts_failed),
+                        auto_ranged_get->synced_data.total_num_parts);
+                } else {
+                    ++auto_ranged_get->synced_data.num_parts_failed;
+                }
+                break;
+            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
                 AWS_LOGF_DEBUG(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: %d out of %d parts have completed.",
-                    (void *)meta_request,
-                    (auto_ranged_get->synced_data.num_parts_successful + auto_ranged_get->synced_data.num_parts_failed),
-                    auto_ranged_get->synced_data.total_num_parts);
-            } else {
-                ++auto_ranged_get->synced_data.num_parts_failed;
-            }
-            break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST, "id=%p Get of file using initial message completed.", (void *)meta_request);
-            auto_ranged_get->synced_data.get_without_range_completed = true;
-            break;
-    }
+                    AWS_LS_S3_META_REQUEST, "id=%p Get of file using initial message completed.", (void *)meta_request);
+                auto_ranged_get->synced_data.get_without_range_completed = true;
+                break;
+        }
 
-    if (error_code != AWS_ERROR_SUCCESS) {
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-    }
+        if (error_code != AWS_ERROR_SUCCESS) {
+            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        }
 
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
 }

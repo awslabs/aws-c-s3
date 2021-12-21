@@ -148,9 +148,11 @@ int aws_s3_meta_request_init_base(
 }
 
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 }
 
 void aws_s3_meta_request_set_fail_synced(
@@ -197,9 +199,11 @@ void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_req
 bool aws_s3_meta_request_has_finish_result(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     bool is_finishing = aws_s3_meta_request_has_finish_result_synced(meta_request);
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     return is_finishing;
 }
@@ -312,9 +316,11 @@ bool aws_s3_meta_request_update(
 bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     bool active = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE;
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     return active;
 }
@@ -322,9 +328,11 @@ bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request) {
 bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     bool is_finished = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED;
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     return is_finished;
 }
@@ -455,9 +463,13 @@ dont_send_clean_up:
         error_code,
         aws_error_str(error_code));
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
 
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
@@ -600,9 +612,13 @@ finish:
             error_code,
             aws_error_str(error_code));
 
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* BEGIN CRITICAL SECTION */
+        {
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+        }
+        /* END CRITICAL SECTION */
     }
 
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
@@ -858,9 +874,11 @@ void aws_s3_meta_request_send_request_finish_default(
         finish_code = AWS_S3_CONNECTION_FINISH_CODE_SUCCESS;
 
     } else {
+        /* BEGIN CRITICAL SECTION */
         aws_s3_meta_request_lock_synced_data(meta_request);
         bool meta_request_finishing = aws_s3_meta_request_has_finish_result_synced(meta_request);
         aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* END CRITICAL SECTION */
 
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already has
          * a result, then make sure that this request isn't retried. */
@@ -1036,17 +1054,19 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
         aws_atomic_fetch_sub(&client->stats.num_requests_streaming, 1);
         aws_s3_request_release(request);
     }
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        if (error_code != AWS_ERROR_SUCCESS) {
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+        }
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    if (error_code != AWS_ERROR_SUCCESS) {
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+        meta_request->synced_data.num_parts_delivery_completed += (num_failed + num_successful);
+        meta_request->synced_data.num_parts_delivery_failed += num_failed;
+        meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-    meta_request->synced_data.num_parts_delivery_completed += (num_failed + num_successful);
-    meta_request->synced_data.num_parts_delivery_failed += num_failed;
-    meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
+    /* END CRITICAL SECTION */
     aws_mem_release(client->allocator, payload);
     payload = NULL;
 
@@ -1113,29 +1133,33 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     struct aws_s3_meta_request_result finish_result;
     AWS_ZERO_STRUCT(finish_result);
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
-        already_finished = true;
-        goto unlock;
+        if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
+            already_finished = true;
+            goto unlock;
+        }
+
+        meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
+
+        /* Clean out the pending-stream-to-caller priority queue*/
+        while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
+            struct aws_s3_request *request = NULL;
+            aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
+            AWS_FATAL_ASSERT(request != NULL);
+
+            aws_linked_list_push_back(&release_request_list, &request->node);
+        }
+
+        finish_result = meta_request->synced_data.finish_result;
+        AWS_ZERO_STRUCT(meta_request->synced_data.finish_result);
+
+    unlock:
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-    meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
-
-    /* Clean out the pending-stream-to-caller priority queue*/
-    while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
-        struct aws_s3_request *request = NULL;
-        aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
-        AWS_FATAL_ASSERT(request != NULL);
-
-        aws_linked_list_push_back(&release_request_list, &request->node);
-    }
-
-    finish_result = meta_request->synced_data.finish_result;
-    AWS_ZERO_STRUCT(meta_request->synced_data.finish_result);
-
-unlock:
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     if (already_finished) {
         return;

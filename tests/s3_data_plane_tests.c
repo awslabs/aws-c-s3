@@ -1524,6 +1524,7 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
+/* default test */
 AWS_TEST_CASE(test_s3_put_object_less_than_part_size_flex_checks, s_test_s3_put_object_less_than_part_size_flex_checks)
 static int s_test_s3_put_object_less_than_part_size_flex_checks(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

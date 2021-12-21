@@ -129,71 +129,76 @@ static bool s_s3_meta_request_default_update(
     struct aws_s3_request *request = NULL;
     bool work_remaining = false;
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+        if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
-        /* If the request hasn't been sent, then create and send it now. */
-        if (!meta_request_default->synced_data.request_sent) {
-            if (out_request == NULL) {
+            /* If the request hasn't been sent, then create and send it now. */
+            if (!meta_request_default->synced_data.request_sent) {
+                if (out_request == NULL) {
+                    goto has_work_remaining;
+                }
+
+                request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Meta Request Default created request %p",
+                    (void *)meta_request,
+                    (void *)request);
+
+                meta_request_default->synced_data.request_sent = true;
                 goto has_work_remaining;
             }
 
-            request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+            /* If the request hasn't been completed, then wait for it to be completed. */
+            if (!meta_request_default->synced_data.request_completed) {
+                goto has_work_remaining;
+            }
 
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Meta Request Default created request %p",
-                (void *)meta_request,
-                (void *)request);
+            /* If delivery hasn't been attempted yet for the response body, wait for that to happen. */
+            if (meta_request->synced_data.num_parts_delivery_completed < 1) {
+                goto has_work_remaining;
+            }
 
-            meta_request_default->synced_data.request_sent = true;
-            goto has_work_remaining;
-        }
+            goto no_work_remaining;
 
-        /* If the request hasn't been completed, then wait for it to be completed. */
-        if (!meta_request_default->synced_data.request_completed) {
-            goto has_work_remaining;
-        }
+        } else {
 
-        /* If delivery hasn't been attempted yet for the response body, wait for that to happen. */
-        if (meta_request->synced_data.num_parts_delivery_completed < 1) {
-            goto has_work_remaining;
-        }
+            /* If we are canceling, and the request hasn't been sent yet, then there is nothing to wait for. */
+            if (!meta_request_default->synced_data.request_sent) {
+                goto no_work_remaining;
+            }
 
-        goto no_work_remaining;
+            /* If the request hasn't been completed yet, then wait for that to happen. */
+            if (!meta_request_default->synced_data.request_completed) {
+                goto has_work_remaining;
+            }
 
-    } else {
+            /* If some parts are still being delievered to the caller, then wait for those to finish. */
+            if (meta_request->synced_data.num_parts_delivery_completed <
+                meta_request->synced_data.num_parts_delivery_sent) {
+                goto has_work_remaining;
+            }
 
-        /* If we are canceling, and the request hasn't been sent yet, then there is nothing to wait for. */
-        if (!meta_request_default->synced_data.request_sent) {
             goto no_work_remaining;
         }
 
-        /* If the request hasn't been completed yet, then wait for that to happen. */
-        if (!meta_request_default->synced_data.request_completed) {
-            goto has_work_remaining;
+    has_work_remaining:
+        work_remaining = true;
+
+    no_work_remaining:
+
+        if (!work_remaining) {
+            aws_s3_meta_request_set_success_synced(
+                meta_request, meta_request_default->synced_data.cached_response_status);
         }
 
-        /* If some parts are still being delievered to the caller, then wait for those to finish. */
-        if (meta_request->synced_data.num_parts_delivery_completed <
-            meta_request->synced_data.num_parts_delivery_sent) {
-            goto has_work_remaining;
-        }
-
-        goto no_work_remaining;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-has_work_remaining:
-    work_remaining = true;
-
-no_work_remaining:
-
-    if (!work_remaining) {
-        aws_s3_meta_request_set_success_synced(meta_request, meta_request_default->synced_data.cached_response_status);
-    }
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     if (work_remaining) {
         if (request != NULL) {
@@ -279,16 +284,20 @@ static void s_s3_meta_request_default_request_finished(
         meta_request->headers_callback = NULL;
     }
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    meta_request_default->synced_data.cached_response_status = request->send_data.response_status;
-    meta_request_default->synced_data.request_completed = true;
-    meta_request_default->synced_data.request_error_code = error_code;
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        meta_request_default->synced_data.cached_response_status = request->send_data.response_status;
+        meta_request_default->synced_data.request_completed = true;
+        meta_request_default->synced_data.request_error_code = error_code;
 
-    if (error_code == AWS_ERROR_SUCCESS) {
-        aws_s3_meta_request_stream_response_body_synced(meta_request, request);
-    } else {
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        if (error_code == AWS_ERROR_SUCCESS) {
+            aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+        } else {
+            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        }
+
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 }
