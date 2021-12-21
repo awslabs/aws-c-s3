@@ -170,6 +170,13 @@ void progress_listener_update_progress(struct progress_listener *listener, uint6
     aws_mutex_unlock(&listener->mutex);
 }
 
+void progress_listener_reset_progress(struct progress_listener *listener) {
+    aws_mutex_lock(&listener->mutex);
+    listener->current = 0;
+    listener->render_update_pending = true;
+    aws_mutex_unlock(&listener->mutex);
+}
+
 void progress_listener_update_state(struct progress_listener *listener, struct aws_string *state_name) {
     aws_mutex_lock(&listener->mutex);
     aws_string_destroy(listener->state);
@@ -190,7 +197,8 @@ void progress_listener_render(struct progress_listener *listener) {
     struct progress_listener_group *group = listener->owning_group;
 
     fprintf(group->render_sink, "\33[2K");
-    fprintf(group->render_sink, "%s %s\n", aws_string_c_str(listener->label), aws_string_c_str(listener->state));
+    fprintf(group->render_sink, "%s\n", aws_string_c_str(listener->label));
+    fprintf(group->render_sink, "\33[2K");
 
     size_t completion = (size_t)(((double)listener->current / (double)listener->max) * 100);
 
@@ -208,5 +216,11 @@ void progress_listener_render(struct progress_listener *listener) {
     }
 
     fprintf(group->render_sink, "]");
-    fprintf(group->render_sink, " %llu/%llu (%zu%%)\n\n", listener->current, listener->max, completion);
+    fprintf(
+        group->render_sink,
+        " %llu/%llu (%zu%%)  %s\n\33[2K\n",
+        listener->current,
+        listener->max,
+        completion,
+        aws_string_c_str(listener->state));
 }
