@@ -94,12 +94,8 @@ static void s_parse_app_ctx(int argc, char *const argv[], struct app_ctx *app_ct
             case 'h':
                 app_ctx->help_requested = true;
                 break;
-            case 0x02:
-                /* positional arguments are handled by the subcommands. */
-                break;
             default:
-                fprintf(stderr, "Unknown option\n");
-                s_usage(1);
+                break;
         }
     }
 

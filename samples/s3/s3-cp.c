@@ -48,12 +48,20 @@ static void s_usage(int exit_code) {
 
     fprintf(
         sink,
-        "usage: s3-cp [options] s3://{source_bucket/source_object_key} "
-        "s3://{destination_bucket/destination_object_key}\n");
-    fprintf(sink, " source_bucket: the S3 bucket containing the object to copy\n");
-    fprintf(sink, " source_object_key: the key of the S3 Object to copy\n");
-    fprintf(sink, " destination_bucket: the S3 bucket the object will be copied to\n");
-    fprintf(sink, " destination_object_key: the key to be used for the new S3 object\n");
+        "usage: s3-cp [options] source_path "
+        "destination_path\n");
+    fprintf(
+        sink,
+        " source_path: an S3 bucket containing the object prefix to copy, or a local filesystem path to upload.\n");
+    fprintf(sink, "    In the case of an S3 bucket, use URI format S3://{bucket_name}/{prefix_and_or_key}.\n");
+
+    fprintf(
+        sink,
+        " destination_path: an S3 bucket containing the object prefix to copy, or a local filesystem path to download "
+        "to.\n");
+    fprintf(sink, "    In the case of an S3 bucket, use URI format S3://{bucket_name}/{prefix_and_or_key}.\n");
+    fprintf(sink, " If both the source_path and destination_path are S3 URIs it will attempt an object copy. \n");
+    fprintf(sink, "  Note: both buckets must be in the same region for the copy to work\n");
     exit(exit_code);
 }
 
@@ -97,79 +105,6 @@ static void s_parse_options(int argc, char **argv, struct cp_app_ctx *ctx) {
         fprintf(stderr, "An URI for the source and destination must be provided.\n");
         s_usage(1);
     }
-}
-
-static const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
-static const struct aws_byte_cursor g_x_amz_copy_source_name =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
-
-struct aws_http_message *copy_object_request_new(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor source_bucket,
-    struct aws_byte_cursor source_key,
-    struct aws_byte_cursor endpoint,
-    struct aws_byte_cursor destination_key) {
-
-    AWS_PRECONDITION(allocator);
-
-    struct aws_http_message *message = aws_http_message_new_request(allocator);
-
-    if (message == NULL) {
-        return NULL;
-    }
-
-    /* the URI path is / followed by the key */
-    char destination_path[1024];
-    snprintf(destination_path, sizeof(destination_path), "/%.*s", (int)destination_key.len, destination_key.ptr);
-
-    if (aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str(destination_path))) {
-        goto error_clean_up_message;
-    }
-
-    struct aws_http_header host_header = {.name = g_host_header_name, .value = endpoint};
-    if (aws_http_message_add_header(message, host_header)) {
-        goto error_clean_up_message;
-    }
-
-    char copy_source_value[1024];
-    snprintf(
-        copy_source_value,
-        sizeof(copy_source_value),
-        "%.*s/%.*s",
-        (int)source_bucket.len,
-        source_bucket.ptr,
-        (int)source_key.len,
-        source_key.ptr);
-
-    struct aws_byte_cursor copy_source_cursor = aws_byte_cursor_from_c_str(copy_source_value);
-    struct aws_byte_buf copy_source_value_encoded;
-    aws_byte_buf_init(&copy_source_value_encoded, allocator, 1024);
-    aws_byte_buf_append_encoding_uri_param(&copy_source_value_encoded, &copy_source_cursor);
-
-    struct aws_http_header copy_source_header = {
-        .name = g_x_amz_copy_source_name,
-        .value = aws_byte_cursor_from_buf(&copy_source_value_encoded),
-    };
-    if (aws_http_message_add_header(message, copy_source_header)) {
-        goto error_clean_up_message;
-    }
-
-    if (aws_http_message_set_request_method(message, aws_http_method_put)) {
-        goto error_clean_up_message;
-    }
-
-    aws_byte_buf_clean_up(&copy_source_value_encoded);
-    return message;
-
-error_clean_up_message:
-
-    aws_byte_buf_clean_up(&copy_source_value_encoded);
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
 }
 
 static void s_dispatch_and_run_transfers(struct cp_app_ctx *cp_app_ctx);
@@ -270,42 +205,13 @@ int s3_cp_main(int argc, char *argv[], const char *command_name, void *user_data
 
     s_dispatch_and_run_transfers(&cp_app_ctx);
 
-    /* come back to all of this once it's moved
-
-    struct aws_http_message *message = copy_object_request_new(
-        app_ctx->allocator, source_bucket, source_key, aws_byte_cursor_from_c_str(endpoint), destination_key);
-
-    struct aws_s3_meta_request_options meta_request_options = {
-        .user_data = &app_ctx,
-        .body_callback = NULL,
-        .signing_config = &app_ctx->signing_config,
-        .finish_callback = s_meta_request_finish,
-        .headers_callback = NULL,
-        .message = message,
-        .shutdown_callback = NULL,
-        .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
-    };
-
-    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(app_ctx->client, &meta_request_options);
-    if (meta_request == NULL) {
-        printf("*** meta_request IS NULL\n");
-    }
-
-    // wait completion of the meta request
-    aws_mutex_lock(&cp_app_ctx.mutex);
-    aws_condition_variable_wait_pred(&cp_app_ctx.c_var, &cp_app_ctx.mutex, s_app_completion_predicate, &app_ctx);
-    aws_mutex_unlock(&cp_app_ctx.mutex);
-
-    // release resources
-    aws_s3_meta_request_release(meta_request);
-    */
-
     aws_condition_variable_clean_up(&cp_app_ctx.c_var);
     aws_mutex_clean_up(&cp_app_ctx.mutex);
 
     return 0;
 }
 
+/* this stream wrapper is purely for updating progress bars on upload */
 struct progress_update_stream {
     struct aws_input_stream input_stream;
     struct single_transfer_ctx *transfer;
@@ -360,7 +266,156 @@ static struct aws_input_stream_vtable s_update_input_stream_vtable = {
     .get_status = s_input_get_status,
     .destroy = s_input_destroy,
 };
+/* end of stream for the progress bar */
 
+static const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
+static const struct aws_byte_cursor g_x_amz_copy_source_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
+
+/* helper function for getting an http request to make the copy object request. */
+static struct aws_http_message *s_copy_object_request_new(
+    struct cp_app_ctx *cp_app_ctx,
+    const struct aws_byte_cursor *source_bucket,
+    const struct aws_byte_cursor *source_key,
+    const struct aws_byte_cursor *destination_key) {
+    struct aws_http_message *message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
+
+    if (aws_http_message_set_request_path(message, *destination_key)) {
+        goto error_clean_up_message;
+    }
+
+    struct aws_byte_cursor endpoint = aws_byte_cursor_from_c_str(cp_app_ctx->dest_endpoint);
+    struct aws_http_header host_header = {.name = g_host_header_name, .value = endpoint};
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    char copy_source_value[1024];
+    snprintf(
+        copy_source_value,
+        sizeof(copy_source_value),
+        "%.*s/%.*s",
+        (int)source_bucket->len,
+        source_bucket->ptr,
+        (int)source_key->len,
+        source_key->ptr);
+
+    struct aws_byte_cursor copy_source_cursor = aws_byte_cursor_from_c_str(copy_source_value);
+    struct aws_byte_buf copy_source_value_encoded;
+    aws_byte_buf_init(&copy_source_value_encoded, cp_app_ctx->app_ctx->allocator, 1024);
+    aws_byte_buf_append_encoding_uri_param(&copy_source_value_encoded, &copy_source_cursor);
+
+    struct aws_http_header copy_source_header = {
+        .name = g_x_amz_copy_source_name,
+        .value = aws_byte_cursor_from_buf(&copy_source_value_encoded),
+    };
+    if (aws_http_message_add_header(message, copy_source_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_method(message, aws_http_method_put)) {
+        goto error_clean_up_message;
+    }
+
+    aws_byte_buf_clean_up(&copy_source_value_encoded);
+    return message;
+
+error_clean_up_message:
+
+    aws_byte_buf_clean_up(&copy_source_value_encoded);
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+/* invoked upon the completion of a copy object request. */
+static void s_copy_object_request_finish(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data) {
+    (void)meta_request;
+    struct single_transfer_ctx *transfer_ctx = user_data;
+
+    struct aws_string *new_state = NULL;
+    if (meta_request_result->error_code == AWS_ERROR_SUCCESS) {
+        new_state = aws_string_new_from_c_str(transfer_ctx->cp_app_ctx->app_ctx->allocator, "Completed");
+        progress_listener_update_progress(transfer_ctx->listener, 100);
+    } else {
+        new_state = aws_string_new_from_c_str(transfer_ctx->cp_app_ctx->app_ctx->allocator, "Error");
+    }
+
+    progress_listener_update_state(transfer_ctx->listener, new_state);
+    aws_s3_meta_request_release(transfer_ctx->meta_request);
+
+    aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
+    transfer_ctx->cp_app_ctx->completed_transfers++;
+    aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
+    aws_condition_variable_notify_one(&transfer_ctx->cp_app_ctx->c_var);
+
+    aws_mem_release(transfer_ctx->cp_app_ctx->app_ctx->allocator, transfer_ctx);
+}
+
+/* create a copy object request and send it based on the source bucket/key and destination bucket/key. */
+static int s_kick_off_copy_object_request(
+    struct cp_app_ctx *cp_app_ctx,
+    const struct aws_byte_cursor *source_bucket,
+    const struct aws_byte_cursor *source_key,
+    const struct aws_byte_cursor *destination_key) {
+    struct aws_http_message *message =
+        s_copy_object_request_new(cp_app_ctx, source_bucket, source_key, destination_key);
+
+    struct single_transfer_ctx *transfer_ctx =
+        aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
+    transfer_ctx->cp_app_ctx = cp_app_ctx;
+
+    struct aws_byte_buf label_buf;
+    struct aws_byte_cursor label_start_cur = aws_byte_cursor_from_c_str("copy: s3://");
+    aws_byte_buf_init_copy_from_cursor(&label_buf, cp_app_ctx->app_ctx->allocator, label_start_cur);
+    aws_byte_buf_append_dynamic(&label_buf, source_bucket);
+    aws_byte_buf_append_byte_dynamic(&label_buf, '/');
+    aws_byte_buf_append_dynamic(&label_buf, source_key);
+    struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to s3://");
+    aws_byte_buf_append_dynamic(&label_buf, &to_cur);
+    aws_byte_buf_append_dynamic(&label_buf, &cp_app_ctx->destination_uri.host_name);
+    aws_byte_buf_append_dynamic(&label_buf, destination_key);
+
+    struct aws_string *label = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &label_buf);
+    aws_byte_buf_clean_up(&label_buf);
+    struct aws_string *state = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "In Progress");
+
+    transfer_ctx->listener = progress_listener_new(cp_app_ctx->listener_group, label, state, 100);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .user_data = transfer_ctx,
+        .body_callback = NULL,
+        .signing_config = &cp_app_ctx->app_ctx->signing_config,
+        .finish_callback = s_copy_object_request_finish,
+        .headers_callback = NULL,
+        .message = message,
+        .shutdown_callback = NULL,
+        .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
+    };
+
+    transfer_ctx->meta_request = aws_s3_client_make_meta_request(cp_app_ctx->app_ctx->client, &meta_request_options);
+    if (transfer_ctx->meta_request == NULL) {
+        fprintf(
+            stderr,
+            "Failure when initiating copy object request with error %s\n",
+            aws_error_debug_str(aws_last_error()));
+        exit(1);
+    }
+
+    aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
+    transfer_ctx->cp_app_ctx->expected_transfers++;
+    aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* invoked upon an upload completion. */
 void s_put_request_finished(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
@@ -392,105 +447,126 @@ static bool s_are_all_transfers_done(void *arg) {
     return cp_app_ctx->expected_transfers == cp_app_ctx->completed_transfers;
 }
 
+/* kick off a PUT request for an object from a file on disk */
+static int s_kickoff_put_object(
+    struct cp_app_ctx *cp_app_ctx,
+    const struct aws_byte_cursor *src_path,
+    const struct aws_byte_cursor *dest_path,
+    uint64_t file_size) {
+    struct single_transfer_ctx *transfer_ctx =
+        aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
+    transfer_ctx->cp_app_ctx = cp_app_ctx;
+
+    struct aws_byte_buf uri_path;
+    struct aws_byte_cursor destination_path = *dest_path;
+
+    aws_byte_buf_init_copy_from_cursor(&uri_path, cp_app_ctx->app_ctx->allocator, cp_app_ctx->destination_uri.path);
+    aws_byte_buf_append_dynamic(&uri_path, &destination_path);
+
+    for (size_t i = 0; i < uri_path.len; ++i) {
+        if (uri_path.buffer[i] == '\\') {
+            uri_path.buffer[i] = '/';
+        }
+    }
+
+    struct aws_byte_cursor full_path = aws_byte_cursor_from_buf(&uri_path);
+
+    if (uri_path.buffer[0] == '.') {
+        aws_byte_cursor_advance(&full_path, 1);
+    }
+
+    struct aws_byte_buf label_buf;
+    struct aws_byte_cursor operation_name_cur = aws_byte_cursor_from_c_str("upload: ");
+    aws_byte_buf_init_copy_from_cursor(&label_buf, cp_app_ctx->app_ctx->allocator, operation_name_cur);
+    aws_byte_buf_append_dynamic(&label_buf, dest_path);
+    struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to s3://");
+    aws_byte_buf_append_dynamic(&label_buf, &to_cur);
+    aws_byte_buf_append_dynamic(&label_buf, &cp_app_ctx->destination_uri.authority);
+    aws_byte_buf_append_dynamic(&label_buf, &full_path);
+
+    struct aws_string *label = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &label_buf);
+    aws_byte_buf_clean_up(&label_buf);
+
+    struct aws_string *state = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "In Progress");
+
+    transfer_ctx->listener = progress_listener_new(cp_app_ctx->listener_group, label, state, file_size);
+    aws_string_destroy(state);
+    aws_string_destroy(label);
+    aws_byte_buf_clean_up(&label_buf);
+
+    struct aws_s3_meta_request_options request_options = {
+        .user_data = transfer_ctx,
+        .signing_config = &cp_app_ctx->app_ctx->signing_config,
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .finish_callback = s_put_request_finished,
+    };
+
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = aws_byte_cursor_from_c_str(cp_app_ctx->dest_endpoint),
+    };
+
+    char content_length[256];
+    AWS_ZERO_ARRAY(content_length);
+    snprintf(content_length, AWS_ARRAY_SIZE(content_length), "%" PRIu64, file_size);
+
+    struct aws_http_header content_length_header = {
+        .name = aws_byte_cursor_from_c_str("content-length"),
+        .value = aws_byte_cursor_from_c_str(content_length),
+    };
+
+    request_options.message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
+    aws_http_message_add_header(request_options.message, host_header);
+    aws_http_message_add_header(request_options.message, content_length_header);
+    aws_http_message_set_request_method(request_options.message, aws_http_method_put);
+    aws_http_message_set_request_path(request_options.message, full_path);
+
+    struct aws_input_stream *body_input =
+        aws_input_stream_new_from_file(cp_app_ctx->app_ctx->allocator, (const char *)src_path->ptr);
+
+    if (!body_input) {
+        aws_mem_release(cp_app_ctx->app_ctx->allocator, transfer_ctx);
+        return AWS_OP_ERR;
+    }
+
+    struct progress_update_stream *update_stream =
+        aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct progress_update_stream));
+    update_stream->transfer = transfer_ctx;
+    update_stream->wrapped_stream = body_input;
+    update_stream->input_stream.vtable = &s_update_input_stream_vtable;
+    update_stream->input_stream.impl = update_stream;
+    update_stream->input_stream.allocator = cp_app_ctx->app_ctx->allocator;
+    aws_http_message_set_body_stream(request_options.message, &update_stream->input_stream);
+
+    transfer_ctx->meta_request = aws_s3_client_make_meta_request(cp_app_ctx->app_ctx->client, &request_options);
+
+    if (!transfer_ctx->meta_request) {
+        aws_mem_release(cp_app_ctx->app_ctx->allocator, transfer_ctx);
+        return AWS_OP_ERR;
+    }
+
+    aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
+    transfer_ctx->cp_app_ctx->expected_transfers++;
+    aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* invoked upon walking a directory. it's invoked for each entry found in the directory. */
 static bool s_on_directory_entry(const struct aws_directory_entry *entry, void *user_data) {
     struct cp_app_ctx *cp_app_ctx = user_data;
 
     if (entry->file_type & AWS_FILE_TYPE_FILE) {
-        struct single_transfer_ctx *transfer_ctx =
-            aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
-        transfer_ctx->cp_app_ctx = cp_app_ctx;
-
-        struct aws_byte_buf uri_path;
-        struct aws_byte_cursor destination_path = entry->relative_path;
-
-        if (destination_path.len >= 2 && destination_path.ptr[0] == '.') {
-            aws_byte_cursor_advance(&destination_path, 1);
-        }
-        aws_byte_buf_init_copy_from_cursor(&uri_path, cp_app_ctx->app_ctx->allocator, cp_app_ctx->destination_uri.path);
-        aws_byte_buf_append_dynamic(&uri_path, &destination_path);
-
-        for (size_t i = 0; i < uri_path.len; ++i) {
-            if (uri_path.buffer[i] == '\\') {
-                uri_path.buffer[i] = '/';
-            }
-        }
-
-        struct aws_byte_cursor full_path = aws_byte_cursor_from_buf(&uri_path);
-
-        if (uri_path.buffer[0] == '.') {
-            aws_byte_cursor_advance(&full_path, 1);
-        }
-
-        struct aws_byte_buf label_buf;
-        struct aws_byte_cursor operation_name_cur = aws_byte_cursor_from_c_str("upload: ");
-        aws_byte_buf_init_copy_from_cursor(&label_buf, cp_app_ctx->app_ctx->allocator, operation_name_cur);
-        aws_byte_buf_append_dynamic(&label_buf, &entry->relative_path);
-        struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to s3://");
-        aws_byte_buf_append_dynamic(&label_buf, &to_cur);
-        aws_byte_buf_append_dynamic(&label_buf, &cp_app_ctx->destination_uri.authority);
-        aws_byte_buf_append_dynamic(&label_buf, &full_path);
-
-        struct aws_string *label = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &label_buf);
-        aws_byte_buf_clean_up(&label_buf);
-
-        struct aws_string *state = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "In Progress");
-
-        transfer_ctx->listener = progress_listener_new(cp_app_ctx->listener_group, label, state, entry->file_size);
-        aws_string_destroy(state);
-        aws_string_destroy(label);
-        aws_byte_buf_clean_up(&label_buf);
-
-        struct aws_s3_meta_request_options request_options = {
-            .user_data = transfer_ctx,
-            .signing_config = &cp_app_ctx->app_ctx->signing_config,
-            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-            .finish_callback = s_put_request_finished,
-        };
-
-        struct aws_http_header host_header = {
-            .name = aws_byte_cursor_from_c_str("host"),
-            .value = aws_byte_cursor_from_c_str(cp_app_ctx->dest_endpoint),
-        };
-
-        char content_length[256];
-        AWS_ZERO_ARRAY(content_length);
-        snprintf(content_length, AWS_ARRAY_SIZE(content_length), "%" PRIu64, entry->file_size);
-
-        struct aws_http_header content_length_header = {
-            .name = aws_byte_cursor_from_c_str("content-length"),
-            .value = aws_byte_cursor_from_c_str(content_length),
-        };
-
-        request_options.message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
-        aws_http_message_add_header(request_options.message, host_header);
-        aws_http_message_add_header(request_options.message, content_length_header);
-        aws_http_message_set_request_method(request_options.message, aws_http_method_put);
-        aws_http_message_set_request_path(request_options.message, full_path);
-
-        struct aws_input_stream *body_input =
-            aws_input_stream_new_from_file(cp_app_ctx->app_ctx->allocator, (const char *)entry->path.ptr);
-        if (body_input) {
-
-            struct progress_update_stream *update_stream =
-                aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct progress_update_stream));
-            update_stream->transfer = transfer_ctx;
-            update_stream->wrapped_stream = body_input;
-            update_stream->input_stream.vtable = &s_update_input_stream_vtable;
-            update_stream->input_stream.impl = update_stream;
-            update_stream->input_stream.allocator = cp_app_ctx->app_ctx->allocator;
-            aws_http_message_set_body_stream(request_options.message, &update_stream->input_stream);
-
-            transfer_ctx->meta_request = aws_s3_client_make_meta_request(cp_app_ctx->app_ctx->client, &request_options);
-
-            aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
-            transfer_ctx->cp_app_ctx->expected_transfers++;
-            aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
-        }
+        struct aws_byte_cursor escaped_dest_path = entry->relative_path;
+        aws_byte_cursor_advance(&escaped_dest_path, cp_app_ctx->source_uri.uri_str.len);
+        int ret_val = s_kickoff_put_object(cp_app_ctx, &entry->relative_path, &escaped_dest_path, entry->file_size);
+        return ret_val == AWS_OP_SUCCESS;
     }
 
     return true;
 }
 
+/* upon each byte downloaded, update the progress bar, and write to disk. */
 int s_get_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -507,6 +583,7 @@ int s_get_body_callback(
     return AWS_OP_SUCCESS;
 }
 
+/* Invoked when the get object request completes. */
 void s_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
@@ -534,124 +611,172 @@ void s_get_request_finished(
     aws_mem_release(transfer_ctx->cp_app_ctx->app_ctx->allocator, transfer_ctx);
 }
 
+/* Setup a get object request and write the file to disk as it's downloaded. */
+static int s_kickoff_get_object(
+    struct cp_app_ctx *cp_app_ctx,
+    const struct aws_byte_cursor *key,
+    const struct aws_byte_cursor *destination,
+    size_t size) {
+    struct single_transfer_ctx *transfer_ctx =
+        aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
+    transfer_ctx->cp_app_ctx = cp_app_ctx;
+
+    struct aws_byte_buf label_buf;
+    struct aws_byte_cursor operation_name_cur = aws_byte_cursor_from_c_str("download: s3://");
+    aws_byte_buf_init_copy_from_cursor(&label_buf, cp_app_ctx->app_ctx->allocator, operation_name_cur);
+    aws_byte_buf_append_dynamic(&label_buf, &cp_app_ctx->source_uri.host_name);
+    struct aws_byte_cursor slash_cur = aws_byte_cursor_from_c_str("/");
+    aws_byte_buf_append_dynamic(&label_buf, &slash_cur);
+    aws_byte_buf_append_dynamic(&label_buf, key);
+    struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to ");
+    aws_byte_buf_append_dynamic(&label_buf, &to_cur);
+    aws_byte_buf_append_dynamic(&label_buf, destination);
+
+    struct aws_string *label = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &label_buf);
+    aws_byte_buf_clean_up(&label_buf);
+
+    struct aws_string *state = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "In Progress");
+
+    transfer_ctx->listener = progress_listener_new(cp_app_ctx->listener_group, label, state, size);
+    aws_string_destroy(state);
+    aws_string_destroy(label);
+    aws_byte_buf_clean_up(&label_buf);
+
+    struct aws_string *file_path = aws_string_new_from_cursor(cp_app_ctx->app_ctx->allocator, destination);
+    struct aws_string *mode = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "wb");
+    transfer_ctx->output_sink = aws_fopen_safe(file_path, mode);
+    aws_string_destroy(mode);
+    aws_string_destroy(file_path);
+
+    if (!transfer_ctx->output_sink) {
+        return AWS_OP_ERR;
+    }
+
+    struct aws_s3_meta_request_options request_options = {
+        .user_data = transfer_ctx,
+        .signing_config = &cp_app_ctx->app_ctx->signing_config,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .finish_callback = s_get_request_finished,
+        .body_callback = s_get_body_callback,
+    };
+
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = aws_byte_cursor_from_c_str(cp_app_ctx->source_endpoint),
+    };
+
+    struct aws_http_header accept_header = {
+        .name = aws_byte_cursor_from_c_str("accept"),
+        .value = aws_byte_cursor_from_c_str("*/*"),
+    };
+
+    struct aws_http_header user_agent_header = {
+        .name = aws_byte_cursor_from_c_str("user-agent"),
+        .value = aws_byte_cursor_from_c_str("AWS common runtime command-line client"),
+    };
+
+    request_options.message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
+    aws_http_message_add_header(request_options.message, host_header);
+    aws_http_message_add_header(request_options.message, accept_header);
+    aws_http_message_add_header(request_options.message, user_agent_header);
+    aws_http_message_set_request_method(request_options.message, aws_http_method_get);
+
+    struct aws_byte_buf path_buf;
+    aws_byte_buf_init(&path_buf, cp_app_ctx->app_ctx->allocator, key->len + 1);
+    aws_byte_buf_append_dynamic(&path_buf, &slash_cur);
+    aws_byte_buf_append_dynamic(&path_buf, key);
+    struct aws_byte_cursor path_cur = aws_byte_cursor_from_buf(&path_buf);
+    aws_http_message_set_request_path(request_options.message, path_cur);
+    aws_byte_buf_clean_up(&path_buf);
+
+    transfer_ctx->meta_request = aws_s3_client_make_meta_request(cp_app_ctx->app_ctx->client, &request_options);
+
+    if (!transfer_ctx->meta_request) {
+        return AWS_OP_ERR;
+    }
+
+    aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
+    transfer_ctx->cp_app_ctx->expected_transfers++;
+    aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* upon listing the objects in a bucket, this is invoked for each object encountered. */
 static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_data) {
     struct cp_app_ctx *cp_app_ctx = user_data;
 
     /* size greater than zero means it's an actual object. */
     if (info->key.len > 0) {
-        struct aws_byte_buf dest_directory;
-        aws_byte_buf_init_copy(&dest_directory, cp_app_ctx->app_ctx->allocator, &cp_app_ctx->destination_uri.uri_str);
-
-        struct aws_string *dir_path = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &dest_directory);
-        if (!aws_directory_exists(dir_path)) {
-            aws_directory_create(dir_path);
-        }
-        aws_string_destroy(dir_path);
-
         struct aws_byte_cursor trimmed_key = info->key;
 
-        if (info->prefix.len) {
+        /* in this first case, if prefix and key are the same, we just download to the dest uri at key name. */
+        if (aws_byte_cursor_eq_ignore_case(&info->key, &info->prefix)) {
+            for (size_t i = trimmed_key.len - 1; i > 0; --i) {
+                if (trimmed_key.ptr[i] == '/') {
+                    aws_byte_cursor_advance(&trimmed_key, i + 1);
+                    break;
+                }
+            }
+        } else if (info->prefix.len) {
             aws_byte_cursor_advance(&trimmed_key, info->prefix.len);
         }
 
-        struct aws_array_list splits;
-        aws_array_list_init_dynamic(&splits, cp_app_ctx->app_ctx->allocator, 8, sizeof(struct aws_byte_cursor));
-        aws_byte_cursor_split_on_char(&trimmed_key, '/', &splits);
+        /* if we're going to be downloading to disk, set up the get object requests here. */
+        if (cp_app_ctx->dest_file_system) {
+            struct aws_byte_buf dest_directory;
+            aws_byte_buf_init_copy(
+                &dest_directory, cp_app_ctx->app_ctx->allocator, &cp_app_ctx->destination_uri.uri_str);
 
-        for (size_t i = 0; i < aws_array_list_length(&splits); ++i) {
-            struct aws_byte_cursor path_component;
-            aws_array_list_get_at(&splits, &path_component, i);
-
-            if (path_component.len > 0) {
-                if (dest_directory.buffer[dest_directory.len - 1] != AWS_PATH_DELIM) {
-                    struct aws_byte_cursor slash_cur = aws_byte_cursor_from_c_str(AWS_PATH_DELIM_STR);
-                    aws_byte_buf_append_dynamic(&dest_directory, &slash_cur);
-                }
-                aws_byte_buf_append_dynamic(&dest_directory, &path_component);
-
-                dir_path = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &dest_directory);
-                if (i < aws_array_list_length(&splits) - 1 && !aws_directory_exists(dir_path)) {
-                    aws_directory_create(dir_path);
-                }
-                aws_string_destroy(dir_path);
+            struct aws_string *dir_path = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &dest_directory);
+            if (!aws_directory_exists(dir_path)) {
+                aws_directory_create(dir_path);
             }
+            aws_string_destroy(dir_path);
+
+            struct aws_array_list splits;
+            aws_array_list_init_dynamic(&splits, cp_app_ctx->app_ctx->allocator, 8, sizeof(struct aws_byte_cursor));
+            aws_byte_cursor_split_on_char(&trimmed_key, '/', &splits);
+
+            for (size_t i = 0; i < aws_array_list_length(&splits); ++i) {
+                struct aws_byte_cursor path_component;
+                aws_array_list_get_at(&splits, &path_component, i);
+
+                if (path_component.len > 0) {
+                    if (dest_directory.buffer[dest_directory.len - 1] != AWS_PATH_DELIM) {
+                        struct aws_byte_cursor slash_cur = aws_byte_cursor_from_c_str(AWS_PATH_DELIM_STR);
+                        aws_byte_buf_append_dynamic(&dest_directory, &slash_cur);
+                    }
+                    aws_byte_buf_append_dynamic(&dest_directory, &path_component);
+
+                    dir_path = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &dest_directory);
+                    if (i < aws_array_list_length(&splits) - 1 && !aws_directory_exists(dir_path)) {
+                        aws_directory_create(dir_path);
+                    }
+                    aws_string_destroy(dir_path);
+                }
+            }
+
+            struct aws_byte_cursor destination_cur = aws_byte_cursor_from_buf(&dest_directory);
+            int ret_val = s_kickoff_get_object(cp_app_ctx, &info->key, &destination_cur, info->size);
+            aws_byte_buf_clean_up(&dest_directory);
+
+            return ret_val == AWS_OP_SUCCESS;
         }
 
-        struct single_transfer_ctx *transfer_ctx =
-            aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
-        transfer_ctx->cp_app_ctx = cp_app_ctx;
+        /* otherwise, we're copying between buckets. Set up the copy here. */
+        struct aws_byte_buf destination_key;
+        aws_byte_buf_init_copy_from_cursor(
+            &destination_key, cp_app_ctx->app_ctx->allocator, cp_app_ctx->destination_uri.path);
+        aws_byte_buf_append_dynamic(&destination_key, &trimmed_key);
+        struct aws_byte_cursor destination_key_cur = aws_byte_cursor_from_buf(&destination_key);
 
-        struct aws_byte_buf label_buf;
-        struct aws_byte_cursor operation_name_cur = aws_byte_cursor_from_c_str("download: s3://");
-        aws_byte_buf_init_copy_from_cursor(&label_buf, cp_app_ctx->app_ctx->allocator, operation_name_cur);
-        aws_byte_buf_append_dynamic(&label_buf, &cp_app_ctx->source_uri.host_name);
-        struct aws_byte_cursor slash_cur = aws_byte_cursor_from_c_str("/");
-        aws_byte_buf_append_dynamic(&label_buf, &slash_cur);
-        aws_byte_buf_append_dynamic(&label_buf, &info->key);
-        struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to ");
-        aws_byte_buf_append_dynamic(&label_buf, &to_cur);
-        struct aws_byte_cursor dest_dir_cur = aws_byte_cursor_from_buf(&dest_directory);
-        aws_byte_buf_append_dynamic(&label_buf, &dest_dir_cur);
+        int return_code =
+            s_kick_off_copy_object_request(
+                cp_app_ctx, &cp_app_ctx->source_uri.host_name, &info->key, &destination_key_cur) == AWS_OP_SUCCESS;
 
-        struct aws_string *label = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &label_buf);
-        aws_byte_buf_clean_up(&label_buf);
-
-        struct aws_string *state = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "In Progress");
-
-        transfer_ctx->listener = progress_listener_new(cp_app_ctx->listener_group, label, state, info->size);
-        aws_string_destroy(state);
-        aws_string_destroy(label);
-        aws_byte_buf_clean_up(&label_buf);
-
-        struct aws_string *file_path = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &dest_directory);
-        aws_byte_buf_clean_up(&dest_directory);
-        struct aws_string *mode = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "wb");
-        transfer_ctx->output_sink = aws_fopen_safe(file_path, mode);
-        aws_string_destroy(mode);
-        aws_string_destroy(file_path);
-
-        struct aws_s3_meta_request_options request_options = {
-            .user_data = transfer_ctx,
-            .signing_config = &cp_app_ctx->app_ctx->signing_config,
-            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .finish_callback = s_get_request_finished,
-            .body_callback = s_get_body_callback,
-        };
-
-        struct aws_http_header host_header = {
-            .name = aws_byte_cursor_from_c_str("host"),
-            .value = aws_byte_cursor_from_c_str(cp_app_ctx->source_endpoint),
-        };
-
-        struct aws_http_header accept_header = {
-            .name = aws_byte_cursor_from_c_str("accept"),
-            .value = aws_byte_cursor_from_c_str("*/*"),
-        };
-
-        struct aws_http_header user_agent_header = {
-            .name = aws_byte_cursor_from_c_str("user-agent"),
-            .value = aws_byte_cursor_from_c_str("AWS common runtime command-line client"),
-        };
-
-        request_options.message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
-        aws_http_message_add_header(request_options.message, host_header);
-        aws_http_message_add_header(request_options.message, accept_header);
-        aws_http_message_add_header(request_options.message, user_agent_header);
-        aws_http_message_set_request_method(request_options.message, aws_http_method_get);
-
-        struct aws_byte_buf path_buf;
-        aws_byte_buf_init(&path_buf, cp_app_ctx->app_ctx->allocator, info->key.len + 1);
-        aws_byte_buf_append_dynamic(&path_buf, &slash_cur);
-        aws_byte_buf_append_dynamic(&path_buf, &info->key);
-        struct aws_byte_cursor path_cur = aws_byte_cursor_from_buf(&path_buf);
-        aws_http_message_set_request_path(request_options.message, path_cur);
-        aws_byte_buf_clean_up(&path_buf);
-
-        transfer_ctx->meta_request = aws_s3_client_make_meta_request(cp_app_ctx->app_ctx->client, &request_options);
-
-        aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
-        transfer_ctx->cp_app_ctx->expected_transfers++;
-        aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
+        aws_byte_buf_clean_up(&destination_key);
+        return return_code == AWS_OP_SUCCESS;
     }
 
     return true;
@@ -680,7 +805,10 @@ void s_dispatch_and_run_transfers(struct cp_app_ctx *cp_app_ctx) {
 
     struct aws_s3_paginator *paginator = NULL;
 
+    /* the source argument is either a directory on disk or s3 (it's not actually possible to tell a prefix from an
+     * object) */
     if (cp_app_ctx->source_is_directory_or_prefix) {
+        /* uploading a directory from disk to S3 */
         if (cp_app_ctx->source_file_system) {
             struct aws_string *path =
                 aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &cp_app_ctx->source_uri.uri_str);
@@ -697,7 +825,11 @@ void s_dispatch_and_run_transfers(struct cp_app_ctx *cp_app_ctx) {
                 &cp_app_ctx->c_var, &cp_app_ctx->mutex, s_are_all_transfers_done, cp_app_ctx);
             aws_mutex_unlock(&cp_app_ctx->mutex);
 
+            /* due to trickery in list_objects, this handles the source is s3 key instead of just a prefix, so we
+             * don't need to handle that later.*/
         } else {
+            /* this is an s3 bucket, and we'll be downloading it to disk. Incidentally, this also works for plain ole
+             * single objects. */
             char main_endpoint[1024];
             AWS_ZERO_ARRAY(main_endpoint);
             snprintf(main_endpoint, sizeof(main_endpoint), "s3.%s.amazonaws.com", cp_app_ctx->app_ctx->region);
@@ -714,6 +846,11 @@ void s_dispatch_and_run_transfers(struct cp_app_ctx *cp_app_ctx) {
             };
 
             paginator = aws_s3_initiate_list_objects(cp_app_ctx->app_ctx->allocator, &list_objects_params);
+
+            if (!paginator) {
+                fprintf(stderr, "List objects failed with error %s\n", aws_error_debug_str(aws_last_error()));
+                s_usage(1);
+            }
             aws_s3_paginator_continue(paginator, &cp_app_ctx->app_ctx->signing_config);
 
             aws_mutex_lock(&cp_app_ctx->mutex);
@@ -722,6 +859,46 @@ void s_dispatch_and_run_transfers(struct cp_app_ctx *cp_app_ctx) {
             aws_mutex_unlock(&cp_app_ctx->mutex);
 
             aws_s3_paginator_release(paginator);
+        }
+    } else {
+        /* only handles a single file from disk being uploaded to s3. */
+        if (cp_app_ctx->source_file_system) {
+            struct aws_byte_cursor source_path = aws_byte_cursor_from_buf(&cp_app_ctx->source_uri.uri_str);
+            int64_t source_file_length = 0;
+            struct aws_string *source_path_str =
+                aws_string_new_from_cursor(cp_app_ctx->app_ctx->allocator, &source_path);
+            struct aws_string *open_mode = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "rb");
+            FILE *src_file = aws_fopen_safe(source_path_str, open_mode);
+
+            if (!src_file) {
+                fprintf(stderr, "File open failed with error %s\n", aws_error_debug_str(aws_last_error()));
+                s_usage(1);
+            }
+
+            aws_file_get_length(src_file, &source_file_length);
+            fclose(src_file);
+            aws_string_destroy(open_mode);
+            aws_string_destroy(source_path_str);
+
+            struct aws_byte_cursor file_name_portion = cp_app_ctx->source_uri.path;
+
+            /* just the final segment of the key */
+            for (size_t i = file_name_portion.len - 1; i > 0; --i) {
+                if (file_name_portion.ptr[i] == AWS_PATH_DELIM) {
+                    aws_byte_cursor_advance(&file_name_portion, i + 1);
+                    break;
+                }
+            }
+
+            if (s_kickoff_put_object(cp_app_ctx, &source_path, &file_name_portion, source_file_length)) {
+                fprintf(stderr, "File transfer failed with error %s\n", aws_error_debug_str(aws_last_error()));
+                s_usage(1);
+            }
+
+            aws_mutex_lock(&cp_app_ctx->mutex);
+            aws_condition_variable_wait_pred(
+                &cp_app_ctx->c_var, &cp_app_ctx->mutex, s_are_all_transfers_done, cp_app_ctx);
+            aws_mutex_unlock(&cp_app_ctx->mutex);
         }
     }
 }

@@ -21,6 +21,7 @@ struct s3_ls_app_data {
     struct aws_mutex mutex;
     struct aws_condition_variable cvar;
     bool execution_completed;
+    bool long_format;
 };
 
 static void s_usage(int exit_code) {
@@ -28,12 +29,14 @@ static void s_usage(int exit_code) {
     fprintf(output, "usage: s3 ls [options] s3://{bucket}[/prefix]\n");
     fprintf(output, " bucket: the S3 bucket to list objects\n");
     fprintf(output, " prefix: the prefix to filter\n");
+    fprintf(output, "  -l, List in long format\n");
     fprintf(output, "  -h, --help\n");
     fprintf(output, "            Display this message and quit.\n");
     exit(exit_code);
 }
 
 static struct aws_cli_option s_long_options[] = {
+    {"long-format", AWS_CLI_OPTIONS_NO_ARGUMENT, NULL, 'l'},
     /* Per getopt(3) the last element of the array has to be filled with all zeros */
     {NULL, AWS_CLI_OPTIONS_NO_ARGUMENT, NULL, 0},
 };
@@ -44,8 +47,11 @@ static void s_parse_options(int argc, char **argv, struct s3_ls_app_data *ctx) {
     int opt_val = 0;
     bool uri_found = false;
     do {
-        opt_val = aws_cli_getopt_long(argc, argv, "", s_long_options, &option_index);
+        opt_val = aws_cli_getopt_long(argc, argv, "l", s_long_options, &option_index);
         /* START_OF_TEXT means our positional argument */
+        if (opt_val == 'l') {
+            ctx->long_format = true;
+        }
         if (opt_val == 0x02) {
             struct aws_byte_cursor uri_cursor = aws_byte_cursor_from_c_str(aws_cli_positional_arg);
 
@@ -81,9 +87,12 @@ static bool s_app_completion_predicate(void *arg) {
  * Called once for each object returned in the ListObjectsV2 responses.
  */
 bool s_on_object(const struct aws_s3_object_info *info, void *user_data) {
-    (void)user_data;
+    struct s3_ls_app_data *app_ctx = user_data;
 
-    printf("%-18" PRIu64 " %.*s\n", info->size, (int)info->key.len, info->key.ptr);
+    if (app_ctx->long_format) {
+        printf("%-18" PRIu64 " ", info->size);
+    }
+    printf("%.*s\n", (int)info->key.len, info->key.ptr);
     return true;
 }
 
