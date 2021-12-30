@@ -1288,7 +1288,7 @@ static void s_s3_client_prepare_callback_queue_request(
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
-    /* BEGIN CRITICAL SECTION */
+    /* END CRITICAL SECTION */
 }
 
 void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {

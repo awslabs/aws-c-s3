@@ -9,7 +9,6 @@
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
 
-static const size_t s_etags_initial_capacity = 16;
 static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
@@ -80,13 +79,12 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         goto error_clean_up;
     }
 
-    if (aws_array_list_init_dynamic(
-            &auto_ranged_put->synced_data.etag_list,
-            allocator,
-            s_etags_initial_capacity,
-            sizeof(struct aws_string *))) {
-        goto error_clean_up;
-    }
+    /* @dengket do the etags need to be synced? each etag is accessed exactly twice, once when initialized by the
+     * corresponding part, and once during complete multipart upload when the list is used to create the message body.
+     */
+    struct aws_string **etag_c_arry = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
+    aws_array_list_init_static(
+        &auto_ranged_put->synced_data.etag_list, etag_c_arry, num_parts, sizeof(struct aws_string *));
 
     auto_ranged_put->content_length = content_length;
     auto_ranged_put->synced_data.total_num_parts = num_parts;
@@ -98,7 +96,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     return &auto_ranged_put->base;
 
 error_clean_up:
-
     aws_mem_release(allocator, auto_ranged_put);
     return NULL;
 }
@@ -120,7 +117,7 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
         aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
         aws_string_destroy(etag);
     }
-
+    aws_mem_release(meta_request->allocator, auto_ranged_put->synced_data.etag_list.data);
     aws_array_list_clean_up(&auto_ranged_put->synced_data.etag_list);
     aws_http_headers_release(auto_ranged_put->synced_data.needed_response_headers);
     aws_mem_release(meta_request->allocator, auto_ranged_put);
@@ -377,9 +374,6 @@ static int s_s3_auto_ranged_put_prepare_request(
 
                 /* Build the message to complete our multipart upload, which includes a payload describing all of
                  * our completed parts. */
-                /* is there a better way to do this? we generally prefer to keep critical sections as small as
-                 * possible
-                 */
                 message = aws_s3_complete_multipart_message_new(
                     meta_request->allocator,
                     meta_request->initial_request_message,
@@ -573,12 +567,6 @@ static void s_s3_auto_ranged_put_request_finished(
                     /* ETags need to be associated with their part number, so we keep the etag indices consistent with
                      * part numbers. This means we may have to add padding to the list in the case that parts finish out
                      * of order. */
-                    while (aws_array_list_length(&auto_ranged_put->synced_data.etag_list) < part_number) {
-                        int push_back_result =
-                            aws_array_list_push_back(&auto_ranged_put->synced_data.etag_list, &null_etag);
-                        AWS_FATAL_ASSERT(push_back_result == AWS_OP_SUCCESS);
-                    }
-
                     aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
                 } else {
                     ++auto_ranged_put->synced_data.num_parts_failed;
