@@ -562,8 +562,6 @@ static void s_s3_auto_ranged_put_request_finished(
 
                     ++auto_ranged_put->synced_data.num_parts_successful;
 
-                    struct aws_string *null_etag = NULL;
-
                     /* ETags need to be associated with their part number, so we keep the etag indices consistent with
                      * part numbers. This means we may have to add padding to the list in the case that parts finish out
                      * of order. */
