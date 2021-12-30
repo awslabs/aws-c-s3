@@ -1532,12 +1532,11 @@ static int s_test_s3_put_object_less_than_part_size_flex_checks(struct aws_alloc
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config = {
-        .part_size = 20 * 1024 * 1024,
-        .flexible_checksum_options = {
-            .checksum_algorithm = AWS_SCA_CRC32,
-            .checksum_location = AWS_MR_FC_TRAILER,
-        }};
+    struct aws_s3_client_config client_config = {.part_size = 20 * 1024 * 1024,
+                                                 .flexible_checksum_options = {
+                                                     .checksum_algorithm = AWS_SCA_CRC32,
+                                                     .checksum_location = AWS_MR_FC_TRAILER,
+                                                 }};
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
