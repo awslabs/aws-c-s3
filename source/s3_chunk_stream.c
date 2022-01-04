@@ -23,6 +23,7 @@ struct aws_chunk_stream {
     struct aws_input_stream *current_stream;
     struct aws_input_stream *checksum_stream;
     struct aws_byte_buf checksum_result;
+    struct aws_byte_buf *checksum_result_output;
     struct aws_byte_buf pre_chunk_buffer;
     struct aws_byte_buf post_chunk_buffer;
     struct aws_byte_cursor checksum_header_name;
@@ -44,20 +45,33 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor colon_cursor = aws_byte_cursor_from_string(s_colon);
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&parent_stream->checksum_result);
-    aws_byte_buf_init(
-        &parent_stream->post_chunk_buffer,
-        aws_default_allocator(),
-        final_chunk_cursor.len + parent_stream->checksum_header_name.len + colon_cursor.len +
-            checksum_result_cursor.len + post_trailer_cursor.len);
-    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &final_chunk_cursor);
-    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &parent_stream->checksum_header_name);
-    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &colon_cursor);
-    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &checksum_result_cursor);
-    aws_byte_buf_append(&parent_stream->post_chunk_buffer, &post_trailer_cursor);
+    if (parent_stream->checksum_result_output &&
+        aws_byte_buf_init_copy_from_cursor(
+            parent_stream->checksum_result_output, aws_default_allocator(), checksum_result_cursor)) {
+        return AWS_OP_ERR;
+    }
+    if (aws_byte_buf_init(
+            &parent_stream->post_chunk_buffer,
+            aws_default_allocator(),
+            final_chunk_cursor.len + parent_stream->checksum_header_name.len + colon_cursor.len +
+                checksum_result_cursor.len + post_trailer_cursor.len)) {
+        goto error;
+    }
+    if (aws_byte_buf_append(&parent_stream->post_chunk_buffer, &final_chunk_cursor) ||
+        aws_byte_buf_append(&parent_stream->post_chunk_buffer, &parent_stream->checksum_header_name) ||
+        aws_byte_buf_append(&parent_stream->post_chunk_buffer, &colon_cursor) ||
+        aws_byte_buf_append(&parent_stream->post_chunk_buffer, &checksum_result_cursor) ||
+        aws_byte_buf_append(&parent_stream->post_chunk_buffer, &post_trailer_cursor)) {
+        goto error;
+    }
     struct aws_byte_cursor post_chunk_cursor = aws_byte_cursor_from_buf(&parent_stream->post_chunk_buffer);
     parent_stream->current_stream = aws_input_stream_new_from_cursor(aws_default_allocator(), &post_chunk_cursor);
     parent_stream->set_current_stream_fn = s_set_null_stream;
     return AWS_OP_SUCCESS;
+error:
+    aws_byte_buf_clean_up(parent_stream->checksum_result_output);
+    aws_byte_buf_clean_up(&parent_stream->post_chunk_buffer);
+    return AWS_OP_ERR;
 }
 
 static int s_set_chunk_stream(struct aws_chunk_stream *parent_stream) {
@@ -93,8 +107,8 @@ static int s_aws_input_chunk_stream_read(struct aws_input_stream *stream, struct
             dest->len = start;
             return AWS_OP_ERR;
         }
-        if (status.is_end_of_stream) {
-            impl->set_current_stream_fn(impl);
+        if (status.is_end_of_stream && impl->set_current_stream_fn(impl)) {
+            return AWS_OP_ERR;
         }
     }
     return AWS_OP_SUCCESS;
@@ -147,7 +161,8 @@ static struct aws_input_stream_vtable s_aws_input_chunk_stream_vtable = {
 struct aws_input_stream *aws_chunk_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
-    enum aws_s3_checksum_algorithm algorithm) {
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *checksum_output) {
 
     struct aws_input_stream *stream = NULL;
     struct aws_chunk_stream *impl = NULL;
@@ -161,6 +176,7 @@ struct aws_input_stream *aws_chunk_stream_new(
     stream->allocator = allocator;
     stream->impl = impl;
     stream->vtable = &s_aws_input_chunk_stream_vtable;
+    impl->checksum_result_output = checksum_output;
     int64_t stream_length = 0;
     if (aws_input_stream_get_length(existing_stream, &stream_length)) {
         goto error;
@@ -223,6 +239,7 @@ error:
     aws_input_stream_destroy(impl->checksum_stream);
     aws_input_stream_destroy(impl->current_stream);
     aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
+    aws_byte_buf_clean_up(&impl->checksum_result);
     aws_mem_release(stream->allocator, stream);
     return NULL;
 }

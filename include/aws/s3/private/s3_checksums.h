@@ -29,11 +29,22 @@ struct aws_input_stream *aws_checksum_stream_new(
     enum aws_s3_checksum_algorithm algorithm,
     struct aws_byte_buf *checksum_result);
 
+/**
+ * @brief
+ *
+ * @param allocator
+ * @param existing_stream
+ * @param algorithm
+ * @param checksum_output optional argument, if provided the buffer will be initialized to the appropriate size and
+ * filled with the checksum result when calculated. Callers responsibility to cleanup.
+ * @return AWS_S3_API struct*
+ */
 AWS_S3_API
 struct aws_input_stream *aws_chunk_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
-    enum aws_s3_checksum_algorithm algorithm);
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *checksum_output);
 
 /**
  * Get the size of the checksum output corresponding to the aws_s3_checksum_algorithm enum value.

@@ -211,7 +211,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    struct aws_s3_meta_request_flexible_checksums_options *checksum_options) {
+    struct aws_s3_meta_request_flexible_checksums_options *checksum_options,
+    struct aws_byte_buf *encoded_checksum_output) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
@@ -229,12 +230,13 @@ struct aws_http_message *aws_s3_upload_part_message_new(
 
     if (buffer != NULL) {
         if (checksum_options->checksum_algorithm && checksum_options->checksum_location == AWS_MR_FC_TRAILER) {
-            if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_options->checksum_algorithm) ==
+            if (aws_s3_message_util_assign_body(
+                    allocator, buffer, message, checksum_options->checksum_algorithm, encoded_checksum_output) ==
                 NULL) {
                 goto error_clean_up;
             }
         } else {
-            if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE) == NULL) {
+            if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, NULL) == NULL) {
                 goto error_clean_up;
             }
         }
@@ -363,7 +365,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         }
 
         /* come back to this to see what needs to be done */
-        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE);
+        /* I believe complete_mutipart_upload message is not itself checksummed */
+        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, NULL);
     }
 
     return message;
@@ -417,7 +420,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
-    enum aws_s3_checksum_algorithm algorithm) {
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *out_checksum) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
     AWS_PRECONDITION(byte_buf);
@@ -456,7 +460,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             goto error_clean_up;
         }
         /* set input stream to chunk stream */
-        input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm);
+        /* TODO edit final argument to be passed in */
+        input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
         if (input_stream) {
             goto error_clean_up;
         }

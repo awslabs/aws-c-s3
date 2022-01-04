@@ -244,9 +244,10 @@ static int s_s3_meta_request_default_prepare_request(
         aws_s3_message_util_add_checksum_header(meta_request->allocator, &request->request_body, message, AWS_SCA_MD5);
     }
     if (checksum_algorithm && checksum_location == AWS_MR_FC_TRAILER) {
-        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, checksum_algorithm);
+        aws_s3_message_util_assign_body(
+            meta_request->allocator, &request->request_body, message, checksum_algorithm, NULL);
     } else {
-        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, AWS_SCA_NONE);
+        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, AWS_SCA_NONE, NULL);
     }
 
     aws_s3_request_setup_send_data(request, message);

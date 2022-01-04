@@ -82,9 +82,12 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     /* @dengket do the etags need to be synced? each etag is accessed exactly twice, once when initialized by the
      * corresponding part, and once during complete multipart upload when the list is used to create the message body.
      */
-    struct aws_string **etag_c_arry = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
+    struct aws_string **etag_c_array = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
+    struct aws_string **checksums_c_array = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf *), num_parts);
     aws_array_list_init_static(
-        &auto_ranged_put->synced_data.etag_list, etag_c_arry, num_parts, sizeof(struct aws_string *));
+        &auto_ranged_put->synced_data.etag_list, etag_c_array, num_parts, sizeof(struct aws_string *));
+    aws_array_list_init_static(
+        &auto_ranged_put->checksums_list, checksums_c_array, num_parts, sizeof(struct aws_byte_buf *));
 
     auto_ranged_put->content_length = content_length;
     auto_ranged_put->synced_data.total_num_parts = num_parts;
@@ -117,8 +120,17 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
         aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
         aws_string_destroy(etag);
     }
+    for (size_t checksum_index = 0; checksum_index < aws_array_list_length(&auto_ranged_put->checksums_list);
+         ++checksum_index) {
+        struct aws_byte_buf *checksum = NULL;
+
+        aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &checksum, checksum_index);
+        aws_byte_buf_clean_up(checksum);
+    }
     aws_mem_release(meta_request->allocator, auto_ranged_put->synced_data.etag_list.data);
+    aws_mem_release(meta_request->allocator, auto_ranged_put->checksums_list.data);
     aws_array_list_clean_up(&auto_ranged_put->synced_data.etag_list);
+    aws_array_list_clean_up(&auto_ranged_put->checksums_list);
     aws_http_headers_release(auto_ranged_put->synced_data.needed_response_headers);
     aws_mem_release(meta_request->allocator, auto_ranged_put);
 }
@@ -343,7 +355,10 @@ static int s_s3_auto_ranged_put_prepare_request(
                     goto message_create_failed;
                 }
             }
-
+            struct aws_byte_buf *encoded_checksum_output = NULL;
+            /* might be missing a reference or a dereference here? */
+            aws_array_list_get_at_ptr(
+                &auto_ranged_put->checksums_list, (void **)&encoded_checksum_output, request->part_number);
             /* Create a new put-object message to upload a part. */
             message = aws_s3_upload_part_message_new(
                 meta_request->allocator,
@@ -352,7 +367,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                 request->part_number,
                 auto_ranged_put->upload_id,
                 meta_request->should_compute_content_md5,
-                &meta_request->flexible_checksum_options);
+                &meta_request->flexible_checksum_options,
+                encoded_checksum_output);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
@@ -374,6 +390,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
                 /* Build the message to complete our multipart upload, which includes a payload describing all of
                  * our completed parts. */
+                /* TODO ADD checksum list */
                 message = aws_s3_complete_multipart_message_new(
                     meta_request->allocator,
                     meta_request->initial_request_message,
