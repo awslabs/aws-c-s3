@@ -620,7 +620,7 @@ static int s_kickoff_get_object(
     struct cp_app_ctx *cp_app_ctx,
     const struct aws_byte_cursor *key,
     const struct aws_byte_cursor *destination,
-    size_t size) {
+    uint64_t size) {
     struct single_transfer_ctx *transfer_ctx =
         aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
     transfer_ctx->cp_app_ctx = cp_app_ctx;
