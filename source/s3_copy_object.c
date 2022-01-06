@@ -560,7 +560,7 @@ static void s_s3_copy_object_request_finished(
                 if (!aws_http_headers_get(
                         request->send_data.response_headers, g_content_length_header_name, &content_length_cursor)) {
 
-                    if (!aws_s3_strutil_read_unsigned_num(
+                    if (!aws_byte_cursor_utf8_parse_u64(
                             content_length_cursor, &copy_object->synced_data.content_length)) {
                         copy_object->synced_data.head_object_completed = true;
                     } else {
