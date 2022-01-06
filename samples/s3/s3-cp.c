@@ -17,6 +17,10 @@
 #include <inttypes.h>
 #include <stdio.h>
 
+#if _MSC_VER
+#    pragma warning(disable : 4706) /* assignment in conditional */
+#endif                              /* _MSC_VER */
+
 struct cp_app_ctx {
     struct app_ctx *app_ctx;
     struct aws_uri source_uri;
