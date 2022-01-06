@@ -220,7 +220,7 @@ void progress_listener_render(struct progress_listener *listener) {
     /* clamp the state to 20 characters to avoid overflowing the line and missing up the line calculations */
     fprintf(
         group->render_sink,
-        " %llu/%llu (%zu%%)  %.20s\n\33[2K\n",
+        " %" PRIu64 "/%" PRIu64 "(%zu%%)  %.20s\n\33[2K\n",
         listener->current,
         listener->max,
         completion,
