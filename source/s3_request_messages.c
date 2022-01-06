@@ -285,12 +285,14 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
-    const struct aws_array_list *etags) {
+    const struct aws_array_list *etags,
+    const struct aws_array_list *checksums) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
+    AWS_PRECONDITION(checksums);
 
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
@@ -364,8 +366,6 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        /* come back to this to see what needs to be done */
-        /* I believe complete_mutipart_upload message is not itself checksummed */
         aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, NULL);
     }
 

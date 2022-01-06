@@ -1030,7 +1030,7 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&payload->requests);
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_ASSERT(meta_request == request->meta_request);
-
+        /* RESPONSE HANDLED HERE, LOOK HERE!!!!!!!!!!!!!!!!!!!! *******************************************************/
         struct aws_byte_cursor body_buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
         AWS_ASSERT(request->part_number >= 1);
