@@ -367,6 +367,11 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 goto error_clean_up;
             }
             if (mpu_algorithm_checksum_name) {
+
+                struct aws_byte_buf *checksum_buf = NULL;
+                aws_array_list_get_at(checksums, &checksum_buf, etag_index);
+                struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(checksum_buf);
+
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
                     goto error_clean_up;
                 }
@@ -374,6 +379,9 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                     goto error_clean_up;
                 }
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &checksum)) {
                     goto error_clean_up;
                 }
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_end_bracket)) {

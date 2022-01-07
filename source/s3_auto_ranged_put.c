@@ -357,8 +357,7 @@ static int s_s3_auto_ranged_put_prepare_request(
             }
             struct aws_byte_buf *encoded_checksum_output = NULL;
             /* might be missing a reference or a dereference here? */
-            aws_array_list_get_at_ptr(
-                &auto_ranged_put->checksums_list, (void **)&encoded_checksum_output, request->part_number);
+            aws_array_list_get_at(&auto_ranged_put->checksums_list, &encoded_checksum_output, request->part_number);
             /* Create a new put-object message to upload a part. */
             message = aws_s3_upload_part_message_new(
                 meta_request->allocator,
