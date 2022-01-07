@@ -832,8 +832,8 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     struct aws_byte_buf body_buffer;
     aws_byte_buf_init(&body_buffer, allocator, 64);
 
-    struct aws_http_message *complete_multipart_message =
-        aws_s3_complete_multipart_message_new(allocator, original_message, &body_buffer, upload_id, &etags, &checksums);
+    struct aws_http_message *complete_multipart_message = aws_s3_complete_multipart_message_new(
+        allocator, original_message, &body_buffer, upload_id, &etags, &checksums, AWS_SCA_NONE);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(complete_multipart_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(complete_multipart_message, &expected_create_path));

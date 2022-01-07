@@ -2077,8 +2077,8 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
     struct aws_array_list checksums;
     ASSERT_SUCCESS(aws_array_list_init_dynamic(&checksums, allocator, 0, sizeof(struct aws_byte_cursor *)));
 
-    struct aws_http_message *new_message =
-        aws_s3_complete_multipart_message_new(allocator, base_message, &body_buffer, upload_id, &etags, &checksums);
+    struct aws_http_message *new_message = aws_s3_complete_multipart_message_new(
+        allocator, base_message, &body_buffer, upload_id, &etags, &checksums, AWS_SCA_NONE);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));

@@ -69,6 +69,18 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_sha256_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_crc32c_complete_mpu_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32_complete_mpu_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha1_complete_mpu_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha256_complete_mpu_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_s3_client_version;
 
 AWS_S3_API

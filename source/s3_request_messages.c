@@ -276,9 +276,12 @@ static const struct aws_byte_cursor s_part_section_string_1 =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag>\n"
                                           "         <PartNumber>");
 
-static const struct aws_byte_cursor s_part_section_string_2 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n"
-                                                                                                    "    </Part>\n");
-
+static const struct aws_byte_cursor s_close_part_number_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n");
+static const struct aws_byte_cursor s_close_part_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    </Part>\n");
+static const struct aws_byte_cursor s_open_start_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("         <");
+static const struct aws_byte_cursor s_open_end_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</");
+static const struct aws_byte_cursor s_close_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">");
+static const struct aws_byte_cursor s_close_bracket_new_line = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">\n");
 /* Create a complete-multipart message, which includes an XML payload of all completed parts. */
 struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_allocator *allocator,
@@ -286,13 +289,16 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *etags,
-    const struct aws_array_list *checksums) {
+    const struct aws_array_list *checksums,
+    enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
     AWS_PRECONDITION(checksums);
+
+    const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
 
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
@@ -357,7 +363,30 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 goto error_clean_up;
             }
 
-            if (aws_byte_buf_append_dynamic(body_buffer, &s_part_section_string_2)) {
+            if (aws_byte_buf_append_dynamic(body_buffer, &s_close_part_number_tag)) {
+                goto error_clean_up;
+            }
+            if (mpu_algorithm_checksum_name) {
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_open_end_bracket)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket_new_line)) {
+                    goto error_clean_up;
+                }
+            }
+            if (aws_byte_buf_append_dynamic(body_buffer, &s_close_part_tag)) {
                 goto error_clean_up;
             }
         }

@@ -59,6 +59,12 @@ AWS_S3_API
 struct aws_byte_cursor aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
+ * Get the complete multipart upload name corresponding to the aws_s3_checksum_algorithm enum value.
+ */
+AWS_S3_API
+const struct aws_byte_cursor *aws_get_complete_mpu_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+
+/**
  * create a new aws_checksum corresponding to the aws_s3_checksum_algorithm enum value.
  */
 AWS_S3_API

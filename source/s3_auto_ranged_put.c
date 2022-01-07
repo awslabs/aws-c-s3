@@ -397,7 +397,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                     &request->request_body,
                     auto_ranged_put->upload_id,
                     &auto_ranged_put->synced_data.etag_list,
-                    &auto_ranged_put->checksums_list);
+                    &auto_ranged_put->checksums_list,
+                    meta_request->flexible_checksum_options.checksum_algorithm);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }
