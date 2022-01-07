@@ -814,7 +814,7 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     ASSERT_SUCCESS(aws_array_list_push_back(&etags, &etag));
 
     struct aws_array_list checksums;
-    ASSERT_SUCCESS(aws_array_list_init_dynamic(&checksums, allocator, 0, sizeof(struct aws_byte_buffer *)));
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&checksums, allocator, 0, sizeof(struct aws_byte_buf *)));
 
     const struct aws_byte_cursor header_exclude_exceptions[] = {
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
