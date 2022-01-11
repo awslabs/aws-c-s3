@@ -224,7 +224,9 @@ int aws_checksum_compute_fn(
 }
 
 void aws_checksum_destroy(struct aws_checksum *checksum) {
-    checksum->vtable->destroy(checksum);
+    if (checksum != NULL) {
+        checksum->vtable->destroy(checksum);
+    }
 }
 
 int aws_checksum_update(struct aws_checksum *checksum, const struct aws_byte_cursor *to_checksum) {

@@ -123,10 +123,14 @@ struct aws_s3_meta_request {
 
     /* Customer specified callbacks. */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
-    /* check to see if brawn is activated, if so compose callbacks */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
+
+    /* Customer specified callbacks to be called by our specialized callback to calculate the response checkum. */
+    aws_s3_meta_request_headers_callback_fn *headers_checksum_callback;
+    aws_s3_meta_request_receive_body_callback_fn *body_checksum_callback;
+    aws_s3_meta_request_finish_fn *finish_checksum_callback;
 
     enum aws_s3_meta_request_type type;
 
@@ -180,6 +184,10 @@ struct aws_s3_meta_request {
     const bool should_compute_content_md5;
 
     struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options;
+
+    struct aws_checksum *running_response_sum;
+
+    struct aws_byte_buf response_header_checksum;
 };
 
 AWS_EXTERN_C_BEGIN

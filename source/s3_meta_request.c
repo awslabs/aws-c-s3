@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
@@ -67,6 +68,75 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     AWS_PRECONDITION(meta_request);
 
     aws_mutex_unlock(&meta_request->synced_data.lock);
+}
+
+static int s_is_get_request(const struct aws_s3_meta_request_options *options, bool *is_request) {
+    if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        *is_request = true;
+        return AWS_OP_SUCCESS;
+    }
+    if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+        struct aws_byte_cursor method;
+        if (aws_http_message_get_request_method(options->message, &method)) {
+            return AWS_OP_ERR;
+        }
+        *is_request = aws_byte_cursor_eq(&method, &aws_http_method_get);
+        return AWS_OP_SUCCESS;
+    }
+    *is_request = false;
+    return AWS_OP_SUCCESS;
+}
+
+static int s_get_response_headers_brawn_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+    for (int i = AWS_SCA_CRC32C; i < AWS_SCA_MD5; i++) {
+        struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        if (aws_http_headers_has(headers, algorithm_header_name)) {
+            struct aws_byte_cursor header_sum;
+            aws_http_headers_get(headers, algorithm_header_name, &header_sum);
+            aws_byte_buf_init_copy_from_cursor(
+                &meta_request->response_header_checksum, aws_default_allocator(), header_sum);
+            meta_request->running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+            break;
+        }
+    }
+    return meta_request->headers_checksum_callback(meta_request, headers, response_status, user_data);
+}
+
+/* should I offset checksum calculation by range_start? unclear to me from docs */
+static int s_get_response_body_brawn_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+    if (meta_request->running_response_sum) {
+        aws_checksum_update(meta_request->running_response_sum, body);
+    }
+    return meta_request->body_checksum_callback(meta_request, body, range_start, user_data);
+}
+
+static void s_get_response_finish_brawn_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data) {
+    if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->running_response_sum) {
+        struct aws_byte_buf response_body_sum;
+        aws_byte_buf_init(&response_body_sum, aws_default_allocator(), meta_request->running_response_sum->digest_size);
+        aws_checksum_finalize(meta_request->running_response_sum, &response_body_sum, 0);
+        if (!aws_byte_buf_eq(&response_body_sum, &meta_request->response_header_checksum)) {
+            /* is this proper? */
+            struct aws_s3_meta_request_result *mut_request_result =
+                (struct aws_s3_meta_request_result *)meta_request_result;
+            mut_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+        }
+        aws_byte_buf_clean_up(&response_body_sum);
+    }
+    aws_checksum_destroy(meta_request->running_response_sum);
+    aws_byte_buf_clean_up(&meta_request->response_header_checksum);
+    meta_request->finish_checksum_callback(meta_request, meta_request_result, user_data);
 }
 
 int aws_s3_meta_request_init_base(
@@ -138,11 +208,27 @@ int aws_s3_meta_request_init_base(
 
     meta_request->synced_data.next_streaming_part = 1;
 
+    meta_request->running_response_sum = NULL;
     meta_request->user_data = options->user_data;
-    meta_request->headers_callback = options->headers_callback;
-    meta_request->body_callback = options->body_callback;
-    meta_request->finish_callback = options->finish_callback;
     meta_request->shutdown_callback = options->shutdown_callback;
+
+    bool is_get = false;
+    if (s_is_get_request(options, &is_get)) {
+        return AWS_OP_ERR;
+    }
+    if (is_get) {
+        meta_request->headers_checksum_callback = options->headers_callback;
+        meta_request->body_checksum_callback = options->body_callback;
+        meta_request->finish_checksum_callback = options->finish_callback;
+
+        meta_request->headers_callback = s_get_response_headers_brawn_callback;
+        meta_request->body_callback = s_get_response_body_brawn_callback;
+        meta_request->finish_callback = s_get_response_finish_brawn_callback;
+    } else {
+        meta_request->headers_callback = options->headers_callback;
+        meta_request->body_callback = options->body_callback;
+        meta_request->finish_callback = options->finish_callback;
+    }
 
     return AWS_OP_SUCCESS;
 }
