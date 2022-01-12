@@ -1,2 +1,2 @@
 
-add_subdirectory(s3-cp)
+add_subdirectory(s3)
