@@ -118,8 +118,6 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_MD5,
 };
 
-enum aws_s3_checksum_algorithm checksum_algorithm;
-
 /* Options for a new client. */
 struct aws_s3_client_config {
 
