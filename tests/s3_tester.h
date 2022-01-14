@@ -191,7 +191,7 @@ struct aws_s3_meta_request_test_results {
 
 struct aws_s3_client_config;
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, bool streaming);
 
 /* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
  * client to clean up. */

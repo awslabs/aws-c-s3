@@ -9,8 +9,8 @@
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
-AWS_STATIC_STRING_FROM_LITERAL(s_pre_chunk, ";\r\n");
-AWS_STATIC_STRING_FROM_LITERAL(s_final_chunk, "\r\n0;\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_pre_chunk, "\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_final_chunk, "\r\n0\r\n");
 AWS_STATIC_STRING_FROM_LITERAL(s_colon, ":");
 AWS_STATIC_STRING_FROM_LITERAL(s_post_trailer, "\r\n\r\n");
 
@@ -188,7 +188,7 @@ struct aws_input_stream *aws_chunk_stream_new(
      */
     char stream_length_string[32];
     AWS_ZERO_ARRAY(stream_length_string);
-    snprintf(stream_length_string, AWS_ARRAY_SIZE(stream_length_string), "%" PRId64, stream_length);
+    snprintf(stream_length_string, AWS_ARRAY_SIZE(stream_length_string), "%" PRIX64, stream_length);
     struct aws_string *stream_length_aws_string = aws_string_new_from_c_str(allocator, stream_length_string);
     struct aws_byte_cursor stream_length_cursor = aws_byte_cursor_from_string(stream_length_aws_string);
     if (aws_byte_buf_init(&impl->pre_chunk_buffer, allocator, stream_length_cursor.len + pre_chunk_cursor.len)) {

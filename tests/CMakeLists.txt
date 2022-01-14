@@ -136,6 +136,8 @@ add_test_case(test_add_user_agent_header)
 add_test_case(test_get_existing_compute_platform_info)
 add_test_case(test_get_nonexistent_compute_platform_info)
 
+add_test_case(test_s3_put_object_less_than_part_size_flex_checks)
+
 add_net_test_case(sha1_nist_test_case_1)
 add_net_test_case(sha1_nist_test_case_2)
 add_net_test_case(sha1_nist_test_case_3)

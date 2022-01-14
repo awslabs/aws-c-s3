@@ -499,7 +499,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         /* set input stream to chunk stream */
         /* TODO edit final argument to be passed in */
         input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
-        if (input_stream) {
+        if (!input_stream) {
             goto error_clean_up;
         }
     }
@@ -520,7 +520,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     return input_stream;
 
 error_clean_up:
-
+    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
     aws_input_stream_destroy(input_stream);
     return NULL;
 }

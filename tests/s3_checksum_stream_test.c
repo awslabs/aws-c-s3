@@ -45,11 +45,12 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
     return AWS_OP_SUCCESS;
 }
 
-AWS_STATIC_STRING_FROM_LITERAL(s_0pre_chunk, "0;\r\n");
-AWS_STATIC_STRING_FROM_LITERAL(s_3pre_chunk, "3;\r\n");
-AWS_STATIC_STRING_FROM_LITERAL(s_57pre_chunk, "56;\r\n");
-AWS_STATIC_STRING_FROM_LITERAL(s_113pre_chunk, "112;\r\n");
-AWS_STATIC_STRING_FROM_LITERAL(s_final_chunk, "\r\n0;\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_0pre_chunk, "0\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_3pre_chunk, "3\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_56pre_chunk, "38\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_112pre_chunk, "70\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_11pre_chunk, "B\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_final_chunk, "\r\n0\r\n");
 AWS_STATIC_STRING_FROM_LITERAL(s_colon, ":");
 AWS_STATIC_STRING_FROM_LITERAL(s_post_trailer, "\r\n\r\n");
 
@@ -172,6 +173,7 @@ static int s_verify_checksum_stream_fn(struct aws_allocator *allocator, void *ct
     struct aws_byte_cursor input3 = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
                                                                "klmghijklmnhijklmnoijklmnopjklmnopqklm"
                                                                "nopqrlmnopqrsmnopqrstnopqrstu");
+    struct aws_byte_cursor input4 = aws_byte_cursor_from_c_str("Hello world");
     for (size_t buffer_size = 1; buffer_size < input0.len + 3; buffer_size++) {
         ASSERT_SUCCESS(compare_checksum_stream(allocator, &input0, buffer_size));
     }
@@ -181,8 +183,11 @@ static int s_verify_checksum_stream_fn(struct aws_allocator *allocator, void *ct
     for (size_t buffer_size = 1; buffer_size < input2.len + 3; buffer_size++) {
         ASSERT_SUCCESS(compare_checksum_stream(allocator, &input2, buffer_size));
     }
-    for (size_t buffer_size = 1; buffer_size < input2.len + 3; buffer_size++) {
+    for (size_t buffer_size = 1; buffer_size < input3.len + 3; buffer_size++) {
         ASSERT_SUCCESS(compare_checksum_stream(allocator, &input3, buffer_size));
+    }
+    for (size_t buffer_size = 1; buffer_size < input4.len + 3; buffer_size++) {
+        ASSERT_SUCCESS(compare_checksum_stream(allocator, &input4, buffer_size));
     }
     aws_s3_library_clean_up();
     return AWS_OP_SUCCESS;
@@ -200,6 +205,7 @@ static int s_verify_chunk_stream_fn(struct aws_allocator *allocator, void *ctx) 
     struct aws_byte_cursor input3 = aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghij"
                                                                "klmghijklmnhijklmnoijklmnopjklmnopqklm"
                                                                "nopqrlmnopqrsmnopqrstnopqrstu");
+    struct aws_byte_cursor input4 = aws_byte_cursor_from_c_str("Hello world");
     for (size_t buffer_size = 1; buffer_size < input0.len + 70; buffer_size++) {
         ASSERT_SUCCESS(compare_chunk_stream(allocator, s_0pre_chunk, &input0, buffer_size));
     }
@@ -207,10 +213,13 @@ static int s_verify_chunk_stream_fn(struct aws_allocator *allocator, void *ctx) 
         ASSERT_SUCCESS(compare_chunk_stream(allocator, s_3pre_chunk, &input1, buffer_size));
     }
     for (size_t buffer_size = 1; buffer_size < input2.len + 70; buffer_size++) {
-        ASSERT_SUCCESS(compare_chunk_stream(allocator, s_57pre_chunk, &input2, buffer_size));
+        ASSERT_SUCCESS(compare_chunk_stream(allocator, s_56pre_chunk, &input2, buffer_size));
     }
     for (size_t buffer_size = 1; buffer_size < input3.len + 70; buffer_size++) {
-        ASSERT_SUCCESS(compare_chunk_stream(allocator, s_113pre_chunk, &input3, buffer_size));
+        ASSERT_SUCCESS(compare_chunk_stream(allocator, s_112pre_chunk, &input3, buffer_size));
+    }
+    for (size_t buffer_size = 1; buffer_size < input4.len + 70; buffer_size++) {
+        ASSERT_SUCCESS(compare_chunk_stream(allocator, s_11pre_chunk, &input4, buffer_size));
     }
     aws_s3_library_clean_up();
     return AWS_OP_SUCCESS;

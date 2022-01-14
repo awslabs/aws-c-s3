@@ -197,7 +197,7 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     return endpoint_string;
 }
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, bool streaming) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -257,6 +257,10 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 #endif
 
     aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
+
+    if (streaming) {
+        tester->default_signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+    }
 
     return AWS_OP_SUCCESS;
 
@@ -1128,7 +1132,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     if (tester == NULL) {
         ASSERT_TRUE(options->allocator);
-        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester));
+        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester, false));
         tester = &local_tester;
         clean_up_local_tester = true;
     } else if (allocator == NULL) {
