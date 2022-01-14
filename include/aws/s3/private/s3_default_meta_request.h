@@ -33,6 +33,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     uint64_t content_length,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
-    struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options);
+    enum aws_s3_checksum_algorithm checksum_algorithm);
 
 #endif

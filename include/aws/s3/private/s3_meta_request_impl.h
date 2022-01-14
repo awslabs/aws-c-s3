@@ -183,7 +183,7 @@ struct aws_s3_meta_request {
 
     const bool should_compute_content_md5;
 
-    struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options;
+    enum aws_s3_checksum_algorithm checksum_algorithm;
 
     struct aws_checksum *running_response_sum;
 
@@ -199,7 +199,7 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
-    struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options,
+    enum aws_s3_checksum_algorithm checksum_algorithm,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,

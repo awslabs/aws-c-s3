@@ -211,7 +211,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    struct aws_s3_meta_request_flexible_checksums_options *checksum_options,
+    enum aws_s3_checksum_algorithm checksum_algorithm,
     struct aws_byte_buf *encoded_checksum_output) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
@@ -229,10 +229,9 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     }
 
     if (buffer != NULL) {
-        if (checksum_options->checksum_algorithm && checksum_options->checksum_location == AWS_MR_FC_TRAILER) {
+        if (checksum_algorithm) {
             if (aws_s3_message_util_assign_body(
-                    allocator, buffer, message, checksum_options->checksum_algorithm, encoded_checksum_output) ==
-                NULL) {
+                    allocator, buffer, message, checksum_algorithm, encoded_checksum_output) == NULL) {
                 goto error_clean_up;
             }
         } else {
@@ -240,8 +239,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
                 goto error_clean_up;
             }
         }
-
-        if (!checksum_options->checksum_algorithm && should_compute_content_md5) {
+        if (!checksum_algorithm && should_compute_content_md5) {
             if (aws_s3_message_util_add_checksum_header(allocator, buffer, message, AWS_SCA_MD5)) {
                 goto error_clean_up;
             }
@@ -451,8 +449,6 @@ error_clean_up:
 }
 
 /* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
-/* TODO chunk-stream needs to add header name to
- * stream, content length needs to use the input_stream get-length function */
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,

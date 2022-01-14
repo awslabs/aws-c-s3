@@ -69,7 +69,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    struct aws_s3_meta_request_flexible_checksums_options *checksum_options,
+    enum aws_s3_checksum_algorithm checksum_algorithm,
     struct aws_byte_buf *encoded_checksum_output);
 
 /* Create an HTTP request for an S3 Create-Multipart-Upload request. */

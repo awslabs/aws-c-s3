@@ -71,7 +71,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             part_size,
             client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
                 aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
-            client->flexible_checksum_options,
+            client->checksum_algorithm,
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
@@ -366,7 +366,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 request->part_number,
                 auto_ranged_put->upload_id,
                 meta_request->should_compute_content_md5,
-                &meta_request->flexible_checksum_options,
+                meta_request->checksum_algorithm,
                 encoded_checksum_output);
             break;
         }
@@ -397,7 +397,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     auto_ranged_put->upload_id,
                     &auto_ranged_put->synced_data.etag_list,
                     &auto_ranged_put->checksums_list,
-                    meta_request->flexible_checksum_options.checksum_algorithm);
+                    meta_request->checksum_algorithm);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }

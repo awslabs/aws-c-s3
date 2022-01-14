@@ -118,15 +118,7 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_MD5,
 };
 
-enum aws_s3_meta_request_flexible_checksum_location {
-    AWS_MR_FC_HEADER,
-    AWS_MR_FC_TRAILER,
-};
-
-struct aws_s3_meta_request_flexible_checksums_options {
-    enum aws_s3_checksum_algorithm checksum_algorithm;
-    enum aws_s3_meta_request_flexible_checksum_location checksum_location;
-};
+enum aws_s3_checksum_algorithm checksum_algorithm;
 
 /* Options for a new client. */
 struct aws_s3_client_config {
@@ -177,7 +169,7 @@ struct aws_s3_client_config {
 
     /**
      * If a flexible checksum is specified it will replace compute_content_md5 */
-    struct aws_s3_meta_request_flexible_checksums_options flexible_checksum_options;
+    enum aws_s3_checksum_algorithm checksum_algorithm;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;

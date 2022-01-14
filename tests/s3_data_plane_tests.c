@@ -1532,11 +1532,7 @@ static int s_test_s3_put_object_less_than_part_size_flex_checks(struct aws_alloc
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
 
-    struct aws_s3_client_config client_config = {.part_size = 20 * 1024 * 1024,
-                                                 .flexible_checksum_options = {
-                                                     .checksum_algorithm = AWS_SCA_CRC32,
-                                                     .checksum_location = AWS_MR_FC_TRAILER,
-                                                 }};
+    struct aws_s3_client_config client_config = {.part_size = 20 * 1024 * 1024, .checksum_algorithm = AWS_SCA_CRC32C};
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
@@ -1926,18 +1922,8 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
     uint32_t part_number = 1;
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
 
-    struct aws_s3_meta_request_flexible_checksums_options checksum_options;
-    AWS_ZERO_STRUCT(checksum_options);
-
     struct aws_http_message *new_message = aws_s3_upload_part_message_new(
-        allocator,
-        base_message,
-        &test_buffer,
-        part_number,
-        upload_id,
-        should_compute_content_md5,
-        &checksum_options,
-        NULL);
+        allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5, AWS_SCA_NONE, NULL);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     if (should_compute_content_md5) {
