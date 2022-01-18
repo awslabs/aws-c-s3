@@ -74,8 +74,10 @@ static int s_compute_chunk_stream(
     if (aws_byte_buf_append(output, input)) {
         return AWS_OP_ERR;
     }
-    if (aws_byte_buf_append(output, &final_chunk)) {
-        return AWS_OP_ERR;
+    if (input->len > 0) {
+        if (aws_byte_buf_append(output, &final_chunk)) {
+            return AWS_OP_ERR;
+        }
     }
     if (aws_byte_buf_append(output, &checksum_header_name)) {
         return AWS_OP_ERR;

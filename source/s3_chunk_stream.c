@@ -9,7 +9,8 @@
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
-AWS_STATIC_STRING_FROM_LITERAL(s_pre_chunk, "\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_carriage_return, "\r\n");
+AWS_STATIC_STRING_FROM_LITERAL(s_empty_chunk, "0\r\n");
 AWS_STATIC_STRING_FROM_LITERAL(s_final_chunk, "\r\n0\r\n");
 AWS_STATIC_STRING_FROM_LITERAL(s_colon, ":");
 AWS_STATIC_STRING_FROM_LITERAL(s_post_trailer, "\r\n\r\n");
@@ -40,10 +41,22 @@ static int s_set_null_stream(struct aws_chunk_stream *parent_stream) {
 }
 
 static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
+    int64_t current_stream_length;
+    if (aws_input_stream_get_length(parent_stream->current_stream, &current_stream_length)) {
+        return AWS_OP_ERR;
+    }
     aws_input_stream_destroy(parent_stream->current_stream);
-    struct aws_byte_cursor final_chunk_cursor = aws_byte_cursor_from_string(s_final_chunk);
+
+    struct aws_byte_cursor final_chunk_cursor;
+    /* should I use aws_likely here? */
+    if (current_stream_length > 0) {
+        final_chunk_cursor = aws_byte_cursor_from_string(s_final_chunk);
+    } else {
+        final_chunk_cursor = aws_byte_cursor_from_string(s_empty_chunk);
+    }
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor colon_cursor = aws_byte_cursor_from_string(s_colon);
+
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&parent_stream->checksum_result);
     if (parent_stream->checksum_result_output &&
         aws_byte_buf_init_copy_from_cursor(
@@ -178,10 +191,11 @@ struct aws_input_stream *aws_chunk_stream_new(
     stream->vtable = &s_aws_input_chunk_stream_vtable;
     impl->checksum_result_output = checksum_output;
     int64_t stream_length = 0;
+    int64_t final_chunk_len = 0;
     if (aws_input_stream_get_length(existing_stream, &stream_length)) {
         goto error;
     }
-    struct aws_byte_cursor pre_chunk_cursor = aws_byte_cursor_from_string(s_pre_chunk);
+    struct aws_byte_cursor pre_chunk_cursor = aws_byte_cursor_from_string(s_carriage_return);
     /*
      * Should I claculate the length here with a log algirthm?
      * 2^64 is 20 digits long so if this overflows so do our int_64 lengths.
@@ -201,10 +215,24 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_byte_buf_append(&impl->pre_chunk_buffer, &pre_chunk_cursor)) {
         goto error;
     }
-    struct aws_byte_cursor complete_pre_chunk_cursor = aws_byte_cursor_from_buf(&impl->pre_chunk_buffer);
-    impl->current_stream = aws_input_stream_new_from_cursor(allocator, &complete_pre_chunk_cursor);
-    if (impl->current_stream == NULL) {
+    impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_result);
+    if (impl->checksum_stream == NULL) {
         goto error;
+    }
+    struct aws_byte_cursor complete_pre_chunk_cursor = aws_byte_cursor_from_buf(&impl->pre_chunk_buffer);
+
+    if (stream_length > 0) {
+        impl->current_stream = aws_input_stream_new_from_cursor(allocator, &complete_pre_chunk_cursor);
+        final_chunk_len = s_final_chunk->len;
+        if (impl->current_stream == NULL) {
+            goto error;
+        }
+        impl->set_current_stream_fn = s_set_chunk_stream;
+    } else {
+        impl->current_stream = impl->checksum_stream;
+        final_chunk_len = s_empty_chunk->len;
+        impl->checksum_stream = NULL;
+        impl->set_current_stream_fn = s_set_post_chunk_stream;
     }
     size_t checksum_len = aws_get_digest_size_from_algorithm(algorithm);
     size_t encoded_checksum_len = 0;
@@ -214,14 +242,10 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_byte_buf_init(&impl->checksum_result, allocator, encoded_checksum_len)) {
         goto error;
     }
-    impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_result);
-    if (impl->checksum_stream == NULL) {
-        goto error;
-    }
+
     impl->checksum_header_name = aws_get_http_header_name_from_algorithm(algorithm);
-    impl->set_current_stream_fn = s_set_chunk_stream;
+
     int64_t prechunk_stream_len = 0;
-    int64_t final_chunk_len = s_final_chunk->len;
     int64_t colon_len = s_colon->len;
     int64_t post_trailer_len = s_post_trailer->len;
     if (aws_input_stream_get_length(impl->current_stream, &prechunk_stream_len)) {
@@ -232,7 +256,6 @@ struct aws_input_stream *aws_chunk_stream_new(
     impl->length = prechunk_stream_len + stream_length + final_chunk_len + impl->checksum_header_name.len + colon_len +
                    encoded_checksum_len + post_trailer_len - 1;
     AWS_FATAL_ASSERT(impl->current_stream);
-    AWS_FATAL_ASSERT(impl->checksum_stream);
     return stream;
 
 error:

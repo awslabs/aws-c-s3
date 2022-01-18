@@ -493,7 +493,6 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             goto error_clean_up;
         }
         /* set input stream to chunk stream */
-        /* TODO edit final argument to be passed in */
         input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
         if (!input_stream) {
             goto error_clean_up;
