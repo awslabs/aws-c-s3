@@ -57,6 +57,9 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_trailer_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_create_mpu_checksum_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_crc32c_header_name;
 
 AWS_S3_API
@@ -67,6 +70,18 @@ extern const struct aws_byte_cursor g_sha1_header_name;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_sha256_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32c_create_mpu_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32_create_mpu_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha1_create_mpu_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha256_create_mpu_header_name;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_crc32c_complete_mpu_name;

@@ -1402,7 +1402,20 @@ AWS_TEST_CASE(test_s3_put_object_tls_default_fc, s_test_s3_put_object_tls_defaul
 static int s_test_s3_put_object_tls_default_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, AWS_SCA_CRC32C));
+    // for (int alg = AWS_SCA_CRC32C; alg < AWS_SCA_MD5; alg++) {
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, AWS_SCA_CRC32));
+    // }
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_tls_disabled_fc, s_test_s3_put_object_tls_disabled_fc)
+static int s_test_s3_put_object_tls_disabled_fc(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    // for (int alg = AWS_SCA_CRC32C; alg < AWS_SCA_MD5; alg++) {
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DISABLED, 0, AWS_SCA_CRC32));
+    // }
 
     return 0;
 }
@@ -1545,26 +1558,27 @@ AWS_TEST_CASE(test_s3_put_object_less_than_part_size_fc, s_test_s3_put_object_le
 static int s_test_s3_put_object_less_than_part_size_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
+    for (int alg = AWS_SCA_CRC32C; alg < AWS_SCA_MD5; alg++) {
+        struct aws_s3_tester tester;
+        ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
 
-    struct aws_s3_client_config client_config = {.part_size = 20 * 1024 * 1024, .checksum_algorithm = AWS_SCA_CRC32C};
+        struct aws_s3_client_config client_config = {.part_size = 20 * 1024 * 1024, .checksum_algorithm = alg};
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+        ASSERT_SUCCESS(aws_s3_tester_bind_client(
+            &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+        struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_TRUE(client != NULL);
+        ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 1, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+            &tester, client, 1, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
-    aws_s3_client_release(client);
-    client = NULL;
+        aws_s3_client_release(client);
+        client = NULL;
 
-    aws_s3_tester_clean_up(&tester);
-
+        aws_s3_tester_clean_up(&tester);
+    }
     return 0;
 }
 
@@ -1600,29 +1614,30 @@ AWS_TEST_CASE(test_s3_put_object_empty_object_fc, s_test_s3_put_object_empty_obj
 static int s_test_s3_put_object_empty_object_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
+    for (int alg = AWS_SCA_CRC32C; alg < AWS_SCA_MD5; alg++) {
+        struct aws_s3_tester tester;
+        ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
 
-    struct aws_s3_client_config client_config;
-    AWS_ZERO_STRUCT(client_config);
+        struct aws_s3_client_config client_config;
+        AWS_ZERO_STRUCT(client_config);
 
-    client_config.checksum_algorithm = AWS_SCA_SHA256;
+        client_config.checksum_algorithm = alg;
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+        ASSERT_SUCCESS(aws_s3_tester_bind_client(
+            &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+        struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_TRUE(client != NULL);
+        ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 0, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
+            &tester, client, 0, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
-    aws_s3_client_release(client);
-    client = NULL;
+        aws_s3_client_release(client);
+        client = NULL;
 
-    aws_s3_tester_clean_up(&tester);
-
+        aws_s3_tester_clean_up(&tester);
+    }
     return 0;
 }
 
@@ -2051,7 +2066,8 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
     struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
     ASSERT_TRUE(aws_http_headers_has(base_headers, g_content_md5_header_name));
 
-    struct aws_http_message *new_message = aws_s3_create_multipart_upload_message_new(allocator, base_message);
+    struct aws_http_message *new_message =
+        aws_s3_create_multipart_upload_message_new(allocator, base_message, AWS_SCA_NONE);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));

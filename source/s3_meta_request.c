@@ -627,6 +627,12 @@ void aws_s3_meta_request_sign_request_default(
         return;
     }
 
+    if (request->part_number == 0 &&
+        aws_byte_cursor_eq(
+            &signing_config.signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
+        signing_config.signed_body_value = g_aws_signed_body_value_unsigned_payload;
+    }
+
     if (aws_sign_request_aws(
             meta_request->allocator,
             request->send_data.signable,
@@ -844,6 +850,9 @@ static int s_s3_meta_request_incoming_body(
         request->send_data.response_status,
         (uint64_t)data->len,
         (void *)connection);
+
+    /* TODO delete maybe? Guessing theres a reason we didn't previously log? */
+    AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
 
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;

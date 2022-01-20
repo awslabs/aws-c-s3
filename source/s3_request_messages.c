@@ -157,7 +157,8 @@ error_clean_up:
 /* Creates a create-multipart-upload request from a given put objet request. */
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *base_message) {
+    struct aws_http_message *base_message,
+    enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
@@ -183,6 +184,14 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
 
     if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
         if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+            goto error_clean_up;
+        }
+    }
+    if (algorithm) {
+        if (aws_http_headers_set(
+                headers,
+                g_create_mpu_checksum_header_name,
+                *aws_get_create_mpu_header_name_from_algorithm(algorithm))) {
             goto error_clean_up;
         }
     }
@@ -238,10 +247,10 @@ struct aws_http_message *aws_s3_upload_part_message_new(
             if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, NULL) == NULL) {
                 goto error_clean_up;
             }
-        }
-        if (!checksum_algorithm && should_compute_content_md5) {
-            if (aws_s3_message_util_add_checksum_header(allocator, buffer, message, AWS_SCA_MD5)) {
-                goto error_clean_up;
+            if (should_compute_content_md5) {
+                if (aws_s3_message_util_add_checksum_header(allocator, buffer, message, AWS_SCA_MD5)) {
+                    goto error_clean_up;
+                }
             }
         }
     } else {

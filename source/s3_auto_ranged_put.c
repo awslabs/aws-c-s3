@@ -330,7 +330,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
-                meta_request->allocator, meta_request->initial_request_message);
+                meta_request->allocator, meta_request->initial_request_message, meta_request->checksum_algorithm);
 
             break;
         }

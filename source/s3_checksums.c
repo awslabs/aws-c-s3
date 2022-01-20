@@ -44,6 +44,20 @@ struct aws_byte_cursor aws_get_http_header_name_from_algorithm(enum aws_s3_check
             return invalid_algorithm_enum_val;
     }
 }
+const struct aws_byte_cursor *aws_get_create_mpu_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
+    switch (algorithm) {
+        case AWS_SCA_CRC32C:
+            return &g_crc32c_create_mpu_header_name;
+        case AWS_SCA_CRC32:
+            return &g_crc32_create_mpu_header_name;
+        case AWS_SCA_SHA1:
+            return &g_sha1_create_mpu_header_name;
+        case AWS_SCA_SHA256:
+            return &g_sha256_create_mpu_header_name;
+        default:
+            return NULL;
+    }
+}
 
 const struct aws_byte_cursor *aws_get_complete_mpu_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
     switch (algorithm) {
