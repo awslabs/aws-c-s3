@@ -296,14 +296,13 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *etags,
-    const struct aws_array_list *checksums,
+    struct aws_byte_buf *checksums,
     enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
-    AWS_PRECONDITION(checksums);
 
     const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
 
@@ -374,10 +373,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 goto error_clean_up;
             }
             if (mpu_algorithm_checksum_name) {
-
-                struct aws_byte_buf *checksum_buf = NULL;
-                aws_array_list_get_at(checksums, &checksum_buf, etag_index);
-                struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(checksum_buf);
+                struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(&checksums[etag_index]);
 
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
                     goto error_clean_up;

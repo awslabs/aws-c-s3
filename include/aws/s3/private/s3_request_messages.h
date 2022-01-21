@@ -83,7 +83,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *etags,
-    const struct aws_array_list *checksums,
+    struct aws_byte_buf *checksums,
     enum aws_s3_checksum_algorithm algorithm);
 
 AWS_S3_API

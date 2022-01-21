@@ -139,7 +139,6 @@ add_test_case(test_get_nonexistent_compute_platform_info)
 add_net_test_case(test_s3_put_object_tls_default_fc)
 add_net_test_case(test_s3_put_object_less_than_part_size_fc)
 add_net_test_case(test_s3_put_object_empty_object_fc)
-add_net_test_case(test_s3_put_object_tls_disabled_fc)
 
 add_net_test_case(sha1_nist_test_case_1)
 add_net_test_case(sha1_nist_test_case_2)

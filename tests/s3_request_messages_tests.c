@@ -810,9 +810,6 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     struct aws_string *etag = aws_string_new_from_c_str(allocator, ETAG_VALUE);
     ASSERT_SUCCESS(aws_array_list_push_back(&etags, &etag));
 
-    struct aws_array_list checksums;
-    ASSERT_SUCCESS(aws_array_list_init_dynamic(&checksums, allocator, 0, sizeof(struct aws_byte_buf *)));
-
     const struct aws_byte_cursor header_exclude_exceptions[] = {
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
     };
@@ -830,7 +827,7 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     aws_byte_buf_init(&body_buffer, allocator, 64);
 
     struct aws_http_message *complete_multipart_message = aws_s3_complete_multipart_message_new(
-        allocator, original_message, &body_buffer, upload_id, &etags, &checksums, AWS_SCA_NONE);
+        allocator, original_message, &body_buffer, upload_id, &etags, NULL, AWS_SCA_NONE);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(complete_multipart_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(complete_multipart_message, &expected_create_path));
@@ -874,9 +871,6 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
 
     aws_string_destroy(etag);
     aws_array_list_clean_up(&etags);
-
-    aws_array_list_clean_up(&checksums);
-
 #undef TEST_PATH
 #undef UPLOAD_ID
 #undef EXPECTED_UPLOAD_PART_PATH
