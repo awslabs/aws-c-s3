@@ -359,7 +359,7 @@ static void s_copy_object_request_finish(
     struct aws_string *new_state = NULL;
     if (meta_request_result->error_code == AWS_ERROR_SUCCESS) {
         new_state = aws_string_new_from_c_str(transfer_ctx->cp_app_ctx->app_ctx->allocator, "Completed");
-        progress_listener_update_progress(transfer_ctx->listener, 1000);
+        progress_listener_update_progress(transfer_ctx->listener, 100);
     } else {
         new_state = aws_string_new_from_c_str(transfer_ctx->cp_app_ctx->app_ctx->allocator, "Error");
     }
