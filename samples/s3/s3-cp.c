@@ -335,6 +335,19 @@ error_clean_up_message:
     return NULL;
 }
 
+/* upon copy object progress, update the progress bar. */
+static void s_copy_object_progress(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+    (void)meta_request;
+
+    struct single_transfer_ctx *transfer_ctx = user_data;
+
+    progress_listener_update_max_value(transfer_ctx->listener, progress->content_length);
+    progress_listener_update_progress(transfer_ctx->listener, progress->bytes_transferred);
+}
+
 /* invoked upon the completion of a copy object request. */
 static void s_copy_object_request_finish(
     struct aws_s3_meta_request *meta_request,
@@ -346,7 +359,7 @@ static void s_copy_object_request_finish(
     struct aws_string *new_state = NULL;
     if (meta_request_result->error_code == AWS_ERROR_SUCCESS) {
         new_state = aws_string_new_from_c_str(transfer_ctx->cp_app_ctx->app_ctx->allocator, "Completed");
-        progress_listener_update_progress(transfer_ctx->listener, 100);
+        progress_listener_update_progress(transfer_ctx->listener, 1000);
     } else {
         new_state = aws_string_new_from_c_str(transfer_ctx->cp_app_ctx->app_ctx->allocator, "Error");
     }
@@ -400,6 +413,7 @@ static int s_kick_off_copy_object_request(
         .headers_callback = NULL,
         .message = message,
         .shutdown_callback = NULL,
+        .progress_callback = s_copy_object_progress,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
     };
 

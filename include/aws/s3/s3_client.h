@@ -82,6 +82,7 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
  * Return AWS_OP_ERR to indicate failure and cancel the request.
  */
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
+
     /* The meta request that the callback is being issued for. */
     struct aws_s3_meta_request *meta_request,
 
@@ -101,6 +102,26 @@ typedef int(aws_s3_meta_request_receive_body_callback_fn)(
 typedef void(aws_s3_meta_request_finish_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data);
+
+/**
+ * Information sent in the meta_request progress callback.
+ */
+struct aws_s3_meta_request_progress {
+
+    /* Bytes transferred since the previous progress update */
+    uint64_t bytes_transferred;
+
+    /* Length of the entire meta request operation */
+    uint64_t content_length;
+};
+
+/**
+ * Invoked to report progress of multi-part upload and copy object requests.
+ */
+typedef void(aws_s3_meta_request_progress_fn)(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
     void *user_data);
 
 typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
@@ -206,6 +227,12 @@ struct aws_s3_meta_request_options {
 
     /* Callback for when the meta request has completely cleaned up. */
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
+
+    /**
+     * Invoked to report progress of multi-part upload and copy object requests.
+     * See `aws_s3_meta_request_progress_fn`
+     */
+    aws_s3_meta_request_progress_fn *progress_callback;
 };
 
 /* Result details of a meta request.
