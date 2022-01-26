@@ -63,6 +63,8 @@ void progress_listener_update_progress(struct progress_listener *listener, uint6
 
 void progress_listener_reset_progress(struct progress_listener *listener);
 
+void progress_listener_update_max_value(struct progress_listener *listener, uint64_t max_value);
+
 /**
  * Update the label for the progress bar.
  */

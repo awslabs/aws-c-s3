@@ -127,6 +127,7 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
+    aws_s3_meta_request_progress_fn *progress_callback;
 
     enum aws_s3_meta_request_type type;
 

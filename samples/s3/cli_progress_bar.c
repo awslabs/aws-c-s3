@@ -177,6 +177,13 @@ void progress_listener_reset_progress(struct progress_listener *listener) {
     aws_mutex_unlock(&listener->mutex);
 }
 
+void progress_listener_update_max_value(struct progress_listener *listener, uint64_t max_value) {
+    aws_mutex_lock(&listener->mutex);
+    listener->max = max_value;
+    listener->render_update_pending = true;
+    aws_mutex_unlock(&listener->mutex);
+}
+
 void progress_listener_update_state(struct progress_listener *listener, struct aws_string *state_name) {
     aws_mutex_lock(&listener->mutex);
     aws_string_destroy(listener->state);

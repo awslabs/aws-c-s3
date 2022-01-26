@@ -540,6 +540,37 @@ message_create_failed:
     return AWS_OP_ERR;
 }
 
+/* For UploadPartCopy requests, etag is sent in the request body, within XML entity quotes */
+static struct aws_string *s_etag_new_from_upload_part_copy_response(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *response_body) {
+    struct aws_string *etag = NULL;
+
+    struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(response_body);
+
+    struct aws_string *etag_within_xml_quotes =
+        get_top_level_xml_tag_value(allocator, &g_etag_header_name, &response_body_cursor);
+
+    struct aws_byte_buf etag_within_quotes_byte_buf;
+    AWS_ZERO_STRUCT(etag_within_quotes_byte_buf);
+    replace_quote_entities(allocator, etag_within_xml_quotes, &etag_within_quotes_byte_buf);
+
+    /* Remove the quotes surrounding the etag. */
+    struct aws_byte_cursor etag_within_quotes_byte_cursor = aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf);
+    if (etag_within_quotes_byte_cursor.len >= 2 && etag_within_quotes_byte_cursor.ptr[0] == '"' &&
+        etag_within_quotes_byte_cursor.ptr[etag_within_quotes_byte_cursor.len - 1] == '"') {
+
+        aws_byte_cursor_advance(&etag_within_quotes_byte_cursor, 1);
+        --etag_within_quotes_byte_cursor.len;
+    }
+
+    etag = aws_string_new_from_cursor(allocator, &etag_within_quotes_byte_cursor);
+    aws_byte_buf_clean_up(&etag_within_quotes_byte_buf);
+    aws_string_destroy(etag_within_xml_quotes);
+
+    return etag;
+}
+
 static void s_s3_copy_object_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -646,34 +677,6 @@ static void s_s3_copy_object_request_finished(
             size_t part_number = request->part_number;
             AWS_FATAL_ASSERT(part_number > 0);
             size_t part_index = part_number - 1;
-            struct aws_string *etag = NULL;
-
-            if (error_code == AWS_ERROR_SUCCESS) {
-                /* For UploadPartCopy requests, etag is sent in the request body, within XML entity quotes */
-                struct aws_byte_cursor response_body_cursor =
-                    aws_byte_cursor_from_buf(&request->send_data.response_body);
-
-                struct aws_string *etag_within_xml_quotes =
-                    get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
-
-                struct aws_byte_buf etag_within_quotes_byte_buf;
-                AWS_ZERO_STRUCT(etag_within_quotes_byte_buf);
-                replace_quote_entities(meta_request->allocator, etag_within_xml_quotes, &etag_within_quotes_byte_buf);
-
-                /* Remove the quotes surrounding the etag. */
-                struct aws_byte_cursor etag_within_quotes_byte_cursor =
-                    aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf);
-                if (etag_within_quotes_byte_cursor.len >= 2 && etag_within_quotes_byte_cursor.ptr[0] == '"' &&
-                    etag_within_quotes_byte_cursor.ptr[etag_within_quotes_byte_cursor.len - 1] == '"') {
-
-                    aws_byte_cursor_advance(&etag_within_quotes_byte_cursor, 1);
-                    --etag_within_quotes_byte_cursor.len;
-                }
-
-                etag = aws_string_new_from_cursor(meta_request->allocator, &etag_within_quotes_byte_cursor);
-                aws_byte_buf_clean_up(&etag_within_quotes_byte_buf);
-                aws_string_destroy(etag_within_xml_quotes);
-            }
 
             ++copy_object->synced_data.num_parts_completed;
 
@@ -685,12 +688,20 @@ static void s_s3_copy_object_request_finished(
                 copy_object->synced_data.total_num_parts);
 
             if (error_code == AWS_ERROR_SUCCESS) {
+                struct aws_string *etag = s_etag_new_from_upload_part_copy_response(
+                    meta_request->allocator, &request->send_data.response_body);
+
                 AWS_ASSERT(etag != NULL);
 
                 ++copy_object->synced_data.num_parts_successful;
+                if (meta_request->progress_callback != NULL) {
+                    struct aws_s3_meta_request_progress progress = {
+                        .bytes_transferred = copy_object->synced_data.part_size,
+                        .content_length = copy_object->synced_data.content_length};
+                    meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
+                }
 
                 struct aws_string *null_etag = NULL;
-
                 /* ETags need to be associated with their part number, so we keep the etag indices consistent with
                  * part numbers. This means we may have to add padding to the list in the case that parts finish out
                  * of order. */
@@ -698,7 +709,6 @@ static void s_s3_copy_object_request_finished(
                     int push_back_result = aws_array_list_push_back(&copy_object->synced_data.etag_list, &null_etag);
                     AWS_FATAL_ASSERT(push_back_result == AWS_OP_SUCCESS);
                 }
-
                 aws_array_list_set_at(&copy_object->synced_data.etag_list, &etag, part_index);
             } else {
                 ++copy_object->synced_data.num_parts_failed;

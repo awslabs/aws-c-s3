@@ -141,6 +141,7 @@ int aws_s3_meta_request_init_base(
     meta_request->body_callback = options->body_callback;
     meta_request->finish_callback = options->finish_callback;
     meta_request->shutdown_callback = options->shutdown_callback;
+    meta_request->progress_callback = options->progress_callback;
 
     return AWS_OP_SUCCESS;
 }
