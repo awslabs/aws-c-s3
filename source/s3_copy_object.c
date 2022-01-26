@@ -541,7 +541,7 @@ message_create_failed:
 }
 
 /* For UploadPartCopy requests, etag is sent in the request body, within XML entity quotes */
-static struct aws_string *s_get_etag_from_upload_part_copy_response(
+static struct aws_string *s_etag_new_from_upload_part_copy_response(
     struct aws_allocator *allocator,
     struct aws_byte_buf *response_body) {
     struct aws_string *etag = NULL;
@@ -688,7 +688,7 @@ static void s_s3_copy_object_request_finished(
                 copy_object->synced_data.total_num_parts);
 
             if (error_code == AWS_ERROR_SUCCESS) {
-                struct aws_string *etag = s_get_etag_from_upload_part_copy_response(
+                struct aws_string *etag = s_etag_new_from_upload_part_copy_response(
                     meta_request->allocator, &request->send_data.response_body);
 
                 AWS_ASSERT(etag != NULL);
