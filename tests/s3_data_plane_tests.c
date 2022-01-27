@@ -1547,7 +1547,6 @@ AWS_TEST_CASE(test_s3_put_object_less_than_part_size_fc, s_test_s3_put_object_le
 static int s_test_s3_put_object_less_than_part_size_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    // for (int alg = AWS_SCA_CRC32C; alg < AWS_SCA_MD5; alg++) {
     int alg = AWS_SCA_CRC32;
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
@@ -1568,7 +1567,6 @@ static int s_test_s3_put_object_less_than_part_size_fc(struct aws_allocator *all
     client = NULL;
 
     aws_s3_tester_clean_up(&tester);
-    // }
     return 0;
 }
 
@@ -2169,6 +2167,92 @@ static int s_test_s3_put_object_double_slashes(struct aws_allocator *allocator, 
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_round_trip, s_test_s3_round_trip)
+static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* should we generate a unique path each time? */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    /*** GET FILE ***/
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_round_trip_fc, s_test_s3_round_trip_fc)
+static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* should we generate a unique path each time? */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+    client_options.checksum_algorithm = AWS_SCA_CRC32;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .object_path_override = object_path,
+            },
+        .client_options = &client_options,
+        .stream_signing = true,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    /*** GET FILE ***/
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_meta_request_default, s_test_s3_meta_request_default)
 static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -2706,6 +2790,7 @@ static int s_test_s3_default_invoke_headers_callback_cancels_on_error(struct aws
     return 0;
 }
 
+/******************** BOOKMARK *************************************/
 AWS_TEST_CASE(
     test_s3_get_object_invoke_headers_callback_on_error,
     s_test_s3_get_object_invoke_headers_callback_on_error)

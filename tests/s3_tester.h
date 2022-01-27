@@ -118,6 +118,7 @@ struct aws_s3_tester_client_options {
     size_t part_size;
     size_t max_part_size;
     uint32_t setup_region : 1;
+    enum aws_s3_checksum_algorithm checksum_algorithm;
 };
 
 struct aws_s3_tester_meta_request_options {
@@ -138,6 +139,8 @@ struct aws_s3_tester_meta_request_options {
 
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
+
+    bool stream_signing;
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
@@ -307,6 +310,16 @@ int aws_s3_tester_send_meta_request(
     struct aws_s3_meta_request_options *options,
     struct aws_s3_meta_request_test_results *test_results,
     uint32_t flags);
+
+int aws_s3_tester_round_trip_meta_request(
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *client,
+    uint32_t file_size_mb,
+    enum aws_s3_checksum_algorithm algorithm,
+    char *test_file_identifier,
+    uint32_t flags,
+    struct aws_s3_meta_request_test_results *put_out_results,
+    struct aws_s3_meta_request_test_results *get_out_results);
 
 /* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_get_object_meta_request(

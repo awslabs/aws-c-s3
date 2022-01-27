@@ -848,6 +848,7 @@ static void s_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester) {
     aws_s3_tester_unlock_synced_data(tester);
 }
 
+/************************************** BOOKMARK GET OBJECT ******************************************************/
 struct aws_http_message *aws_s3_test_get_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host,
@@ -1068,6 +1069,7 @@ int aws_s3_tester_client_new(
     struct aws_s3_client_config client_config = {
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
+        .checksum_algorithm = options->checksum_algorithm,
     };
 
     struct aws_tls_connection_options tls_connection_options;
@@ -1129,7 +1131,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     if (tester == NULL) {
         ASSERT_TRUE(options->allocator);
-        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester, false));
+        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester, options->stream_signing));
         tester = &local_tester;
         clean_up_local_tester = true;
     } else if (allocator == NULL) {
@@ -1518,6 +1520,7 @@ int aws_s3_tester_validate_get_object_results(
     return AWS_OP_SUCCESS;
 }
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
@@ -1605,6 +1608,7 @@ int aws_s3_tester_send_put_object_meta_request(
     return AWS_OP_SUCCESS;
 }
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
     uint32_t flags) {
