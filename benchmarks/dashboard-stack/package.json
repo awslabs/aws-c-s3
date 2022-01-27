@@ -11,7 +11,7 @@
     "cdk": "cdk"
   },
   "devDependencies": {
-    "@aws-cdk/assert": "^1.103.0",
+    "@aws-cdk/assert": "^v1.126.0",
     "@types/jest": "^27.0.1",
     "@types/node": "10.17.27",
     "aws-cdk": "^1.20.0",
@@ -21,18 +21,18 @@
     "typescript": "~3.9.7"
   },
   "dependencies": {
-    "@aws-cdk/aws-cloudwatch": "^1.103.0",
-    "@aws-cdk/aws-codebuild": "^1.103.0",
-    "@aws-cdk/aws-ec2": "^1.103.0",
-    "@aws-cdk/aws-events": "^1.103.0",
-    "@aws-cdk/aws-events-targets": "^1.103.0",
-    "@aws-cdk/aws-iam": "^1.103.0",
-    "@aws-cdk/aws-kms": "^1.103.0",
-    "@aws-cdk/aws-lambda": "^1.103.0",
-    "@aws-cdk/aws-s3": "^1.103.0",
-    "@aws-cdk/aws-s3-assets": "^1.103.0",
-    "@aws-cdk/aws-s3-deployment": "^1.103.0",
-    "@aws-cdk/core": "^1.103.0",
+    "@aws-cdk/aws-cloudwatch": "^v1.126.0",
+    "@aws-cdk/aws-codebuild": "^v1.126.0",
+    "@aws-cdk/aws-ec2": "^v1.126.0",
+    "@aws-cdk/aws-events": "^v1.126.0",
+    "@aws-cdk/aws-events-targets": "^v1.126.0",
+    "@aws-cdk/aws-iam": "^v1.126.0",
+    "@aws-cdk/aws-kms": "^v1.126.0",
+    "@aws-cdk/aws-lambda": "^v1.126.0",
+    "@aws-cdk/aws-s3": "^v1.126.0",
+    "@aws-cdk/aws-s3-assets": "^v1.126.0",
+    "@aws-cdk/aws-s3-deployment": "^v1.126.0",
+    "@aws-cdk/core": "^v1.126.0",
     "cdk-ec2-key-pair": "2.2.0",
     "source-map-support": "^0.5.16"
   }
