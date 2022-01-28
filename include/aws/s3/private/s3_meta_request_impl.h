@@ -126,6 +126,7 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
+    aws_s3_meta_request_progress_fn *progress_callback;
 
     /* Customer specified callbacks to be called by our specialized callback to calculate the response checkum. */
     aws_s3_meta_request_headers_callback_fn *headers_checksum_callback;

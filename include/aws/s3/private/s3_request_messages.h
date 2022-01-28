@@ -73,6 +73,20 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     enum aws_s3_checksum_algorithm checksum_algorithm,
     struct aws_byte_buf *encoded_checksum_output);
 
+/* Create an HTTP request for an S3 UploadPartCopy request, using the original request as a basis.
+ * If multipart is not needed, part number and upload_id can be 0 and NULL,
+ * respectively. */
+AWS_S3_API
+struct aws_http_message *aws_s3_upload_part_copy_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_buf *buffer,
+    uint32_t part_number,
+    uint64_t range_start,
+    uint64_t range_end,
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5);
+
 /* Create an HTTP request for an S3 Complete-Multipart-Upload request. Creates the necessary XML payload using the
  * passed in array list of ETags.  (Each ETag is assumed to be an aws_string*)  Buffer passed in will be used to store
  * said XML payload, which will be used as the body. */
@@ -91,6 +105,20 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     const struct aws_string *upload_id);
+
+/* Creates a HEAD GetObject request to get the size of the specified object. */
+AWS_S3_API
+struct aws_http_message *aws_s3_get_object_size_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_cursor source_bucket,
+    struct aws_byte_cursor source_key);
+
+/* Creates a HEAD GetObject request to get the size of the source object of a CopyObject request. */
+AWS_S3_API
+struct aws_http_message *aws_s3_get_source_object_size_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message);
 
 /* Add content-md5 header to the http message passed in. The MD5 will be computed from the input_buf */
 AWS_S3_API

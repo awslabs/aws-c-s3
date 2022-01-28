@@ -31,6 +31,7 @@
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
 
+#include <aws/s3/private/s3_copy_object.h>
 #include <inttypes.h>
 #include <math.h>
 
@@ -55,6 +56,7 @@ const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE
     10, /* AWS_S3_META_REQUEST_TYPE_DEFAULT */
     10, /* AWS_S3_META_REQUEST_TYPE_GET_OBJECT */
     10, /* AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
+    10  /* AWS_S3_META_REQUEST_TYPE_COPY_OBJECT */
 };
 
 /* Should be max of s_num_conns_per_vip_meta_request_look_up */
@@ -593,7 +595,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_PRECONDITION(options);
 
     if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT && options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
-        options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+        options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && options->type != AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request; invalid meta request type specified.",
@@ -886,6 +888,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
         return aws_s3_meta_request_auto_ranged_put_new(
             client->allocator, client, part_size, content_length, num_parts, options);
+    } else if (options->type == AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {
+        return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         return aws_s3_meta_request_default_new(
             client->allocator, client, content_length, false, options, client->checksum_algorithm);

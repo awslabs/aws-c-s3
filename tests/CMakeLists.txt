@@ -202,6 +202,13 @@ add_test_case(crc32c_test_invalid_state)
 
 add_net_test_case(verify_checksum_stream)
 add_net_test_case(verify_chunk_stream)
+add_net_test_case(test_s3_copy_small_object)
+add_net_test_case(test_s3_multipart_copy_large_object)
+add_net_test_case(test_s3_copy_object_invalid_source_key)
+
+add_test_case(test_s3_list_bucket_init_mem_safety)
+add_test_case(test_s3_list_bucket_init_mem_safety_optional_copies)
+add_net_test_case(test_s3_list_bucket_valid)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

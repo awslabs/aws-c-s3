@@ -211,6 +211,7 @@ int aws_s3_meta_request_init_base(
     meta_request->running_response_sum = NULL;
     meta_request->user_data = options->user_data;
     meta_request->shutdown_callback = options->shutdown_callback;
+    meta_request->progress_callback = options->progress_callback;
 
     bool is_get = false;
     if (s_is_get_request(options, &is_get)) {

@@ -126,3 +126,7 @@ include(CTest)
 if (BUILD_TESTING)
     add_subdirectory(tests)
 endif()
+
+if (NOT BYO_CRYPTO)
+    add_subdirectory(samples)
+endif()
