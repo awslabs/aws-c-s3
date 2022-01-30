@@ -10,6 +10,7 @@
 #include <aws/s3/s3.h>
 
 #include <aws/auth/signing_config.h>
+#include "aws/io/uri.h"
 
 struct aws_allocator;
 
@@ -23,6 +24,7 @@ struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
 struct aws_s3_meta_request_result;
+struct aws_uri;
 
 /**
  * A Meta Request represents a group of generated requests that are being done on behalf of the
@@ -198,6 +200,9 @@ struct aws_s3_meta_request_options {
 
     /* Callback for when the meta request has completely cleaned up. */
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
+
+    /* If present, then overrides HTTP Request host header */
+    struct aws_uri *uri;
 };
 
 /* Result details of a meta request.
