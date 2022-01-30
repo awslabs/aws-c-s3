@@ -198,6 +198,12 @@ struct aws_s3_meta_request_options {
 
     /* Callback for when the meta request has completely cleaned up. */
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
+
+    /* Support meta requests over HTTP and HTTPS */
+    enum aws_s3_meta_request_tls_mode tls_mode;
+
+    /* HTTP port override. If zero, determine port based on TLS context */
+    int port;
 };
 
 /* Result details of a meta request.

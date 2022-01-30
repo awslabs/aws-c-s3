@@ -649,10 +649,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             .ref_count_zero_callback = client->vtable->endpoint_ref_count_zero,
             .shutdown_callback = client->vtable->endpoint_shutdown_callback,
             .client_bootstrap = client->client_bootstrap,
-            .tls_connection_options = client->tls_connection_options,
+            .tls_connection_options = options->tls_mode == AWS_MR_TLS_ENABLED ? client->tls_connection_options : NULL,
             .dns_host_address_ttl_seconds = s_dns_host_address_ttl_seconds,
             .user_data = client,
             .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
+            .port = options->port,
         };
 
         endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);

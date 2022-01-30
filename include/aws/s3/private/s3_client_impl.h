@@ -65,6 +65,9 @@ struct aws_s3_endpoint_options {
 
     /* Maximum number of connections that can be spawned for this endpoint. */
     uint32_t max_connections;
+
+    /* HTTP port override. If zero, determine port based on TLS context */
+    int port;
 };
 
 struct aws_s3_endpoint {
