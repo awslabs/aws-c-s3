@@ -15,7 +15,7 @@
 static int s_test_s3_list_bucket_init_mem_safety(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
@@ -45,7 +45,7 @@ AWS_TEST_CASE(test_s3_list_bucket_init_mem_safety, s_test_s3_list_bucket_init_me
 static int s_test_s3_list_bucket_init_mem_safety_optional_copies(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
@@ -128,7 +128,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
