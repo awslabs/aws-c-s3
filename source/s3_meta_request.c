@@ -103,7 +103,11 @@ static int s_get_response_headers_brawn_callback(
             break;
         }
     }
-    return meta_request->headers_checksum_callback(meta_request, headers, response_status, user_data);
+    if (meta_request->headers_checksum_callback) {
+        return meta_request->headers_checksum_callback(meta_request, headers, response_status, user_data);
+    } else {
+        return AWS_OP_SUCCESS;
+    }
 }
 
 /* should I offset checksum calculation by range_start? unclear to me from docs */
@@ -115,7 +119,11 @@ static int s_get_response_body_brawn_callback(
     if (meta_request->running_response_sum) {
         aws_checksum_update(meta_request->running_response_sum, body);
     }
-    return meta_request->body_checksum_callback(meta_request, body, range_start, user_data);
+    if (meta_request->body_checksum_callback) {
+        return meta_request->body_checksum_callback(meta_request, body, range_start, user_data);
+    } else {
+        return AWS_OP_SUCCESS;
+    }
 }
 
 static void s_get_response_finish_brawn_callback(
@@ -136,7 +144,9 @@ static void s_get_response_finish_brawn_callback(
     }
     aws_checksum_destroy(meta_request->running_response_sum);
     aws_byte_buf_clean_up(&meta_request->response_header_checksum);
-    meta_request->finish_checksum_callback(meta_request, meta_request_result, user_data);
+    if (meta_request->finish_checksum_callback) {
+        meta_request->finish_checksum_callback(meta_request, meta_request_result, user_data);
+    }
 }
 
 int aws_s3_meta_request_init_base(
