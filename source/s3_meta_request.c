@@ -862,8 +862,8 @@ static int s_s3_meta_request_incoming_body(
         (uint64_t)data->len,
         (void *)connection);
 
-    /* TODO delete maybe? Guessing theres a reason we didn't previously log? */
-    AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
+    /* TODO delete maybe? Guessing theres a reason we didn't previously log? ****************************/
+    // AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
 
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;
