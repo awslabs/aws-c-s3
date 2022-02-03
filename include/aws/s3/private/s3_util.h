@@ -57,6 +57,12 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_trailer_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_request_validation_mode;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_enabled;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_create_mpu_checksum_header_name;
 
 AWS_S3_API

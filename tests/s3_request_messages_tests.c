@@ -495,6 +495,7 @@ static int s_test_s3_message_util_assign_body(struct aws_allocator *allocator, v
     (void)ctx;
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
+    aws_http_message_set_request_method(message, aws_http_method_get);
 
     const size_t test_buffer_size = 42;
     struct aws_byte_buf test_buffer;

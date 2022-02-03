@@ -102,8 +102,6 @@ static int s_s3_test_meta_request_body_callback(
         range_start + body->len - 1,
         meta_request_test_results->expected_range_start);
 
-    AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "RESPONSE BODY: \n" PRInSTR, AWS_BYTE_CURSOR_PRI(*body));
-
     uint64_t object_range_start = 0;
 
     /* If this is an auto-ranged-get meta request, then grab the object range start so that the expected_range_start can

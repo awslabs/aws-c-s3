@@ -11,6 +11,7 @@
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
 #include <aws/auth/signing_result.h>
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/io/event_loop.h>
@@ -130,23 +131,50 @@ static void s_get_response_finish_brawn_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
     void *user_data) {
+    struct aws_byte_buf response_body_sum;
+    struct aws_byte_buf encoded_response_body_sum;
+    AWS_ZERO_STRUCT(response_body_sum);
+    AWS_ZERO_STRUCT(encoded_response_body_sum);
     if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->running_response_sum) {
-        struct aws_byte_buf response_body_sum;
-        aws_byte_buf_init(&response_body_sum, aws_default_allocator(), meta_request->running_response_sum->digest_size);
-        aws_checksum_finalize(meta_request->running_response_sum, &response_body_sum, 0);
-        if (!aws_byte_buf_eq(&response_body_sum, &meta_request->response_header_checksum)) {
-            /* is this proper? */
-            struct aws_s3_meta_request_result *mut_request_result =
-                (struct aws_s3_meta_request_result *)meta_request_result;
-            mut_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+        size_t encoded_checksum_len = 0;
+        /* what error should I raise for these? */
+        if (aws_base64_compute_encoded_len(meta_request->running_response_sum->digest_size, &encoded_checksum_len)) {
+            aws_raise_error(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+            goto error;
         }
-        aws_byte_buf_clean_up(&response_body_sum);
+        if (aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len)) {
+            aws_raise_error(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+            goto error;
+        }
+        if (aws_byte_buf_init(
+                &response_body_sum, aws_default_allocator(), meta_request->running_response_sum->digest_size)) {
+            aws_raise_error(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+            goto error;
+        }
+        if (aws_checksum_finalize(meta_request->running_response_sum, &response_body_sum, 0)) {
+            aws_raise_error(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+            goto error;
+        }
+        struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
+        if (aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum)) {
+            aws_raise_error(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+            goto error;
+        }
+        if (!aws_byte_buf_eq(&encoded_response_body_sum, &meta_request->response_header_checksum)) {
+            /* is this proper? */
+            aws_raise_error(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+            goto error;
+        }
     }
-    aws_checksum_destroy(meta_request->running_response_sum);
-    aws_byte_buf_clean_up(&meta_request->response_header_checksum);
     if (meta_request->finish_checksum_callback) {
         meta_request->finish_checksum_callback(meta_request, meta_request_result, user_data);
     }
+error:
+    /* this error handling is improper because this is technically a user defined callback */
+    aws_byte_buf_clean_up(&response_body_sum);
+    aws_byte_buf_clean_up(&encoded_response_body_sum);
+    aws_checksum_destroy(meta_request->running_response_sum);
+    aws_byte_buf_clean_up(&meta_request->response_header_checksum);
 }
 
 int aws_s3_meta_request_init_base(
@@ -863,7 +891,7 @@ static int s_s3_meta_request_incoming_body(
         (void *)connection);
 
     /* TODO delete maybe? Guessing theres a reason we didn't previously log? ****************************/
-    // AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
+    AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
 
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;

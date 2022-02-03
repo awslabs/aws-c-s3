@@ -636,6 +636,15 @@ error_clean_up:
     return NULL;
 }
 
+static int s_is_get_request(const struct aws_http_message *message, bool *is_request) {
+    struct aws_byte_cursor method;
+    if (aws_http_message_get_request_method(message, &method)) {
+        return AWS_OP_ERR;
+    }
+    *is_request = aws_byte_cursor_eq(&method, &aws_http_method_get);
+    return AWS_OP_SUCCESS;
+}
+
 /* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
@@ -659,6 +668,15 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     if (input_stream == NULL) {
         goto error_clean_up;
     }
+
+    bool is_get = false;
+    if (s_is_get_request(out_message, &is_get)) {
+        goto error_clean_up;
+    }
+    if (is_get) {
+        aws_http_headers_set(headers, g_request_validation_mode, g_enabled);
+    }
+
     if (algorithm) {
         /* set Content-Encoding header */
         if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_value)) {

@@ -32,6 +32,9 @@ const struct aws_byte_cursor g_decoded_content_length_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-decoded-content-length");
 const struct aws_byte_cursor g_content_md5_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5");
 const struct aws_byte_cursor g_trailer_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-trailer");
+const struct aws_byte_cursor g_request_validation_mode = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-mode");
+const struct aws_byte_cursor g_enabled = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("enabled");
+
 const struct aws_byte_cursor g_create_mpu_checksum_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-algorithm");
 const struct aws_byte_cursor g_crc32c_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c");
