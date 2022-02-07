@@ -2138,6 +2138,9 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
     return 0;
 }
 
