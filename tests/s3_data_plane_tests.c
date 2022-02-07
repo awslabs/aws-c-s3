@@ -2133,6 +2133,16 @@ AWS_TEST_CASE(test_s3_round_trip_empty, s_test_s3_round_trip_empty)
 static int s_test_s3_round_trip_empty(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
     /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_empty.txt");
     struct aws_s3_meta_request_test_results meta_request_test_results;
@@ -2141,6 +2151,7 @@ static int s_test_s3_round_trip_empty(struct aws_allocator *allocator, void *ctx
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
         .put_options =
             {
                 .object_size_mb = 0,
@@ -2148,7 +2159,7 @@ static int s_test_s3_round_trip_empty(struct aws_allocator *allocator, void *ctx
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -2158,6 +2169,7 @@ static int s_test_s3_round_trip_empty(struct aws_allocator *allocator, void *ctx
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
         .get_options =
             {
                 .object_path = object_path,
@@ -2168,7 +2180,10 @@ static int s_test_s3_round_trip_empty(struct aws_allocator *allocator, void *ctx
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
