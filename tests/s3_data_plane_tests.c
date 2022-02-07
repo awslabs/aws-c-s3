@@ -2089,12 +2089,52 @@ static int s_test_s3_put_object_double_slashes(struct aws_allocator *allocator, 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_round_trip, s_test_s3_round_trip)
-static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
+// AWS_TEST_CASE(test_s3_round_trip, s_test_s3_round_trip)
+// static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
+//     (void)ctx;
+
+//     /* should we generate a unique path each time? */
+//     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
+//     struct aws_s3_meta_request_test_results meta_request_test_results;
+//     AWS_ZERO_STRUCT(meta_request_test_results);
+
+//     struct aws_s3_tester_meta_request_options put_options = {
+//         .allocator = allocator,
+//         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+//         .put_options =
+//             {
+//                 .object_size_mb = 1,
+//                 .object_path_override = object_path,
+//             },
+//     };
+
+//     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
+
+//     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+//     /*** GET FILE ***/
+
+//     struct aws_s3_tester_meta_request_options get_options = {
+//         .allocator = allocator,
+//         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+//         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+//         .get_options =
+//             {
+//                 .object_path = object_path,
+//             },
+//     };
+
+//     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
+
+//     return 0;
+// }
+
+AWS_TEST_CASE(test_s3_round_trip_empty, s_test_s3_round_trip_empty)
+static int s_test_s3_round_trip_empty(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_empty.txt");
     struct aws_s3_meta_request_test_results meta_request_test_results;
     AWS_ZERO_STRUCT(meta_request_test_results);
 
@@ -2103,7 +2143,7 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .put_options =
             {
-                .object_size_mb = 1,
+                .object_size_mb = 0,
                 .object_path_override = object_path,
             },
     };
@@ -2116,11 +2156,15 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .get_options =
             {
                 .object_path = object_path,
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
             },
     };
 
