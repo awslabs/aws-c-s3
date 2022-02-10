@@ -90,7 +90,6 @@ static struct aws_input_stream_vtable s_aws_s3_test_input_stream_vtable = {
 };
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t stream_length) {
-    AWS_ASSERT(allocator);
 
     struct aws_s3_test_input_stream_impl *test_input_stream =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_test_input_stream_impl));
@@ -105,6 +104,7 @@ struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allo
 
     test_input_stream->position = 0;
     test_input_stream->length = stream_length;
+    test_input_stream->allocator = allocator;
 
     return input_stream;
 }
