@@ -202,7 +202,7 @@ static bool s_s3_auto_ranged_get_update(
 
                         auto_ranged_get->synced_data.head_object_sent = true;
                     }
-
+                    /*********************************************** JONATHAN BRAWN ISSUE HERE *********************/
                 } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
                     /* If we aren't using a head object, then discover the size of the object while trying to get the
                      * first part. */
@@ -365,6 +365,7 @@ static int s_s3_auto_ranged_get_prepare_request(
             request->request_tag);
         goto message_alloc_failed;
     }
+    aws_http_headers_set(aws_http_message_get_headers(message), g_request_validation_mode, g_enabled);
 
     aws_s3_request_setup_send_data(request, message);
     aws_http_message_release(message);

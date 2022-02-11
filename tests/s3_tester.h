@@ -121,6 +121,7 @@ struct aws_s3_tester_client_options {
     enum aws_s3_checksum_algorithm checksum_algorithm;
 };
 
+/* should really break this up to a client setup, and a meta_request sending */
 struct aws_s3_tester_meta_request_options {
     /* Optional if a valid aws_s3_tester was passed as an argument to the function. When NULL, the aws_s3_tester's
      * allocator will be used. */
@@ -141,6 +142,9 @@ struct aws_s3_tester_meta_request_options {
     struct aws_s3_tester_client_options *client_options;
 
     bool stream_signing;
+
+    /* override client signing config */
+    struct aws_signing_config_aws *signing_config;
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;

@@ -271,6 +271,10 @@ struct aws_s3_meta_request_result {
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
 
+    bool did_validate;
+
+    bool checksum_mismatch;
+
     /* Final error code of the meta request. */
     int error_code;
 };

@@ -1160,6 +1160,10 @@ int aws_s3_tester_send_meta_request_with_options(
         .message = options->message,
     };
 
+    if (options->signing_config) {
+        meta_request_options.signing_config = options->signing_config;
+    }
+
     struct aws_byte_buf input_stream_buffer;
     AWS_ZERO_STRUCT(input_stream_buffer);
 

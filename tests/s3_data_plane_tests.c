@@ -2172,6 +2172,16 @@ AWS_TEST_CASE(test_s3_round_trip, s_test_s3_round_trip)
 static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
     /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
     struct aws_s3_meta_request_test_results meta_request_test_results;
@@ -2180,6 +2190,7 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
         .put_options =
             {
                 .object_size_mb = 1,
@@ -2187,7 +2198,7 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -2197,13 +2208,143 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
         .get_options =
             {
                 .object_path = object_path,
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_round_trip_default_get, s_test_s3_round_trip_default_get)
+static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* should we generate a unique path each time? */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_default.txt");
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    /*** GET FILE ***/
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_round_trip_default_get_fc, s_test_s3_round_trip_default_get_fc)
+static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+        .checksum_algorithm = AWS_SCA_CRC32,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* should we generate a unique path each time? */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_default_fc.txt");
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    /*** GET FILE ***/
+
+    struct aws_signing_config_aws get_signing_config;
+
+    aws_s3_init_default_signing_config(&get_signing_config, g_test_s3_region, tester.credentials_provider);
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .signing_config = &get_signing_config,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
@@ -2212,138 +2353,61 @@ AWS_TEST_CASE(test_s3_round_trip_fc, s_test_s3_round_trip_fc)
 static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+        .checksum_algorithm = AWS_SCA_CRC32,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
     /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
-    struct aws_s3_tester_client_options client_options;
-    AWS_ZERO_STRUCT(client_options);
-    client_options.checksum_algorithm = AWS_SCA_CRC32;
-
     struct aws_s3_meta_request_test_results meta_request_test_results;
     AWS_ZERO_STRUCT(meta_request_test_results);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
         .put_options =
             {
                 .object_size_mb = 1,
                 .object_path_override = object_path,
             },
-        .client_options = &client_options,
-        .stream_signing = true,
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     /*** GET FILE ***/
+
+    struct aws_signing_config_aws get_signing_config;
+
+    aws_s3_init_default_signing_config(&get_signing_config, g_test_s3_region, tester.credentials_provider);
+    tester.default_signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+    client->checksum_algorithm = AWS_SCA_NONE;
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .signing_config = &get_signing_config,
         .get_options =
             {
                 .object_path = object_path,
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_round_trip_empty, s_test_s3_round_trip_empty)
-static int s_test_s3_round_trip_empty(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_empty.txt");
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
-
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .put_options =
-            {
-                .object_size_mb = 0,
-                .object_path_override = object_path,
-            },
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    /*** GET FILE ***/
-
-    struct aws_s3_tester_meta_request_options get_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .get_options =
-            {
-                .object_path = object_path,
-            },
-        .default_type_options =
-            {
-                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
-            },
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_round_trip_empty_fc, s_test_s3_round_trip_empty_fc)
-static int s_test_s3_round_trip_empty_fc(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_empty_fc.txt");
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    struct aws_s3_tester_client_options client_options;
-    AWS_ZERO_STRUCT(meta_request_test_results);
-    client_options.checksum_algorithm = AWS_SCA_CRC32;
-
-    AWS_ZERO_STRUCT(meta_request_test_results);
-
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .put_options =
-            {
-                .object_size_mb = 1,
-                .object_path_override = object_path,
-            },
-        .client_options = &client_options,
-        .stream_signing = true,
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &meta_request_test_results));
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    /*** GET FILE ***/
-
-    struct aws_s3_tester_meta_request_options get_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .get_options =
-            {
-                .object_path = object_path,
-            },
-        .default_type_options =
-            {
-                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
-            },
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, NULL));
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
