@@ -2184,9 +2184,6 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
 
     /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
-
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -2198,9 +2195,7 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /*** GET FILE ***/
 
@@ -2239,8 +2234,6 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
 
     /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_default.txt");
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2253,9 +2246,7 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /*** GET FILE ***/
 
@@ -2299,10 +2290,6 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
 
     /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_default_fc.txt");
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
-
-    AWS_ZERO_STRUCT(meta_request_test_results);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2315,9 +2302,7 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /*** GET FILE ***/
 
@@ -2366,8 +2351,6 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
 
     /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2380,9 +2363,7 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /*** GET FILE ***/
 

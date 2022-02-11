@@ -183,6 +183,9 @@ struct aws_s3_meta_request_test_results {
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    aws_s3_meta_request_finish_fn *finish_callback;
+    aws_s3_meta_request_shutdown_fn *shutdown_callback;
+    aws_s3_meta_request_progress_fn *progress_callback;
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
@@ -352,6 +355,20 @@ int aws_s3_tester_validate_put_object_results(
 struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
+
+void s3_test_validate_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data);
+void s3_test_validate_fail_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data);
+
+void s3_test_no_validate_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 
