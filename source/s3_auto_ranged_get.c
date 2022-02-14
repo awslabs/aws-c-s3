@@ -119,31 +119,6 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
-/* Check the finish result of meta request, in case of the request failed because of downloading an empty file */
-static bool s_check_empty_file_download_error(struct aws_s3_request *failed_request) {
-    struct aws_http_headers *failed_headers = failed_request->send_data.response_headers;
-    struct aws_byte_buf failed_body = failed_request->send_data.response_body;
-    if (failed_headers && failed_body.capacity > 0) {
-        struct aws_byte_cursor content_type;
-        AWS_ZERO_STRUCT(content_type);
-        if (!aws_http_headers_get(failed_headers, g_content_type_header_name, &content_type)) {
-            /* Content type found */
-            if (aws_byte_cursor_eq_ignore_case(&content_type, &g_application_xml_value)) {
-                /* XML response */
-                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&failed_body);
-                struct aws_string *size =
-                    get_top_level_xml_tag_value(failed_request->allocator, &g_object_size_value, &body_cursor);
-                bool check_size = aws_string_eq_c_str(size, "0");
-                aws_string_destroy(size);
-                if (check_size) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
 static bool s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
@@ -376,8 +351,6 @@ static int s_discover_object_range_and_content_length(
     AWS_PRECONDITION(out_total_content_length);
     AWS_PRECONDITION(out_object_range_start);
     AWS_PRECONDITION(out_object_range_end);
-
-    int result = AWS_OP_ERR;
 
     uint64_t total_content_length = 0;
     uint64_t object_range_start = 0;
