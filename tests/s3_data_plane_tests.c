@@ -2324,6 +2324,7 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
             },
+        .finish_callback = s3_test_validate_checksum,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
@@ -2383,6 +2384,7 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
             {
                 .object_path = object_path,
             },
+        .finish_callback = s3_test_validate_checksum,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));

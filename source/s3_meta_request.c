@@ -153,14 +153,10 @@ static void s_get_response_finish_brawn_callback(
         aws_checksum_finalize(meta_request->running_response_sum, &response_body_sum, 0);
         struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
         aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
-        if (aws_byte_buf_eq(&encoded_response_body_sum, &meta_request->response_header_checksum)) {
-            mut_meta_request_result->checksum_mismatch = false;
-        } else {
-            mut_meta_request_result->checksum_mismatch = true;
-        }
+        mut_meta_request_result->checksum_match =
+            aws_byte_buf_eq(&encoded_response_body_sum, &meta_request->response_header_checksum);
     } else {
         mut_meta_request_result->did_validate = false;
-        mut_meta_request_result->checksum_mismatch = false;
     }
     if (meta_request->finish_checksum_callback) {
         meta_request->finish_checksum_callback(meta_request, meta_request_result, user_data);

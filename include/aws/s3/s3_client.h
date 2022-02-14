@@ -273,7 +273,7 @@ struct aws_s3_meta_request_result {
 
     bool did_validate;
 
-    bool checksum_mismatch;
+    bool checksum_match;
 
     /* Final error code of the meta request. */
     int error_code;

@@ -154,9 +154,9 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
 
-    // if (meta_request_test_results->finish_callback != NULL) {
-    //     meta_request_test_results->finish_callback(meta_request, result, user_data);
-    // }
+    if (meta_request_test_results->finish_callback != NULL) {
+        meta_request_test_results->finish_callback(meta_request, result, user_data);
+    }
 
     aws_s3_tester_notify_meta_request_finished(tester, result);
 }
@@ -165,24 +165,23 @@ void s3_test_validate_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *result,
     void *user_data) {
-    ASSERT_TRUE(result->did_validate);
-    ASSERT_FALSE(result->checksum_mismatch);
+    AWS_FATAL_ASSERT(result->did_validate);
+    AWS_FATAL_ASSERT(result->checksum_match);
 }
 
 void s3_test_validate_fail_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *result,
     void *user_data) {
-    ASSERT_TRUE(result->did_validate);
-    ASSERT_TRUE(result->checksum_mismatch);
+    AWS_FATAL_ASSERT(result->did_validate);
+    AWS_FATAL_ASSERT(!result->checksum_match);
 }
 
 void s3_test_no_validate_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *result,
     void *user_data) {
-    ASSERT_FALSE(result->did_validate);
-    ASSERT_FALSE(result->checksum_mismatch);
+    AWS_FATAL_ASSERT(!result->did_validate);
 }
 
 static void s_s3_test_meta_request_shutdown(void *user_data) {
@@ -1334,6 +1333,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     out_results->headers_callback = options->headers_callback;
     out_results->body_callback = options->body_callback;
+    out_results->finish_callback = options->finish_callback;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 

@@ -148,6 +148,7 @@ struct aws_s3_tester_meta_request_options {
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    aws_s3_meta_request_finish_fn *finish_callback;
 
     /* Default Meta Request specific options. */
     struct {
