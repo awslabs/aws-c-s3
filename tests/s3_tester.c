@@ -165,6 +165,8 @@ void s3_test_validate_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *result,
     void *user_data) {
+    (void)meta_request;
+    (void)user_data;
     AWS_FATAL_ASSERT(result->did_validate);
     AWS_FATAL_ASSERT(result->checksum_match);
 }
@@ -173,6 +175,8 @@ void s3_test_validate_fail_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *result,
     void *user_data) {
+    (void)meta_request;
+    (void)user_data;
     AWS_FATAL_ASSERT(result->did_validate);
     AWS_FATAL_ASSERT(!result->checksum_match);
 }
@@ -181,6 +185,8 @@ void s3_test_no_validate_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *result,
     void *user_data) {
+    (void)meta_request;
+    (void)user_data;
     AWS_FATAL_ASSERT(!result->did_validate);
 }
 
