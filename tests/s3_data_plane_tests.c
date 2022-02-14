@@ -2519,7 +2519,6 @@ static int s_test_s3_error_missing_file(struct aws_allocator *allocator, void *c
     ASSERT_TRUE(meta_request_test_results.finished_error_code != AWS_ERROR_SUCCESS);
 
     ASSERT_TRUE(meta_request_test_results.error_response_headers != NULL);
-    ASSERT_TRUE(meta_request_test_results.error_response_body.len > 0);
 
     aws_s3_meta_request_release(meta_request);
     meta_request = NULL;
