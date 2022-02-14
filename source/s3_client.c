@@ -387,7 +387,6 @@ struct aws_s3_client *aws_s3_client_new(
     client->synced_data.active = true;
 
     if (client_config->retry_strategy != NULL) {
-        aws_retry_strategy_acquire(client_config->retry_strategy);
         client->retry_strategy = client_config->retry_strategy;
     } else {
         struct aws_exponential_backoff_retry_options backoff_retry_options = {
