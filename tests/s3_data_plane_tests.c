@@ -2325,6 +2325,7 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
             },
         .finish_callback = s3_test_validate_checksum,
+        .headers_callback = s3_validate_headers_checksum_set,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
@@ -2372,7 +2373,6 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
 
     aws_s3_init_default_signing_config(&get_signing_config, g_test_s3_region, tester.credentials_provider);
     tester.default_signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
-    client->checksum_algorithm = AWS_SCA_NONE;
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -2385,6 +2385,7 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
                 .object_path = object_path,
             },
         .finish_callback = s3_test_validate_checksum,
+        .headers_callback = s3_validate_headers_checksum_set,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));

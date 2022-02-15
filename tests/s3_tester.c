@@ -5,6 +5,7 @@
 
 #include "s3_tester.h"
 #include "aws/s3/private/s3_auto_ranged_get.h"
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
@@ -79,6 +80,18 @@ static int s_s3_test_meta_request_header_callback(
         return meta_request_test_results->headers_callback(meta_request, headers, response_status, user_data);
     }
 
+    return AWS_OP_SUCCESS;
+}
+
+int s3_validate_headers_checksum_set(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+    struct aws_s3_meta_request_test_results *meta_request_test_results =
+        (struct aws_s3_meta_request_test_results *)user_data;
+    ASSERT_NOT_NULL(meta_request->running_response_sum);
+    ASSERT_INT_EQUALS(meta_request->running_response_sum->algorithm, meta_request_test_results->algorithm);
     return AWS_OP_SUCCESS;
 }
 
@@ -1340,6 +1353,8 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->headers_callback = options->headers_callback;
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
+
+    out_results->algorithm = client->checksum_algorithm;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 

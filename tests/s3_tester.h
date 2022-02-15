@@ -198,6 +198,7 @@ struct aws_s3_meta_request_test_results {
     uint64_t received_body_size;
     int finished_response_status;
     int finished_error_code;
+    enum aws_s3_checksum_algorithm algorithm;
 };
 
 struct aws_s3_client_config;
@@ -356,6 +357,12 @@ int aws_s3_tester_validate_put_object_results(
 struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
+
+int s3_validate_headers_checksum_set(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data);
 
 void s3_test_validate_checksum(
     struct aws_s3_meta_request *meta_request,

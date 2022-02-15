@@ -202,20 +202,28 @@ struct aws_checksum *aws_crc32c_checksum_new(struct aws_allocator *allocator) {
 }
 
 struct aws_checksum *aws_checksum_new(struct aws_allocator *allocator, enum aws_s3_checksum_algorithm algorithm) {
+    struct aws_checksum *checksum = NULL;
     switch (algorithm) {
         case AWS_SCA_CRC32C:
-            return aws_crc32c_checksum_new(allocator);
+            checksum = aws_crc32c_checksum_new(allocator);
+            break;
         case AWS_SCA_CRC32:
-            return aws_crc32_checksum_new(allocator);
+            checksum = aws_crc32_checksum_new(allocator);
+            break;
         case AWS_SCA_SHA1:
-            return aws_hash_new(allocator, aws_sha1_new);
+            checksum = aws_hash_new(allocator, aws_sha1_new);
+            break;
         case AWS_SCA_SHA256:
-            return aws_hash_new(allocator, aws_sha256_new);
+            checksum = aws_hash_new(allocator, aws_sha256_new);
+            break;
         case AWS_SCA_MD5:
-            return aws_hash_new(allocator, aws_md5_new);
+            checksum = aws_hash_new(allocator, aws_md5_new);
+            break;
         default:
             return NULL;
     }
+    checksum->algorithm = algorithm;
+    return checksum;
 }
 
 int aws_checksum_compute_fn(
