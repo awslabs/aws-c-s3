@@ -88,6 +88,8 @@ int s3_validate_headers_checksum_set(
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
+    (void)response_status;
+    (void)headers;
     struct aws_s3_meta_request_test_results *meta_request_test_results =
         (struct aws_s3_meta_request_test_results *)user_data;
     ASSERT_NOT_NULL(meta_request->running_response_sum);
