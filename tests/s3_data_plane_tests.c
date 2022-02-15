@@ -2352,7 +2352,7 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_fc.txt");
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
