@@ -10,7 +10,6 @@
 #include <aws/s3/s3.h>
 
 #include <aws/auth/signing_config.h>
-#include "aws/io/uri.h"
 
 struct aws_allocator;
 
