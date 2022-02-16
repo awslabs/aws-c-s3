@@ -229,9 +229,6 @@ struct aws_s3_meta_request_options {
     /* Callback for when the meta request has completely cleaned up. */
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
 
-    /* Support meta requests over HTTP and HTTPS */
-    enum aws_s3_meta_request_tls_mode tls_mode;
-
     /**
      * Invoked to report progress of the meta request execution.
      * Currently, the progress callback is invoked only for the CopyObject meta request type.
