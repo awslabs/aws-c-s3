@@ -23,6 +23,7 @@ struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
 struct aws_s3_meta_request_result;
+struct aws_uri;
 
 /**
  * A Meta Request represents a group of generated requests that are being done on behalf of the
@@ -231,9 +232,6 @@ struct aws_s3_meta_request_options {
     /* Support meta requests over HTTP and HTTPS */
     enum aws_s3_meta_request_tls_mode tls_mode;
 
-    /* HTTP port override. If zero, determine port based on TLS context */
-    int port;
-
     /**
      * Invoked to report progress of the meta request execution.
      * Currently, the progress callback is invoked only for the CopyObject meta request type.
@@ -241,6 +239,9 @@ struct aws_s3_meta_request_options {
      * See `aws_s3_meta_request_progress_fn`
      */
     aws_s3_meta_request_progress_fn *progress_callback;
+
+    /* If present, then overrides HTTP Request host header */
+    struct aws_uri *uri;
 };
 
 /* Result details of a meta request.
