@@ -105,7 +105,7 @@ struct aws_s3_connection {
     struct aws_retry_token *retry_token;
 
     struct aws_checksum *running_response_sum;
-    struct aws_byte_buf *response_header_checksum
+    struct aws_byte_buf *response_header_checksum;
 };
 
 struct aws_s3_client_vtable {

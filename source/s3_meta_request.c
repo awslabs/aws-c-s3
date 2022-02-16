@@ -797,58 +797,59 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
     return error_code;
 }
 
-static void s_get_part_response_checksum_callback(
-    struct aws_s3_connection *connection,
-    const struct aws_http_headers *headers) {
-    connection->running_response_sum = NULL;
-    for (int i = AWS_SCA_CRC32C; i < AWS_SCA_MD5; i++) {
-        struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
-        if (aws_http_headers_has(headers, algorithm_header_name)) {
-            struct aws_byte_cursor header_sum;
-            aws_http_headers_get(headers, algorithm_header_name, &header_sum);
-            size_t encoded_len = 0;
-            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
-            if (header_sum.len == encoded_len - 1) {
-                aws_byte_buf_init_copy_from_cursor(
-                    &connection->response_header_checksum, aws_default_allocator(), header_sum);
-                connection->running_response_sum = aws_checksum_new(aws_default_allocator(), i);
-            }
-            break;
-        }
-    }
-}
+// static void s_get_part_response_checksum_callback(
+//     struct aws_s3_connection *connection,
+//     const struct aws_http_headers *headers) {
+//     connection->running_response_sum = NULL;
+//     for (int i = AWS_SCA_CRC32C; i < AWS_SCA_MD5; i++) {
+//         struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+//         if (aws_http_headers_has(headers, algorithm_header_name)) {
+//             struct aws_byte_cursor header_sum;
+//             aws_http_headers_get(headers, algorithm_header_name, &header_sum);
+//             size_t encoded_len = 0;
+//             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+//             if (header_sum.len == encoded_len - 1) {
+//                 aws_byte_buf_init_copy_from_cursor(
+//                     connection->response_header_checksum, aws_default_allocator(), header_sum);
+//                 connection->running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+//             }
+//             break;
+//         }
+//     }
+// }
 
-/* warning this might get screwed up with retrys/restarts */
-static void s_get_part_response_body_checksum_callback(
-    struct aws_checksum *running_response_sum,
-    const struct aws_byte_cursor *body) {
-    if (running_response_sum) {
-        aws_checksum_update(running_response_sum, body);
-    }
-}
+// /* warning this might get screwed up with retrys/restarts */
+// static void s_get_part_response_body_checksum_callback(
+//     struct aws_checksum *running_response_sum,
+//     const struct aws_byte_cursor *body) {
+//     if (running_response_sum) {
+//         aws_checksum_update(running_response_sum, body);
+//     }
+// }
 
-static int s_get_response_finish_brawn_callback(struct aws_s3_connection *connection, int error_code) {
-    struct aws_byte_buf response_body_sum;
-    struct aws_byte_buf encoded_response_body_sum;
-    AWS_ZERO_STRUCT(response_body_sum);
-    AWS_ZERO_STRUCT(encoded_response_body_sum);
-    if (error_code == AWS_OP_SUCCESS && connection->running_response_sum) {
-        size_t encoded_checksum_len = 0;
-        /* what error should I raise for these? */
-        aws_base64_compute_encoded_len(connection->running_response_sum->digest_size, &encoded_checksum_len);
-        aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
-        aws_byte_buf_init(&response_body_sum, aws_default_allocator(), connection->running_response_sum->digest_size);
-        aws_checksum_finalize(connection->running_response_sum, &response_body_sum, 0);
-        struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
-        aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
-        bool result = aws_byte_buf_eq(&encoded_response_body_sum, &connection->response_header_checksum);
-        aws_byte_buf_clean_up(&response_body_sum);
-        aws_byte_buf_clean_up(&encoded_response_body_sum);
-        aws_checksum_destroy(connection->running_response_sum);
-        aws_byte_buf_clean_up(&connection->response_header_checksum);
-        return result;
-    }
-}
+// static int s_get_response_finish_checksum_callback(struct aws_s3_connection *connection, int error_code) {
+//     struct aws_byte_buf response_body_sum;
+//     struct aws_byte_buf encoded_response_body_sum;
+//     AWS_ZERO_STRUCT(response_body_sum);
+//     AWS_ZERO_STRUCT(encoded_response_body_sum);
+//     if (error_code == AWS_OP_SUCCESS && connection->running_response_sum) {
+//         size_t encoded_checksum_len = 0;
+//         /* what error should I raise for these? */
+//         aws_base64_compute_encoded_len(connection->running_response_sum->digest_size, &encoded_checksum_len);
+//         aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
+//         aws_byte_buf_init(&response_body_sum, aws_default_allocator(),
+//         connection->running_response_sum->digest_size); aws_checksum_finalize(connection->running_response_sum,
+//         &response_body_sum, 0); struct aws_byte_cursor response_body_sum_cursor =
+//         aws_byte_cursor_from_buf(&response_body_sum); aws_base64_encode(&response_body_sum_cursor,
+//         &encoded_response_body_sum); bool result = aws_byte_buf_eq(&encoded_response_body_sum,
+//         &connection->response_header_checksum); aws_byte_buf_clean_up(&response_body_sum);
+//         aws_byte_buf_clean_up(&encoded_response_body_sum);
+//         aws_checksum_destroy(connection->running_response_sum);
+//         aws_byte_buf_clean_up(&connection->response_header_checksum);
+//         return result;
+//     }
+// }
+
 static int s_s3_meta_request_incoming_headers(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
@@ -1188,8 +1189,6 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&payload->requests);
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_ASSERT(meta_request == request->meta_request);
-        /* RESPONSE HANDLED HERE, LOOK HERE!!!!!!!!!!!!!!!!!!!!
-         * *******************************************************/
         struct aws_byte_cursor body_buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
         AWS_ASSERT(request->part_number >= 1);
