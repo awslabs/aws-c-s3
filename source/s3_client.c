@@ -609,21 +609,13 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     }
 
     struct aws_byte_cursor host_header_value;
-    AWS_ZERO_STRUCT(host_header_value);
 
-    struct aws_string *endpoint_host_name = NULL;
-
-    if (aws_http_headers_get(message_headers, g_host_header_name, &host_header_value) == AWS_OP_SUCCESS) {
-        endpoint_host_name = aws_string_new_from_cursor(client->allocator, &host_header_value);
-    }
-
-    struct aws_s3_meta_request *meta_request = client->vtable->meta_request_factory(client, options);
-
-    if (meta_request == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not create new meta request.", (void *)client);
-        if (endpoint_host_name) {
-            aws_string_destroy(endpoint_host_name);
-        }
+    if (aws_http_headers_get(message_headers, g_host_header_name, &host_header_value)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
+            (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
 
@@ -633,29 +625,32 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     if (options->uri != NULL) {
         const struct aws_byte_cursor *uri_host_name_cursor = aws_uri_host_name(options->uri);
         if (uri_host_name_cursor->len) {
-            struct aws_string *uri_host_name = aws_string_new_from_cursor(client->allocator, uri_host_name_cursor);
-            if (endpoint_host_name != NULL) {
-                aws_string_destroy(endpoint_host_name);
+            if (!aws_byte_cursor_eq(uri_host_name_cursor, &host_header_value)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Cannot create meta s3 request; 'Host' header does not match URI 'hostname'.",
+                    (void *)client);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
             }
-            endpoint_host_name = uri_host_name;
         }
         struct aws_byte_cursor https_scheme = aws_byte_cursor_from_c_str("https");
-        is_https = aws_byte_cursor_eq(aws_uri_scheme(options->uri), &https_scheme);
+        is_https = aws_byte_cursor_eq_ignore_case(aws_uri_scheme(options->uri), &https_scheme);
         port = aws_uri_port(options->uri);
     }
 
-    if (endpoint_host_name == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "id=%p Cannot create meta s3 request; no 'Host' header and no URI host name",
-            (void *)client);
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    struct aws_s3_meta_request *meta_request = client->vtable->meta_request_factory(client, options);
+
+    if (meta_request == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not create new meta request.", (void *)client);
         return NULL;
     }
 
     bool error_occurred = false;
 
     aws_s3_client_lock_synced_data(client);
+
+    struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, &host_header_value);
 
     struct aws_s3_endpoint *endpoint = NULL;
     struct aws_hash_element *endpoint_hash_element = NULL;
