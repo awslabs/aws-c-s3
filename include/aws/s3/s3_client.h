@@ -237,13 +237,13 @@ struct aws_s3_meta_request_options {
      */
     aws_s3_meta_request_progress_fn *progress_callback;
 
-     /**
-       * Optional.
-       * The endpoint for the meta request to connect to. If not set, then tls settings from client will
-       * determine the port, and host header from `message` will determine the host for the connection.
-       * Note: must match the host header from `message`
-       */
-     struct aws_uri *endpoint;
+    /**
+     * Optional.
+     * The endpoint for the meta request to connect to. If not set, then tls settings from client will
+     * determine the port, and host header from `message` will determine the host for the connection.
+     * Note: must match the host header from `message`
+     */
+    struct aws_uri *endpoint;
 };
 
 /* Result details of a meta request.
