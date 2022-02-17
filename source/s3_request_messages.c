@@ -407,14 +407,20 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_byte_cursor source_key;
     AWS_ZERO_STRUCT(source_key);
 
-    source_bucket.ptr = decode_buffer.buffer;
+    /* source format might have an optional leading slash, therefore it is either {bucket}/{key} or /{bucket}/{key} */
+    if (decode_buffer.len > 1 && decode_buffer.buffer[0] == '/') {
+        /* skip the leading slash */
+        source_bucket.ptr = &decode_buffer.buffer[1];
+    } else {
+        source_bucket.ptr = decode_buffer.buffer;
+    }
 
-    /* source format is {bucket}/{key}. split them */
-    for (size_t i = 0; i < decode_buffer.len; i++) {
-        if (decode_buffer.buffer[i] == '/') {
-            source_bucket.len = i;
-            source_key.ptr = decode_buffer.buffer + i + 1; /* skip the / */
-            source_key.len = decode_buffer.len - i - 1;
+    /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them. */
+    for (uint8_t *p = source_bucket.ptr; p < (decode_buffer.buffer + decode_buffer.len); p++) {
+        if (*p == '/') {
+            source_bucket.len = p - source_bucket.ptr;
+            source_key.ptr = p + 1; /* skip the / */
+            source_key.len = decode_buffer.len - (source_key.ptr - decode_buffer.buffer);
             break;
         }
     }
