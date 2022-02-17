@@ -67,7 +67,7 @@ struct aws_s3_endpoint_options {
     uint32_t max_connections;
 
     /* HTTP port override. If zero, determine port based on TLS context */
-    int port;
+    uint16_t port;
 };
 
 struct aws_s3_endpoint {
