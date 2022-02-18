@@ -374,7 +374,7 @@ error_clean_up:
     return NULL;
 }
 
-/* Creates a HEAD GetObject request to get the size of the source object. */
+/* Creates a HEAD GetObject sub-request to get the size of the source object of a Copy meta request. */
 struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
