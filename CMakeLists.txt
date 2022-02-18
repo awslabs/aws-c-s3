@@ -126,6 +126,6 @@ if (BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-if (NOT BYO_CRYPTO)
+if (NOT BYO_CRYPTO AND NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(samples)
 endif()
