@@ -797,58 +797,75 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
     return error_code;
 }
 
-// static void s_get_part_response_checksum_callback(
-//     struct aws_s3_connection *connection,
-//     const struct aws_http_headers *headers) {
-//     connection->running_response_sum = NULL;
-//     for (int i = AWS_SCA_CRC32C; i < AWS_SCA_MD5; i++) {
-//         struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
-//         if (aws_http_headers_has(headers, algorithm_header_name)) {
-//             struct aws_byte_cursor header_sum;
-//             aws_http_headers_get(headers, algorithm_header_name, &header_sum);
-//             size_t encoded_len = 0;
-//             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
-//             if (header_sum.len == encoded_len - 1) {
-//                 aws_byte_buf_init_copy_from_cursor(
-//                     connection->response_header_checksum, aws_default_allocator(), header_sum);
-//                 connection->running_response_sum = aws_checksum_new(aws_default_allocator(), i);
-//             }
-//             break;
-//         }
-//     }
-// }
+static bool s_header_value_from_list(
+    const struct aws_http_header *headers,
+    size_t headers_count,
+    struct aws_byte_cursor name,
+    struct aws_byte_cursor *out_value) {
+    for (size_t i = 0; i < headers_count; ++i) {
+        if (aws_byte_cursor_eq(&headers[i].name, &name)) {
+            *out_value = headers[i].value;
+            return true;
+        }
+    }
+    return false;
+}
 
-// /* warning this might get screwed up with retrys/restarts */
-// static void s_get_part_response_body_checksum_callback(
-//     struct aws_checksum *running_response_sum,
-//     const struct aws_byte_cursor *body) {
-//     if (running_response_sum) {
-//         aws_checksum_update(running_response_sum, body);
-//     }
-// }
+static void s_get_part_response_checksum_callback(
+    struct aws_s3_connection *connection,
+    const struct aws_http_header *headers,
+    size_t headers_count) {
+    connection->running_response_sum = NULL;
+    for (int i = AWS_SCA_CRC32C; i < AWS_SCA_MD5; i++) {
+        struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        struct aws_byte_cursor header_sum;
+        if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {
+            size_t encoded_len = 0;
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+            if (header_sum.len == encoded_len - 1) {
+                aws_byte_buf_init_copy_from_cursor(
+                    &connection->response_header_checksum, aws_default_allocator(), header_sum);
+                connection->running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+            }
+            break;
+        }
+    }
+}
 
-// static int s_get_response_finish_checksum_callback(struct aws_s3_connection *connection, int error_code) {
-//     struct aws_byte_buf response_body_sum;
-//     struct aws_byte_buf encoded_response_body_sum;
-//     AWS_ZERO_STRUCT(response_body_sum);
-//     AWS_ZERO_STRUCT(encoded_response_body_sum);
-//     if (error_code == AWS_OP_SUCCESS && connection->running_response_sum) {
-//         size_t encoded_checksum_len = 0;
-//         /* what error should I raise for these? */
-//         aws_base64_compute_encoded_len(connection->running_response_sum->digest_size, &encoded_checksum_len);
-//         aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
-//         aws_byte_buf_init(&response_body_sum, aws_default_allocator(),
-//         connection->running_response_sum->digest_size); aws_checksum_finalize(connection->running_response_sum,
-//         &response_body_sum, 0); struct aws_byte_cursor response_body_sum_cursor =
-//         aws_byte_cursor_from_buf(&response_body_sum); aws_base64_encode(&response_body_sum_cursor,
-//         &encoded_response_body_sum); bool result = aws_byte_buf_eq(&encoded_response_body_sum,
-//         &connection->response_header_checksum); aws_byte_buf_clean_up(&response_body_sum);
-//         aws_byte_buf_clean_up(&encoded_response_body_sum);
-//         aws_checksum_destroy(connection->running_response_sum);
-//         aws_byte_buf_clean_up(&connection->response_header_checksum);
-//         return result;
-//     }
-// }
+/* warning this might get screwed up with retrys/restarts */
+static void s_get_part_response_body_checksum_callback(
+    struct aws_checksum *running_response_sum,
+    const struct aws_byte_cursor *body) {
+    if (running_response_sum) {
+        aws_checksum_update(running_response_sum, body);
+    }
+}
+
+static void s_get_response_finish_checksum_callback(struct aws_s3_connection *connection, int error_code) {
+    struct aws_byte_buf response_body_sum;
+    struct aws_byte_buf encoded_response_body_sum;
+    AWS_ZERO_STRUCT(response_body_sum);
+    AWS_ZERO_STRUCT(encoded_response_body_sum);
+    if (error_code == AWS_OP_SUCCESS && connection->running_response_sum) {
+        size_t encoded_checksum_len = 0;
+        connection->request->did_validate = true;
+        /* what error should I raise for these? */
+        aws_base64_compute_encoded_len(connection->running_response_sum->digest_size, &encoded_checksum_len);
+        aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
+        aws_byte_buf_init(&response_body_sum, aws_default_allocator(), connection->running_response_sum->digest_size);
+        aws_checksum_finalize(connection->running_response_sum, &response_body_sum, 0);
+        struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
+        aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
+        connection->request->checksum_match =
+            aws_byte_buf_eq(&encoded_response_body_sum, &connection->response_header_checksum);
+        aws_byte_buf_clean_up(&response_body_sum);
+        aws_byte_buf_clean_up(&encoded_response_body_sum);
+        aws_checksum_destroy(connection->running_response_sum);
+        aws_byte_buf_clean_up(&connection->response_header_checksum);
+    } else {
+        connection->request->did_validate = false;
+    }
+}
 
 static int s_s3_meta_request_incoming_headers(
     struct aws_http_stream *stream,
@@ -887,6 +904,10 @@ static int s_s3_meta_request_incoming_headers(
 
     bool successful_response =
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
+
+    if (successful_response) {
+        s_get_part_response_checksum_callback(connection, headers, headers_count);
+    }
 
     /* Only record headers if an error has taken place, or if the reqest_desc has asked for them. */
     bool should_record_headers = !successful_response || request->record_response_headers;
@@ -935,6 +956,8 @@ static int s_s3_meta_request_incoming_body(
     /* TODO delete maybe? Guessing theres a reason we didn't previously log? ****************************/
     // AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
 
+    s_get_part_response_body_checksum_callback(connection->running_response_sum, data);
+
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;
 
@@ -966,7 +989,7 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
-
+    s_get_response_finish_checksum_callback(connection, error_code);
     s_s3_meta_request_send_request_finish(connection, stream, error_code);
 }
 
@@ -1028,8 +1051,18 @@ void aws_s3_meta_request_send_request_finish_default(
     enum aws_s3_connection_finish_code finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
     if (error_code == AWS_ERROR_SUCCESS) {
+        if (request->did_validate && !request->checksum_match) {
+            finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
-        finish_code = AWS_S3_CONNECTION_FINISH_CODE_SUCCESS;
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Meta request cannot recover from checksum mismatch. (request=%p, response status=%d)",
+                (void *)meta_request,
+                (void *)request,
+                response_status);
+        } else {
+            finish_code = AWS_S3_CONNECTION_FINISH_CODE_SUCCESS;
+        }
 
     } else {
         /* BEGIN CRITICAL SECTION */
