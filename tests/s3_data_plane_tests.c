@@ -3498,6 +3498,7 @@ struct copy_object_test_data {
     struct aws_mutex mutex;
     struct aws_condition_variable c_var;
     bool execution_completed;
+    bool headers_callback_was_invoked;
     int meta_request_error_code;
     int response_status_code;
 };
@@ -3526,6 +3527,21 @@ static void s_copy_object_meta_request_finish(
     test_data->execution_completed = true;
     aws_mutex_unlock(&test_data->mutex);
     aws_condition_variable_notify_one(&test_data->c_var);
+}
+
+static int s_copy_object_meta_request_headers_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+
+    struct copy_object_test_data *test_data = user_data;
+
+    aws_mutex_lock(&test_data->mutex);
+    test_data->headers_callback_was_invoked = true;
+    aws_mutex_unlock(&test_data->mutex);
+
+    return AWS_OP_SUCCESS;
 }
 
 static bool s_copy_test_completion_predicate(void *arg) {
@@ -3578,7 +3594,7 @@ static int s_test_s3_copy_object_from_x_amz_copy_source(
         .body_callback = NULL,
         .signing_config = client_config.signing_config,
         .finish_callback = s_copy_object_meta_request_finish,
-        .headers_callback = NULL,
+        .headers_callback = s_copy_object_meta_request_headers_callback,
         .message = message,
         .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
@@ -3595,6 +3611,9 @@ static int s_test_s3_copy_object_from_x_amz_copy_source(
     /* assert error_code and response_status_code */
     ASSERT_INT_EQUALS(expected_error_code, test_data.meta_request_error_code);
     ASSERT_INT_EQUALS(expected_response_status, test_data.response_status_code);
+
+    /* assert headers callback was invoked */
+    ASSERT_TRUE(test_data.headers_callback_was_invoked);
 
     aws_s3_meta_request_release(meta_request);
     aws_mutex_clean_up(&test_data.mutex);
