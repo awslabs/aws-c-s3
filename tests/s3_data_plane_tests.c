@@ -3535,6 +3535,10 @@ static int s_copy_object_meta_request_headers_callback(
     int response_status,
     void *user_data) {
 
+    (void)meta_request;
+    (void)headers;
+    (void)response_status;
+
     struct copy_object_test_data *test_data = user_data;
 
     aws_mutex_lock(&test_data->mutex);
