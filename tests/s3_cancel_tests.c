@@ -174,7 +174,7 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
     AWS_ASSERT(allocator);
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct s3_cancel_test_user_data test_user_data = {
         .type = cancel_type,
@@ -444,7 +444,7 @@ static int s_test_s3_cancel_prepare(struct aws_allocator *allocator, void *ctx) 
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct test_s3_cancel_prepare_user_data test_user_data;
     AWS_ZERO_STRUCT(test_user_data);

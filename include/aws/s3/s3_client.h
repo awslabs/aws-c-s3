@@ -23,6 +23,7 @@ struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
 struct aws_s3_meta_request_result;
+struct aws_uri;
 
 /**
  * A Meta Request represents a group of generated requests that are being done on behalf of the
@@ -138,6 +139,15 @@ enum aws_s3_meta_request_compute_content_md5 {
     AWS_MR_CONTENT_MD5_ENABLED,
 };
 
+enum aws_s3_checksum_algorithm {
+    AWS_SCA_NONE = 0,
+    AWS_SCA_CRC32C,
+    AWS_SCA_CRC32,
+    AWS_SCA_SHA1,
+    AWS_SCA_SHA256,
+    AWS_SCA_MD5,
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
 
@@ -184,6 +194,10 @@ struct aws_s3_client_config {
      *     or initial request has content-md5 header.
      * For single-part upload, keep the content-md5 in the initial request unchanged. */
     enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
+
+    /**
+     * If a flexible checksum is specified it will replace compute_content_md5 */
+    enum aws_s3_checksum_algorithm checksum_algorithm;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
@@ -235,6 +249,14 @@ struct aws_s3_meta_request_options {
      * See `aws_s3_meta_request_progress_fn`
      */
     aws_s3_meta_request_progress_fn *progress_callback;
+
+    /**
+     * Optional.
+     * The endpoint for the meta request to connect to. If not set, then tls settings from client will
+     * determine the port, and host header from `message` will determine the host for the connection.
+     * Note: must match the host header from `message`
+     */
+    struct aws_uri *endpoint;
 };
 
 /* Result details of a meta request.
@@ -257,6 +279,10 @@ struct aws_s3_meta_request_result {
 
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
+
+    bool did_validate;
+
+    bool checksum_match;
 
     /* Final error code of the meta request. */
     int error_code;

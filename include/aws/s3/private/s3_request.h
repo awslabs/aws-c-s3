@@ -58,9 +58,17 @@ struct aws_s3_request {
      * prepare function, this will be 0.*/
     uint32_t num_times_prepared;
 
+    /* Get request only, was there a checksum to validate */
+    bool did_validate;
+
+    /* Get request only, if there was an attached checksum to validate did it match the computed checksum */
+    bool checksum_match;
+
     /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
      * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
      * be more contextual, like "first part" instead of just "part".) */
+
+    /* should this be refactored to make it clear that this could be one of two enums for puts, and gets? */
     int request_tag;
 
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to

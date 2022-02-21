@@ -374,6 +374,8 @@ struct aws_s3_client *aws_s3_client_new(
     *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
         client_config->compute_content_md5;
 
+    client->checksum_algorithm = client_config->checksum_algorithm;
+
     /* Determine how many vips are ideal by dividing target-throughput by throughput-per-vip. */
     {
         double ideal_vip_count_double = client->throughput_target_gbps / s_throughput_per_vip_gbps;
@@ -457,25 +459,33 @@ static void s_s3_client_start_destroy(void *user_data) {
     struct aws_linked_list local_vip_list;
     aws_linked_list_init(&local_vip_list);
 
-    aws_s3_client_lock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
 
-    client->synced_data.active = false;
+        client->synced_data.active = false;
 
-    /* Prevent the client from cleaning up inbetween the mutex unlock/re-lock below.*/
-    client->synced_data.start_destroy_executing = true;
+        /* Prevent the client from cleaning up inbetween the mutex unlock/re-lock below.*/
+        client->synced_data.start_destroy_executing = true;
 
-    aws_s3_client_unlock_synced_data(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
 
-    aws_s3_client_lock_synced_data(client);
-    client->synced_data.start_destroy_executing = false;
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        client->synced_data.start_destroy_executing = false;
 
-    /* Schedule the work task to clean up outstanding connections and to call s_s3_client_finish_destroy function if
-     * everything cleaning up asynchronously has finished.  */
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+        /* Schedule the work task to clean up outstanding connections and to call s_s3_client_finish_destroy function if
+         * everything cleaning up asynchronously has finished.  */
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 }
 
 static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
@@ -522,10 +532,14 @@ static void s_s3_client_body_streaming_elg_shutdown(void *user_data) {
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client body streaming ELG shutdown.", (void *)client);
 
-    aws_s3_client_lock_synced_data(client);
-    client->synced_data.body_streaming_elg_allocated = false;
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        client->synced_data.body_streaming_elg_allocated = false;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 }
 
 uint32_t aws_s3_client_queue_requests_threaded(
@@ -621,6 +635,26 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
+    bool is_https = true;
+    uint16_t port = 0;
+
+    if (options->endpoint != NULL) {
+        const struct aws_byte_cursor *host_name_cursor = aws_uri_host_name(options->endpoint);
+        if (host_name_cursor->len) {
+            if (!aws_byte_cursor_eq(host_name_cursor, &host_header_value)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Cannot create meta s3 request; 'Host' header does not match URI 'hostname'.",
+                    (void *)client);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+        }
+        struct aws_byte_cursor https_scheme = aws_byte_cursor_from_c_str("https");
+        is_https = aws_byte_cursor_eq_ignore_case(aws_uri_scheme(options->endpoint), &https_scheme);
+        port = aws_uri_port(options->endpoint);
+    }
+
     struct aws_s3_meta_request *meta_request = client->vtable->meta_request_factory(client, options);
 
     if (meta_request == NULL) {
@@ -630,57 +664,62 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     bool error_occurred = false;
 
-    aws_s3_client_lock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
 
-    struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, &host_header_value);
+        struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, &host_header_value);
 
-    struct aws_s3_endpoint *endpoint = NULL;
-    struct aws_hash_element *endpoint_hash_element = NULL;
+        struct aws_s3_endpoint *endpoint = NULL;
+        struct aws_hash_element *endpoint_hash_element = NULL;
 
-    int was_created = 0;
+        int was_created = 0;
 
-    if (aws_hash_table_create(
-            &client->synced_data.endpoints, endpoint_host_name, &endpoint_hash_element, &was_created)) {
-        error_occurred = true;
-        goto unlock;
-    }
-
-    if (was_created) {
-        struct aws_s3_endpoint_options endpoint_options = {
-            .host_name = endpoint_host_name,
-            .ref_count_zero_callback = client->vtable->endpoint_ref_count_zero,
-            .shutdown_callback = client->vtable->endpoint_shutdown_callback,
-            .client_bootstrap = client->client_bootstrap,
-            .tls_connection_options = client->tls_connection_options,
-            .dns_host_address_ttl_seconds = s_dns_host_address_ttl_seconds,
-            .user_data = client,
-            .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
-        };
-
-        endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
-
-        if (endpoint == NULL) {
-            aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
+        if (aws_hash_table_create(
+                &client->synced_data.endpoints, endpoint_host_name, &endpoint_hash_element, &was_created)) {
             error_occurred = true;
             goto unlock;
         }
 
-        endpoint_hash_element->value = endpoint;
-        ++client->synced_data.num_endpoints_allocated;
-    } else {
-        endpoint = aws_s3_endpoint_acquire(endpoint_hash_element->value);
+        if (was_created) {
+            struct aws_s3_endpoint_options endpoint_options = {
+                .host_name = endpoint_host_name,
+                .ref_count_zero_callback = client->vtable->endpoint_ref_count_zero,
+                .shutdown_callback = client->vtable->endpoint_shutdown_callback,
+                .client_bootstrap = client->client_bootstrap,
+                .tls_connection_options = is_https ? client->tls_connection_options : NULL,
+                .dns_host_address_ttl_seconds = s_dns_host_address_ttl_seconds,
+                .user_data = client,
+                .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
+                .port = port,
+            };
 
-        aws_string_destroy(endpoint_host_name);
-        endpoint_host_name = NULL;
+            endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
+
+            if (endpoint == NULL) {
+                aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
+                error_occurred = true;
+                goto unlock;
+            }
+
+            endpoint_hash_element->value = endpoint;
+            ++client->synced_data.num_endpoints_allocated;
+        } else {
+            endpoint = aws_s3_endpoint_acquire(endpoint_hash_element->value);
+
+            aws_string_destroy(endpoint_host_name);
+            endpoint_host_name = NULL;
+        }
+
+        meta_request->endpoint = endpoint;
+
+        s_s3_client_push_meta_request_synced(client, meta_request);
+        s_s3_client_schedule_process_work_synced(client);
+
+    unlock:
+        aws_s3_client_unlock_synced_data(client);
     }
-
-    meta_request->endpoint = endpoint;
-
-    s_s3_client_push_meta_request_synced(client, meta_request);
-    s_s3_client_schedule_process_work_synced(client);
-
-unlock:
-    aws_s3_client_unlock_synced_data(client);
+    /* END CRITICAL SECTION */
 
     if (error_occurred) {
         AWS_LOGF_ERROR(
@@ -707,17 +746,21 @@ static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint
 
     bool clean_up_endpoint = false;
 
-    aws_s3_client_lock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
 
-    /* It is possible that before we were able to acquire the lock here, the critical section used for looking up the
-     * endpoint in the table and assigning it to a new meta request was called in a different thread. To handle this
-     * case, we check the ref count before removing it.*/
-    if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 0) {
-        aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-        clean_up_endpoint = true;
+        /* It is possible that before we were able to acquire the lock here, the critical section used for looking up
+         * the endpoint in the table and assigning it to a new meta request was called in a different thread. To handle
+         * this case, we check the ref count before removing it.*/
+        if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 0) {
+            aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+            clean_up_endpoint = true;
+        }
+
+        aws_s3_client_unlock_synced_data(client);
     }
-
-    aws_s3_client_unlock_synced_data(client);
+    /* END CRITICAL SECTION */
 
     return clean_up_endpoint;
 }
@@ -726,10 +769,14 @@ static void s_s3_client_endpoint_shutdown_callback(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    aws_s3_client_lock_synced_data(client);
-    --client->synced_data.num_endpoints_allocated;
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        --client->synced_data.num_endpoints_allocated;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 }
 
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
@@ -763,7 +810,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
          * request.
          * TODO: Still need tests to verify that the request of a part is splittable or not */
         if (aws_http_headers_has(initial_message_headers, aws_byte_cursor_from_c_str("partNumber"))) {
-            return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
+            return aws_s3_meta_request_default_new(
+                client->allocator, client, content_length, false, options, client->checksum_algorithm);
         }
 
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
@@ -811,14 +859,15 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             client_max_part_size = g_s3_min_upload_part_size;
         }
 
-        if (content_length < client_part_size) {
+        if (content_length <= client_part_size) {
             return aws_s3_meta_request_default_new(
                 client->allocator,
                 client,
                 content_length,
                 client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                     !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
-                options);
+                options,
+                client->checksum_algorithm);
         }
 
         uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
@@ -862,7 +911,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {
         return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-        return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
+        return aws_s3_meta_request_default_new(
+            client->allocator, client, content_length, false, options, client->checksum_algorithm);
     } else {
         AWS_FATAL_ASSERT(false);
     }
@@ -913,9 +963,13 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
-    aws_s3_client_lock_synced_data(client);
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 }
 
 static void s_s3_client_remove_meta_request_threaded(
@@ -962,8 +1016,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         AWS_LS_S3_CLIENT,
         "id=%p s_s3_client_process_work_default - Moving relevant synced_data into threaded_data.",
         (void *)client);
-    aws_s3_client_lock_synced_data(client);
 
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_client_lock_synced_data(client);
     /* Once we exit this mutex, someone can reschedule this task. */
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
@@ -999,6 +1054,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     uint32_t num_endpoints_allocated = client->synced_data.num_endpoints_allocated;
 
     aws_s3_client_unlock_synced_data(client);
+    /* END CRITICAL SECTION */
 
     /*******************/
     /* Step 2: Push meta requests into the thread local list if they haven't already been scheduled. */
@@ -1089,6 +1145,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* Step 5: Check for client shutdown. */
     /*******************/
     {
+        /* BEGIN CRITICAL SECTION */
         aws_s3_client_lock_synced_data(client);
         client->synced_data.process_work_task_in_progress = false;
 
@@ -1120,6 +1177,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         }
 
         aws_s3_client_unlock_synced_data(client);
+        /* END CRITICAL SECTION */
 
         if (finish_destroy) {
             client->vtable->finish_destroy(client);
@@ -1241,16 +1299,20 @@ static void s_s3_client_prepare_callback_queue_request(
         request = NULL;
     }
 
-    aws_s3_client_lock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
 
-    if (error_code == AWS_ERROR_SUCCESS) {
-        aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
-    } else {
-        ++client->synced_data.num_failed_prepare_requests;
+        if (error_code == AWS_ERROR_SUCCESS) {
+            aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+        } else {
+            ++client->synced_data.num_failed_prepare_requests;
+        }
+
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
     }
-
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+    /* END CRITICAL SECTION */
 }
 
 void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
@@ -1610,9 +1672,13 @@ reset_connection:
     aws_mem_release(client->allocator, connection);
     connection = NULL;
 
-    aws_s3_client_lock_synced_data(client);
-    s_s3_client_schedule_process_work_synced(client);
-    aws_s3_client_unlock_synced_data(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 }
 
 static void s_s3_client_prepare_request_callback_retry_request(
@@ -1710,9 +1776,12 @@ void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct
     AWS_PRECONDITION(request);
 
     if (request->tracked_by_client) {
+        /* BEGIN CRITICAL SECTION */
         aws_s3_client_lock_synced_data(client);
+        /* isn't an atomic fetch redundant in a critical section? */
         aws_atomic_fetch_sub(&client->stats.num_requests_in_flight, 1);
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
+        /* END CRITICAL SECTION */
     }
 }

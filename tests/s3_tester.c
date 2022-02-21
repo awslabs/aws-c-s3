@@ -5,6 +5,7 @@
 
 #include "s3_tester.h"
 #include "aws/s3/private/s3_auto_ranged_get.h"
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
@@ -82,6 +83,20 @@ static int s_s3_test_meta_request_header_callback(
     return AWS_OP_SUCCESS;
 }
 
+int s3_validate_headers_checksum_set(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+    (void)response_status;
+    (void)headers;
+    struct aws_s3_meta_request_test_results *meta_request_test_results =
+        (struct aws_s3_meta_request_test_results *)user_data;
+    ASSERT_NOT_NULL(meta_request->running_response_sum);
+    ASSERT_INT_EQUALS(meta_request->running_response_sum->algorithm, meta_request_test_results->algorithm);
+    return AWS_OP_SUCCESS;
+}
+
 static int s_s3_test_meta_request_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -154,7 +169,40 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
 
+    if (meta_request_test_results->finish_callback != NULL) {
+        meta_request_test_results->finish_callback(meta_request, result, user_data);
+    }
+
     aws_s3_tester_notify_meta_request_finished(tester, result);
+}
+
+void s3_test_validate_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data) {
+    (void)meta_request;
+    (void)user_data;
+    AWS_FATAL_ASSERT(result->did_validate);
+    AWS_FATAL_ASSERT(result->checksum_match);
+}
+
+void s3_test_validate_fail_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data) {
+    (void)meta_request;
+    (void)user_data;
+    AWS_FATAL_ASSERT(result->did_validate);
+    AWS_FATAL_ASSERT(!result->checksum_match);
+}
+
+void s3_test_no_validate_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data) {
+    (void)meta_request;
+    (void)user_data;
+    AWS_FATAL_ASSERT(!result->did_validate);
 }
 
 static void s_s3_test_meta_request_shutdown(void *user_data) {
@@ -199,7 +247,7 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     return endpoint_string;
 }
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, bool streaming) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -259,6 +307,10 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 #endif
 
     aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
+
+    if (streaming) {
+        tester->default_signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+    }
 
     return AWS_OP_SUCCESS;
 
@@ -781,6 +833,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         NULL,
         0,
         false,
+        AWS_SCA_NONE,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
@@ -843,6 +896,7 @@ static void s_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester) {
     aws_s3_tester_unlock_synced_data(tester);
 }
 
+/************************************** BOOKMARK GET OBJECT ******************************************************/
 struct aws_http_message *aws_s3_test_get_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host,
@@ -1063,6 +1117,7 @@ int aws_s3_tester_client_new(
     struct aws_s3_client_config client_config = {
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
+        .checksum_algorithm = options->checksum_algorithm,
     };
 
     struct aws_tls_connection_options tls_connection_options;
@@ -1125,7 +1180,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     if (tester == NULL) {
         ASSERT_TRUE(options->allocator);
-        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester));
+        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester, options->stream_signing));
         tester = &local_tester;
         clean_up_local_tester = true;
     } else if (allocator == NULL) {
@@ -1152,6 +1207,10 @@ int aws_s3_tester_send_meta_request_with_options(
         .type = options->meta_request_type,
         .message = options->message,
     };
+
+    if (options->signing_config) {
+        meta_request_options.signing_config = options->signing_config;
+    }
 
     struct aws_byte_buf input_stream_buffer;
     AWS_ZERO_STRUCT(input_stream_buffer);
@@ -1193,6 +1252,8 @@ int aws_s3_tester_send_meta_request_with_options(
             uint32_t object_size_mb = options->put_options.object_size_mb;
             size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
 
+            /* this doesn't do what we think it should because a) we sometimes do ranged puts with only 1 part, and b)
+             * g_min_upload_part_size overrides this anyways */
             if (options->put_options.ensure_multipart) {
                 if (object_size_bytes == 0) {
                     object_size_bytes = client->part_size * 2;
@@ -1295,6 +1356,9 @@ int aws_s3_tester_send_meta_request_with_options(
 
     out_results->headers_callback = options->headers_callback;
     out_results->body_callback = options->body_callback;
+    out_results->finish_callback = options->finish_callback;
+
+    out_results->algorithm = client->checksum_algorithm;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
@@ -1514,6 +1578,7 @@ int aws_s3_tester_validate_get_object_results(
     return AWS_OP_SUCCESS;
 }
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
@@ -1558,7 +1623,7 @@ int aws_s3_tester_send_put_object_meta_request(
         flags);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5) {
-        ASSERT_SUCCESS(aws_s3_message_util_add_content_md5_header(allocator, &test_buffer, message));
+        ASSERT_SUCCESS(aws_s3_message_util_add_checksum_header(allocator, &test_buffer, message, AWS_SCA_MD5));
     } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5) {
         struct aws_http_header content_md5_header = {
             .name = g_content_md5_header_name,
@@ -1601,6 +1666,7 @@ int aws_s3_tester_send_put_object_meta_request(
     return AWS_OP_SUCCESS;
 }
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
     uint32_t flags) {

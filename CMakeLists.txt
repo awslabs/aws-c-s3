@@ -95,6 +95,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         $<INSTALL_INTERFACE:include>)
 
 aws_use_package(aws-c-auth)
+aws_use_package(aws-checksums)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_AWS_LIBS})
 
@@ -126,6 +127,6 @@ if (BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-if (NOT BYO_CRYPTO)
+if (NOT BYO_CRYPTO AND NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(samples)
 endif()
