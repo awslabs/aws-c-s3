@@ -114,7 +114,7 @@ struct aws_http_message *aws_s3_get_object_size_message_new(
     struct aws_byte_cursor source_bucket,
     struct aws_byte_cursor source_key);
 
-/* Creates a HEAD GetObject request to get the size of the source object of a CopyObject request. */
+/* Creates a HEAD GetObject sub-request to get the size of the source object of a Copy meta request. */
 AWS_S3_API
 struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_allocator *allocator,

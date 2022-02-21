@@ -598,8 +598,32 @@ static void s_s3_copy_object_request_finished(
             break;
         }
 
+        /* The S3 object is not large enough for multi-part copy. A copy of the original CopyObject request
+         * was bypassed to S3 and is now finished. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS: {
 
+            /* Invoke headers callback if it was requested for this meta request */
+            if (meta_request->headers_callback != NULL) {
+                struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
+
+                /* Copy all the response headers from this request. */
+                copy_http_headers(request->send_data.response_headers, final_response_headers);
+
+                /* Notify the user of the headers. */
+                if (meta_request->headers_callback(
+                        meta_request,
+                        final_response_headers,
+                        request->send_data.response_status,
+                        meta_request->user_data)) {
+
+                    error_code = aws_last_error_or_unknown();
+                }
+                meta_request->headers_callback = NULL;
+
+                aws_http_headers_release(final_response_headers);
+            }
+
+            /* Signals completion of the meta request */
             if (error_code == AWS_ERROR_SUCCESS) {
                 copy_object->synced_data.copy_request_bypass_completed = true;
             } else {
@@ -748,6 +772,7 @@ static void s_s3_copy_object_request_finished(
 
                     error_code = aws_last_error_or_unknown();
                 }
+                meta_request->headers_callback = NULL;
 
                 aws_http_headers_release(final_response_headers);
             }
