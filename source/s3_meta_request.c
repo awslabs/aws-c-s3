@@ -849,7 +849,6 @@ static void s_get_response_finish_checksum_callback(struct aws_s3_connection *co
     if (error_code == AWS_OP_SUCCESS && connection->running_response_sum) {
         size_t encoded_checksum_len = 0;
         connection->request->did_validate = true;
-        /* what error should I raise for these? */
         aws_base64_compute_encoded_len(connection->running_response_sum->digest_size, &encoded_checksum_len);
         aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
         aws_byte_buf_init(&response_body_sum, aws_default_allocator(), connection->running_response_sum->digest_size);
@@ -955,8 +954,6 @@ static int s_s3_meta_request_incoming_body(
         (uint64_t)data->len,
         (void *)connection);
 
-    /* TODO delete maybe? Guessing theres a reason we didn't previously log? ****************************/
-    // AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
     if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
         s_get_part_response_body_checksum_callback(connection->running_response_sum, data);
     }
