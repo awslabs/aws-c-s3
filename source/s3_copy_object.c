@@ -72,6 +72,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
             client,
             UNKNOWN_PART_SIZE,
             false,
+            AWS_SCA_NONE,
             options,
             copy_object,
             &s_s3_copy_object_vtable,
@@ -358,11 +359,12 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
         /* The S3 object is not large enough for multi-part copy. Bypasses a copy of the original CopyObject request to
          * S3. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS: {
-            message = aws_s3_message_util_copy_http_message(
+            message = aws_s3_message_util_copy_http_message_no_body(
                 meta_request->allocator, meta_request->initial_request_message, NULL, 0);
 
             if (meta_request->should_compute_content_md5) {
-                aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
+                aws_s3_message_util_add_checksum_header(
+                    meta_request->allocator, &request->request_body, message, AWS_SCA_MD5);
             }
 
             break;
@@ -407,7 +409,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
-                meta_request->allocator, meta_request->initial_request_message);
+                meta_request->allocator, meta_request->initial_request_message, AWS_SCA_NONE);
 
             break;
         }
@@ -465,7 +467,9 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                 meta_request->initial_request_message,
                 &request->request_body,
                 copy_object->upload_id,
-                &copy_object->synced_data.etag_list);
+                &copy_object->synced_data.etag_list,
+                NULL,
+                AWS_SCA_NONE);
 
             break;
         }

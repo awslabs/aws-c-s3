@@ -33,7 +33,7 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct replace_quote_entities_test_case test_cases[] = {
         {

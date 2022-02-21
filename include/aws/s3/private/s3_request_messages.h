@@ -6,6 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 #include "aws/s3/s3.h"
+/* is this appropriate to include here? */
+#include "aws/s3/s3_client.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,7 +22,7 @@ struct aws_array_list;
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
-struct aws_http_message *aws_s3_message_util_copy_http_message(
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
     const struct aws_byte_cursor *excluded_headers_arrays,
@@ -30,7 +32,9 @@ AWS_S3_API
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
-    struct aws_http_message *out_message);
+    struct aws_http_message *out_message,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *out_checksum);
 
 /* Create an HTTP request for an S3 Ranged Get Object Request, using the given request as a basis */
 AWS_S3_API
@@ -52,7 +56,8 @@ int aws_s3_message_util_set_multipart_request_path(
 AWS_S3_API
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *base_message);
+    struct aws_http_message *base_message,
+    enum aws_s3_checksum_algorithm algorithm);
 
 /* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns a
  * body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and NULL,
@@ -64,7 +69,9 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_byte_buf *buffer,
     uint32_t part_number,
     const struct aws_string *upload_id,
-    bool should_compute_content_md5);
+    bool should_compute_content_md5,
+    enum aws_s3_checksum_algorithm checksum_algorithm,
+    struct aws_byte_buf *encoded_checksum_output);
 
 /* Create an HTTP request for an S3 UploadPartCopy request, using the original request as a basis.
  * If multipart is not needed, part number and upload_id can be 0 and NULL,
@@ -89,7 +96,9 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
-    const struct aws_array_list *etags);
+    const struct aws_array_list *etags,
+    struct aws_byte_buf *checksums,
+    enum aws_s3_checksum_algorithm algorithm);
 
 AWS_S3_API
 struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
@@ -113,10 +122,11 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
 
 /* Add content-md5 header to the http message passed in. The MD5 will be computed from the input_buf */
 AWS_S3_API
-int aws_s3_message_util_add_content_md5_header(
+int aws_s3_message_util_add_checksum_header(
     struct aws_allocator *allocator,
     struct aws_byte_buf *input_buf,
-    struct aws_http_message *message);
+    struct aws_http_message *message,
+    enum aws_s3_checksum_algorithm algorithm);
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[];

@@ -25,8 +25,30 @@ const struct aws_byte_cursor g_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING
 const struct aws_byte_cursor g_etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
 const struct aws_byte_cursor g_content_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Range");
 const struct aws_byte_cursor g_content_type_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type");
+const struct aws_byte_cursor g_content_encoding_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding");
+const struct aws_byte_cursor g_content_encoding_header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-chunked");
 const struct aws_byte_cursor g_content_length_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
+const struct aws_byte_cursor g_decoded_content_length_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-decoded-content-length");
 const struct aws_byte_cursor g_content_md5_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5");
+const struct aws_byte_cursor g_trailer_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-trailer");
+const struct aws_byte_cursor g_request_validation_mode = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-mode");
+const struct aws_byte_cursor g_enabled = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("enabled");
+
+const struct aws_byte_cursor g_create_mpu_checksum_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-algorithm");
+const struct aws_byte_cursor g_crc32c_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c");
+const struct aws_byte_cursor g_crc32_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32");
+const struct aws_byte_cursor g_sha1_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1");
+const struct aws_byte_cursor g_sha256_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256");
+const struct aws_byte_cursor g_crc32c_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32C");
+const struct aws_byte_cursor g_crc32_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32");
+const struct aws_byte_cursor g_sha1_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA1");
+const struct aws_byte_cursor g_sha256_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA256");
+const struct aws_byte_cursor g_crc32c_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32C");
+const struct aws_byte_cursor g_crc32_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32");
+const struct aws_byte_cursor g_sha1_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA1");
+const struct aws_byte_cursor g_sha256_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
 const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");

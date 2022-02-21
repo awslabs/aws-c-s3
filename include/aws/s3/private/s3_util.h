@@ -54,6 +54,54 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_content_md5_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_trailer_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_request_validation_mode;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_enabled;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_create_mpu_checksum_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32c_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha1_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha256_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32c_create_mpu_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32_create_mpu_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha1_create_mpu_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha256_create_mpu_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32c_complete_mpu_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_crc32_complete_mpu_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha1_complete_mpu_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_sha256_complete_mpu_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_s3_client_version;
 
 AWS_S3_API
@@ -72,7 +120,16 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_content_type_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_content_encoding_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_content_encoding_header_value;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_content_length_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_decoded_content_length_header_name;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_etag_header_name;

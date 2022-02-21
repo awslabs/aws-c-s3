@@ -106,6 +106,9 @@ struct aws_s3_connection {
 
     /* Current retry token for the request. If it has never been retried, this will be NULL. */
     struct aws_retry_token *retry_token;
+
+    struct aws_checksum *running_response_sum;
+    struct aws_byte_buf response_header_checksum;
 };
 
 struct aws_s3_client_vtable {
@@ -182,6 +185,10 @@ struct aws_s3_client {
      * For single-part upload, if the content-md5 header is specified, it will remain unchanged. If the header is not
      *     specified, and this is set to AWS_MR_CONTENT_MD5_ENABLED, it will be calculated. */
     const enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
+
+    /**
+     * If a flexible checksum is specified it will replace compute_content_md5 */
+    enum aws_s3_checksum_algorithm checksum_algorithm;
 
     /* Hard limit on max connections set through the client config. */
     const uint32_t max_active_connections_override;
