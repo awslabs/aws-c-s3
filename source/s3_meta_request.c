@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
@@ -815,7 +816,6 @@ static void s_get_part_response_checksum_callback(
     struct aws_s3_connection *connection,
     const struct aws_http_header *headers,
     size_t headers_count) {
-    connection->running_response_sum = NULL;
     for (int i = AWS_SCA_CRC32C; i < AWS_SCA_MD5; i++) {
         struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         struct aws_byte_cursor header_sum;
@@ -862,6 +862,7 @@ static void s_get_response_finish_checksum_callback(struct aws_s3_connection *co
         aws_byte_buf_clean_up(&encoded_response_body_sum);
         aws_checksum_destroy(connection->running_response_sum);
         aws_byte_buf_clean_up(&connection->response_header_checksum);
+        connection->running_response_sum = NULL;
     } else {
         connection->request->did_validate = false;
     }
@@ -905,7 +906,8 @@ static int s_s3_meta_request_incoming_headers(
     bool successful_response =
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
 
-    if (successful_response) {
+    if (successful_response && connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
+        connection->request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
         s_get_part_response_checksum_callback(connection, headers, headers_count);
     }
 
@@ -955,8 +957,9 @@ static int s_s3_meta_request_incoming_body(
 
     /* TODO delete maybe? Guessing theres a reason we didn't previously log? ****************************/
     // AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "RESPONSE BODY:\n" PRInSTR, AWS_BYTE_CURSOR_PRI(*data));
-
-    s_get_part_response_body_checksum_callback(connection->running_response_sum, data);
+    if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        s_get_part_response_body_checksum_callback(connection->running_response_sum, data);
+    }
 
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;
@@ -989,7 +992,9 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
-    s_get_response_finish_checksum_callback(connection, error_code);
+    if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        s_get_response_finish_checksum_callback(connection, error_code);
+    }
     s_s3_meta_request_send_request_finish(connection, stream, error_code);
 }
 
@@ -1051,7 +1056,8 @@ void aws_s3_meta_request_send_request_finish_default(
     enum aws_s3_connection_finish_code finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
     if (error_code == AWS_ERROR_SUCCESS) {
-        if (request->did_validate && !request->checksum_match) {
+        if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT && request->did_validate &&
+            !request->checksum_match) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
             AWS_LOGF_ERROR(

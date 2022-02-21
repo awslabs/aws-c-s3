@@ -168,7 +168,7 @@ static bool s_s3_auto_ranged_get_update(
                     request = aws_s3_request_new(
                         meta_request,
                         AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
-                        1,
+                        0,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
                     request->discovers_object_size = true;

@@ -1252,6 +1252,8 @@ int aws_s3_tester_send_meta_request_with_options(
             uint32_t object_size_mb = options->put_options.object_size_mb;
             size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
 
+            /* this doesn't do what we think it should because a) we sometimes do ranged puts with only 1 part, and b)
+             * g_min_upload_part_size overrides this anyways */
             if (options->put_options.ensure_multipart) {
                 if (object_size_bytes == 0) {
                     object_size_bytes = client->part_size * 2;

@@ -2396,6 +2396,66 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
+/* here we don't validate the metarequest fc since we don't expect a validation response on a multipart upload, but we
+ * do expect that the individual parts will be validated since the upload and download part size matches */
+AWS_TEST_CASE(test_s3_round_trip_mpu_fc, s_test_s3_round_trip_mpu_fc)
+static int s_test_s3_round_trip_mpu_fc(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .checksum_algorithm = AWS_SCA_CRC32,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* should we generate a unique path each time? */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** GET FILE ***/
+
+    struct aws_signing_config_aws get_signing_config;
+
+    aws_s3_init_default_signing_config(&get_signing_config, g_test_s3_region, tester.credentials_provider);
+    tester.default_signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .signing_config = &get_signing_config,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_meta_request_default, s_test_s3_meta_request_default)
 static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

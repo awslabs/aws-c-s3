@@ -838,8 +838,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             client_max_part_size = g_s3_min_upload_part_size;
         }
 
-        if (content_length < client_part_size) {
-            /* add checksum options here */
+        if (content_length <= client_part_size) {
             return aws_s3_meta_request_default_new(
                 client->allocator,
                 client,
