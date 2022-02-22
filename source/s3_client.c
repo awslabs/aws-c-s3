@@ -374,7 +374,7 @@ struct aws_s3_client *aws_s3_client_new(
     *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
         client_config->compute_content_md5;
 
-    client->checksum_algorithm = client_config->checksum_algorithm;
+    *((enum aws_s3_checksum_algorithm *)&client->checksum_algorithm) = client_config->checksum_algorithm;
 
     /* Determine how many vips are ideal by dividing target-throughput by throughput-per-vip. */
     {

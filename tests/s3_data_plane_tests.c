@@ -1305,7 +1305,7 @@ static int s_test_s3_put_object_helper(
     struct aws_allocator *allocator,
     enum aws_s3_client_tls_usage tls_usage,
     uint32_t extra_meta_request_flag,
-    enum aws_s3_checksum_algorithm checksum_algorithm) {
+    const enum aws_s3_checksum_algorithm checksum_algorithm) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     if (checksum_algorithm) {

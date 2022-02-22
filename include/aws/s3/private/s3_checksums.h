@@ -19,7 +19,7 @@ struct aws_s3_checksum {
     struct aws_checksum_vtable *vtable;
     void *impl;
     size_t digest_size;
-    int algorithm;
+    enum aws_s3_checksum_algorithm algorithm;
     bool good;
 };
 

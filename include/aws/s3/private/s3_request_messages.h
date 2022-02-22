@@ -70,7 +70,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    enum aws_s3_checksum_algorithm checksum_algorithm,
+    const enum aws_s3_checksum_algorithm checksum_algorithm,
     struct aws_byte_buf *encoded_checksum_output);
 
 /* Create an HTTP request for an S3 UploadPartCopy request, using the original request as a basis.

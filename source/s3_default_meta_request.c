@@ -45,7 +45,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     uint64_t content_length,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
-    enum aws_s3_checksum_algorithm checksum_algorithm) {
+    const enum aws_s3_checksum_algorithm checksum_algorithm) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
@@ -234,7 +234,7 @@ static int s_s3_meta_request_default_prepare_request(
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         meta_request->allocator, meta_request->initial_request_message, NULL, 0);
 
-    enum aws_s3_checksum_algorithm checksum_algorithm = meta_request->checksum_algorithm;
+    const enum aws_s3_checksum_algorithm checksum_algorithm = meta_request->checksum_algorithm;
     if (!checksum_algorithm && meta_request->should_compute_content_md5) {
         aws_s3_message_util_add_checksum_header(meta_request->allocator, &request->request_body, message, AWS_SCA_MD5);
     }
