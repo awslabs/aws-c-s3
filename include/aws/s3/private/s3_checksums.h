@@ -6,15 +6,15 @@
  */
 #include "aws/s3/s3_client.h"
 
-struct aws_checksum;
+struct aws_s3_checksum;
 
 struct aws_checksum_vtable {
-    void (*destroy)(struct aws_checksum *checksum);
-    int (*update)(struct aws_checksum *checksum, const struct aws_byte_cursor *buf);
-    int (*finalize)(struct aws_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to);
+    void (*destroy)(struct aws_s3_checksum *checksum);
+    int (*update)(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf);
+    int (*finalize)(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to);
 };
 
-struct aws_checksum {
+struct aws_s3_checksum {
     struct aws_allocator *allocator;
     struct aws_checksum_vtable *vtable;
     void *impl;
@@ -75,7 +75,7 @@ const struct aws_byte_cursor *aws_get_complete_mpu_name_from_algorithm(enum aws_
  * create a new aws_checksum corresponding to the aws_s3_checksum_algorithm enum value.
  */
 AWS_S3_API
-struct aws_checksum *aws_checksum_new(struct aws_allocator *allocator, enum aws_s3_checksum_algorithm algorithm);
+struct aws_s3_checksum *aws_checksum_new(struct aws_allocator *allocator, enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * Compute an aws_checksum corresponding to the provided enum, passing a function pointer around instead of using a
@@ -94,18 +94,18 @@ int aws_checksum_compute(
  * Cleans up and deallocates checksum.
  */
 AWS_S3_API
-void aws_checksum_destroy(struct aws_checksum *checksum);
+void aws_checksum_destroy(struct aws_s3_checksum *checksum);
 
 /**
  * Updates the running checksum with to_checksum. this can be called multiple times.
  */
 AWS_S3_API
-int aws_checksum_update(struct aws_checksum *checksum, const struct aws_byte_cursor *to_checksum);
+int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum);
 
 /**
  * Completes the checksum computation and writes the final digest to output.
  * Allocation of output is the caller's responsibility.
  */
 AWS_S3_API
-int aws_checksum_finalize(struct aws_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
+int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
 #endif

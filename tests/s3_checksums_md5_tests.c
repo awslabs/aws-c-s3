@@ -340,7 +340,7 @@ static int s_md5_test_invalid_state_fn(struct aws_allocator *allocator, void *ct
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("123456789012345678901234567890123456789012345"
                                                               "67890123456789012345678901234567890");
 
-    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_MD5);
+    struct aws_s3_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_MD5);
     ASSERT_NOT_NULL(checksum);
 
     uint8_t output[AWS_MD5_LEN] = {0};

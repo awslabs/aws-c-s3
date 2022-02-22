@@ -9,7 +9,7 @@
 
 struct aws_checksum_stream {
     struct aws_input_stream *old_stream;
-    struct aws_checksum *checksum;
+    struct aws_s3_checksum *checksum;
     struct aws_byte_buf checksum_result;
     struct aws_byte_buf *encoded_checksum_result;
     bool did_seek;

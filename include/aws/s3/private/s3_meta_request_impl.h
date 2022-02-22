@@ -186,7 +186,7 @@ struct aws_s3_meta_request {
 
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
-    struct aws_checksum *running_response_sum;
+    struct aws_s3_checksum *running_response_sum;
 
     struct aws_byte_buf response_header_checksum;
 };

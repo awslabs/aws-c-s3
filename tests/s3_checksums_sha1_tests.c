@@ -81,7 +81,7 @@ static int s_sha1_nist_test_case_5_fn(struct aws_allocator *allocator, void *ctx
 
     aws_s3_library_init(allocator);
 
-    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
+    struct aws_s3_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
 
@@ -115,7 +115,7 @@ static int s_sha1_nist_test_case_5_truncated_fn(struct aws_allocator *allocator,
 
     aws_s3_library_init(allocator);
 
-    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
+    struct aws_s3_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
 
@@ -147,7 +147,7 @@ static int s_sha1_nist_test_case_6_fn(struct aws_allocator *allocator, void *ctx
 
     aws_s3_library_init(allocator);
 
-    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
+    struct aws_s3_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
     ASSERT_NOT_NULL(checksum);
     struct aws_byte_cursor input =
         aws_byte_cursor_from_c_str("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno");
@@ -235,7 +235,7 @@ static int s_sha1_test_invalid_state_fn(struct aws_allocator *allocator, void *c
                                                               "klmghijklmnhijklmnoijklmnopjklmnopqklm"
                                                               "nopqrlmnopqrsmnopqrstnopqrstu");
 
-    struct aws_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
+    struct aws_s3_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
     ASSERT_NOT_NULL(checksum);
 
     uint8_t output[AWS_SHA1_LEN] = {0};

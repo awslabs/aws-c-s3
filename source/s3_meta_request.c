@@ -834,7 +834,7 @@ static void s_get_part_response_checksum_callback(
 
 /* warning this might get screwed up with retrys/restarts */
 static void s_get_part_response_body_checksum_callback(
-    struct aws_checksum *running_response_sum,
+    struct aws_s3_checksum *running_response_sum,
     const struct aws_byte_cursor *body) {
     if (running_response_sum) {
         aws_checksum_update(running_response_sum, body);

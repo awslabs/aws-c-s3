@@ -4,7 +4,7 @@
  */
 #include "aws/s3/private/s3_checksums.h"
 
-typedef struct aws_checksum *(
+typedef struct aws_s3_checksum *(
     aws_checksum_new_fn)(struct aws_allocator *allocator, enum aws_s3_checksum_algorithm algorithm);
 
 static inline int s_verify_checksum_test_case(
@@ -23,7 +23,7 @@ static inline int s_verify_checksum_test_case(
         struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, expected->len);
         output_buf.len = 0;
 
-        struct aws_checksum *checksum = new_fn(allocator, algorithm);
+        struct aws_s3_checksum *checksum = new_fn(allocator, algorithm);
         ASSERT_NOT_NULL(checksum);
 
         struct aws_byte_cursor input_cpy = *input;
