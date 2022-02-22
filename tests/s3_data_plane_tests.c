@@ -2992,7 +2992,6 @@ static int s_test_s3_default_invoke_headers_callback_cancels_on_error(struct aws
     return 0;
 }
 
-/******************** BOOKMARK *************************************/
 AWS_TEST_CASE(
     test_s3_get_object_invoke_headers_callback_on_error,
     s_test_s3_get_object_invoke_headers_callback_on_error)

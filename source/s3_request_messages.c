@@ -245,19 +245,14 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     }
 
     if (buffer != NULL) {
-        if (checksum_algorithm) {
-            if (aws_s3_message_util_assign_body(
-                    allocator, buffer, message, checksum_algorithm, encoded_checksum_output) == NULL) {
+
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_algorithm, encoded_checksum_output) ==
+            NULL) {
+            goto error_clean_up;
+        }
+        if (checksum_algorithm == AWS_SCA_NONE && should_compute_content_md5) {
+            if (aws_s3_message_util_add_checksum_header(allocator, buffer, message, AWS_SCA_MD5)) {
                 goto error_clean_up;
-            }
-        } else {
-            if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, NULL) == NULL) {
-                goto error_clean_up;
-            }
-            if (should_compute_content_md5) {
-                if (aws_s3_message_util_add_checksum_header(allocator, buffer, message, AWS_SCA_MD5)) {
-                    goto error_clean_up;
-                }
             }
         }
     } else {
