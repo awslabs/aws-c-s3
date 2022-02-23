@@ -68,7 +68,7 @@ struct aws_s3_request {
      * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
      * be more contextual, like "first part" instead of just "part".) */
 
-    /* should this be refactored to make it clear that this could be one of two enums for puts, and gets? */
+    /* TODO: this should be a union type to make it clear that this could be one of two enums for puts, and gets. */
     int request_tag;
 
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to

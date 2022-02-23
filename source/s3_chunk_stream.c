@@ -196,10 +196,6 @@ struct aws_input_stream *aws_chunk_stream_new(
         goto error;
     }
     struct aws_byte_cursor pre_chunk_cursor = aws_byte_cursor_from_string(s_carriage_return);
-    /*
-     * Should I claculate the length here with a log algirthm?
-     * 2^64 is 20 digits long so if this overflows so do our int_64 lengths.
-     */
     char stream_length_string[32];
     AWS_ZERO_ARRAY(stream_length_string);
     snprintf(stream_length_string, AWS_ARRAY_SIZE(stream_length_string), "%" PRIX64, stream_length);

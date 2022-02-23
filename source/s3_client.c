@@ -1778,7 +1778,6 @@ void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct
     if (request->tracked_by_client) {
         /* BEGIN CRITICAL SECTION */
         aws_s3_client_lock_synced_data(client);
-        /* isn't an atomic fetch redundant in a critical section? */
         aws_atomic_fetch_sub(&client->stats.num_requests_in_flight, 1);
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);

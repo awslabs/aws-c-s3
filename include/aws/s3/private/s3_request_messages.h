@@ -6,7 +6,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 #include "aws/s3/s3.h"
-/* is this appropriate to include here? */
 #include "aws/s3/s3_client.h"
 #include <inttypes.h>
 #include <stdbool.h>
