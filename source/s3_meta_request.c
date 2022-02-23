@@ -97,6 +97,7 @@ static int s_is_get_request(const struct aws_s3_meta_request_options *options) {
         struct aws_byte_cursor method;
         int err = aws_http_message_get_request_method(options->message, &method);
         AWS_ASSERT(err == AWS_OP_SUCCESS);
+        (void)err;
         return aws_byte_cursor_eq(&method, &aws_http_method_get);
     }
     return false;
