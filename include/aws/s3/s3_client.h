@@ -195,7 +195,7 @@ struct aws_s3_client_config {
      * For single-part upload, keep the content-md5 in the initial request unchanged. */
     enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
-    /* If a flexible checksum is specified it will override compute_content_md5 */
+    /* If a flexible checksum is specified it will disable compute_content_md5 */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */

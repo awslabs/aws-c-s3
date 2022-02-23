@@ -816,6 +816,7 @@ struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *te
     return endpoint;
 }
 
+/* Mock request defaults to GET request */
 struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
@@ -826,6 +827,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
 
     struct aws_s3_meta_request_options options = {
         .message = dummy_http_message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
     };
 
     aws_s3_meta_request_init_base(

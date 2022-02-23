@@ -72,21 +72,34 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-static int s_is_get_request(const struct aws_s3_meta_request_options *options, bool *is_request) {
+// static int s_is_get_request(const struct aws_s3_meta_request_options *options, bool *out) {
+//     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+//         *out = true;
+//         return AWS_OP_SUCCESS;
+//     }
+//     if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+//         struct aws_byte_cursor method;
+//         if (aws_http_message_get_request_method(options->message, &method)) {
+//             return AWS_OP_ERR;
+//         }
+//         *out = aws_byte_cursor_eq(&method, &aws_http_method_get);
+//         return AWS_OP_SUCCESS;
+//     }
+//     *out = false;
+//     return AWS_OP_SUCCESS;
+// }
+
+static int s_is_get_request(const struct aws_s3_meta_request_options *options) {
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-        *is_request = true;
-        return AWS_OP_SUCCESS;
+        return true;
     }
     if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         struct aws_byte_cursor method;
-        if (aws_http_message_get_request_method(options->message, &method)) {
-            return AWS_OP_ERR;
-        }
-        *is_request = aws_byte_cursor_eq(&method, &aws_http_method_get);
-        return AWS_OP_SUCCESS;
+        int err = aws_http_message_get_request_method(options->message, &method);
+        AWS_ASSERT(err == AWS_OP_SUCCESS);
+        return aws_byte_cursor_eq(&method, &aws_http_method_get);
     }
-    *is_request = false;
-    return AWS_OP_SUCCESS;
+    return false;
 }
 
 static int s_get_response_headers_brawn_callback(
@@ -241,11 +254,11 @@ int aws_s3_meta_request_init_base(
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
 
-    bool is_get = false;
-    if (s_is_get_request(options, &is_get)) {
-        return AWS_OP_ERR;
-    }
-    if (is_get) {
+    // bool is_get = false;
+    // if (s_is_get_request(options, &is_get)) {
+    //     return AWS_OP_ERR;
+    // }
+    if (s_is_get_request(options)) {
         meta_request->headers_checksum_callback = options->headers_callback;
         meta_request->body_checksum_callback = options->body_callback;
         meta_request->finish_checksum_callback = options->finish_callback;
