@@ -100,9 +100,15 @@ static int s_aws_input_chunk_stream_seek(
     struct aws_input_stream *stream,
     int64_t offset,
     enum aws_stream_seek_basis basis) {
-
-    struct aws_chunk_stream *impl = stream->impl;
-    return aws_input_stream_seek(impl->current_stream, offset, basis);
+    (void)stream;
+    (void)offset;
+    (void)basis;
+    AWS_LOGF_ERROR(
+        AWS_LS_S3_CLIENT,
+        "Cannot seek on chunk stream, as it will cause the checksum output to mismatch the checksum of the stream"
+        "contents");
+    AWS_ASSERT(false);
+    return AWS_OP_ERR;
 }
 
 static int s_aws_input_chunk_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {

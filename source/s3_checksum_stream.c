@@ -19,10 +19,15 @@ static int s_aws_input_checksum_stream_seek(
     struct aws_input_stream *stream,
     int64_t offset,
     enum aws_stream_seek_basis basis) {
-
-    struct aws_checksum_stream *impl = stream->impl;
-    impl->did_seek = true;
-    return aws_input_stream_seek(impl->old_stream, offset, basis);
+    (void)stream;
+    (void)offset;
+    (void)basis;
+    AWS_LOGF_ERROR(
+        AWS_LS_S3_CLIENT,
+        "Cannot seek on checksum stream, as it will cause the checksum output to mismatch the checksum of the stream "
+        "contents");
+    AWS_ASSERT(false);
+    return AWS_OP_ERR;
 }
 
 static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
@@ -47,11 +52,7 @@ static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, str
 
 static int s_aws_input_checksum_stream_get_status(struct aws_input_stream *stream, struct aws_stream_status *status) {
     struct aws_checksum_stream *impl = stream->impl;
-    int err = aws_input_stream_get_status(impl->old_stream, status);
-    if (!err) {
-        status->is_valid &= !impl->did_seek;
-    }
-    return err;
+    return aws_input_stream_get_status(impl->old_stream, status);
 }
 
 static int s_aws_input_checksum_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {

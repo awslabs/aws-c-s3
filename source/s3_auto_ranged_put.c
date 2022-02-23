@@ -382,7 +382,6 @@ static int s_s3_auto_ranged_put_prepare_request(
 
                 /* Build the message to complete our multipart upload, which includes a payload describing all of
                  * our completed parts. */
-                /* TODO ADD checksum list */
                 message = aws_s3_complete_multipart_message_new(
                     meta_request->allocator,
                     meta_request->initial_request_message,

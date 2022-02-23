@@ -410,7 +410,6 @@ static int s_discover_object_range_and_content_length(
     return AWS_OP_SUCCESS;
 }
 
-/* fail request level checksum validation here? */
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
