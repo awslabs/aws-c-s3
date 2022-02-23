@@ -145,7 +145,6 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
-    AWS_SCA_MD5,
 };
 
 /* Options for a new client. */

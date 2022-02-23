@@ -57,7 +57,7 @@ size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorit
  * Get the header name corresponding to the aws_s3_checksum_algorithm enum value.
  */
 AWS_S3_API
-struct aws_byte_cursor aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+const struct aws_byte_cursor *aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * Get the multipart upload header name corresponding to the aws_s3_checksum_algorithm enum value.

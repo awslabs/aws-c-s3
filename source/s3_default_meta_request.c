@@ -236,7 +236,7 @@ static int s_s3_meta_request_default_prepare_request(
 
     const enum aws_s3_checksum_algorithm checksum_algorithm = meta_request->checksum_algorithm;
     if (!checksum_algorithm && meta_request->should_compute_content_md5) {
-        aws_s3_message_util_add_checksum_header(meta_request->allocator, &request->request_body, message, AWS_SCA_MD5);
+        aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
     }
 
     aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, checksum_algorithm, NULL);

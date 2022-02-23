@@ -157,11 +157,10 @@ static bool s_s3_auto_ranged_get_update(
              * request to figure that out. */
             if (!auto_ranged_get->synced_data.object_range_known) {
 
-                /* If there exists a range header, we currently always do a head request first. While the range header
-                 * value could be parsed client-side, doing so presents a number of complications. For example, the
-                 * given range could be an unsatisfiable range, and might not even specify a complete range. To keep
-                 * things simple, we are currently relying on the service to handle turning the Range header into a
-                 * Content-Range response header.*/
+                /* we always send a HEAD request first in order to get the checksum header should it exist. If there is
+                 * a range header value the given range could be an unsatisfiable range, and might not even specify a
+                 * complete range. We rely on the service to turn the Range header into a Content-Range response
+                 * header.*/
 
                 /* If the head object request hasn't been sent yet, then send it now. */
                 if (!auto_ranged_get->synced_data.head_object_sent) {

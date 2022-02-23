@@ -121,11 +121,10 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
 
 /* Add content-md5 header to the http message passed in. The MD5 will be computed from the input_buf */
 AWS_S3_API
-int aws_s3_message_util_add_checksum_header(
+int aws_s3_message_util_add_content_md5_header(
     struct aws_allocator *allocator,
     struct aws_byte_buf *input_buf,
-    struct aws_http_message *message,
-    enum aws_s3_checksum_algorithm algorithm);
+    struct aws_http_message *message);
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[];

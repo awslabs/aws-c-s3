@@ -17,31 +17,23 @@ size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorit
             return AWS_SHA1_LEN;
         case AWS_SCA_SHA256:
             return AWS_SHA256_LEN;
-        case AWS_SCA_MD5:
-            return AWS_MD5_LEN;
         default:
-            AWS_ASSERT(false);
             return 0;
     }
 }
 
-struct aws_byte_cursor aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
+const struct aws_byte_cursor *aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
     switch (algorithm) {
         case AWS_SCA_CRC32C:
-            return g_crc32c_header_name;
+            return &g_crc32c_header_name;
         case AWS_SCA_CRC32:
-            return g_crc32_header_name;
+            return &g_crc32_header_name;
         case AWS_SCA_SHA1:
-            return g_sha1_header_name;
+            return &g_sha1_header_name;
         case AWS_SCA_SHA256:
-            return g_sha256_header_name;
-        case AWS_SCA_MD5:
-            return g_content_md5_header_name;
+            return &g_sha256_header_name;
         default:
-            AWS_ASSERT(false);
-            struct aws_byte_cursor invalid_algorithm_enum_val;
-            AWS_ZERO_STRUCT(invalid_algorithm_enum_val);
-            return invalid_algorithm_enum_val;
+            return NULL;
     }
 }
 const struct aws_byte_cursor *aws_get_create_mpu_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
@@ -216,9 +208,6 @@ struct aws_s3_checksum *aws_checksum_new(struct aws_allocator *allocator, enum a
         case AWS_SCA_SHA256:
             checksum = aws_hash_new(allocator, aws_sha256_new);
             break;
-        case AWS_SCA_MD5:
-            checksum = aws_hash_new(allocator, aws_md5_new);
-            break;
         default:
             return NULL;
     }
@@ -271,8 +260,6 @@ int aws_checksum_compute(
             return aws_sha1_compute(allocator, input, output, truncate_to);
         case AWS_SCA_SHA256:
             return aws_sha256_compute(allocator, input, output, truncate_to);
-        case AWS_SCA_MD5:
-            return aws_md5_compute(allocator, input, output, truncate_to);
         case AWS_SCA_CRC32:
             return aws_checksum_compute_fn(allocator, input, output, aws_crc32_checksum_new, truncate_to);
         case AWS_SCA_CRC32C:

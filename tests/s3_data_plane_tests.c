@@ -1403,9 +1403,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_default_fc, s_test_s3_put_object_tls_defaul
 static int s_test_s3_put_object_tls_default_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    // for (int alg = AWS_SCA_CRC32C; alg < AWS_SCA_MD5; alg++) {
     ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, AWS_SCA_CRC32));
-    // }
 
     return 0;
 }
@@ -1603,7 +1601,6 @@ AWS_TEST_CASE(test_s3_put_object_empty_object_fc, s_test_s3_put_object_empty_obj
 static int s_test_s3_put_object_empty_object_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    // for (int alg = AWS_SCA_CRC32C; alg < AWS_SCA_MD5; alg++) {
     int alg = AWS_SCA_CRC32;
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
@@ -1627,7 +1624,6 @@ static int s_test_s3_put_object_empty_object_fc(struct aws_allocator *allocator,
     client = NULL;
 
     aws_s3_tester_clean_up(&tester);
-    // }
     return 0;
 }
 

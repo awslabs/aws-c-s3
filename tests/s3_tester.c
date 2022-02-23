@@ -1623,7 +1623,7 @@ int aws_s3_tester_send_put_object_meta_request(
         flags);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5) {
-        ASSERT_SUCCESS(aws_s3_message_util_add_checksum_header(allocator, &test_buffer, message, AWS_SCA_MD5));
+        ASSERT_SUCCESS(aws_s3_message_util_add_content_md5_header(allocator, &test_buffer, message));
     } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5) {
         struct aws_http_header content_md5_header = {
             .name = g_content_md5_header_name,
