@@ -170,7 +170,9 @@ void aws_s3_meta_request_persistable_state_destroy(struct aws_s3_meta_request_pe
         struct aws_string *etag = NULL;
 
         aws_array_list_get_at(&state->etag_list, &etag, etag_index);
-        aws_string_destroy(etag);
+        if (etag != NULL) {
+            aws_string_destroy(etag);
+        }
     }
 
     aws_array_list_clean_up(&state->etag_list);

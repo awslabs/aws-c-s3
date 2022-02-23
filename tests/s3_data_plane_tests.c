@@ -3782,8 +3782,8 @@ struct aws_http_message *put_object_request_new(
     aws_input_stream_get_length(body_stream, &content_length);
     snprintf(content_length_c_str, sizeof(content_length_c_str), "%" PRIu64, content_length);
 
-    struct aws_http_header content_length_header = {
-        .name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_c_str)};
+    struct aws_http_header content_length_header = {.name = g_content_length_header_name,
+                                                    .value = aws_byte_cursor_from_c_str(content_length_c_str)};
 
     if (aws_http_message_add_header(message, content_length_header)) {
         goto error_clean_up_message;
@@ -3865,6 +3865,40 @@ static bool s_put_pause_resume_test_completion_predicate(void *arg) {
     return test_data->execution_completed;
 }
 
+static void s_pause_meta_request_progress(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+
+    AWS_ASSERT(meta_request);
+    AWS_ASSERT(progress);
+    AWS_ASSERT(user_data);
+
+    struct put_object_pause_resume_test_data *test_data = user_data;
+
+    aws_atomic_fetch_add(&test_data->total_bytes_uploaded, progress->bytes_transferred);
+
+    size_t total_bytes_uploaded = aws_atomic_load_int(&test_data->total_bytes_uploaded);
+    size_t offset_to_pause = aws_atomic_load_int(&test_data->request_pause_offset);
+
+    if (total_bytes_uploaded >= offset_to_pause) {
+        /* offset of the upload at which we should pause was reached. let's pause the upload */
+
+        size_t expected = false;
+        bool request_pause = aws_atomic_compare_exchange_int(&test_data->pause_requested, &expected, true);
+        if (!request_pause) {
+            /* if the meta request has already been paused previously, do nothing. */
+            return;
+        }
+
+        struct aws_s3_meta_request *meta_request = aws_atomic_load_ptr(&test_data->pause_meta_request_ptr);
+        struct aws_s3_meta_request_persistable_state *persistable_state = NULL;
+        int pause_result = aws_s3_meta_request_pause(meta_request, &persistable_state);
+        aws_atomic_store_int(&test_data->pause_result, pause_result);
+        aws_atomic_store_ptr(&test_data->persistable_state_ptr, persistable_state);
+    }
+}
+
 static int s_test_s3_put_pause_helper(
     struct aws_allocator *allocator,
     void *ctx,
@@ -3912,6 +3946,7 @@ static int s_test_s3_put_pause_helper(
         .signing_config = client_config.signing_config,
         .finish_callback = s_put_pause_resume_meta_request_finish,
         .headers_callback = NULL,
+        .progress_callback = s_pause_meta_request_progress,
         .message = message,
         .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -3943,42 +3978,6 @@ static int s_test_s3_put_pause_helper(
     return 0;
 }
 
-static void s_s3_put_pause_resume_stream_on_read(
-    struct aws_input_stream *stream,
-    struct aws_byte_buf *dest,
-    void *user_data) {
-    AWS_ASSERT(stream);
-    AWS_ASSERT(dest);
-    AWS_ASSERT(user_data);
-
-    struct put_object_pause_resume_test_data *test_data = user_data;
-
-    aws_atomic_fetch_add(&test_data->total_bytes_uploaded, dest->capacity);
-
-    size_t total_bytes_uploaded = aws_atomic_load_int(&test_data->total_bytes_uploaded);
-    size_t offset_to_pause = aws_atomic_load_int(&test_data->request_pause_offset);
-
-    if (total_bytes_uploaded >= offset_to_pause) {
-        /* offset of the upload at which we should pause was reached. let's pause the upload */
-
-        size_t expected = false;
-        bool request_pause = aws_atomic_compare_exchange_int(&test_data->pause_requested, &expected, true);
-        if (!request_pause) {
-            /* if the meta request has already been paused previously, do nothing. */
-            return;
-        }
-
-        uint64_t one_sec_in_nanos = aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
-        aws_thread_current_sleep(3 * one_sec_in_nanos);
-
-        struct aws_s3_meta_request *meta_request = aws_atomic_load_ptr(&test_data->pause_meta_request_ptr);
-        struct aws_s3_meta_request_persistable_state *persistable_state = NULL;
-        int pause_result = aws_s3_meta_request_pause(meta_request, &persistable_state);
-        aws_atomic_store_int(&test_data->pause_result, pause_result);
-        aws_atomic_store_ptr(&test_data->persistable_state_ptr, persistable_state);
-    }
-}
-
 AWS_TEST_CASE(test_s3_put_pause_resume, s_test_s3_put_pause_resume)
 static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx) {
 
@@ -4005,7 +4004,8 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
 
     /* stream used to initiate upload */
     struct aws_input_stream *initial_upload_stream = aws_s3_test_input_stream_new(allocator, objectLength);
-    aws_s3_test_input_stream_set_read_callback(initial_upload_stream, s_s3_put_pause_resume_stream_on_read, &test_data);
+    // aws_s3_test_input_stream_set_read_callback(initial_upload_stream, s_s3_put_pause_resume_stream_on_read,
+    // &test_data);
 
     /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
     int result = s_test_s3_put_pause_helper(
@@ -4030,7 +4030,11 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     for (size_t i = 0; i < aws_array_list_length(&persistable_state->etag_list); i++) {
         struct aws_string *etag = NULL;
         aws_array_list_get_at(&persistable_state->etag_list, &etag, i);
-        printf("%.*s\n", (int)etag->len, etag->bytes);
+        if (etag != NULL) {
+            printf("%.*s\n", (int)etag->len, etag->bytes);
+        } else {
+            printf("NULL\n");
+        }
     }
 
     aws_input_stream_seek(resume_upload_stream, persistable_state->total_bytes_transferred, AWS_SSB_BEGIN);

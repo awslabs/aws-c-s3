@@ -561,6 +561,18 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
 
                 aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
+
+                if (meta_request->progress_callback != NULL) {
+                    struct aws_s3_meta_request_progress progress = {
+                        .bytes_transferred = meta_request->part_size,
+                        .content_length = auto_ranged_put->content_length};
+
+                    /* don't hold the lock while invoking the callback */
+                    aws_s3_meta_request_unlock_synced_data(meta_request);
+                    meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
+                    aws_s3_meta_request_lock_synced_data(meta_request);
+                }
+
             } else {
                 ++auto_ranged_put->synced_data.num_parts_failed;
                 aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
@@ -671,7 +683,8 @@ static int s_s3_auto_ranged_put_pause(
     for (size_t i = 0; i < aws_array_list_length(&auto_ranged_put->synced_data.etag_list); i++) {
         struct aws_string *etag = NULL;
         aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, i);
-        struct aws_string *etag_copy = aws_string_new_from_string(meta_request->allocator, etag);
+        struct aws_string *etag_copy =
+            (etag == NULL) ? NULL : aws_string_new_from_string(meta_request->allocator, etag);
         aws_array_list_push_back(&state->etag_list, &etag_copy);
     }
 
