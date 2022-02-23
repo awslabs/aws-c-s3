@@ -3687,7 +3687,8 @@ struct aws_http_message *put_object_request_new(
     int64_t content_length = 0;
     aws_input_stream_get_length(body_stream, &content_length);
     snprintf(content_length_c_str, sizeof(content_length_c_str), "%" PRIu64, content_length);
-    struct aws_http_header content_length_header = {.name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_c_str) };
+    struct aws_http_header content_length_header = {
+        .name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_c_str)};
     if (aws_http_message_add_header(message, content_length_header)) {
         goto error_clean_up_message;
     }
@@ -3827,7 +3828,8 @@ static int s_test_s3_put_pause_helper(
 
     /* wait completion of the meta request */
     aws_mutex_lock(&test_data->mutex);
-    aws_condition_variable_wait_pred(&test_data->c_var, &test_data->mutex, s_put_pause_resume_test_completion_predicate, test_data);
+    aws_condition_variable_wait_pred(
+        &test_data->c_var, &test_data->mutex, s_put_pause_resume_test_completion_predicate, test_data);
     aws_mutex_unlock(&test_data->mutex);
 
     /* assert error_code and response_status_code */
@@ -3845,7 +3847,10 @@ static int s_test_s3_put_pause_helper(
     return 0;
 }
 
-static void s_s3_put_pause_resume_stream_on_read(struct aws_input_stream *stream, struct aws_byte_buf *dest, void *user_data) {
+static void s_s3_put_pause_resume_stream_on_read(
+    struct aws_input_stream *stream,
+    struct aws_byte_buf *dest,
+    void *user_data) {
     AWS_ASSERT(stream);
     AWS_ASSERT(dest);
     AWS_ASSERT(user_data);
@@ -3907,13 +3912,14 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     aws_s3_test_input_stream_set_read_callback(initial_upload_stream, s_s3_put_pause_resume_stream_on_read, &test_data);
 
     /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
-    int result = s_test_s3_put_pause_helper(allocator,
-                                            ctx,
-                                            &test_data,
-                                            destination_key,
-                                            initial_upload_stream,
-                                            AWS_ERROR_SUCCESS,
-                                            AWS_HTTP_STATUS_CODE_200_OK);
+    int result = s_test_s3_put_pause_helper(
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        initial_upload_stream,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK);
 
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, result);
 
@@ -3921,9 +3927,18 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
 
     /* new stream used to resume upload. it begins at the offset specified in the persistable state */
     struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new(allocator, objectLength);
-    struct aws_s3_meta_request_persistable_state *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
-    aws_input_stream_seek(resume_upload_stream, persistable_state->totalBytesTransferred, AWS_SSB_BEGIN);
-    
+    struct aws_s3_meta_request_persistable_state *persistable_state =
+        aws_atomic_load_ptr(&test_data.persistable_state_ptr);
+
+    /* todo: remove debugging code below */
+    for (size_t i = 0; i < aws_array_list_length(&persistable_state->etag_list); i++) {
+        struct aws_string *etag = NULL;
+        aws_array_list_get_at(&persistable_state->etag_list, &etag, i);
+        printf("%.*s\n", (int)etag->len, etag->bytes);
+    }
+
+    aws_input_stream_seek(resume_upload_stream, persistable_state->total_bytes_transferred, AWS_SSB_BEGIN);
+
     aws_s3_meta_request_persistable_state_destroy(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
 

@@ -117,7 +117,10 @@ struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allo
     return input_stream;
 }
 
-void aws_s3_test_input_stream_set_read_callback(struct aws_input_stream *stream, aws_s3_test_input_stream_on_read_fn *on_read_fn, void *user_data) {
+void aws_s3_test_input_stream_set_read_callback(
+    struct aws_input_stream *stream,
+    aws_s3_test_input_stream_on_read_fn *on_read_fn,
+    void *user_data) {
     AWS_ASSERT(stream);
 
     struct aws_s3_test_input_stream_impl *test_input_stream = stream->impl;

@@ -278,10 +278,25 @@ struct aws_s3_meta_request_persistable_state {
     struct aws_string *multipart_upload_id;
 
     /**
+     * Total number of parts.
+     */
+    uint32_t total_num_parts;
+
+    /**
+     * Number of upload parts completed.
+     */
+    uint32_t num_parts_completed;
+
+    /**
+     * Etags of the uploaded parts.
+     */
+    struct aws_array_list etag_list;
+
+    /**
      * Total bytes completed at the moment the operation was paused.
      * The resume operation should begin streaming at this offset.
      */
-    uint64_t totalBytesTransferred;
+    uint64_t total_bytes_transferred;
 };
 
 AWS_EXTERN_C_BEGIN
@@ -306,7 +321,9 @@ AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
-int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_persistable_state **resume_token);
+int aws_s3_meta_request_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_persistable_state **resume_token);
 
 AWS_S3_API
 void aws_s3_meta_request_persistable_state_destroy(struct aws_s3_meta_request_persistable_state *state);

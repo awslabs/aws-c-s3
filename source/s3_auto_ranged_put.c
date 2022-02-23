@@ -49,8 +49,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .finished_request = s_s3_auto_ranged_put_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
-    .pause = s_s3_auto_ranged_put_pause
-};
+    .pause = s_s3_auto_ranged_put_pause};
 
 /* Allocate a new auto-ranged put meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
@@ -647,8 +646,8 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_persistable_state **persistable_state) {
 
-    (void) meta_request;
-    (void) persistable_state;
+    (void)meta_request;
+    (void)persistable_state;
 
     printf("*** pausing! \n");
 
@@ -659,13 +658,27 @@ static int s_s3_auto_ranged_put_pause(
     aws_s3_meta_request_lock_synced_data(meta_request);
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-
-    state->totalBytesTransferred = auto_ranged_put->synced_data.num_parts_successful * meta_request->part_size;
+    state->partition_size = meta_request->part_size;
     state->multipart_upload_id = aws_string_new_from_string(meta_request->allocator, auto_ranged_put->upload_id);
+    state->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
+    state->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
+
+    /* copy etag list to persistable state */
+    AWS_FATAL_ASSERT(
+        aws_array_list_init_dynamic(
+            &state->etag_list, meta_request->allocator, s_etags_initial_capacity, sizeof(struct aws_string *)) == 0);
+
+    for (size_t i = 0; i < aws_array_list_length(&auto_ranged_put->synced_data.etag_list); i++) {
+        struct aws_string *etag = NULL;
+        aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, i);
+        struct aws_string *etag_copy = aws_string_new_from_string(meta_request->allocator, etag);
+        aws_array_list_push_back(&state->etag_list, &etag_copy);
+    }
+
+    state->total_bytes_transferred = auto_ranged_put->synced_data.num_parts_successful * meta_request->part_size;
 
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);
-
 
     *persistable_state = state;
 
