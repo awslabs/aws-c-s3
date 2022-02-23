@@ -374,7 +374,7 @@ error_clean_up:
     return NULL;
 }
 
-/* Creates a HEAD GetObject request to get the size of the source object. */
+/* Creates a HEAD GetObject sub-request to get the size of the source object of a Copy meta request. */
 struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
@@ -402,24 +402,28 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         goto error_cleanup;
     }
 
-    struct aws_byte_cursor source_bucket;
-    AWS_ZERO_STRUCT(source_bucket);
-    struct aws_byte_cursor source_key;
-    AWS_ZERO_STRUCT(source_key);
+    /* extracts source bucket and key */
+    struct aws_byte_cursor source_bucket = aws_byte_cursor_from_buf(&decode_buffer);
 
-    source_bucket.ptr = decode_buffer.buffer;
-
-    /* source format is {bucket}/{key}. split them */
-    for (size_t i = 0; i < decode_buffer.len; i++) {
-        if (decode_buffer.buffer[i] == '/') {
-            source_bucket.len = i;
-            source_key.ptr = decode_buffer.buffer + i + 1; /* skip the / */
-            source_key.len = decode_buffer.len - i - 1;
-            break;
-        }
+    /* x-amz-copy-source might have an optional leading slash. if so let's skip it */
+    if (decode_buffer.len > 1 && decode_buffer.buffer[0] == '/') {
+        /* skip the leading slash */
+        aws_byte_cursor_advance(&source_bucket, 1);
     }
 
-    if (source_bucket.len == 0 || source_key.len <= 0) {
+    /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them. */
+    struct aws_byte_cursor source_key = source_bucket;
+
+    while (source_key.len > 0) {
+        if (*source_key.ptr == '/') {
+            source_bucket.len = source_key.ptr - source_bucket.ptr;
+            aws_byte_cursor_advance(&source_key, 1); /* skip the / between bucket and key */
+            break;
+        }
+        aws_byte_cursor_advance(&source_key, 1);
+    }
+
+    if (source_bucket.len == 0 || source_key.len == 0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
             "The CopyRequest x-amz-copy-source header must contain the bucket and object key separated by a slash");

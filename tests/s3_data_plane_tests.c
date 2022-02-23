@@ -3438,8 +3438,7 @@ static const struct aws_byte_cursor g_x_amz_copy_source_name =
 
 struct aws_http_message *copy_object_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor source_bucket,
-    struct aws_byte_cursor source_key,
+    struct aws_byte_cursor x_amz_source,
     struct aws_byte_cursor endpoint,
     struct aws_byte_cursor destination_key) {
 
@@ -3464,20 +3463,9 @@ struct aws_http_message *copy_object_request_new(
         goto error_clean_up_message;
     }
 
-    char copy_source_value[1024];
-    snprintf(
-        copy_source_value,
-        sizeof(copy_source_value),
-        "%.*s/%.*s",
-        (int)source_bucket.len,
-        source_bucket.ptr,
-        (int)source_key.len,
-        source_key.ptr);
-
-    struct aws_byte_cursor copy_source_cursor = aws_byte_cursor_from_c_str(copy_source_value);
     struct aws_byte_buf copy_source_value_encoded;
     aws_byte_buf_init(&copy_source_value_encoded, allocator, 1024);
-    aws_byte_buf_append_encoding_uri_param(&copy_source_value_encoded, &copy_source_cursor);
+    aws_byte_buf_append_encoding_uri_param(&copy_source_value_encoded, &x_amz_source);
 
     struct aws_http_header copy_source_header = {
         .name = g_x_amz_copy_source_name,
@@ -3510,6 +3498,7 @@ struct copy_object_test_data {
     struct aws_mutex mutex;
     struct aws_condition_variable c_var;
     bool execution_completed;
+    bool headers_callback_was_invoked;
     int meta_request_error_code;
     int response_status_code;
 };
@@ -3540,20 +3529,36 @@ static void s_copy_object_meta_request_finish(
     aws_condition_variable_notify_one(&test_data->c_var);
 }
 
+static int s_copy_object_meta_request_headers_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+
+    (void)meta_request;
+    (void)headers;
+    (void)response_status;
+
+    struct copy_object_test_data *test_data = user_data;
+
+    aws_mutex_lock(&test_data->mutex);
+    test_data->headers_callback_was_invoked = true;
+    aws_mutex_unlock(&test_data->mutex);
+
+    return AWS_OP_SUCCESS;
+}
+
 static bool s_copy_test_completion_predicate(void *arg) {
     struct copy_object_test_data *test_data = arg;
     return test_data->execution_completed;
 }
 
-static int s_test_s3_copy_object_helper(
+static int s_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_allocator *allocator,
-    void *ctx,
-    struct aws_byte_cursor source_key,
+    struct aws_byte_cursor x_amz_copy_source,
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status) {
-
-    (void)ctx;
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -3567,7 +3572,6 @@ static int s_test_s3_copy_object_helper(
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    struct aws_byte_cursor source_bucket = g_test_bucket_name;
     struct aws_byte_cursor destination_bucket = g_test_bucket_name;
 
     char endpoint[1024];
@@ -3580,8 +3584,8 @@ static int s_test_s3_copy_object_helper(
         g_test_s3_region.ptr);
 
     /* creates a CopyObject request */
-    struct aws_http_message *message = copy_object_request_new(
-        allocator, source_bucket, source_key, aws_byte_cursor_from_c_str(endpoint), destination_key);
+    struct aws_http_message *message =
+        copy_object_request_new(allocator, x_amz_copy_source, aws_byte_cursor_from_c_str(endpoint), destination_key);
 
     struct copy_object_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
@@ -3594,7 +3598,7 @@ static int s_test_s3_copy_object_helper(
         .body_callback = NULL,
         .signing_config = client_config.signing_config,
         .finish_callback = s_copy_object_meta_request_finish,
-        .headers_callback = NULL,
+        .headers_callback = s_copy_object_meta_request_headers_callback,
         .message = message,
         .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
@@ -3612,6 +3616,9 @@ static int s_test_s3_copy_object_helper(
     ASSERT_INT_EQUALS(expected_error_code, test_data.meta_request_error_code);
     ASSERT_INT_EQUALS(expected_response_status, test_data.response_status_code);
 
+    /* assert headers callback was invoked */
+    ASSERT_TRUE(test_data.headers_callback_was_invoked);
+
     aws_s3_meta_request_release(meta_request);
     aws_mutex_clean_up(&test_data.mutex);
     aws_http_message_destroy(message);
@@ -3623,36 +3630,123 @@ static int s_test_s3_copy_object_helper(
     return 0;
 }
 
+static int s_test_s3_copy_object_helper(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor source_key,
+    struct aws_byte_cursor destination_key,
+    int expected_error_code,
+    int expected_response_status) {
+
+    struct aws_byte_cursor source_bucket = g_test_bucket_name;
+
+    char copy_source_value[1024];
+    snprintf(
+        copy_source_value,
+        sizeof(copy_source_value),
+        "%.*s/%.*s",
+        (int)source_bucket.len,
+        source_bucket.ptr,
+        (int)source_key.len,
+        source_key.ptr);
+
+    struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
+
+    return s_test_s3_copy_object_from_x_amz_copy_source(
+        allocator, x_amz_copy_source, destination_key, expected_error_code, expected_response_status);
+}
+
 AWS_TEST_CASE(test_s3_copy_small_object, s_test_s3_copy_small_object)
 static int s_test_s3_copy_small_object(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing_object_1MB.txt");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/get_object_test_1MB.txt");
     return s_test_s3_copy_object_helper(
-        allocator, ctx, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
 }
 
 AWS_TEST_CASE(test_s3_multipart_copy_large_object, s_test_s3_multipart_copy_large_object)
 static int s_test_s3_multipart_copy_large_object(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("put_object_test_5GB_1.txt");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/put_object_test_5GB_1.txt");
     return s_test_s3_copy_object_helper(
-        allocator, ctx, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
 }
 
 AWS_TEST_CASE(test_s3_copy_object_invalid_source_key, s_test_s3_copy_object_invalid_source_key)
 static int s_test_s3_copy_object_invalid_source_key(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("__INVALID__");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/__INVALID__");
     return s_test_s3_copy_object_helper(
         allocator,
-        ctx,
         source_key,
         destination_key,
         AWS_ERROR_S3_INVALID_RESPONSE_STATUS,
         AWS_HTTP_STATUS_CODE_404_NOT_FOUND);
+}
+
+/**
+ * Test a bypass Copy Object meta request using a slash prefix in the x_amz_copy_source header.
+ * S3 supports both bucket/key and /bucket/key
+ * This test validates the fix for the bug described in https://sim.amazon.com/issues/AWSCRT-730
+ */
+AWS_TEST_CASE(test_s3_copy_source_prefixed_by_slash, s_test_s3_copy_source_prefixed_by_slash)
+static int s_test_s3_copy_source_prefixed_by_slash(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing_object_1MB.txt");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/get_object_test_1MB.txt");
+
+    struct aws_byte_cursor source_bucket = g_test_bucket_name;
+
+    char copy_source_value[1024];
+    snprintf(
+        copy_source_value,
+        sizeof(copy_source_value),
+        "/%.*s/%.*s",
+        (int)source_bucket.len,
+        source_bucket.ptr,
+        (int)source_key.len,
+        source_key.ptr);
+
+    struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
+
+    return s_test_s3_copy_object_from_x_amz_copy_source(
+        allocator, x_amz_copy_source, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+}
+
+/**
+ * Test multipart Copy Object meta request using a slash prefix in the x_amz_copy_source header.
+ * S3 supports both bucket/key and /bucket/key
+ * This test validates the fix for the bug described in https://sim.amazon.com/issues/AWSCRT-730
+ */
+AWS_TEST_CASE(test_s3_copy_source_prefixed_by_slash_multipart, s_test_s3_copy_source_prefixed_by_slash_multipart)
+static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("put_object_test_5GB_1.txt");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/put_object_test_5GB_1.txt");
+
+    struct aws_byte_cursor source_bucket = g_test_bucket_name;
+
+    char copy_source_value[1024];
+    snprintf(
+        copy_source_value,
+        sizeof(copy_source_value),
+        "/%.*s/%.*s",
+        (int)source_bucket.len,
+        source_bucket.ptr,
+        (int)source_key.len,
+        source_key.ptr);
+
+    struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
+
+    return s_test_s3_copy_object_from_x_amz_copy_source(
+        allocator, x_amz_copy_source, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
 }
 
 struct aws_http_message *put_object_request_new(
@@ -3687,10 +3781,10 @@ struct aws_http_message *put_object_request_new(
     int64_t content_length = 0;
     aws_input_stream_get_length(body_stream, &content_length);
     snprintf(content_length_c_str, sizeof(content_length_c_str), "%" PRIu64, content_length);
+
     struct aws_http_header content_length_header = {
-        .name = g_content_length_header_name,
-        .value = aws_byte_cursor_from_c_str(content_length_c_str)
-    };
+        .name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_c_str)};
+
     if (aws_http_message_add_header(message, content_length_header)) {
         goto error_clean_up_message;
     }

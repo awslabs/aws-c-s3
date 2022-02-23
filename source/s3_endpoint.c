@@ -50,7 +50,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_string *host_name,
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
-    uint32_t max_connections);
+    uint32_t max_connections,
+    uint16_t port);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
@@ -96,7 +97,8 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->host_name,
         options->client_bootstrap,
         options->tls_connection_options,
-        options->max_connections);
+        options->max_connections,
+        options->port);
 
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
@@ -122,7 +124,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_string *host_name,
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
-    uint32_t max_connections) {
+    uint32_t max_connections,
+    uint16_t port) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
     AWS_PRECONDITION(host_name);
@@ -166,9 +169,9 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         aws_tls_connection_options_set_server_name(manager_tls_options, endpoint->allocator, &host_name_cursor);
 
         manager_options.tls_connection_options = manager_tls_options;
-        manager_options.port = s_https_port;
+        manager_options.port = port == 0 ? s_https_port : port;
     } else {
-        manager_options.port = s_http_port;
+        manager_options.port = port == 0 ? s_http_port : port;
     }
 
     struct aws_http_connection_manager *http_connection_manager =
