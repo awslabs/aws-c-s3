@@ -3688,7 +3688,9 @@ struct aws_http_message *put_object_request_new(
     aws_input_stream_get_length(body_stream, &content_length);
     snprintf(content_length_c_str, sizeof(content_length_c_str), "%" PRIu64, content_length);
     struct aws_http_header content_length_header = {
-        .name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_c_str)};
+        .name = g_content_length_header_name,
+        .value = aws_byte_cursor_from_c_str(content_length_c_str)
+    };
     if (aws_http_message_add_header(message, content_length_header)) {
         goto error_clean_up_message;
     }
