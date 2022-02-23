@@ -639,7 +639,7 @@ static int s_is_get_request(const struct aws_http_message *message) {
     struct aws_byte_cursor method;
     int err = aws_http_message_get_request_method(message, &method);
     AWS_ASSERT(err == AWS_OP_SUCCESS)
-
+    (void)err;
     return aws_byte_cursor_eq(&method, &aws_http_method_get);
 }
 
