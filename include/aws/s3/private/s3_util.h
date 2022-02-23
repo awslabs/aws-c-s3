@@ -123,7 +123,7 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_content_encoding_header_name;
 
 AWS_S3_API
-extern const struct aws_byte_cursor g_content_encoding_header_value;
+extern const struct aws_byte_cursor g_content_encoding_header_aws_chunked;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_content_length_header_name;

@@ -362,8 +362,7 @@ static int s_discover_object_range_and_content_length(
 
     if (error_code != AWS_ERROR_SUCCESS) {
         /* If the head request failed, there's nothing we can do, so resurface the error code. */
-        aws_raise_error(error_code);
-        return AWS_OP_ERR;
+        return aws_raise_error(error_code);
     }
 
     /* There should be a Content-Length header that indicates the total size of the range.*/
@@ -382,7 +381,7 @@ static int s_discover_object_range_and_content_length(
      * header. This means that there should also be a Content-Range header that specifies the object range and
      * total object size.*/
     if (total_content_length == 0) {
-        AWS_LOGF_DEBUG(
+        AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
             "id=%p Detected content_len 0 with request %p.",
             (void *)meta_request,

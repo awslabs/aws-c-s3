@@ -26,7 +26,8 @@ const struct aws_byte_cursor g_etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_
 const struct aws_byte_cursor g_content_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Range");
 const struct aws_byte_cursor g_content_type_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type");
 const struct aws_byte_cursor g_content_encoding_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding");
-const struct aws_byte_cursor g_content_encoding_header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-chunked");
+const struct aws_byte_cursor g_content_encoding_header_aws_chunked =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-chunked");
 const struct aws_byte_cursor g_content_length_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length");
 const struct aws_byte_cursor g_decoded_content_length_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-decoded-content-length");

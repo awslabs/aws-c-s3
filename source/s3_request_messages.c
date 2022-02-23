@@ -674,7 +674,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
 
     if (algorithm) {
         /* set Content-Encoding header */
-        if (!is_get && aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_value)) {
+        if (!is_get &&
+            aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
             goto error_clean_up;
         }
         /* set x-amz-trailer header */
