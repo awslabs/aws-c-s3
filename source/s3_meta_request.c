@@ -152,6 +152,20 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
+int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_persistable_state **resume_token) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable);
+    AWS_PRECONDITION(meta_request->vtable->pause);
+
+    return meta_request->vtable->pause(meta_request, resume_token);
+}
+
+void aws_s3_meta_request_persistable_state_destroy(struct aws_s3_meta_request_persistable_state *state) {
+    AWS_PRECONDITION(state);
+    aws_string_destroy(state->multipart_upload_id);
+    aws_mem_release(state->multipart_upload_id->allocator, state);
+}
+
 void aws_s3_meta_request_set_fail_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,

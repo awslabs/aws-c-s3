@@ -334,7 +334,12 @@ int aws_s3_tester_validate_put_object_results(
 
 struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
+/* Callback used by tests to observe the test input stream reads */
+typedef void(aws_s3_test_input_stream_on_read_fn)(struct aws_input_stream *stream, struct aws_byte_buf *dest, void *user_data);
+
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
+
+void aws_s3_test_input_stream_set_read_callback(struct aws_input_stream *stream, aws_s3_test_input_stream_on_read_fn *on_read, void *user_data);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 

@@ -86,6 +86,9 @@ struct aws_s3_meta_request_vtable {
 
     /* Handle de-allocation of the meta request. */
     void (*destroy)(struct aws_s3_meta_request *);
+
+    /* Pause the given request */
+    int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_persistable_state **resume_token);
 };
 
 /**

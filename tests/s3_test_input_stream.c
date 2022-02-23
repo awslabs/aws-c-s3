@@ -4,6 +4,8 @@
 struct aws_s3_test_input_stream_impl {
     size_t position;
     size_t length;
+    aws_s3_test_input_stream_on_read_fn *on_read_fn;
+    void *user_data;
 };
 
 static int s_aws_s3_test_input_stream_seek(
@@ -24,6 +26,10 @@ static int s_aws_s3_test_input_stream_read(struct aws_input_stream *stream, stru
     (void)dest;
 
     struct aws_s3_test_input_stream_impl *test_input_stream = stream->impl;
+
+    if (test_input_stream->on_read_fn != NULL) {
+        test_input_stream->on_read_fn(stream, dest, test_input_stream->user_data);
+    }
 
     if (dest->capacity > (test_input_stream->length - test_input_stream->position)) {
         aws_raise_error(AWS_IO_STREAM_READ_FAILED);
@@ -109,4 +115,12 @@ struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allo
     test_input_stream->length = stream_length;
 
     return input_stream;
+}
+
+void aws_s3_test_input_stream_set_read_callback(struct aws_input_stream *stream, aws_s3_test_input_stream_on_read_fn *on_read_fn, void *user_data) {
+    AWS_ASSERT(stream);
+
+    struct aws_s3_test_input_stream_impl *test_input_stream = stream->impl;
+    test_input_stream->user_data = user_data;
+    test_input_stream->on_read_fn = on_read_fn;
 }

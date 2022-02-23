@@ -36,6 +36,10 @@ static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static int s_s3_auto_ranged_put_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_persistable_state **persistable_state);
+
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -45,6 +49,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .finished_request = s_s3_auto_ranged_put_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .pause = s_s3_auto_ranged_put_pause
 };
 
 /* Allocate a new auto-ranged put meta request */
@@ -636,4 +641,33 @@ static void s_s3_auto_ranged_put_request_finished(
             break;
         }
     }
+}
+
+static int s_s3_auto_ranged_put_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_persistable_state **persistable_state) {
+
+    (void) meta_request;
+    (void) persistable_state;
+
+    printf("*** pausing! \n");
+
+    struct aws_s3_meta_request_persistable_state *state =
+        aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_meta_request_persistable_state));
+
+    /* lock */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+
+    state->totalBytesTransferred = auto_ranged_put->synced_data.num_parts_successful * meta_request->part_size;
+    state->multipart_upload_id = aws_string_new_from_string(meta_request->allocator, auto_ranged_put->upload_id);
+
+    /* unlock */
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+
+    *persistable_state = state;
+
+    return AWS_ERROR_SUCCESS;
 }

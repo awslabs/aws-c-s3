@@ -262,6 +262,28 @@ struct aws_s3_meta_request_result {
     int error_code;
 };
 
+/**
+ * Persistable state used to resume a paused upload.
+ */
+struct aws_s3_meta_request_persistable_state {
+
+    /**
+     * Size of the partition used in the operation being resumed.
+     */
+    size_t partition_size;
+
+    /**
+     * Multipart Upload Id of the operation being resumed.
+     */
+    struct aws_string *multipart_upload_id;
+
+    /**
+     * Total bytes completed at the moment the operation was paused.
+     * The resume operation should begin streaming at this offset.
+     */
+    uint64_t totalBytesTransferred;
+};
+
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
@@ -282,6 +304,12 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
 AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
+
+AWS_S3_API
+int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_persistable_state **resume_token);
+
+AWS_S3_API
+void aws_s3_meta_request_persistable_state_destroy(struct aws_s3_meta_request_persistable_state *state);
 
 AWS_S3_API
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);

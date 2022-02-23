@@ -139,6 +139,7 @@ add_test_case(test_get_nonexistent_compute_platform_info)
 add_net_test_case(test_s3_copy_small_object)
 add_net_test_case(test_s3_multipart_copy_large_object)
 add_net_test_case(test_s3_copy_object_invalid_source_key)
+add_net_test_case(test_s3_put_pause_resume)
 
 add_test_case(test_s3_list_bucket_init_mem_safety)
 add_test_case(test_s3_list_bucket_init_mem_safety_optional_copies)
