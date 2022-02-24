@@ -244,6 +244,13 @@ struct aws_s3_meta_request_options {
      * Note: must match the host header from `message`
      */
     struct aws_uri *endpoint;
+
+    /**
+     * Optional.
+     * For meta requests that support pause/resume (e.g. PutObject), the resume token returned by
+     * aws_s3_meta_request_pause() can be provided here.
+     */
+     struct aws_s3_meta_request_persistable_state *persistable_state;
 };
 
 /* Result details of a meta request.

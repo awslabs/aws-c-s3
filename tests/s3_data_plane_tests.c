@@ -3899,12 +3899,13 @@ static void s_pause_meta_request_progress(
     }
 }
 
-static int s_test_s3_put_pause_helper(
+static int s_test_s3_put_pause_resume_helper(
     struct aws_allocator *allocator,
     void *ctx,
     struct put_object_pause_resume_test_data *test_data,
     struct aws_byte_cursor destination_key,
     struct aws_input_stream *upload_body_stream,
+    struct aws_s3_meta_request_persistable_state *resume_state,
     int expected_error_code,
     int expected_response_status) {
 
@@ -3950,6 +3951,7 @@ static int s_test_s3_put_pause_helper(
         .message = message,
         .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .persistable_state = resume_state
     };
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
@@ -4006,16 +4008,17 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     struct aws_input_stream *initial_upload_stream = aws_s3_test_input_stream_new(allocator, objectLength);
 
     /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
-    int result = s_test_s3_put_pause_helper(
+    int result = s_test_s3_put_pause_resume_helper(
         allocator,
         ctx,
         &test_data,
         destination_key,
         initial_upload_stream,
+        NULL,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK);
 
-    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, result);
+    ASSERT_SUCCESS(result);
 
     aws_input_stream_destroy(initial_upload_stream);
 
@@ -4024,7 +4027,10 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     struct aws_s3_meta_request_persistable_state *persistable_state =
         aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 
-    /* todo: remove debugging code below */
+    aws_input_stream_seek(resume_upload_stream, persistable_state->total_bytes_transferred, AWS_SSB_BEGIN);
+
+    /* todo: remove debugging code below to show the etags of the paused upload */
+    /* null etags are expected for upload of parts that didn't complete by the time the upload was paused */
     for (size_t i = 0; i < aws_array_list_length(&persistable_state->etag_list); i++) {
         struct aws_string *etag = NULL;
         aws_array_list_get_at(&persistable_state->etag_list, &etag, i);
@@ -4035,7 +4041,23 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         }
     }
 
-    aws_input_stream_seek(resume_upload_stream, persistable_state->total_bytes_transferred, AWS_SSB_BEGIN);
+    /* offset where pause should be requested is set to a value greater than content length,
+     * to avoid any more pause when resuming the upload */
+    aws_atomic_store_int(&test_data.request_pause_offset, objectLength * 2);
+
+    int resume_result = s_test_s3_put_pause_resume_helper(
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        initial_upload_stream,
+        persistable_state,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK);
+
+    ASSERT_SUCCESS(resume_result);
+
+    /* TODO: perform further validations of content integrity */
 
     aws_s3_meta_request_persistable_state_destroy(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
