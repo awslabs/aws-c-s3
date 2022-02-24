@@ -502,7 +502,7 @@ static int s_test_s3_message_util_assign_body(struct aws_allocator *allocator, v
     ASSERT_SUCCESS(s_fill_byte_buf(&test_buffer, allocator, test_buffer_size));
 
     struct aws_input_stream *input_stream =
-        aws_s3_message_util_assign_body(allocator, &test_buffer, message, AWS_SCA_NONE, NULL);
+        aws_s3_message_util_assign_body(allocator, &test_buffer, message, AWS_SCA_NONE, false, NULL);
     ASSERT_TRUE(input_stream != NULL);
 
     ASSERT_TRUE(aws_http_message_get_body_stream(message) == input_stream);

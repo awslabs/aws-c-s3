@@ -189,6 +189,8 @@ struct aws_s3_client {
     /* If a flexible checksum is specified it will disable compute_content_md5 */
     const enum aws_s3_checksum_algorithm checksum_algorithm;
 
+    const bool validate_get_response_checksum;
+
     /* Hard limit on max connections set through the client config. */
     const uint32_t max_active_connections_override;
 

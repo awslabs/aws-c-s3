@@ -375,6 +375,7 @@ struct aws_s3_client *aws_s3_client_new(
         client_config->compute_content_md5;
 
     *((enum aws_s3_checksum_algorithm *)&client->checksum_algorithm) = client_config->checksum_algorithm;
+    *((bool *)&client->validate_get_response_checksum) = client_config->validate_get_response_checksum;
 
     /* Determine how many vips are ideal by dividing target-throughput by throughput-per-vip. */
     {
@@ -811,7 +812,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
          * TODO: Still need tests to verify that the request of a part is splittable or not */
         if (aws_http_headers_has(initial_message_headers, aws_byte_cursor_from_c_str("partNumber"))) {
             return aws_s3_meta_request_default_new(
-                client->allocator, client, content_length, false, options, client->checksum_algorithm);
+                client->allocator,
+                client,
+                content_length,
+                false,
+                options,
+                AWS_SCA_NONE,
+                client->validate_get_response_checksum);
         }
 
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
@@ -867,7 +874,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                     !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                 options,
-                client->checksum_algorithm);
+                client->checksum_algorithm,
+                false);
         }
 
         uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
@@ -912,7 +920,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         return aws_s3_meta_request_default_new(
-            client->allocator, client, content_length, false, options, client->checksum_algorithm);
+            client->allocator,
+            client,
+            content_length,
+            false,
+            options,
+            client->checksum_algorithm,
+            client->validate_get_response_checksum);
     } else {
         AWS_FATAL_ASSERT(false);
     }

@@ -2275,10 +2275,10 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
-
     struct aws_s3_tester_client_options client_options = {
         .part_size = 16 * 1024,
         .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
     };
 
     struct aws_s3_client *client = NULL;
@@ -2338,10 +2338,10 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
-
     struct aws_s3_tester_client_options client_options = {
         .part_size = 16 * 1024,
         .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
     };
 
     struct aws_s3_client *client = NULL;
@@ -2400,10 +2400,10 @@ static int s_test_s3_round_trip_mpu_fc(struct aws_allocator *allocator, void *ct
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
-
     struct aws_s3_tester_client_options client_options = {
         .part_size = MB_TO_BYTES(5),
         .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
     };
 
     struct aws_s3_client *client = NULL;

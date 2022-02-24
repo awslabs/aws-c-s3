@@ -73,6 +73,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
                 aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
             client->checksum_algorithm,
+            false,
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,

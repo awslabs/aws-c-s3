@@ -72,23 +72,6 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-// static int s_is_get_request(const struct aws_s3_meta_request_options *options, bool *out) {
-//     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-//         *out = true;
-//         return AWS_OP_SUCCESS;
-//     }
-//     if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-//         struct aws_byte_cursor method;
-//         if (aws_http_message_get_request_method(options->message, &method)) {
-//             return AWS_OP_ERR;
-//         }
-//         *out = aws_byte_cursor_eq(&method, &aws_http_method_get);
-//         return AWS_OP_SUCCESS;
-//     }
-//     *out = false;
-//     return AWS_OP_SUCCESS;
-// }
-
 static int s_is_get_request(const struct aws_s3_meta_request_options *options) {
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
         return true;
@@ -103,7 +86,7 @@ static int s_is_get_request(const struct aws_s3_meta_request_options *options) {
     return false;
 }
 
-static int s_get_response_headers_brawn_callback(
+static int s_meta_request_get_response_headers_checksum_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     int response_status,
@@ -123,15 +106,15 @@ static int s_get_response_headers_brawn_callback(
             break;
         }
     }
-    if (meta_request->headers_checksum_callback) {
-        return meta_request->headers_checksum_callback(meta_request, headers, response_status, user_data);
+    if (meta_request->headers_user_callback_after_checksum) {
+        return meta_request->headers_user_callback_after_checksum(meta_request, headers, response_status, user_data);
     } else {
         return AWS_OP_SUCCESS;
     }
 }
 
 /* warning this might get screwed up with retrys/restarts */
-static int s_get_response_body_brawn_callback(
+static int s_meta_request_get_response_body_checksum_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t range_start,
@@ -139,14 +122,14 @@ static int s_get_response_body_brawn_callback(
     if (meta_request->running_response_sum) {
         aws_checksum_update(meta_request->running_response_sum, body);
     }
-    if (meta_request->body_checksum_callback) {
-        return meta_request->body_checksum_callback(meta_request, body, range_start, user_data);
+    if (meta_request->body_user_callback_after_checksum) {
+        return meta_request->body_user_callback_after_checksum(meta_request, body, range_start, user_data);
     } else {
         return AWS_OP_SUCCESS;
     }
 }
 
-static void s_get_response_finish_brawn_callback(
+static void s_meta_request_get_response_finish_checksum_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
     void *user_data) {
@@ -172,8 +155,8 @@ static void s_get_response_finish_brawn_callback(
     } else {
         mut_meta_request_result->did_validate = false;
     }
-    if (meta_request->finish_checksum_callback) {
-        meta_request->finish_checksum_callback(meta_request, meta_request_result, user_data);
+    if (meta_request->finish_user_callback_after_checksum) {
+        meta_request->finish_user_callback_after_checksum(meta_request, meta_request_result, user_data);
     }
     aws_byte_buf_clean_up(&response_body_sum);
     aws_byte_buf_clean_up(&encoded_response_body_sum);
@@ -187,6 +170,7 @@ int aws_s3_meta_request_init_base(
     size_t part_size,
     bool should_compute_content_md5,
     const enum aws_s3_checksum_algorithm checksum_algorithm,
+    bool validate_get_response_checksum,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -219,6 +203,7 @@ int aws_s3_meta_request_init_base(
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     *((enum aws_s3_checksum_algorithm *)&meta_request->checksum_algorithm) = checksum_algorithm;
+    *((bool *)&meta_request->validate_get_response_checksum) = validate_get_response_checksum;
 
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
@@ -255,18 +240,14 @@ int aws_s3_meta_request_init_base(
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
 
-    // bool is_get = false;
-    // if (s_is_get_request(options, &is_get)) {
-    //     return AWS_OP_ERR;
-    // }
     if (s_is_get_request(options)) {
-        meta_request->headers_checksum_callback = options->headers_callback;
-        meta_request->body_checksum_callback = options->body_callback;
-        meta_request->finish_checksum_callback = options->finish_callback;
+        meta_request->headers_user_callback_after_checksum = options->headers_callback;
+        meta_request->body_user_callback_after_checksum = options->body_callback;
+        meta_request->finish_user_callback_after_checksum = options->finish_callback;
 
-        meta_request->headers_callback = s_get_response_headers_brawn_callback;
-        meta_request->body_callback = s_get_response_body_brawn_callback;
-        meta_request->finish_callback = s_get_response_finish_brawn_callback;
+        meta_request->headers_callback = s_meta_request_get_response_headers_checksum_callback;
+        meta_request->body_callback = s_meta_request_get_response_body_checksum_callback;
+        meta_request->finish_callback = s_meta_request_get_response_finish_checksum_callback;
     } else {
         meta_request->headers_callback = options->headers_callback;
         meta_request->body_callback = options->body_callback;

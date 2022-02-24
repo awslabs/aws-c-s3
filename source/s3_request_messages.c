@@ -246,8 +246,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
 
     if (buffer != NULL) {
 
-        if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_algorithm, encoded_checksum_output) ==
-            NULL) {
+        if (aws_s3_message_util_assign_body(
+                allocator, buffer, message, checksum_algorithm, false, encoded_checksum_output) == NULL) {
             goto error_clean_up;
         }
         if (checksum_algorithm == AWS_SCA_NONE && should_compute_content_md5) {
@@ -296,7 +296,7 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     }
 
     if (buffer != NULL) {
-        if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, NULL /* out_checksum */) ==
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, false, NULL /* out_checksum */) ==
             NULL) {
             goto error_clean_up;
         }
@@ -588,7 +588,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, NULL);
+        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, false, NULL /* out_checksum */);
     }
 
     return message;
@@ -649,6 +649,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
     enum aws_s3_checksum_algorithm algorithm,
+    bool validate_get_response_checksum,
     struct aws_byte_buf *out_checksum) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
@@ -668,7 +669,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     }
 
     bool is_get = s_is_get_request(out_message);
-    if (is_get) {
+    if (is_get && validate_get_response_checksum) {
         aws_http_headers_set(headers, g_request_validation_mode, g_enabled);
     }
 

@@ -73,6 +73,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
             UNKNOWN_PART_SIZE,
             false,
             AWS_SCA_NONE,
+            false,
             options,
             copy_object,
             &s_s3_copy_object_vtable,

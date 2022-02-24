@@ -33,6 +33,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
     enum aws_s3_checksum_algorithm algorithm,
+    bool validate_get_response_checksum,
     struct aws_byte_buf *out_checksum);
 
 /* Create an HTTP request for an S3 Ranged Get Object Request, using the given request as a basis */

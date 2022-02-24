@@ -836,6 +836,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         0,
         false,
         AWS_SCA_NONE,
+        false,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
@@ -1118,6 +1119,7 @@ int aws_s3_tester_client_new(
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
         .checksum_algorithm = options->checksum_algorithm,
+        .validate_get_response_checksum = options->validate_get_response_checksum,
     };
 
     struct aws_tls_connection_options tls_connection_options;

@@ -129,9 +129,9 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_progress_fn *progress_callback;
 
     /* Customer specified callbacks to be called by our specialized callback to calculate the response checkum. */
-    aws_s3_meta_request_headers_callback_fn *headers_checksum_callback;
-    aws_s3_meta_request_receive_body_callback_fn *body_checksum_callback;
-    aws_s3_meta_request_finish_fn *finish_checksum_callback;
+    aws_s3_meta_request_headers_callback_fn *headers_user_callback_after_checksum;
+    aws_s3_meta_request_receive_body_callback_fn *body_user_callback_after_checksum;
+    aws_s3_meta_request_finish_fn *finish_user_callback_after_checksum;
 
     enum aws_s3_meta_request_type type;
 
@@ -186,6 +186,8 @@ struct aws_s3_meta_request {
 
     const enum aws_s3_checksum_algorithm checksum_algorithm;
 
+    bool validate_get_response_checksum;
+
     struct aws_s3_checksum *running_response_sum;
 
     struct aws_byte_buf response_header_checksum;
@@ -201,6 +203,7 @@ int aws_s3_meta_request_init_base(
     size_t part_size,
     bool should_compute_content_md5,
     const enum aws_s3_checksum_algorithm checksum_algorithm,
+    bool validate_get_response_checksum,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,

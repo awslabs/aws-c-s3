@@ -197,6 +197,8 @@ struct aws_s3_client_config {
     /* If a flexible checksum is specified it will disable compute_content_md5 */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
+    bool validate_get_response_checksum;
+
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
