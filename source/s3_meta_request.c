@@ -177,7 +177,7 @@ void aws_s3_meta_request_persistable_state_destroy(struct aws_s3_meta_request_pe
 
     aws_array_list_clean_up(&state->etag_list);
 
-    aws_mem_release(state->multipart_upload_id->allocator, state);
+    aws_mem_release(state->allocator, state);
 }
 
 void aws_s3_meta_request_set_fail_synced(

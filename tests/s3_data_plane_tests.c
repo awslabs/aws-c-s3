@@ -4004,8 +4004,6 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
 
     /* stream used to initiate upload */
     struct aws_input_stream *initial_upload_stream = aws_s3_test_input_stream_new(allocator, objectLength);
-    // aws_s3_test_input_stream_set_read_callback(initial_upload_stream, s_s3_put_pause_resume_stream_on_read,
-    // &test_data);
 
     /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
     int result = s_test_s3_put_pause_helper(

@@ -306,6 +306,8 @@ struct aws_s3_meta_request_persistable_state {
      * The resume operation should begin streaming at this offset.
      */
     uint64_t total_bytes_transferred;
+
+    struct aws_allocator *allocator;
 };
 
 AWS_EXTERN_C_BEGIN
