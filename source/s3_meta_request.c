@@ -100,8 +100,8 @@ static int s_meta_request_get_response_headers_checksum_callback(
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
             if (header_sum.len == encoded_len - 1) {
                 aws_byte_buf_init_copy_from_cursor(
-                    &meta_request->response_header_checksum, aws_default_allocator(), header_sum);
-                meta_request->running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+                    &meta_request->meta_request_level_response_header_checksum, aws_default_allocator(), header_sum);
+                meta_request->meta_request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
             }
             break;
         }
@@ -119,8 +119,8 @@ static int s_meta_request_get_response_body_checksum_callback(
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     void *user_data) {
-    if (meta_request->running_response_sum) {
-        aws_checksum_update(meta_request->running_response_sum, body);
+    if (meta_request->meta_request_level_running_response_sum) {
+        aws_checksum_update(meta_request->meta_request_level_running_response_sum, body);
     }
     if (meta_request->body_user_callback_after_checksum) {
         return meta_request->body_user_callback_after_checksum(meta_request, body, range_start, user_data);
@@ -140,18 +140,23 @@ static void s_meta_request_get_response_finish_checksum_callback(
 
     struct aws_s3_meta_request_result *mut_meta_request_result =
         (struct aws_s3_meta_request_result *)meta_request_result;
-    if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->running_response_sum) {
+    if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
         mut_meta_request_result->did_validate = true;
         size_t encoded_checksum_len = 0;
         /* what error should I raise for these? */
-        aws_base64_compute_encoded_len(meta_request->running_response_sum->digest_size, &encoded_checksum_len);
+        aws_base64_compute_encoded_len(
+            meta_request->meta_request_level_running_response_sum->digest_size, &encoded_checksum_len);
         aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
-        aws_byte_buf_init(&response_body_sum, aws_default_allocator(), meta_request->running_response_sum->digest_size);
-        aws_checksum_finalize(meta_request->running_response_sum, &response_body_sum, 0);
+        aws_byte_buf_init(
+            &response_body_sum,
+            aws_default_allocator(),
+            meta_request->meta_request_level_running_response_sum->digest_size);
+        aws_checksum_finalize(meta_request->meta_request_level_running_response_sum, &response_body_sum, 0);
         struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
         aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
-        mut_meta_request_result->checksum_match =
-            aws_byte_buf_eq(&encoded_response_body_sum, &meta_request->response_header_checksum);
+        if (!aws_byte_buf_eq(&encoded_response_body_sum, &meta_request->meta_request_level_response_header_checksum)) {
+            mut_meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+        }
     } else {
         mut_meta_request_result->did_validate = false;
     }
@@ -160,8 +165,8 @@ static void s_meta_request_get_response_finish_checksum_callback(
     }
     aws_byte_buf_clean_up(&response_body_sum);
     aws_byte_buf_clean_up(&encoded_response_body_sum);
-    aws_checksum_destroy(meta_request->running_response_sum);
-    aws_byte_buf_clean_up(&meta_request->response_header_checksum);
+    aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
+    aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 }
 
 int aws_s3_meta_request_init_base(
@@ -235,7 +240,7 @@ int aws_s3_meta_request_init_base(
 
     meta_request->synced_data.next_streaming_part = 1;
 
-    meta_request->running_response_sum = NULL;
+    meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
@@ -819,8 +824,8 @@ static void s_get_part_response_headers_checksum_helper(
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
             if (header_sum.len == encoded_len - 1) {
                 aws_byte_buf_init_copy_from_cursor(
-                    &connection->response_header_checksum, aws_default_allocator(), header_sum);
-                connection->running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+                    &connection->request->request_level_response_header_checksum, aws_default_allocator(), header_sum);
+                connection->request->request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
             }
             break;
         }
@@ -841,22 +846,26 @@ static void s_get_response_part_finish_checksum_helper(struct aws_s3_connection 
     struct aws_byte_buf encoded_response_body_sum;
     AWS_ZERO_STRUCT(response_body_sum);
     AWS_ZERO_STRUCT(encoded_response_body_sum);
-    if (error_code == AWS_OP_SUCCESS && connection->running_response_sum) {
+    if (error_code == AWS_OP_SUCCESS && connection->request->request_level_running_response_sum) {
         size_t encoded_checksum_len = 0;
         connection->request->did_validate = true;
-        aws_base64_compute_encoded_len(connection->running_response_sum->digest_size, &encoded_checksum_len);
+        aws_base64_compute_encoded_len(
+            connection->request->request_level_running_response_sum->digest_size, &encoded_checksum_len);
         aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
-        aws_byte_buf_init(&response_body_sum, aws_default_allocator(), connection->running_response_sum->digest_size);
-        aws_checksum_finalize(connection->running_response_sum, &response_body_sum, 0);
+        aws_byte_buf_init(
+            &response_body_sum,
+            aws_default_allocator(),
+            connection->request->request_level_running_response_sum->digest_size);
+        aws_checksum_finalize(connection->request->request_level_running_response_sum, &response_body_sum, 0);
         struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
         aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
         connection->request->checksum_match =
-            aws_byte_buf_eq(&encoded_response_body_sum, &connection->response_header_checksum);
+            aws_byte_buf_eq(&encoded_response_body_sum, &connection->request->request_level_response_header_checksum);
         aws_byte_buf_clean_up(&response_body_sum);
         aws_byte_buf_clean_up(&encoded_response_body_sum);
-        aws_checksum_destroy(connection->running_response_sum);
-        aws_byte_buf_clean_up(&connection->response_header_checksum);
-        connection->running_response_sum = NULL;
+        aws_checksum_destroy(connection->request->request_level_running_response_sum);
+        aws_byte_buf_clean_up(&connection->request->request_level_response_header_checksum);
+        connection->request->request_level_running_response_sum = NULL;
     } else {
         connection->request->did_validate = false;
     }
@@ -950,7 +959,7 @@ static int s_s3_meta_request_incoming_body(
         (void *)connection);
 
     if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-        s_get_part_response_body_checksum_helper(connection->running_response_sum, data);
+        s_get_part_response_body_checksum_helper(connection->request->request_level_running_response_sum, data);
     }
 
     if (request->send_data.response_body.capacity == 0) {

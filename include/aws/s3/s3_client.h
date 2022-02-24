@@ -195,8 +195,24 @@ struct aws_s3_client_config {
     enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
     /* If a flexible checksum is specified it will disable compute_content_md5 */
+    /**
+     * checksum algorithm will cause single part put requests to append a trailing checksum of the body corresponding to
+     * the specified algorithm. Multipart uploads will have a checksum uploaded corresponding to each individual part,
+     * and the body of the complete multipart upload request will contain a list of the checksums from erach part.
+     * Get requests will be unaffected by this setting. Copy object requests will have a header specifying to s3 to
+     * calculate a new checksum with the corresponding algorithm. multipart copies
+     */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
+    /**
+     * Enable checksumode header will be attached to get requests, this will tell s3 to send back checksums headers if
+     * they exist. If a checksum of an entire single part object is received, the client will calculate the
+     * corresponding checksum on the response bodies notify the user that the checksum was validated and return an
+     * AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error if the calculated checksum, and checksum found in the response
+     * header to not match. Checksum mismatch of individual parts will also result in an
+     * AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error, but the user will not be notified of part level validation should
+     * it succeed.
+     */
     bool validate_get_response_checksum;
 
     /* Callback and associated user data for when the client has completed its shutdown process. */
@@ -280,9 +296,10 @@ struct aws_s3_meta_request_result {
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
 
+    /* Was the server side checksum compared against a calculated checksum of all the response bodies. This may be false
+     * even if validate_get_response_checksum was set because the object was uploaded without a checksum, or was
+     * uploaded as a multipart object. */
     bool did_validate;
-
-    bool checksum_match;
 
     /* Final error code of the meta request. */
     int error_code;

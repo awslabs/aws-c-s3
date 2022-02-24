@@ -23,20 +23,40 @@ struct aws_s3_checksum {
     bool good;
 };
 
+/**
+ * @brief
+ * a stream that takes in a stream, computes a running checksum as it is read, and outputs the checksum when the stream
+ * is destroyed. Scanning this stream will immediatly fail, as it would prevent an accurate calcuation of the checksum.
+ *
+ * @param allocator
+ * @param existing_stream
+ * checksumstream takes ownership of the existing_streams lifetime. destroying the chunk stream
+ * will destroy the existing stream.
+ * @param algorithm
+ * checksum algorithm to use.
+ * @param checksum_output out parameter which will be updated with the checksum of the initial stream.
+ * @return AWS_S3_API struct*
+ */
 AWS_S3_API
 struct aws_input_stream *aws_checksum_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
     enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *checksum_result);
+    struct aws_byte_buf *checksum_output);
 
 /**
  * @brief
+ * A stream that takes in a stream, turns it into a chunk, and follows it with a aws-chunked trailer. Scanning this
+ * stream will immediatly fail, as it would prevent an accurate calcuation of the checksum.
  *
  * @param allocator
  * @param existing_stream
+ * chunkstream takes ownership of the existing_streams lifetime. destroying the chunk stream will
+ * destroy the existing stream.
  * @param algorithm
- * @param checksum_output optional argument, if provided the buffer will be initialized to the appropriate size and
+ * checksum algorithm to use.
+ * @param checksum_output
+ * optional argument, if provided the buffer will be initialized to the appropriate size and
  * filled with the checksum result when calculated. Callers responsibility to cleanup.
  * @return AWS_S3_API struct*
  */

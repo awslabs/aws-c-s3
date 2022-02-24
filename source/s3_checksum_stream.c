@@ -11,7 +11,8 @@ struct aws_checksum_stream {
     struct aws_input_stream *old_stream;
     struct aws_s3_checksum *checksum;
     struct aws_byte_buf checksum_result;
-    struct aws_byte_buf *encoded_checksum_result;
+    /* base64 encoded checksum of the stream, updated on destruction of sream */
+    struct aws_byte_buf *encoded_checksum_output;
     bool did_seek;
 };
 
@@ -69,7 +70,7 @@ static void s_aws_input_checksum_stream_destroy(struct aws_input_stream *stream)
         struct aws_checksum_stream *impl = stream->impl;
         aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0);
         struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&impl->checksum_result);
-        aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_result);
+        aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_output);
         aws_checksum_destroy(impl->checksum);
         aws_input_stream_destroy(impl->old_stream);
         aws_byte_buf_clean_up(&impl->checksum_result);
@@ -89,7 +90,7 @@ struct aws_input_stream *aws_checksum_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
     enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *checksum_result) {
+    struct aws_byte_buf *checksum_output) {
 
     struct aws_input_stream *stream = NULL;
     struct aws_checksum_stream *impl = NULL;
@@ -110,7 +111,7 @@ struct aws_input_stream *aws_checksum_stream_new(
         goto on_error;
     }
     aws_byte_buf_init(&impl->checksum_result, allocator, impl->checksum->digest_size);
-    impl->encoded_checksum_result = checksum_result;
+    impl->encoded_checksum_output = checksum_output;
     impl->did_seek = false;
     AWS_FATAL_ASSERT(impl->old_stream);
 

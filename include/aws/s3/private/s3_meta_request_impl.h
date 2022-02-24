@@ -188,9 +188,11 @@ struct aws_s3_meta_request {
 
     bool validate_get_response_checksum;
 
-    struct aws_s3_checksum *running_response_sum;
+    /* checksum found in either a default get request, or in the initial head request of a mutlipart get */
+    struct aws_byte_buf meta_request_level_response_header_checksum;
 
-    struct aws_byte_buf response_header_checksum;
+    /* running checksum of all of the parts of a default get, or ranged get meta request*/
+    struct aws_s3_checksum *meta_request_level_running_response_sum;
 };
 
 AWS_EXTERN_C_BEGIN

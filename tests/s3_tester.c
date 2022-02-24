@@ -92,8 +92,9 @@ int s3_validate_headers_checksum_set(
     (void)headers;
     struct aws_s3_meta_request_test_results *meta_request_test_results =
         (struct aws_s3_meta_request_test_results *)user_data;
-    ASSERT_NOT_NULL(meta_request->running_response_sum);
-    ASSERT_INT_EQUALS(meta_request->running_response_sum->algorithm, meta_request_test_results->algorithm);
+    ASSERT_NOT_NULL(meta_request->meta_request_level_running_response_sum);
+    ASSERT_INT_EQUALS(
+        meta_request->meta_request_level_running_response_sum->algorithm, meta_request_test_results->algorithm);
     return AWS_OP_SUCCESS;
 }
 
@@ -183,7 +184,7 @@ void s3_test_validate_checksum(
     (void)meta_request;
     (void)user_data;
     AWS_FATAL_ASSERT(result->did_validate);
-    AWS_FATAL_ASSERT(result->checksum_match);
+    AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
 }
 
 void s3_test_validate_fail_checksum(
@@ -193,7 +194,7 @@ void s3_test_validate_fail_checksum(
     (void)meta_request;
     (void)user_data;
     AWS_FATAL_ASSERT(result->did_validate);
-    AWS_FATAL_ASSERT(!result->checksum_match);
+    AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
 }
 
 void s3_test_no_validate_checksum(

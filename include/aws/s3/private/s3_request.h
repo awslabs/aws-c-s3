@@ -58,6 +58,12 @@ struct aws_s3_request {
      * prepare function, this will be 0.*/
     uint32_t num_times_prepared;
 
+    /* checksum found in the header of an individual get part http request */
+    struct aws_byte_buf request_level_response_header_checksum;
+
+    /* running checksum of the respone to an individual get part http request */
+    struct aws_s3_checksum *request_level_running_response_sum;
+
     /* Get request only, was there a checksum to validate */
     bool did_validate;
 

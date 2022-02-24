@@ -296,6 +296,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     }
 
     if (buffer != NULL) {
+        /* part copy does not have a ChecksumAlgorithm member, it will use the same algorithm as the create multipart
+         * upload request specifies */
         if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, false, NULL /* out_checksum */) ==
             NULL) {
             goto error_clean_up;
