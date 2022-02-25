@@ -253,8 +253,14 @@ static bool s_s3_auto_ranged_put_update(
             goto no_work_remaining;
         }
 
+        /* If the upload was paused, we don't abort the multipart upload. */
+        if (meta_request->synced_data.finish_result.error_code == AWS_ERROR_S3_PAUSED) {
+            goto no_work_remaining;
+        }
+
         /* If we made it here, and the abort-multipart-upload message hasn't been sent yet, then do so now. */
         if (!auto_ranged_put->synced_data.abort_multipart_upload_sent) {
+
             if (auto_ranged_put->upload_id == NULL) {
                 goto no_work_remaining;
             }
@@ -660,8 +666,6 @@ static int s_s3_auto_ranged_put_pause(
     (void)meta_request;
     (void)persistable_state;
 
-    printf("*** pausing! \n");
-
     struct aws_s3_meta_request_persistable_state *state =
         aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_meta_request_persistable_state));
 
@@ -690,10 +694,17 @@ static int s_s3_auto_ranged_put_pause(
 
     state->total_bytes_transferred = auto_ranged_put->synced_data.num_parts_successful * meta_request->part_size;
 
+    /**
+     * cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
+     * This allows the client to resume the upload later, setting the persistable state in the meta request options.
+     */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     *persistable_state = state;
+
 
     return AWS_ERROR_SUCCESS;
 }

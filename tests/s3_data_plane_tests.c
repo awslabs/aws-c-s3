@@ -4015,8 +4015,8 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         destination_key,
         initial_upload_stream,
         NULL,
-        AWS_ERROR_SUCCESS,
-        AWS_HTTP_STATUS_CODE_200_OK);
+        AWS_ERROR_S3_PAUSED,
+        0);
 
     ASSERT_SUCCESS(result);
 
@@ -4050,7 +4050,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         ctx,
         &test_data,
         destination_key,
-        initial_upload_stream,
+        resume_upload_stream,
         persistable_state,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK);
