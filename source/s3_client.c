@@ -374,9 +374,6 @@ struct aws_s3_client *aws_s3_client_new(
     *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
         client_config->compute_content_md5;
 
-    *((enum aws_s3_checksum_algorithm *)&client->checksum_algorithm) = client_config->checksum_algorithm;
-    *((bool *)&client->validate_get_response_checksum) = client_config->validate_get_response_checksum;
-
     /* Determine how many vips are ideal by dividing target-throughput by throughput-per-vip. */
     {
         double ideal_vip_count_double = client->throughput_target_gbps / s_throughput_per_vip_gbps;
@@ -818,7 +815,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 false,
                 options,
                 AWS_SCA_NONE,
-                client->validate_get_response_checksum);
+                options->validate_get_response_checksum);
         }
 
         return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
@@ -874,7 +871,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                     !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                 options,
-                client->checksum_algorithm,
+                options->checksum_algorithm,
                 false);
         }
 
@@ -925,8 +922,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             content_length,
             false,
             options,
-            client->checksum_algorithm,
-            client->validate_get_response_checksum);
+            options->checksum_algorithm,
+            options->validate_get_response_checksum);
     } else {
         AWS_FATAL_ASSERT(false);
     }

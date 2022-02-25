@@ -1333,7 +1333,6 @@ static int s_test_s3_put_object_helper(
 
     struct aws_s3_client_config client_config = {
         .part_size = 5 * 1024 * 1024,
-        .checksum_algorithm = checksum_algorithm,
     };
 
     switch (tls_usage) {
@@ -1395,15 +1394,6 @@ static int s_test_s3_put_object_tls_default(struct aws_allocator *allocator, voi
     (void)ctx;
 
     ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, AWS_SCA_NONE));
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_put_object_tls_default_fc, s_test_s3_put_object_tls_default_fc)
-static int s_test_s3_put_object_tls_default_fc(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, AWS_SCA_CRC32));
 
     return 0;
 }
@@ -1541,34 +1531,6 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
-/* default test */
-AWS_TEST_CASE(test_s3_put_object_less_than_part_size_fc, s_test_s3_put_object_less_than_part_size_fc)
-static int s_test_s3_put_object_less_than_part_size_fc(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    int alg = AWS_SCA_CRC32;
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
-
-    struct aws_s3_client_config client_config = {.part_size = 20 * 1024 * 1024, .checksum_algorithm = alg};
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    ASSERT_TRUE(client != NULL);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 1, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
-
-    aws_s3_client_release(client);
-    client = NULL;
-
-    aws_s3_tester_clean_up(&tester);
-    return 0;
-}
-
 AWS_TEST_CASE(test_s3_put_object_empty_object, s_test_s3_put_object_empty_object)
 static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1594,36 +1556,6 @@ static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, vo
 
     aws_s3_tester_clean_up(&tester);
 
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_put_object_empty_object_fc, s_test_s3_put_object_empty_object_fc)
-static int s_test_s3_put_object_empty_object_fc(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    int alg = AWS_SCA_CRC32;
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
-
-    struct aws_s3_client_config client_config;
-    AWS_ZERO_STRUCT(client_config);
-
-    client_config.checksum_algorithm = alg;
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    ASSERT_TRUE(client != NULL);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 0, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
-
-    aws_s3_client_release(client);
-    client = NULL;
-
-    aws_s3_tester_clean_up(&tester);
     return 0;
 }
 
@@ -2277,8 +2209,6 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
     struct aws_s3_tester_client_options client_options = {
         .part_size = 16 * 1024,
-        .checksum_algorithm = AWS_SCA_CRC32,
-        .validate_get_response_checksum = true,
     };
 
     struct aws_s3_client *client = NULL;
@@ -2291,6 +2221,8 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
         .put_options =
             {
                 .object_size_mb = 1,
@@ -2312,6 +2244,8 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
         .signing_config = &get_signing_config,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
         .get_options =
             {
                 .object_path = object_path,
@@ -2340,8 +2274,6 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
     struct aws_s3_tester_client_options client_options = {
         .part_size = 16 * 1024,
-        .checksum_algorithm = AWS_SCA_CRC32,
-        .validate_get_response_checksum = true,
     };
 
     struct aws_s3_client *client = NULL;
@@ -2354,6 +2286,8 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
         .put_options =
             {
                 .object_size_mb = 1,
@@ -2376,6 +2310,8 @@ static int s_test_s3_round_trip_fc(struct aws_allocator *allocator, void *ctx) {
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
         .signing_config = &get_signing_config,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
         .get_options =
             {
                 .object_path = object_path,
@@ -2402,8 +2338,6 @@ static int s_test_s3_round_trip_mpu_fc(struct aws_allocator *allocator, void *ct
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, true));
     struct aws_s3_tester_client_options client_options = {
         .part_size = MB_TO_BYTES(5),
-        .checksum_algorithm = AWS_SCA_CRC32,
-        .validate_get_response_checksum = true,
     };
 
     struct aws_s3_client *client = NULL;
@@ -2416,6 +2350,8 @@ static int s_test_s3_round_trip_mpu_fc(struct aws_allocator *allocator, void *ct
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
         .put_options =
             {
                 .object_size_mb = 10,
@@ -2438,6 +2374,8 @@ static int s_test_s3_round_trip_mpu_fc(struct aws_allocator *allocator, void *ct
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
         .signing_config = &get_signing_config,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
         .get_options =
             {
                 .object_path = object_path,

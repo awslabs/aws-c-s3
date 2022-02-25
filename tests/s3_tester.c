@@ -1119,8 +1119,6 @@ int aws_s3_tester_client_new(
     struct aws_s3_client_config client_config = {
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
-        .checksum_algorithm = options->checksum_algorithm,
-        .validate_get_response_checksum = options->validate_get_response_checksum,
     };
 
     struct aws_tls_connection_options tls_connection_options;
@@ -1209,6 +1207,8 @@ int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_meta_request_options meta_request_options = {
         .type = options->meta_request_type,
         .message = options->message,
+        .checksum_algorithm = options->checksum_algorithm,
+        .validate_get_response_checksum = options->checksum_algorithm,
     };
 
     if (options->signing_config) {
@@ -1361,7 +1361,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
 
-    out_results->algorithm = client->checksum_algorithm;
+    out_results->algorithm = options->checksum_algorithm;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 

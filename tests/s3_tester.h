@@ -118,8 +118,6 @@ struct aws_s3_tester_client_options {
     size_t part_size;
     size_t max_part_size;
     uint32_t setup_region : 1;
-    const enum aws_s3_checksum_algorithm checksum_algorithm;
-    const bool validate_get_response_checksum;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -143,6 +141,9 @@ struct aws_s3_tester_meta_request_options {
     struct aws_s3_tester_client_options *client_options;
 
     bool stream_signing;
+
+    bool validate_get_response_checksum;
+    enum aws_s3_checksum_algorithm checksum_algorithm;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;
