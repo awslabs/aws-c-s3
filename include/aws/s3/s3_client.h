@@ -196,13 +196,13 @@ struct aws_s3_client_config {
      * For single-part upload, keep the content-md5 in the initial request unchanged. */
     enum aws_s3_meta_request_compute_content_md5 compute_content_md5;
 
-    /* If a flexible checksum is specified it will disable compute_content_md5 */
     /**
      * checksum algorithm will cause single part put requests to append a trailing checksum of the body corresponding to
      * the specified algorithm. Multipart uploads will have a checksum uploaded corresponding to each individual part,
      * and the body of the complete multipart upload request will contain a list of the checksums from erach part.
      * Get requests will be unaffected by this setting. Copy object requests will have a header specifying to s3 to
-     * calculate a new checksum with the corresponding algorithm. multipart copies
+     * calculate a new checksum with the corresponding algorithm.
+     * Note: If set, it will disable compute_content_md5
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
@@ -214,6 +214,7 @@ struct aws_s3_client_config {
      * header to not match. Checksum mismatch of individual parts will also result in an
      * AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error, but the user will not be notified of part level validation should
      * it succeed.
+     * overrides the "x-amz-checksum-mode" header if it was already set.
      */
     bool validate_get_response_checksum;
 
