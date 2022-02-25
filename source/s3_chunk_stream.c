@@ -57,6 +57,10 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor colon_cursor = aws_byte_cursor_from_string(s_colon);
 
+    if (parent_stream->checksum_result.len == 0) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to extract base64 encoded checksum of stream");
+        aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
+    }
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&parent_stream->checksum_result);
     if (parent_stream->checksum_result_output &&
         aws_byte_buf_init_copy_from_cursor(
@@ -263,7 +267,6 @@ struct aws_input_stream *aws_chunk_stream_new(
 error:
     /* TODO: the stream should refcount, otherwise, this can lead to crash */
     aws_input_stream_destroy(impl->checksum_stream);
-    aws_input_stream_destroy(impl->current_stream);
     aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
     aws_byte_buf_clean_up(&impl->checksum_result);
     aws_mem_release(stream->allocator, stream);

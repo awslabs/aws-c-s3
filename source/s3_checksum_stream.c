@@ -68,9 +68,15 @@ static int s_aws_input_checksum_stream_get_length(struct aws_input_stream *strea
 static void s_aws_input_checksum_stream_destroy(struct aws_input_stream *stream) {
     if (stream) {
         struct aws_checksum_stream *impl = stream->impl;
-        aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0);
+        if (aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0)) {
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to finalize checksum when destroying checksum_stream");
+            aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
+        }
         struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&impl->checksum_result);
-        aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_output);
+        if (aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_output)) {
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to finalize checksum due to base64 encoding failure");
+            aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
+        }
         aws_checksum_destroy(impl->checksum);
         aws_input_stream_destroy(impl->old_stream);
         aws_byte_buf_clean_up(&impl->checksum_result);
