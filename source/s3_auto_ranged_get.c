@@ -426,10 +426,9 @@ static int s_discover_object_range_and_content_length(
                 break;
             }
 
-            /* When doing a head object request, we currently assume that we did so with a message that had a Range
-             * header. This means that there should also be a Content-Range header that specifies the object range
-             and
-             * total object size.*/
+            /* if the inital message had a ranged header, there should also be a Content-Range header that specifies the
+             * object range and total object size. Otherwise the size and range should be equal to the
+             * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_range_end = total_content_length - 1;
             } else if (aws_s3_parse_content_range_response_header(

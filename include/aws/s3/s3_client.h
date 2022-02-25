@@ -141,10 +141,12 @@ enum aws_s3_meta_request_compute_content_md5 {
 
 enum aws_s3_checksum_algorithm {
     AWS_SCA_NONE = 0,
-    AWS_SCA_CRC32C,
+    AWS_SCA_INIT,
+    AWS_SCA_CRC32C = AWS_SCA_INIT,
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
+    AWS_SCA_COUNT,
 };
 
 /* Options for a new client. */

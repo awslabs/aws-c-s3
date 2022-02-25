@@ -72,7 +72,7 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-static int s_is_get_request(const struct aws_s3_meta_request_options *options) {
+static bool s_is_get_request(const struct aws_s3_meta_request_options *options) {
     if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
         return true;
     }
@@ -91,7 +91,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
-    for (int i = AWS_SCA_CRC32C; i <= AWS_SCA_SHA256; i++) {
+    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         if (aws_http_headers_has(headers, *algorithm_header_name)) {
             struct aws_byte_cursor header_sum;
@@ -816,7 +816,7 @@ static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     const struct aws_http_header *headers,
     size_t headers_count) {
-    for (int i = AWS_SCA_CRC32C; i <= AWS_SCA_SHA256; i++) {
+    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         struct aws_byte_cursor header_sum;
         if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {

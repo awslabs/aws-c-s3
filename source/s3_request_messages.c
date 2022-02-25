@@ -246,8 +246,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
 
     if (buffer != NULL) {
 
-        if (aws_s3_message_util_assign_body(
-                allocator, buffer, message, checksum_algorithm, false, encoded_checksum_output) == NULL) {
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_algorithm, encoded_checksum_output) ==
+            NULL) {
             goto error_clean_up;
         }
         if (checksum_algorithm == AWS_SCA_NONE && should_compute_content_md5) {
@@ -296,9 +296,9 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     }
 
     if (buffer != NULL) {
-        /* part copy does not have a ChecksumAlgorithm member, it will use the same algorithm as the create multipart
-         * upload request specifies */
-        if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, false, NULL /* out_checksum */) ==
+        /* part copy does not have a ChecksumAlgorithm member, it will use the same algorithm as the create
+         * multipart upload request specifies */
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, NULL /* out_checksum */) ==
             NULL) {
             goto error_clean_up;
         }
@@ -427,7 +427,8 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         aws_byte_cursor_advance(&source_bucket, 1);
     }
 
-    /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them. */
+    /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them.
+     */
     struct aws_byte_cursor source_key = source_bucket;
 
     while (source_key.len > 0) {
@@ -590,7 +591,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, false, NULL /* out_checksum */);
+        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, NULL /* out_checksum */);
     }
 
     return message;
@@ -637,21 +638,12 @@ error_clean_up:
     return NULL;
 }
 
-static int s_is_get_request(const struct aws_http_message *message) {
-    struct aws_byte_cursor method;
-    int err = aws_http_message_get_request_method(message, &method);
-    AWS_ASSERT(err == AWS_OP_SUCCESS)
-    (void)err;
-    return aws_byte_cursor_eq(&method, &aws_http_method_get);
-}
-
 /* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
     enum aws_s3_checksum_algorithm algorithm,
-    bool validate_get_response_checksum,
     struct aws_byte_buf *out_checksum) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
@@ -670,15 +662,9 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         goto error_clean_up;
     }
 
-    bool is_get = s_is_get_request(out_message);
-    if (is_get && validate_get_response_checksum) {
-        aws_http_headers_set(headers, g_request_validation_mode, g_enabled);
-    }
-
     if (algorithm) {
         /* set Content-Encoding header */
-        if (!is_get &&
-            aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
+        if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
             goto error_clean_up;
         }
         /* set x-amz-trailer header */

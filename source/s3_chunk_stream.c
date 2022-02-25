@@ -108,7 +108,7 @@ static int s_aws_input_chunk_stream_seek(
         "Cannot seek on chunk stream, as it will cause the checksum output to mismatch the checksum of the stream"
         "contents");
     AWS_ASSERT(false);
-    return AWS_OP_ERR;
+    return aws_raise_error(AWS_IO_STREAM_INVALID_SEEK_POSITION);
 }
 
 static int s_aws_input_chunk_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {

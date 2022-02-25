@@ -81,9 +81,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         goto error_clean_up;
     }
 
-    /* @dengket do the etags need to be synced? each etag is accessed exactly twice, once when initialized by the
-     * corresponding part, and once during complete multipart upload when the list is used to create the message body.
-     */
     struct aws_string **etag_c_array = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
     aws_array_list_init_static(
         &auto_ranged_put->synced_data.etag_list, etag_c_array, num_parts, sizeof(struct aws_string *));
