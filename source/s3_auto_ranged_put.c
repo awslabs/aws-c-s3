@@ -36,6 +36,41 @@ static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+/**
+ * Loads the persistable state used to resume an upload that was previously paused.
+ * @param allocator
+ * @param auto_ranged_put
+ * @param options
+ * @return
+ */
+static int s_load_persistable_state(struct aws_allocator *allocator,
+                                    struct aws_s3_auto_ranged_put *auto_ranged_put,
+                                    struct aws_s3_meta_request_persistable_state *persistable_state) {
+
+    auto_ranged_put->synced_data.num_parts_sent = persistable_state->num_parts_completed;
+    auto_ranged_put->synced_data.num_parts_completed = persistable_state->num_parts_completed;
+    auto_ranged_put->synced_data.create_multipart_upload_sent = true;
+    auto_ranged_put->synced_data.create_multipart_upload_completed = true;
+    auto_ranged_put->upload_id = aws_string_new_from_string(allocator, persistable_state->multipart_upload_id);
+
+    struct aws_array_list *persisted_etag_list = &persistable_state->etag_list;
+
+    for (size_t etag_index = 0; etag_index < aws_array_list_length(persisted_etag_list); etag_index++) {
+        struct aws_string *etag = NULL;
+        aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
+        if (etag != NULL) {
+            /* etag found in persisted state. This means this part was successfully uploaded, skip it... */
+            ++auto_ranged_put->threaded_update_data.next_part_number;
+            ++auto_ranged_put->synced_data.num_parts_sent;
+        } else {
+            /* reached the first part that is missing. Resume upload from here. */
+            break;
+        }
+    }
+
+    return AWS_ERROR_SUCCESS;
+}
+
 static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_persistable_state **persistable_state);
@@ -93,7 +128,19 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
 
     auto_ranged_put->content_length = content_length;
     auto_ranged_put->synced_data.total_num_parts = num_parts;
+
+    /* Upload starts from the beginning by default, but some parts might be skipped during
+     * an upload resume configured in s_load_persistable_state() below. */
     auto_ranged_put->threaded_update_data.next_part_number = 1;
+
+    if (options->persistable_state != NULL) {
+        int load_state_result = s_load_persistable_state(allocator, auto_ranged_put, options->persistable_state);
+        if (load_state_result != AWS_ERROR_SUCCESS) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not load persisted state for auto-ranged-put meta request. Upload will re-start from beginning.");
+        }
+    }
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
@@ -569,8 +616,9 @@ static void s_s3_auto_ranged_put_request_finished(
                 aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
 
                 if (meta_request->progress_callback != NULL) {
-                    struct aws_s3_meta_request_progress progress = {.bytes_transferred = meta_request->part_size,
-                                                                    .content_length = auto_ranged_put->content_length};
+                    struct aws_s3_meta_request_progress progress = {
+                        .bytes_transferred = meta_request->part_size,
+                        .content_length = auto_ranged_put->content_length};
 
                     /* don't hold the lock while invoking the callback */
                     aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -704,7 +752,6 @@ static int s_s3_auto_ranged_put_pause(
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     *persistable_state = state;
-
 
     return AWS_ERROR_SUCCESS;
 }

@@ -3782,8 +3782,8 @@ struct aws_http_message *put_object_request_new(
     aws_input_stream_get_length(body_stream, &content_length);
     snprintf(content_length_c_str, sizeof(content_length_c_str), "%" PRIu64, content_length);
 
-    struct aws_http_header content_length_header = {.name = g_content_length_header_name,
-                                                    .value = aws_byte_cursor_from_c_str(content_length_c_str)};
+    struct aws_http_header content_length_header = {
+        .name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_c_str)};
 
     if (aws_http_message_add_header(message, content_length_header)) {
         goto error_clean_up_message;
@@ -3940,6 +3940,7 @@ static int s_test_s3_put_pause_resume_helper(
 
     test_data->c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data->mutex);
+    test_data->execution_completed = false;
 
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = test_data,
@@ -3951,8 +3952,7 @@ static int s_test_s3_put_pause_resume_helper(
         .message = message,
         .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .persistable_state = resume_state
-    };
+        .persistable_state = resume_state};
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
     ASSERT_NOT_NULL(meta_request);
@@ -3996,8 +3996,6 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     aws_atomic_init_int(&test_data.pause_result, 0);
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
-    printf("*** pause resume test\n");
-
     /* total length of the object to simulate for upload */
     const int objectLength = 128 * 1024 * 1024;
 
@@ -4009,14 +4007,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
 
     /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
     int result = s_test_s3_put_pause_resume_helper(
-        allocator,
-        ctx,
-        &test_data,
-        destination_key,
-        initial_upload_stream,
-        NULL,
-        AWS_ERROR_S3_PAUSED,
-        0);
+        allocator, ctx, &test_data, destination_key, initial_upload_stream, NULL, AWS_ERROR_S3_PAUSED, 0);
 
     ASSERT_SUCCESS(result);
 
@@ -4027,7 +4018,6 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     struct aws_s3_meta_request_persistable_state *persistable_state =
         aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 
-    aws_input_stream_seek(resume_upload_stream, persistable_state->total_bytes_transferred, AWS_SSB_BEGIN);
 
     /* todo: remove debugging code below to show the etags of the paused upload */
     /* null etags are expected for upload of parts that didn't complete by the time the upload was paused */
