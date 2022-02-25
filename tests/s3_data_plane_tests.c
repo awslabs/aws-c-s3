@@ -3772,7 +3772,10 @@ struct aws_http_message *put_object_request_new(
         goto error_clean_up_message;
     }
 
-    struct aws_http_header host_header = {.name = g_host_header_name, .value = endpoint};
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = endpoint,
+    };
     if (aws_http_message_add_header(message, host_header)) {
         goto error_clean_up_message;
     }
@@ -3783,7 +3786,9 @@ struct aws_http_message *put_object_request_new(
     snprintf(content_length_c_str, sizeof(content_length_c_str), "%" PRIu64, content_length);
 
     struct aws_http_header content_length_header = {
-        .name = g_content_length_header_name, .value = aws_byte_cursor_from_c_str(content_length_c_str)};
+        .name = g_content_length_header_name,
+        .value = aws_byte_cursor_from_c_str(content_length_c_str),
+    };
 
     if (aws_http_message_add_header(message, content_length_header)) {
         goto error_clean_up_message;
@@ -3952,7 +3957,8 @@ static int s_test_s3_put_pause_resume_helper(
         .message = message,
         .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .persistable_state = resume_state};
+        .persistable_state = resume_state,
+    };
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
     ASSERT_NOT_NULL(meta_request);
@@ -4017,7 +4023,6 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new(allocator, objectLength);
     struct aws_s3_meta_request_persistable_state *persistable_state =
         aws_atomic_load_ptr(&test_data.persistable_state_ptr);
-
 
     /* todo: remove debugging code below to show the etags of the paused upload */
     /* null etags are expected for upload of parts that didn't complete by the time the upload was paused */

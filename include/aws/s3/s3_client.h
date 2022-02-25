@@ -250,7 +250,7 @@ struct aws_s3_meta_request_options {
      * For meta requests that support pause/resume (e.g. PutObject), the resume token returned by
      * aws_s3_meta_request_pause() can be provided here.
      */
-     struct aws_s3_meta_request_persistable_state *persistable_state;
+    struct aws_s3_meta_request_persistable_state *persistable_state;
 };
 
 /* Result details of a meta request.
@@ -338,6 +338,16 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
 
+/**
+ * In order to pause an ongoing upload, call aws_s3_meta_request_pause(). It will return a resume token that can be
+ * persisted and used to resume the upload. To resume an upload that was paused, supply the resume token in the meta
+ * request options structure member aws_s3_meta_request_options.persistable_state.
+ * The upload can be resumed either from the same client or a different one.
+ * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
+ * @param resume_token outputs the structure with the state that can be used to resume the upload. Use
+ * `aws_s3_meta_request_persistable_state_destroy` to release the memory allocated for this structure.
+ * @return
+ */
 AWS_S3_API
 int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,

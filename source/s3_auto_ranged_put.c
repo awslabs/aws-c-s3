@@ -43,9 +43,10 @@ static void s_s3_auto_ranged_put_request_finished(
  * @param options
  * @return
  */
-static int s_load_persistable_state(struct aws_allocator *allocator,
-                                    struct aws_s3_auto_ranged_put *auto_ranged_put,
-                                    struct aws_s3_meta_request_persistable_state *persistable_state) {
+static int s_load_persistable_state(
+    struct aws_allocator *allocator,
+    struct aws_s3_auto_ranged_put *auto_ranged_put,
+    struct aws_s3_meta_request_persistable_state *persistable_state) {
 
     auto_ranged_put->synced_data.num_parts_sent = persistable_state->num_parts_completed;
     auto_ranged_put->synced_data.num_parts_completed = persistable_state->num_parts_completed;
@@ -138,7 +139,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         if (load_state_result != AWS_ERROR_SUCCESS) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
-                "Could not load persisted state for auto-ranged-put meta request. Upload will re-start from beginning.");
+                "Could not load persisted state for auto-ranged-put meta request. Upload will re-start from "
+                "beginning.");
         }
     }
 
@@ -618,7 +620,8 @@ static void s_s3_auto_ranged_put_request_finished(
                 if (meta_request->progress_callback != NULL) {
                     struct aws_s3_meta_request_progress progress = {
                         .bytes_transferred = meta_request->part_size,
-                        .content_length = auto_ranged_put->content_length};
+                        .content_length = auto_ranged_put->content_length,
+                    };
 
                     /* don't hold the lock while invoking the callback */
                     aws_s3_meta_request_unlock_synced_data(meta_request);
