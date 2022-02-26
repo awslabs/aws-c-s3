@@ -116,7 +116,7 @@ int aws_crc_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out,
     if (aws_byte_buf_write(out, (uint8_t *)&tmp, len)) {
         return AWS_OP_SUCCESS;
     }
-    return AWS_OP_ERR;
+    return aws_raise_error(AWS_ERROR_INVALID_BUFFER_SIZE);
 }
 
 int aws_crc32_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf) {
