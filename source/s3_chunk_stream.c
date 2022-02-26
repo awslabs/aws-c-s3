@@ -221,10 +221,11 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_byte_buf_append(&impl->pre_chunk_buffer, &pre_chunk_cursor)) {
         goto error;
     }
-    impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_result);
-    if (impl->checksum_stream == NULL) {
-        goto error;
-    }
+
+    int64_t prechunk_stream_len = 0;
+    int64_t colon_len = s_colon->len;
+    int64_t post_trailer_len = s_post_trailer->len;
+
     struct aws_byte_cursor complete_pre_chunk_cursor = aws_byte_cursor_from_buf(&impl->pre_chunk_buffer);
 
     if (stream_length > 0) {
@@ -234,11 +235,13 @@ struct aws_input_stream *aws_chunk_stream_new(
             goto error;
         }
         impl->set_current_stream_fn = s_set_chunk_stream;
+        if (aws_input_stream_get_length(impl->current_stream, &prechunk_stream_len)) {
+            goto error;
+        }
     } else {
-        impl->current_stream = impl->checksum_stream;
-        final_chunk_len = s_empty_chunk->len;
-        impl->checksum_stream = NULL;
-        impl->set_current_stream_fn = s_set_post_chunk_stream;
+        if (aws_input_stream_get_length(existing_stream, &prechunk_stream_len)) {
+            goto error;
+        }
     }
     size_t checksum_len = aws_get_digest_size_from_algorithm(algorithm);
     size_t encoded_checksum_len = 0;
@@ -251,22 +254,27 @@ struct aws_input_stream *aws_chunk_stream_new(
 
     impl->checksum_header_name = aws_get_http_header_name_from_algorithm(algorithm);
 
-    int64_t prechunk_stream_len = 0;
-    int64_t colon_len = s_colon->len;
-    int64_t post_trailer_len = s_post_trailer->len;
-    if (aws_input_stream_get_length(impl->current_stream, &prechunk_stream_len)) {
-        goto error;
-    }
     /* we subtract one since aws_base64_compute_encoded_len accounts for the null terminator which won't show up in our
      * stream */
     impl->length = prechunk_stream_len + stream_length + final_chunk_len + impl->checksum_header_name->len + colon_len +
                    encoded_checksum_len + post_trailer_len - 1;
+
+    impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_result);
+    if (impl->checksum_stream == NULL) {
+        goto error;
+    }
+    AWS_FATAL_ASSERT(stream_length >= 0);
+    if (stream_length == 0) {
+        impl->current_stream = impl->checksum_stream;
+        final_chunk_len = s_empty_chunk->len;
+        impl->checksum_stream = NULL;
+        impl->set_current_stream_fn = s_set_post_chunk_stream;
+    }
     AWS_FATAL_ASSERT(impl->current_stream);
     return stream;
 
 error:
     /* TODO: the stream should refcount, otherwise, this can lead to crash */
-    aws_input_stream_destroy(impl->checksum_stream);
     aws_input_stream_destroy(impl->current_stream);
     aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
     aws_byte_buf_clean_up(&impl->checksum_result);
