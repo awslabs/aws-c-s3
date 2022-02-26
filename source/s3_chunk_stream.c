@@ -267,6 +267,7 @@ struct aws_input_stream *aws_chunk_stream_new(
 error:
     /* TODO: the stream should refcount, otherwise, this can lead to crash */
     aws_input_stream_destroy(impl->checksum_stream);
+    aws_input_stream_destroy(impl->current_stream);
     aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
     aws_byte_buf_clean_up(&impl->checksum_result);
     aws_mem_release(stream->allocator, stream);

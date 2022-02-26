@@ -67,6 +67,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     const size_t UNKNOWN_CONTENT_LENGTH = 0;
     const int UNKNOWN_NUM_PARTS = 0;
 
+    /* TODO Handle and test multipart copy */
     if (aws_s3_meta_request_init_base(
             allocator,
             client,
