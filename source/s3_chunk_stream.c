@@ -59,7 +59,7 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
 
     if (parent_stream->checksum_result.len == 0) {
         AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to extract base64 encoded checksum of stream");
-        aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
+        return aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
     }
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&parent_stream->checksum_result);
     if (parent_stream->checksum_result_output &&
