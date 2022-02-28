@@ -3935,8 +3935,8 @@ static int s_test_s3_put_pause_resume_helper(
         g_test_s3_region.ptr);
 
     /* creates a PutObject request */
-    struct aws_http_message *message = put_object_request_new(
-        allocator, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_body_stream);
+    struct aws_http_message *message =
+        put_object_request_new(allocator, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_body_stream);
 
     test_data->c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data->mutex);
