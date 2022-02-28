@@ -3751,7 +3751,6 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
 
 struct aws_http_message *put_object_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor bucket,
     struct aws_byte_cursor key,
     struct aws_byte_cursor endpoint,
     struct aws_input_stream *body_stream) {
@@ -3825,9 +3824,6 @@ struct put_object_pause_resume_test_data {
     /* the offset where upload should be paused */
     struct aws_atomic_var request_pause_offset;
 
-    /* the meta request that will be paused */
-    struct aws_atomic_var pause_meta_request_ptr;
-
     struct aws_atomic_var pause_requested;
 
     struct aws_atomic_var pause_result;
@@ -3896,7 +3892,6 @@ static void s_pause_meta_request_progress(
             return;
         }
 
-        struct aws_s3_meta_request *meta_request = aws_atomic_load_ptr(&test_data->pause_meta_request_ptr);
         struct aws_s3_meta_request_persistable_state *persistable_state = NULL;
         int pause_result = aws_s3_meta_request_pause(meta_request, &persistable_state);
         aws_atomic_store_int(&test_data->pause_result, pause_result);
@@ -3941,7 +3936,7 @@ static int s_test_s3_put_pause_resume_helper(
 
     /* creates a PutObject request */
     struct aws_http_message *message = put_object_request_new(
-        allocator, destination_bucket, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_body_stream);
+        allocator, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_body_stream);
 
     test_data->c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data->mutex);
@@ -3962,8 +3957,6 @@ static int s_test_s3_put_pause_resume_helper(
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
     ASSERT_NOT_NULL(meta_request);
-
-    aws_atomic_store_ptr(&test_data->pause_meta_request_ptr, meta_request);
 
     /* wait completion of the meta request */
     aws_mutex_lock(&test_data->mutex);
@@ -3997,7 +3990,6 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     /* initialize the atomic members */
     aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
     aws_atomic_init_int(&test_data.request_pause_offset, 0);
-    aws_atomic_init_ptr(&test_data.pause_meta_request_ptr, NULL);
     aws_atomic_init_int(&test_data.pause_requested, false);
     aws_atomic_init_int(&test_data.pause_result, 0);
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);

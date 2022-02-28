@@ -48,8 +48,8 @@ static int s_load_persistable_state(
     struct aws_s3_auto_ranged_put *auto_ranged_put,
     struct aws_s3_meta_request_persistable_state *persistable_state) {
 
-    auto_ranged_put->synced_data.num_parts_sent = persistable_state->num_parts_completed;
-    auto_ranged_put->synced_data.num_parts_completed = persistable_state->num_parts_completed;
+    auto_ranged_put->synced_data.num_parts_sent = 0;
+    auto_ranged_put->synced_data.num_parts_completed = 0;
     auto_ranged_put->synced_data.create_multipart_upload_sent = true;
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
     auto_ranged_put->upload_id = aws_string_new_from_string(allocator, persistable_state->multipart_upload_id);
@@ -63,6 +63,7 @@ static int s_load_persistable_state(
             /* etag found in persisted state. This means this part was successfully uploaded, skip it... */
             ++auto_ranged_put->threaded_update_data.next_part_number;
             ++auto_ranged_put->synced_data.num_parts_sent;
+            ++auto_ranged_put->synced_data.num_parts_completed;
         } else {
             /* reached the first part that is missing. Resume upload from here. */
             break;
