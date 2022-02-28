@@ -217,13 +217,14 @@ int s3_cp_main(int argc, char *argv[], const char *command_name, void *user_data
 
 /* this stream wrapper is purely for updating progress bars on upload */
 struct progress_update_stream {
+    struct aws_input_stream base;
     struct single_transfer_ctx *transfer;
     struct aws_input_stream *wrapped_stream;
     struct aws_allocator *allocator;
 };
 
 int s_input_seek(struct aws_input_stream *stream, int64_t offset, enum aws_stream_seek_basis basis) {
-    struct progress_update_stream *update_stream = aws_input_stream_get_impl(stream);
+    struct progress_update_stream *update_stream = AWS_CONTAINER_OF(stream, struct progress_update_stream, base);
 
     if (basis == AWS_SSB_BEGIN && offset == 0) {
         progress_listener_reset_progress(update_stream->transfer->listener);
@@ -237,7 +238,7 @@ int s_input_seek(struct aws_input_stream *stream, int64_t offset, enum aws_strea
 }
 
 int s_input_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
-    struct progress_update_stream *update_stream = aws_input_stream_get_impl(stream);
+    struct progress_update_stream *update_stream = AWS_CONTAINER_OF(stream, struct progress_update_stream, base);
 
     size_t current_len = dest->len;
     int val = aws_input_stream_read(update_stream->wrapped_stream, dest);
@@ -247,18 +248,17 @@ int s_input_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
 }
 
 static int s_input_get_status(struct aws_input_stream *stream, struct aws_stream_status *status) {
-    struct progress_update_stream *update_stream = aws_input_stream_get_impl(stream);
+    struct progress_update_stream *update_stream = AWS_CONTAINER_OF(stream, struct progress_update_stream, base);
 
     return aws_input_stream_get_status(update_stream->wrapped_stream, status);
 }
 
 static int s_input_get_length(struct aws_input_stream *stream, int64_t *out_length) {
-    struct progress_update_stream *update_stream = aws_input_stream_get_impl(stream);
+    struct progress_update_stream *update_stream = AWS_CONTAINER_OF(stream, struct progress_update_stream, base);
     return aws_input_stream_get_length(update_stream->wrapped_stream, out_length);
 }
 
-static void s_input_destroy(struct aws_input_stream *stream) {
-    struct progress_update_stream *update_stream = aws_input_stream_get_impl(stream);
+static void s_input_destroy(struct progress_update_stream *update_stream) {
     aws_input_stream_release(update_stream->wrapped_stream);
     aws_mem_release(update_stream->allocator, update_stream);
 }
@@ -268,7 +268,6 @@ static struct aws_input_stream_vtable s_update_input_stream_vtable = {
     .seek = s_input_seek,
     .read = s_input_read,
     .get_status = s_input_get_status,
-    .impl_destroy = s_input_destroy,
 };
 /* end of stream for the progress bar */
 
@@ -552,18 +551,15 @@ static int s_kickoff_put_object(
     update_stream->transfer = transfer_ctx;
     update_stream->wrapped_stream = body_input;
     update_stream->allocator = cp_app_ctx->app_ctx->allocator;
+    update_stream->base.vtable = &s_update_input_stream_vtable;
+    aws_ref_count_init(
+        &update_stream->base.ref_count, update_stream, (aws_simple_completion_callback *)s_input_destroy);
 
-    struct aws_input_stream_options input_stream_options = {
-        .vtable = &s_update_input_stream_vtable,
-        .impl = update_stream,
-        .allocator = cp_app_ctx->app_ctx->allocator,
-    };
-
-    struct aws_input_stream *wrap_stream = aws_input_stream_new(&input_stream_options);
+    struct aws_input_stream *wrap_stream = &update_stream->base;
     aws_http_message_set_body_stream(request_options.message, wrap_stream);
 
     transfer_ctx->meta_request = aws_s3_client_make_meta_request(cp_app_ctx->app_ctx->client, &request_options);
-    /* message will owns the stream */
+    /* message owns the stream */
     aws_input_stream_release(wrap_stream);
     aws_http_message_release(request_options.message);
 
