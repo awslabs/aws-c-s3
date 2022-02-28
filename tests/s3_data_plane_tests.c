@@ -3877,7 +3877,7 @@ static void s_pause_meta_request_progress(
 
     struct put_object_pause_resume_test_data *test_data = user_data;
 
-    aws_atomic_fetch_add(&test_data->total_bytes_uploaded, progress->bytes_transferred);
+    aws_atomic_fetch_add(&test_data->total_bytes_uploaded, (size_t)progress->bytes_transferred);
 
     size_t total_bytes_uploaded = aws_atomic_load_int(&test_data->total_bytes_uploaded);
     size_t offset_to_pause = aws_atomic_load_int(&test_data->request_pause_offset);
