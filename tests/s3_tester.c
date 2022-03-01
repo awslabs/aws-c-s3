@@ -1350,7 +1350,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     aws_s3_client_release(client);
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&input_stream_buffer);
@@ -1593,7 +1593,7 @@ int aws_s3_tester_send_put_object_meta_request(
     aws_string_destroy(host_name);
     host_name = NULL;
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&test_buffer);

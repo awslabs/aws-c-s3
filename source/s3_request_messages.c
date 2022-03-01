@@ -614,7 +614,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
 
     if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
-        aws_input_stream_destroy(input_stream);
+        aws_input_stream_release(input_stream);
         goto error_clean_up;
     }
 
@@ -624,7 +624,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
 
 error_clean_up:
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     return NULL;
 }
 

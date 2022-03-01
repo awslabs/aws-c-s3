@@ -51,8 +51,9 @@ static void s_s3_request_clean_up_send_data_message(struct aws_s3_request *reque
 
     request->send_data.message = NULL;
 
+    /* The input stream is created by the s3 request, we need to clean it up. */
     struct aws_input_stream *input_stream = aws_http_message_get_body_stream(message);
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_http_message_set_body_stream(message, NULL);
