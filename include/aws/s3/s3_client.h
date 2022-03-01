@@ -222,6 +222,7 @@ struct aws_s3_meta_request_options {
      * calculate a new checksum with the corresponding algorithm.
      * Note: If set, it will disable compute_content_md5
      */
+    /* TODO add functionality for copy object */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
     /**
