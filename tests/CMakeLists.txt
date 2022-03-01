@@ -94,10 +94,10 @@ add_net_test_case(test_s3_complete_multipart_message_with_content_md5)
 add_net_test_case(test_s3_put_object_double_slashes)
 
 add_net_test_case(test_s3_round_trip)
-add_net_test_case(test_s3_round_trip_fc)
 add_net_test_case(test_s3_round_trip_default_get)
-add_net_test_case(test_s3_round_trip_default_get_fc)
-add_net_test_case(test_s3_round_trip_mpu_fc)
+# add_net_test_case(test_s3_round_trip_fc)
+# add_net_test_case(test_s3_round_trip_default_get_fc)
+# add_net_test_case(test_s3_round_trip_mpu_fc)
 
 add_net_test_case(test_s3_meta_request_default)
 add_net_test_case(test_s3_put_object_fail_headers_callback)
