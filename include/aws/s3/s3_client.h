@@ -233,7 +233,7 @@ struct aws_s3_meta_request_options {
      * result in an AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error, but the user will not be notified of part level
      * validation, should it succeed. overrides the "x-amz-checksum-mode" header if it was already set.
      */
-    /* TODO replace this with a validation list, empty validation list is equivalent to false */
+    /* TODO add a validation list, empty validation list is equivalent to false */
     bool validate_get_response_checksum;
 
     /* User data for all callbacks. */
