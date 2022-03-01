@@ -227,12 +227,15 @@ struct aws_s3_meta_request_options {
 
     /**
      * Enable checksumode header will be attached to get requests, this will tell s3 to send back checksums headers if
-     * they exist. If a checksum of an entire single part object matching a checksum is received, the client will
-     * calculate the corresponding checksum on the response bodies. The metarequest finish call will respond with a did
-     * validate field and return set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
-     * checksum, and checksum found in the response header do not match. Checksum mismatch of individual parts will also
-     * result in an AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error, but the user will not be notified of part level
-     * validation, should it succeed. overrides the "x-amz-checksum-mode" header if it was already set.
+     * they exist.
+     *
+     * - If the object to get was uploaded as a single part upload with checksums, s3 will provide a checksum of the
+     * entire object. The checksum of the entire body received will be calculated and compared to the checksum provided
+     * by s3.
+     * - If a checksum of a part object is received, the client will
+     * calculate the corresponding checksum on the response bodies. The metarequest will finish with a did
+     * validate field and set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
+     * checksum, and checksum found in the response header do not match.
      */
     /* TODO add a validation list, empty validation list is equivalent to false */
     bool validate_get_response_checksum;
@@ -300,7 +303,8 @@ struct aws_s3_meta_request_result {
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
 
-    /* Was the server side checksum compared against a calculated checksum of all the response bodies. This may be false
+    /* Only set for GET request.
+     * Was the server side checksum compared against a calculated checksum of the response body. This may be false
      * even if validate_get_response_checksum was set because the object was uploaded without a checksum, or was
      * uploaded as a multipart object. */
     bool did_validate;
