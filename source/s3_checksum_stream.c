@@ -69,8 +69,10 @@ static void s_aws_input_checksum_stream_destroy(struct aws_input_stream *stream)
     if (stream) {
         struct aws_checksum_stream *impl = stream->impl;
         int result = aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0);
+        if (result != AWS_OP_SUCCESS) {
+            aws_byte_buf_reset(&impl->checksum_result, true);
+        }
         AWS_ASSERT(result == AWS_OP_SUCCESS);
-        (void)result;
         struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&impl->checksum_result);
         AWS_FATAL_ASSERT(aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_output) == AWS_OP_SUCCESS);
         aws_checksum_destroy(impl->checksum);
