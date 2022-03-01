@@ -28,7 +28,7 @@ static int s_aws_input_checksum_stream_seek(
         "Cannot seek on checksum stream, as it will cause the checksum output to mismatch the checksum of the stream "
         "contents");
     AWS_ASSERT(false);
-    return aws_raise_error(AWS_IO_STREAM_INVALID_SEEK_POSITION);
+    return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
 }
 
 static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {

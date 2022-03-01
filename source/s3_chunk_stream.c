@@ -112,7 +112,7 @@ static int s_aws_input_chunk_stream_seek(
         "Cannot seek on chunk stream, as it will cause the checksum output to mismatch the checksum of the stream"
         "contents");
     AWS_ASSERT(false);
-    return aws_raise_error(AWS_IO_STREAM_INVALID_SEEK_POSITION);
+    return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
 }
 
 static int s_aws_input_chunk_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
@@ -275,6 +275,7 @@ struct aws_input_stream *aws_chunk_stream_new(
 
 error:
     /* TODO: the stream should refcount, otherwise, this can lead to crash */
+    AWS_ASSERT(impl->checksum_stream == NULL);
     aws_input_stream_destroy(impl->current_stream);
     aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
     aws_byte_buf_clean_up(&impl->checksum_result);
