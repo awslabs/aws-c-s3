@@ -226,14 +226,14 @@ struct aws_s3_meta_request_options {
 
     /**
      * Enable checksumode header will be attached to get requests, this will tell s3 to send back checksums headers if
-     * they exist. If a checksum of an entire single part object is received, the client will calculate the
-     * corresponding checksum on the response bodies notify the user that the checksum was validated and return an
-     * AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error if the calculated checksum, and checksum found in the response
-     * header to not match. Checksum mismatch of individual parts will also result in an
-     * AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error, but the user will not be notified of part level validation should
-     * it succeed.
-     * overrides the "x-amz-checksum-mode" header if it was already set.
+     * they exist. If a checksum of an entire single part object matching a checksum is received, the client will
+     * calculate the corresponding checksum on the response bodies. The metarequest finish call will respond with a did
+     * validate field and return set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
+     * checksum, and checksum found in the response header do not match. Checksum mismatch of individual parts will also
+     * result in an AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH error, but the user will not be notified of part level
+     * validation, should it succeed. overrides the "x-amz-checksum-mode" header if it was already set.
      */
+    /* TODO replace this with a validation list, empty validation list is equivalent to false */
     bool validate_get_response_checksum;
 
     /* User data for all callbacks. */

@@ -87,6 +87,8 @@ static bool s_is_get_request(const struct aws_s3_meta_request_options *options) 
 }
 
 static int s_meta_request_get_response_headers_checksum_callback(
+    /* TODO take in a priority list of checksum algorithms, and use this list to determine which checksum algorithm to
+       validate */
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     int response_status,
