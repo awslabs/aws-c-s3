@@ -871,7 +871,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                     !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                 options,
-                options->checksum_algorithm,
+                options->put_checksum_algorithm,
                 false);
         }
 
@@ -922,7 +922,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             content_length,
             false,
             options,
-            options->checksum_algorithm,
+            options->put_checksum_algorithm,
             options->validate_get_response_checksum);
     } else {
         AWS_FATAL_ASSERT(false);

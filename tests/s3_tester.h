@@ -360,26 +360,6 @@ struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *alloc
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
 
-int s3_validate_headers_checksum_set(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_http_headers *headers,
-    int response_status,
-    void *user_data);
-
-void s3_test_validate_checksum(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_result *result,
-    void *user_data);
-void s3_test_validate_fail_checksum(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_result *result,
-    void *user_data);
-
-void s3_test_no_validate_checksum(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_result *result,
-    void *user_data);
-
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 
 extern const struct aws_byte_cursor g_test_body_content_type;

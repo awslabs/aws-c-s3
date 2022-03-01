@@ -83,21 +83,6 @@ static int s_s3_test_meta_request_header_callback(
     return AWS_OP_SUCCESS;
 }
 
-int s3_validate_headers_checksum_set(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_http_headers *headers,
-    int response_status,
-    void *user_data) {
-    (void)response_status;
-    (void)headers;
-    struct aws_s3_meta_request_test_results *meta_request_test_results =
-        (struct aws_s3_meta_request_test_results *)user_data;
-    ASSERT_NOT_NULL(meta_request->meta_request_level_running_response_sum);
-    ASSERT_INT_EQUALS(
-        meta_request->meta_request_level_running_response_sum->algorithm, meta_request_test_results->algorithm);
-    return AWS_OP_SUCCESS;
-}
-
 static int s_s3_test_meta_request_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -175,35 +160,6 @@ static void s_s3_test_meta_request_finish(
     }
 
     aws_s3_tester_notify_meta_request_finished(tester, result);
-}
-
-void s3_test_validate_checksum(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_result *result,
-    void *user_data) {
-    (void)meta_request;
-    (void)user_data;
-    AWS_FATAL_ASSERT(result->did_validate);
-    AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
-}
-
-void s3_test_validate_fail_checksum(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_result *result,
-    void *user_data) {
-    (void)meta_request;
-    (void)user_data;
-    AWS_FATAL_ASSERT(result->did_validate);
-    AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
-}
-
-void s3_test_no_validate_checksum(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_result *result,
-    void *user_data) {
-    (void)meta_request;
-    (void)user_data;
-    AWS_FATAL_ASSERT(!result->did_validate);
 }
 
 static void s_s3_test_meta_request_shutdown(void *user_data) {
@@ -1207,7 +1163,7 @@ int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_meta_request_options meta_request_options = {
         .type = options->meta_request_type,
         .message = options->message,
-        .checksum_algorithm = options->checksum_algorithm,
+        .put_checksum_algorithm = options->checksum_algorithm,
         .validate_get_response_checksum = options->checksum_algorithm,
     };
 

@@ -73,7 +73,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
             client,
             UNKNOWN_PART_SIZE,
             false,
-            options->checksum_algorithm,
+            options->put_checksum_algorithm,
             false,
             options,
             copy_object,
