@@ -120,6 +120,7 @@ struct aws_s3_tester_client_options {
     uint32_t setup_region : 1;
 };
 
+/* should really break this up to a client setup, and a meta_request sending */
 struct aws_s3_tester_meta_request_options {
     /* Optional if a valid aws_s3_tester was passed as an argument to the function. When NULL, the aws_s3_tester's
      * allocator will be used. */
@@ -139,8 +140,17 @@ struct aws_s3_tester_meta_request_options {
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
 
+    bool stream_signing;
+
+    bool validate_get_response_checksum;
+    enum aws_s3_checksum_algorithm checksum_algorithm;
+
+    /* override client signing config */
+    struct aws_signing_config_aws *signing_config;
+
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    aws_s3_meta_request_finish_fn *finish_callback;
 
     /* Default Meta Request specific options. */
     struct {
@@ -176,6 +186,9 @@ struct aws_s3_meta_request_test_results {
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    aws_s3_meta_request_finish_fn *finish_callback;
+    aws_s3_meta_request_shutdown_fn *shutdown_callback;
+    aws_s3_meta_request_progress_fn *progress_callback;
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
@@ -187,11 +200,12 @@ struct aws_s3_meta_request_test_results {
     uint64_t received_body_size;
     int finished_response_status;
     int finished_error_code;
+    enum aws_s3_checksum_algorithm algorithm;
 };
 
 struct aws_s3_client_config;
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, bool streaming);
 
 /* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
  * client to clean up. */
@@ -307,6 +321,16 @@ int aws_s3_tester_send_meta_request(
     struct aws_s3_meta_request_options *options,
     struct aws_s3_meta_request_test_results *test_results,
     uint32_t flags);
+
+int aws_s3_tester_round_trip_meta_request(
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *client,
+    uint32_t file_size_mb,
+    enum aws_s3_checksum_algorithm algorithm,
+    char *test_file_identifier,
+    uint32_t flags,
+    struct aws_s3_meta_request_test_results *put_out_results,
+    struct aws_s3_meta_request_test_results *get_out_results);
 
 /* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_get_object_meta_request(

@@ -4,6 +4,7 @@
  */
 
 #include "aws/s3/private/s3_request_messages.h"
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
@@ -138,7 +139,7 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(allocator, base_message, NULL, 0);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(allocator, base_message, NULL, 0);
 
     if (message == NULL) {
         return NULL;
@@ -163,11 +164,12 @@ error_clean_up:
 /* Creates a create-multipart-upload request from a given put objet request. */
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *base_message) {
+    struct aws_http_message *base_message,
+    enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
         base_message,
         g_s3_create_multipart_upload_excluded_headers,
@@ -189,6 +191,14 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
 
     if (aws_http_headers_erase(headers, g_content_md5_header_name)) {
         if (aws_last_error_or_unknown() != AWS_ERROR_HTTP_HEADER_NOT_FOUND) {
+            goto error_clean_up;
+        }
+    }
+    if (algorithm) {
+        if (aws_http_headers_set(
+                headers,
+                g_create_mpu_checksum_header_name,
+                *aws_get_create_mpu_header_name_from_algorithm(algorithm))) {
             goto error_clean_up;
         }
     }
@@ -216,12 +226,14 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_byte_buf *buffer,
     uint32_t part_number,
     const struct aws_string *upload_id,
-    bool should_compute_content_md5) {
+    bool should_compute_content_md5,
+    const enum aws_s3_checksum_algorithm checksum_algorithm,
+    struct aws_byte_buf *encoded_checksum_output) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator, base_message, g_s3_upload_part_excluded_headers, AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers));
 
     if (message == NULL) {
@@ -233,11 +245,12 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     }
 
     if (buffer != NULL) {
-        if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
+
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_algorithm, encoded_checksum_output) ==
+            NULL) {
             goto error_clean_up;
         }
-
-        if (should_compute_content_md5) {
+        if (checksum_algorithm == AWS_SCA_NONE && should_compute_content_md5) {
             if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
                 goto error_clean_up;
             }
@@ -271,7 +284,7 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator, base_message, g_s3_upload_part_excluded_headers, AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers));
 
     if (message == NULL) {
@@ -283,7 +296,10 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     }
 
     if (buffer != NULL) {
-        if (aws_s3_message_util_assign_body(allocator, buffer, message) == NULL) {
+        /* part copy does not have a ChecksumAlgorithm member, it will use the same algorithm as the create
+         * multipart upload request specifies */
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, NULL /* out_checksum */) ==
+            NULL) {
             goto error_clean_up;
         }
 
@@ -411,7 +427,8 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         aws_byte_cursor_advance(&source_bucket, 1);
     }
 
-    /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them. */
+    /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them.
+     */
     struct aws_byte_cursor source_key = source_bucket;
 
     while (source_key.len > 0) {
@@ -451,23 +468,30 @@ static const struct aws_byte_cursor s_part_section_string_1 =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag>\n"
                                           "         <PartNumber>");
 
-static const struct aws_byte_cursor s_part_section_string_2 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n"
-                                                                                                    "    </Part>\n");
-
+static const struct aws_byte_cursor s_close_part_number_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n");
+static const struct aws_byte_cursor s_close_part_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    </Part>\n");
+static const struct aws_byte_cursor s_open_start_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("         <");
+static const struct aws_byte_cursor s_open_end_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</");
+static const struct aws_byte_cursor s_close_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">");
+static const struct aws_byte_cursor s_close_bracket_new_line = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">\n");
 /* Create a complete-multipart message, which includes an XML payload of all completed parts. */
 struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
-    const struct aws_array_list *etags) {
+    const struct aws_array_list *etags,
+    struct aws_byte_buf *checksums,
+    enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(etags);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
+
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
         base_message,
         g_s3_complete_multipart_upload_excluded_headers,
@@ -530,7 +554,35 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 goto error_clean_up;
             }
 
-            if (aws_byte_buf_append_dynamic(body_buffer, &s_part_section_string_2)) {
+            if (aws_byte_buf_append_dynamic(body_buffer, &s_close_part_number_tag)) {
+                goto error_clean_up;
+            }
+            if (mpu_algorithm_checksum_name) {
+                struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(&checksums[etag_index]);
+
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &checksum)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_open_end_bracket)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                    goto error_clean_up;
+                }
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket_new_line)) {
+                    goto error_clean_up;
+                }
+            }
+            if (aws_byte_buf_append_dynamic(body_buffer, &s_close_part_tag)) {
                 goto error_clean_up;
             }
         }
@@ -539,7 +591,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        aws_s3_message_util_assign_body(allocator, body_buffer, message);
+        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, NULL /* out_checksum */);
     }
 
     return message;
@@ -561,7 +613,7 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_http_message *base_message,
     const struct aws_string *upload_id) {
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
         allocator,
         base_message,
         g_s3_abort_multipart_upload_excluded_headers,
@@ -590,7 +642,9 @@ error_clean_up:
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
-    struct aws_http_message *out_message) {
+    struct aws_http_message *out_message,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *out_checksum) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
     AWS_PRECONDITION(byte_buf);
@@ -608,13 +662,42 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         goto error_clean_up;
     }
 
+    if (algorithm) {
+        /* set Content-Encoding header */
+        if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
+            goto error_clean_up;
+        }
+        /* set x-amz-trailer header */
+        if (aws_http_headers_set(headers, g_trailer_header_name, *aws_get_http_header_name_from_algorithm(algorithm))) {
+            goto error_clean_up;
+        }
+        /* set x-amz-decoded-content-length header */
+        char decoded_content_length_buffer[64] = "";
+        snprintf(
+            decoded_content_length_buffer,
+            sizeof(decoded_content_length_buffer),
+            "%" PRIu64,
+            (uint64_t)buffer_byte_cursor.len);
+        struct aws_byte_cursor decode_content_length_cursor =
+            aws_byte_cursor_from_array(decoded_content_length_buffer, strlen(decoded_content_length_buffer));
+        if (aws_http_headers_set(headers, g_decoded_content_length_header_name, decode_content_length_cursor)) {
+            goto error_clean_up;
+        }
+        /* set input stream to chunk stream */
+        input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
+        if (!input_stream) {
+            goto error_clean_up;
+        }
+    }
+    int64_t stream_length = 0;
+    if (aws_input_stream_get_length(input_stream, &stream_length)) {
+        goto error_clean_up;
+    }
     char content_length_buffer[64] = "";
-    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)buffer_byte_cursor.len);
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)stream_length);
     struct aws_byte_cursor content_length_cursor =
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
-
     if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
-        aws_input_stream_destroy(input_stream);
         goto error_clean_up;
     }
 
@@ -623,7 +706,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     return input_stream;
 
 error_clean_up:
-
+    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
     aws_input_stream_destroy(input_stream);
     return NULL;
 }
@@ -672,8 +755,8 @@ error_clean_up:
     return AWS_OP_ERR;
 }
 
-/* Copy an existing HTTP message's headers and body. */
-struct aws_http_message *aws_s3_message_util_copy_http_message(
+/* Copy an existing HTTP message's headers, method, and path. */
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     const struct aws_byte_cursor *excluded_header_array,

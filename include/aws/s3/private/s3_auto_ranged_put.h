@@ -30,6 +30,13 @@ struct aws_s3_auto_ranged_put {
         uint32_t next_part_number;
     } threaded_update_data;
 
+    /* very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
+     * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
+     * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
+     * request which will only be invoked after all other parts/threads have completed.
+     */
+    struct aws_byte_buf *checksums_list;
+
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
         struct aws_array_list etag_list;

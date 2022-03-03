@@ -5,6 +5,7 @@
 
 #include "s3_tester.h"
 #include "aws/s3/private/s3_auto_ranged_get.h"
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
@@ -154,6 +155,10 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
 
+    if (meta_request_test_results->finish_callback != NULL) {
+        meta_request_test_results->finish_callback(meta_request, result, user_data);
+    }
+
     aws_s3_tester_notify_meta_request_finished(tester, result);
 }
 
@@ -199,7 +204,7 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     return endpoint_string;
 }
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, bool streaming) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -259,6 +264,10 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 #endif
 
     aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
+
+    if (streaming) {
+        tester->default_signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+    }
 
     return AWS_OP_SUCCESS;
 
@@ -764,6 +773,7 @@ struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *te
     return endpoint;
 }
 
+/* Mock request defaults to GET request */
 struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
@@ -774,12 +784,15 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
 
     struct aws_s3_meta_request_options options = {
         .message = dummy_http_message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
     };
 
     aws_s3_meta_request_init_base(
         tester->allocator,
         NULL,
         0,
+        false,
+        AWS_SCA_NONE,
         false,
         &options,
         empty_meta_request,
@@ -842,7 +855,6 @@ static void s_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester) {
     tester->synced_data.client_shutdown = false;
     aws_s3_tester_unlock_synced_data(tester);
 }
-
 struct aws_http_message *aws_s3_test_get_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host,
@@ -1125,7 +1137,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     if (tester == NULL) {
         ASSERT_TRUE(options->allocator);
-        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester));
+        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester, options->stream_signing));
         tester = &local_tester;
         clean_up_local_tester = true;
     } else if (allocator == NULL) {
@@ -1151,7 +1163,13 @@ int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_meta_request_options meta_request_options = {
         .type = options->meta_request_type,
         .message = options->message,
+        .checksum_algorithm = options->checksum_algorithm,
+        .validate_get_response_checksum = options->validate_get_response_checksum,
     };
+
+    if (options->signing_config) {
+        meta_request_options.signing_config = options->signing_config;
+    }
 
     struct aws_byte_buf input_stream_buffer;
     AWS_ZERO_STRUCT(input_stream_buffer);
@@ -1193,6 +1211,8 @@ int aws_s3_tester_send_meta_request_with_options(
             uint32_t object_size_mb = options->put_options.object_size_mb;
             size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
 
+            /* This doesn't do what we think it should because
+             * g_min_upload_part_size overrides client->part_size */
             if (options->put_options.ensure_multipart) {
                 if (object_size_bytes == 0) {
                     object_size_bytes = client->part_size * 2;
@@ -1295,6 +1315,9 @@ int aws_s3_tester_send_meta_request_with_options(
 
     out_results->headers_callback = options->headers_callback;
     out_results->body_callback = options->body_callback;
+    out_results->finish_callback = options->finish_callback;
+
+    out_results->algorithm = options->checksum_algorithm;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
@@ -1514,6 +1537,7 @@ int aws_s3_tester_validate_get_object_results(
     return AWS_OP_SUCCESS;
 }
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_send_put_object_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
@@ -1601,6 +1625,7 @@ int aws_s3_tester_send_put_object_meta_request(
     return AWS_OP_SUCCESS;
 }
 
+/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
     uint32_t flags) {
