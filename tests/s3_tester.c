@@ -1164,7 +1164,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .type = options->meta_request_type,
         .message = options->message,
         .put_checksum_algorithm = options->checksum_algorithm,
-        .validate_get_response_checksum = options->checksum_algorithm,
+        .validate_get_response_checksum = options->validate_get_response_checksum,
     };
 
     if (options->signing_config) {

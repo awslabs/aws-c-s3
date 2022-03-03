@@ -2375,8 +2375,6 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
     return 0;
 }
 
-/* here we don't validate the metarequest fc since we don't expect a validation response on a multipart upload, but we
- * do expect that the individual parts will be validated since the upload and download part size matches */
 AWS_TEST_CASE(test_s3_round_trip_mpu_multipart_get_fc, s_test_s3_round_trip_mpu_multipart_get_fc)
 static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

@@ -959,6 +959,9 @@ static int s_s3_meta_request_incoming_body(
         request->send_data.response_status,
         (uint64_t)data->len,
         (void *)connection);
+    if (request->send_data.response_status < 200 || request->send_data.response_status >= 299) {
+        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
+    }
 
     if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
         s_get_part_response_body_checksum_helper(connection->request->request_level_running_response_sum, data);
