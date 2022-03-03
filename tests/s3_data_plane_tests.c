@@ -2503,9 +2503,6 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
     return 0;
 }
 
-// cancel upload
-// cancel download
-
 AWS_TEST_CASE(test_s3_meta_request_default, s_test_s3_meta_request_default)
 static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
