@@ -144,6 +144,8 @@ static void s_meta_request_get_response_finish_checksum_callback(
         (struct aws_s3_meta_request_result *)meta_request_result;
     if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
         mut_meta_request_result->did_validate = true;
+        mut_meta_request_result->validation_algorithm =
+            meta_request->meta_request_level_running_response_sum->algorithm;
         size_t encoded_checksum_len = 0;
         /* what error should I raise for these? */
         aws_base64_compute_encoded_len(
@@ -161,6 +163,7 @@ static void s_meta_request_get_response_finish_checksum_callback(
         }
     } else {
         mut_meta_request_result->did_validate = false;
+        mut_meta_request_result->validation_algorithm = AWS_SCA_NONE;
     }
     if (meta_request->finish_user_callback_after_checksum) {
         meta_request->finish_user_callback_after_checksum(meta_request, meta_request_result, user_data);
@@ -959,7 +962,7 @@ static int s_s3_meta_request_incoming_body(
         request->send_data.response_status,
         (uint64_t)data->len,
         (void *)connection);
-    if (request->send_data.response_status < 200 || request->send_data.response_status >= 299) {
+    if (request->send_data.response_status < 200 || request->send_data.response_status > 299) {
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
     }
 

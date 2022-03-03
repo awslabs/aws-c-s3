@@ -309,6 +309,9 @@ struct aws_s3_meta_request_result {
      * uploaded as a multipart object. */
     bool did_validate;
 
+    /* algorithm used to validate checksum */
+    enum aws_s3_checksum_algorithm validation_algorithm;
+
     /* Final error code of the meta request. */
     int error_code;
 };
