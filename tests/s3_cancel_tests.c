@@ -318,7 +318,7 @@ static int s3_cancel_test_helper_fc(
             .client = client,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
-            .checksum_algorithm = AWS_SCA_CRC32,
+            .checksum_algorithm = checksum_algorithm,
             .validate_get_response_checksum = false,
             .put_options =
                 {
