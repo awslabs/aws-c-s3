@@ -38,10 +38,6 @@ static void s_s3_auto_ranged_put_request_finished(
 
 /**
  * Loads the persistable state used to resume an upload that was previously paused.
- * @param allocator
- * @param auto_ranged_put
- * @param options
- * @return
  */
 static int s_load_persistable_state(
     struct aws_allocator *allocator,
@@ -86,7 +82,8 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .finished_request = s_s3_auto_ranged_put_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
-    .pause = s_s3_auto_ranged_put_pause};
+    .pause = s_s3_auto_ranged_put_pause,
+};
 
 /* Allocate a new auto-ranged put meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
@@ -133,12 +130,12 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->threaded_update_data.next_part_number = 1;
 
     if (options->persistable_state != NULL) {
-        int load_state_result = s_load_persistable_state(allocator, auto_ranged_put, options->persistable_state);
-        if (load_state_result != AWS_ERROR_SUCCESS) {
+        if (s_load_persistable_state(allocator, auto_ranged_put, options->persistable_state)) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "Could not load persisted state for auto-ranged-put meta request. Upload will re-start from "
                 "beginning.");
+            goto error_clean_up;
         }
     }
     auto_ranged_put->checksums_list = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf), num_parts);

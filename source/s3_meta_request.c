@@ -280,7 +280,9 @@ int aws_s3_meta_request_pause(
     struct aws_s3_meta_request_persistable_state **resume_token) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
-    AWS_PRECONDITION(meta_request->vtable->pause);
+    if (!meta_request->vtable->pause) {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
 
     return meta_request->vtable->pause(meta_request, resume_token);
 }
