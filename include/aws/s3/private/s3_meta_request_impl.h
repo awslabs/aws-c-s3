@@ -25,7 +25,6 @@ struct aws_s3_request_options;
 struct aws_http_headers;
 struct aws_http_make_request_options;
 struct aws_retry_strategy;
-struct aws_byte_buffer;
 
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
@@ -132,6 +131,11 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
 
+    /* Customer specified callbacks to be called by our specialized callback to calculate the response checkum. */
+    aws_s3_meta_request_headers_callback_fn *headers_user_callback_after_checksum;
+    aws_s3_meta_request_receive_body_callback_fn *body_user_callback_after_checksum;
+    aws_s3_meta_request_finish_fn *finish_user_callback_after_checksum;
+
     enum aws_s3_meta_request_type type;
 
     struct {
@@ -182,6 +186,16 @@ struct aws_s3_meta_request {
     } client_process_work_threaded_data;
 
     const bool should_compute_content_md5;
+
+    const enum aws_s3_checksum_algorithm checksum_algorithm;
+
+    bool validate_get_response_checksum;
+
+    /* checksum found in either a default get request, or in the initial head request of a mutlipart get */
+    struct aws_byte_buf meta_request_level_response_header_checksum;
+
+    /* running checksum of all of the parts of a default get, or ranged get meta request*/
+    struct aws_s3_checksum *meta_request_level_running_response_sum;
 };
 
 AWS_EXTERN_C_BEGIN
@@ -193,6 +207,8 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
+    const enum aws_s3_checksum_algorithm checksum_algorithm,
+    bool validate_get_response_checksum,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,

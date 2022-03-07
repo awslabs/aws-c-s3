@@ -29,7 +29,7 @@ static int s_test_s3_endpoint_ref(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
     aws_s3_tester_set_counter1_desired(&tester, 3);
 
     struct aws_string *host_name =
@@ -100,7 +100,7 @@ static int s_test_s3_endpoint_resurrect(struct aws_allocator *allocator, void *c
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct aws_s3_tester_client_options client_options;
     AWS_ZERO_STRUCT(client_options);
@@ -135,7 +135,7 @@ static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct aws_s3_client *client = NULL;
     struct aws_s3_tester_client_options client_options;

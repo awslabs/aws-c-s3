@@ -139,6 +139,16 @@ enum aws_s3_meta_request_compute_content_md5 {
     AWS_MR_CONTENT_MD5_ENABLED,
 };
 
+enum aws_s3_checksum_algorithm {
+    AWS_SCA_NONE = 0,
+    AWS_SCA_INIT,
+    AWS_SCA_CRC32C = AWS_SCA_INIT,
+    AWS_SCA_CRC32,
+    AWS_SCA_SHA1,
+    AWS_SCA_SHA256,
+    AWS_SCA_COUNT,
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
 
@@ -203,6 +213,32 @@ struct aws_s3_meta_request_options {
 
     /* Initial HTTP message that defines what operation we are doing. */
     struct aws_http_message *message;
+
+    /**
+     * checksum algorithm will cause single part put requests to append a trailing checksum of the body corresponding to
+     * the specified algorithm. Multipart uploads will have a checksum uploaded corresponding to each individual part,
+     * and the body of the complete multipart upload request will contain a list of the checksums from erach part.
+     * Get requests will be unaffected by this setting. Copy object requests will have a header specifying to s3 to
+     * calculate a new checksum with the corresponding algorithm.
+     * Note: If set, it will disable compute_content_md5
+     */
+    /* TODO add functionality for copy object */
+    enum aws_s3_checksum_algorithm checksum_algorithm;
+
+    /**
+     * Enable checksumode header will be attached to get requests, this will tell s3 to send back checksums headers if
+     * they exist.
+     *
+     * - If the object to get was uploaded as a single part upload with checksums, s3 will provide a checksum of the
+     * entire object. The checksum of the entire body received will be calculated and compared to the checksum provided
+     * by s3.
+     * - If a checksum of a part object is received, the client will
+     * calculate the corresponding checksum on the response bodies. The metarequest will finish with a did
+     * validate field and set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
+     * checksum, and checksum found in the response header do not match.
+     */
+    /* TODO add a validation list, empty validation list is equivalent to false */
+    bool validate_get_response_checksum;
 
     /* User data for all callbacks. */
     void *user_data;
@@ -273,6 +309,15 @@ struct aws_s3_meta_request_result {
 
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
+
+    /* Only set for GET request.
+     * Was the server side checksum compared against a calculated checksum of the response body. This may be false
+     * even if validate_get_response_checksum was set because the object was uploaded without a checksum, or was
+     * uploaded as a multipart object. */
+    bool did_validate;
+
+    /* algorithm used to validate checksum */
+    enum aws_s3_checksum_algorithm validation_algorithm;
 
     /* Final error code of the meta request. */
     int error_code;
