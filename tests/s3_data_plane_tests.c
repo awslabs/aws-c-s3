@@ -4313,6 +4313,7 @@ static void s_pause_meta_request_progress(
 }
 
 static int s_test_s3_put_pause_resume_helper(
+    struct aws_s3_tester *tester,
     struct aws_allocator *allocator,
     void *ctx,
     struct put_object_pause_resume_test_data *test_data,
@@ -4324,15 +4325,11 @@ static int s_test_s3_put_pause_resume_helper(
 
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
-
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+        tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
@@ -4387,13 +4384,14 @@ static int s_test_s3_put_pause_resume_helper(
     aws_s3_client_release(client);
     client = NULL;
 
-    aws_s3_tester_clean_up(&tester);
-
     return 0;
 }
 
 AWS_TEST_CASE(test_s3_put_pause_resume, s_test_s3_put_pause_resume)
 static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx) {
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("upload/test_pause_resume.txt");
 
@@ -4418,7 +4416,12 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
 
     /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
     int result = s_test_s3_put_pause_resume_helper(
-        allocator, ctx, &test_data, destination_key, initial_upload_stream, NULL, AWS_ERROR_S3_PAUSED, 0);
+        &tester, allocator, ctx, &test_data, destination_key, initial_upload_stream, NULL, AWS_ERROR_S3_PAUSED, 0);
+
+    if (tester.bound_to_client) {
+        aws_s3_tester_wait_for_client_shutdown(&tester);
+        tester.bound_to_client = false;
+    }
 
     ASSERT_SUCCESS(result);
 
@@ -4446,6 +4449,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     aws_atomic_store_int(&test_data.request_pause_offset, objectLength * 2);
 
     int resume_result = s_test_s3_put_pause_resume_helper(
+        &tester,
         allocator,
         ctx,
         &test_data,
@@ -4461,6 +4465,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
 
     aws_s3_meta_request_persistable_state_destroy(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
+    aws_s3_tester_clean_up(&tester);
 
     return AWS_ERROR_SUCCESS;
 }
