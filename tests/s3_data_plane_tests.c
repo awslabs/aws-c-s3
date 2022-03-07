@@ -4326,7 +4326,7 @@ static int s_test_s3_put_pause_resume_helper(
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
