@@ -135,6 +135,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
                 AWS_LS_S3_META_REQUEST,
                 "Could not load persisted state for auto-ranged-put meta request. Upload will re-start from "
                 "beginning.");
+            aws_mem_release(allocator, etag_c_array);
             goto error_clean_up;
         }
     }

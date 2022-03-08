@@ -4406,29 +4406,26 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
     /* total length of the object to simulate for upload */
-    const int objectLength = 128 * 1024 * 1024;
+    const int object_length = 128 * 1024 * 1024;
 
     /* offset of the upload where pause should be requested by test client */
-    aws_atomic_store_int(&test_data.request_pause_offset, objectLength / 3);
+    aws_atomic_store_int(&test_data.request_pause_offset, object_length / 3);
 
     /* stream used to initiate upload */
-    struct aws_input_stream *initial_upload_stream = aws_s3_test_input_stream_new(allocator, objectLength);
+    struct aws_input_stream *initial_upload_stream = aws_s3_test_input_stream_new(allocator, object_length);
 
     /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
-    int result = s_test_s3_put_pause_resume_helper(
-        &tester, allocator, ctx, &test_data, destination_key, initial_upload_stream, NULL, AWS_ERROR_S3_PAUSED, 0);
-
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
+        &tester, allocator, ctx, &test_data, destination_key, initial_upload_stream, NULL, AWS_ERROR_S3_PAUSED, 0));
     if (tester.bound_to_client) {
         aws_s3_tester_wait_for_client_shutdown(&tester);
         tester.bound_to_client = false;
     }
 
-    ASSERT_SUCCESS(result);
-
     aws_input_stream_destroy(initial_upload_stream);
 
     /* new stream used to resume upload. it begins at the offset specified in the persistable state */
-    struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new(allocator, objectLength);
+    struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new(allocator, object_length);
     struct aws_s3_meta_request_persistable_state *persistable_state =
         aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 
@@ -4443,12 +4440,14 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
             printf("NULL\n");
         }
     }
+    size_t bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
 
     /* offset where pause should be requested is set to a value greater than content length,
      * to avoid any more pause when resuming the upload */
-    aws_atomic_store_int(&test_data.request_pause_offset, objectLength * 2);
+    aws_atomic_store_int(&test_data.request_pause_offset, object_length * 2);
+    aws_atomic_store_int(&test_data.total_bytes_uploaded, 0);
 
-    int resume_result = s_test_s3_put_pause_resume_helper(
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
         &tester,
         allocator,
         ctx,
@@ -4457,10 +4456,11 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         resume_upload_stream,
         persistable_state,
         AWS_ERROR_SUCCESS,
-        AWS_HTTP_STATUS_CODE_200_OK);
+        AWS_HTTP_STATUS_CODE_200_OK));
 
-    ASSERT_SUCCESS(resume_result);
-
+    bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
+    /* TODO: this should be smaller, but since the upload resume stars from the beginning, it's now always equal. */
+    ASSERT_INT_EQUALS(bytes_uploaded, object_length);
     /* TODO: perform further validations of content integrity */
 
     aws_s3_meta_request_persistable_state_destroy(persistable_state);
