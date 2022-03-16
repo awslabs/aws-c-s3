@@ -595,9 +595,10 @@ static void s_s3_client_process_work_empty(struct aws_s3_client *client) {
     (void)client;
 }
 
-static void s_s3_client_endpoint_ref_count_zero_empty(struct aws_s3_endpoint *endpoint) {
+static bool s_s3_client_endpoint_ref_count_zero_empty(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     (void)endpoint;
+    return true;
 }
 
 static void s_s3_client_endpoint_shutdown_callback_empty(void *user_data) {

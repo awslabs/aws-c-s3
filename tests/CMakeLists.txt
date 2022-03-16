@@ -127,9 +127,10 @@ add_net_test_case(test_s3_default_sending_meta_request_user_agent)
 add_net_test_case(test_s3_range_requests)
 add_net_test_case(test_s3_not_satisfiable_range)
 
+add_net_test_case(test_s3_endpoint_ref)
 add_net_test_case(test_s3_bad_endpoint)
 add_net_test_case(test_s3_different_endpoints)
-# add_net_test_case(test_s3_endpoint_resurrect)
+add_net_test_case(test_s3_endpoint_resurrect)
 
 add_test_case(test_s3_replace_quote_entities)
 add_test_case(test_s3_parse_content_range_response_header)

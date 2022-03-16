@@ -217,6 +217,10 @@ static void s_s3_endpoint_ref_count_zero(void *user_data) {
     struct aws_s3_endpoint *endpoint = user_data;
     AWS_PRECONDITION(endpoint);
 
+    if (endpoint->ref_count_zero_callback != NULL && !endpoint->ref_count_zero_callback(endpoint)) {
+        return;
+    }
+
     if (endpoint->http_connection_manager != NULL) {
         struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
         endpoint->http_connection_manager = NULL;

@@ -370,8 +370,6 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
-    /* Okay to access it without lock here as the client should not have any reference to the meta request or the
-     * endpoint now. */
     aws_s3_endpoint_release(meta_request->endpoint);
     aws_s3_client_release(meta_request->client);
 
@@ -1404,14 +1402,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     aws_s3_meta_request_result_clean_up(meta_request, &finish_result);
 
-    {
-        aws_s3_client_lock_synced_data(meta_request->client);
-        /* The endpoint is tracked by the synced hash table from client. All the endpoint refcount need to be protected
-         * by the lock from client */
-        aws_s3_endpoint_release(meta_request->endpoint);
-        meta_request->endpoint = NULL;
-        aws_s3_client_unlock_synced_data(meta_request->client);
-    }
+    aws_s3_endpoint_release(meta_request->endpoint);
+    meta_request->endpoint = NULL;
 
     aws_s3_client_release(meta_request->client);
     meta_request->client = NULL;

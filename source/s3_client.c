@@ -108,9 +108,9 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
-static void s_s3_client_endpoint_ref_count_zero_synced(struct aws_s3_endpoint *endpoint);
+static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
 
-static void s_s3_client_endpoint_shutdown_callback_synced(void *user_data);
+static void s_s3_client_endpoint_shutdown_callback(void *user_data);
 
 /* Default factory function for creating a meta request. */
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
@@ -123,8 +123,8 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .get_host_address_count = aws_host_resolver_get_host_address_count,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
-    .endpoint_ref_count_zero = s_s3_client_endpoint_ref_count_zero_synced,
-    .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback_synced,
+    .endpoint_ref_count_zero = s_s3_client_endpoint_ref_count_zero,
+    .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
 };
 
@@ -692,8 +692,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .port = port,
             };
 
-            /* The endpoint is tracked by the synced hash table from client. All the endpoint refcount need to be
-             * protected by the lock from client */
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
 
             if (endpoint == NULL) {
@@ -705,8 +703,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {
-            /* The endpoint is tracked by the synced hash table from client. All the endpoint refcount need to be
-             * protected by the lock from client */
             endpoint = aws_s3_endpoint_acquire(endpoint_hash_element->value);
 
             aws_string_destroy(endpoint_host_name);
@@ -740,21 +736,45 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     return meta_request;
 }
 
-/* Client will manage endpoint with the lock held. The callback will be invoked with the client helding the lock */
-static void s_s3_client_endpoint_ref_count_zero_synced(struct aws_s3_endpoint *endpoint) {
+static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
 
     struct aws_s3_client *client = endpoint->user_data;
     AWS_PRECONDITION(client);
-    aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+
+    bool clean_up_endpoint = false;
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+
+        /* It is possible that before we were able to acquire the lock here, the critical section used for looking up
+         * the endpoint in the table and assigning it to a new meta request was called in a different thread. To handle
+         * this case, we check the ref count before removing it.*/
+        if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 0) {
+            aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+            clean_up_endpoint = true;
+        }
+
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
+
+    return clean_up_endpoint;
 }
 
-/* Client will manage endpoint with the lock held. The callback will be invoked with the client helding the lock */
-static void s_s3_client_endpoint_shutdown_callback_synced(void *user_data) {
+static void s_s3_client_endpoint_shutdown_callback(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
-    --client->synced_data.num_endpoints_allocated;
-    s_s3_client_schedule_process_work_synced(client);
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        --client->synced_data.num_endpoints_allocated;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 }
 
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
@@ -1376,15 +1396,7 @@ static void s_s3_client_create_connection_for_request_default(
 
     struct aws_s3_connection *connection = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_connection));
 
-    /* BEGIN CRITICAL SECTION */
-    {
-        aws_s3_client_lock_synced_data(client);
-        /* Endpoint is protected by the client lock */
-        connection->endpoint = aws_s3_endpoint_acquire(meta_request->endpoint);
-        aws_s3_client_unlock_synced_data(client);
-    }
-    /* END CRITICAL SECTION */
-
+    connection->endpoint = aws_s3_endpoint_acquire(meta_request->endpoint);
     connection->request = request;
 
     struct aws_byte_cursor host_header_value;
@@ -1463,8 +1475,7 @@ static void s_s3_client_acquired_retry_token(
     AWS_ASSERT(client->vtable->acquire_http_connection);
 
     /* client needs to be kept alive until s_s3_client_on_acquire_http_connection completes */
-    /* TODO: not a blocker, consider managing the life time of aws_s3_client from aws_s3_endpoint to simplify usage
-     */
+    /* TODO: not a blocker, consider managing the life time of aws_s3_client from aws_s3_endpoint to simplify usage */
     aws_s3_client_acquire(client);
 
     client->vtable->acquire_http_connection(
@@ -1666,7 +1677,7 @@ reset_connection:
     aws_retry_token_release(connection->retry_token);
     connection->retry_token = NULL;
 
-    struct aws_s3_endpoint *connection_endpoint = connection->endpoint;
+    aws_s3_endpoint_release(connection->endpoint);
     connection->endpoint = NULL;
 
     aws_mem_release(client->allocator, connection);
@@ -1675,9 +1686,6 @@ reset_connection:
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
-        /* The endpoint is tracked by the synced hash table from client. All the endpoint refcount need to be protected
-         * by the lock from client */
-        aws_s3_endpoint_release(connection_endpoint);
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
