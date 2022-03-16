@@ -31,12 +31,8 @@ enum aws_s3_connection_finish_code {
     AWS_S3_CONNECTION_FINISH_CODE_RETRY,
 };
 
-/* Callback for the owner of the endpoint when the ref count of this endpoint hits zero. This gives the owner a
- * chance to clean up any references to the endpoint, but also to short circuit clean-up. This can be needed in the case
- * of a synced table, where before the lock of the table can be grabbed, a reference for the endpoint is added by a
- * different critical section.*/
-typedef bool(aws_s3_endpoint_ref_zero_fn)(struct aws_s3_endpoint *endpoint);
-
+/* Callback for the owner of the endpoint when the ref count of this endpoint hits zero. */
+typedef void(aws_s3_endpoint_ref_zero_fn)(struct aws_s3_endpoint *endpoint);
 /* Callback for the owner of the endpoint when the endpoint has completely cleaned up. */
 typedef void(aws_s3_endpoint_shutdown_fn)(void *user_data);
 
@@ -44,10 +40,8 @@ struct aws_s3_endpoint_options {
     /* URL of the host that this endpoint refers to. */
     struct aws_string *host_name;
 
-    /* Callback for the owner of the endpoint when the endpoint's refcount hits zero. (More details in the typedef of
-     * this callback.)*/
+    /* Callback for the owner of the endpoint when the endpoint's refcount hits zero. */
     aws_s3_endpoint_ref_zero_fn *ref_count_zero_callback;
-
     /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
 
@@ -83,8 +77,7 @@ struct aws_s3_endpoint {
     /* Connection manager that manages all connections to this endpoint. */
     struct aws_http_connection_manager *http_connection_manager;
 
-    /* Callback for the owner of the endpoint when the endpoint's refcount hits zero. (More details in the typedef of
-     * this callback.)*/
+    /* Callback for the owner of the endpoint when the endpoint's refcount hits zero. */
     aws_s3_endpoint_ref_zero_fn *ref_count_zero_callback;
 
     /* Callback for when this endpoint completely shuts down. */
@@ -129,7 +122,7 @@ struct aws_s3_client_vtable {
 
     void (*process_work)(struct aws_s3_client *client);
 
-    bool (*endpoint_ref_count_zero)(struct aws_s3_endpoint *endpoint);
+    void (*endpoint_ref_count_zero)(struct aws_s3_endpoint *endpoint);
 
     void (*endpoint_shutdown_callback)(void *user_data);
 
