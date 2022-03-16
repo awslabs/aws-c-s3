@@ -108,8 +108,6 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
-static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
-
 static void s_s3_client_endpoint_shutdown_callback(void *user_data);
 
 /* Default factory function for creating a meta request. */
@@ -123,7 +121,6 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .get_host_address_count = aws_host_resolver_get_host_address_count,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_default,
     .process_work = s_s3_client_process_work_default,
-    .endpoint_ref_count_zero = s_s3_client_endpoint_ref_count_zero,
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
 };
@@ -682,7 +679,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         if (was_created) {
             struct aws_s3_endpoint_options endpoint_options = {
                 .host_name = endpoint_host_name,
-                .ref_count_zero_callback = client->vtable->endpoint_ref_count_zero,
                 .shutdown_callback = client->vtable->endpoint_shutdown_callback,
                 .client_bootstrap = client->client_bootstrap,
                 .tls_connection_options = is_https ? client->tls_connection_options : NULL,
@@ -734,14 +730,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     }
 
     return meta_request;
-}
-
-static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
-    AWS_PRECONDITION(endpoint);
-
-    struct aws_s3_client *client = endpoint->user_data;
-    AWS_PRECONDITION(client);
-    return true;
 }
 
 static void s_s3_client_endpoint_shutdown_callback(void *user_data) {
