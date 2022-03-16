@@ -741,26 +741,7 @@ static bool s_s3_client_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint
 
     struct aws_s3_client *client = endpoint->user_data;
     AWS_PRECONDITION(client);
-
-    bool clean_up_endpoint = false;
-
-    /* BEGIN CRITICAL SECTION */
-    {
-        aws_s3_client_lock_synced_data(client);
-
-        /* It is possible that before we were able to acquire the lock here, the critical section used for looking up
-         * the endpoint in the table and assigning it to a new meta request was called in a different thread. To handle
-         * this case, we check the ref count before removing it.*/
-        if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 0) {
-            aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-            clean_up_endpoint = true;
-        }
-
-        aws_s3_client_unlock_synced_data(client);
-    }
-    /* END CRITICAL SECTION */
-
-    return clean_up_endpoint;
+    return true;
 }
 
 static void s_s3_client_endpoint_shutdown_callback(void *user_data) {
@@ -1677,7 +1658,8 @@ reset_connection:
     aws_retry_token_release(connection->retry_token);
     connection->retry_token = NULL;
 
-    aws_s3_endpoint_release(connection->endpoint);
+    /* The endpoint must be created by client here */
+    aws_s3_client_endpoint_release(client, connection->endpoint);
     connection->endpoint = NULL;
 
     aws_mem_release(client->allocator, connection);

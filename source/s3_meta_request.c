@@ -1402,7 +1402,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     aws_s3_meta_request_result_clean_up(meta_request, &finish_result);
 
-    aws_s3_endpoint_release(meta_request->endpoint);
+    /* The endpoint must be created by client here */
+    aws_s3_client_endpoint_release(meta_request->client, meta_request->endpoint);
     meta_request->endpoint = NULL;
 
     aws_s3_client_release(meta_request->client);
