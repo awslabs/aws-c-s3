@@ -370,6 +370,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    /* For a meta request created by client, the endpoint should always be cleaned up by meta request finish call. Just
+     * use regular release here for those meta request not really went through the client */
     aws_s3_endpoint_release(meta_request->endpoint);
     aws_s3_client_release(meta_request->client);
 
