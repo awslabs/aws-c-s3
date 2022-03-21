@@ -48,6 +48,7 @@ static int s_set_null_stream(struct aws_chunk_stream *parent_stream) {
 static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     int64_t current_stream_length;
     if (aws_input_stream_get_length(parent_stream->current_stream, &current_stream_length)) {
+        aws_input_stream_release(parent_stream->current_stream);
         return AWS_OP_ERR;
     }
     aws_input_stream_release(parent_stream->current_stream);
@@ -220,6 +221,16 @@ struct aws_input_stream *aws_chunk_stream_new(
         goto error;
     }
 
+    size_t checksum_len = aws_get_digest_size_from_algorithm(algorithm);
+
+    size_t encoded_checksum_len = 0;
+    if (aws_base64_compute_encoded_len(checksum_len, &encoded_checksum_len)) {
+        goto error;
+    }
+    if (aws_byte_buf_init(&impl->checksum_result, allocator, encoded_checksum_len)) {
+        goto error;
+    }
+
     impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_result);
     if (impl->checksum_stream == NULL) {
         goto error;
@@ -243,14 +254,6 @@ struct aws_input_stream *aws_chunk_stream_new(
         final_chunk_len = s_empty_chunk->len;
         impl->checksum_stream = NULL;
         impl->set_current_stream_fn = s_set_post_chunk_stream;
-    }
-    size_t checksum_len = aws_get_digest_size_from_algorithm(algorithm);
-    size_t encoded_checksum_len = 0;
-    if (aws_base64_compute_encoded_len(checksum_len, &encoded_checksum_len)) {
-        goto error;
-    }
-    if (aws_byte_buf_init(&impl->checksum_result, allocator, encoded_checksum_len)) {
-        goto error;
     }
 
     impl->checksum_header_name = aws_get_http_header_name_from_algorithm(algorithm);
