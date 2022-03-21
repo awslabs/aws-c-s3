@@ -53,16 +53,13 @@ static int s_load_persistable_state(
     struct aws_array_list *persisted_etag_list = &persistable_state->etag_list;
 
     for (size_t etag_index = 0; etag_index < aws_array_list_length(persisted_etag_list); etag_index++) {
+        /* TODO: copy the etag and checksum to the resumed auto range put. */
         struct aws_string *etag = NULL;
         aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
         if (etag != NULL) {
-            /* etag found in persisted state. This means this part was successfully uploaded, skip it... */
-            ++auto_ranged_put->threaded_update_data.next_part_number;
+            /* Mark the num of parts has been sent and completed and copy the etag/check list to resume */
             ++auto_ranged_put->synced_data.num_parts_sent;
             ++auto_ranged_put->synced_data.num_parts_completed;
-        } else {
-            /* reached the first part that is missing. Resume upload from here. */
-            break;
         }
     }
 
@@ -125,8 +122,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->content_length = content_length;
     auto_ranged_put->synced_data.total_num_parts = num_parts;
 
-    /* Upload starts from the beginning by default, but some parts might be skipped during
-     * an upload resume configured in s_load_persistable_state() below. */
     auto_ranged_put->threaded_update_data.next_part_number = 1;
 
     if (options->persistable_state != NULL) {
@@ -219,6 +214,23 @@ static bool s_s3_auto_ranged_put_update(
 
             /* If we haven't sent all of the parts yet, then set up to send a new part now. */
             if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
+
+                /* Check if the etag/checksum list has the result already */
+                struct aws_string *etag = NULL;
+                if (!aws_array_list_get_at(
+                        auto_ranged_put->synced_data.etag_list,
+                        &etag,
+                        auto_ranged_put->threaded_update_data.next_part_number) &&
+                    etag) {
+                    /* Checksum? */
+                    /* TODO: Calculate the checksum and read from body and verify it meets the checksum from server.
+                     * But, NOT create request for it (The part has already been uploaded, just goto has_work_remaining)
+                     */
+                    /* We are on the only thread that can touch the body, so, it's safe to read from there. (TODO: Lock
+                     * or unlock?) */
+                    ++auto_ranged_put->threaded_update_data.next_part_number;
+                    goto has_work_remaining;
+                }
 
                 if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
                     uint32_t num_parts_in_flight =

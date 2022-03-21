@@ -39,6 +39,7 @@ struct aws_s3_auto_ranged_put {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
+        /* Array list of `struct aws_string *` */
         struct aws_array_list etag_list;
 
         uint32_t total_num_parts;

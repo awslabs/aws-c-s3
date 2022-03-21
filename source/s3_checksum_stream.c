@@ -13,7 +13,6 @@ struct aws_checksum_stream {
     struct aws_byte_buf checksum_result;
     /* base64 encoded checksum of the stream, updated on destruction of sream */
     struct aws_byte_buf *encoded_checksum_output;
-    bool did_seek;
 };
 
 static int s_aws_input_checksum_stream_seek(
@@ -34,21 +33,16 @@ static int s_aws_input_checksum_stream_seek(
 static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
     struct aws_checksum_stream *impl = stream->impl;
 
-    size_t start = dest->len;
-    int err = aws_input_stream_read(impl->old_stream, dest);
-    size_t end = dest->len;
-    struct aws_byte_cursor to_sum = aws_byte_cursor_from_buf(dest);
-    to_sum.ptr += start;
-    to_sum.len = end - start;
-    if (!err) {
-        int checksum_res = aws_checksum_update(impl->checksum, &to_sum);
-        if (checksum_res) {
-            dest->len = start;
-            impl->did_seek = true;
-        }
-        return checksum_res;
+    size_t original_len = dest->len;
+    if (aws_input_stream_read(impl->old_stream, dest)) {
+        return AWS_OP_ERR;
     }
-    return err;
+    struct aws_byte_cursor to_sum = aws_byte_cursor_from_buf(dest);
+    /* Move the cursor to the part to calculate the checksum */
+    aws_byte_cursor_advance(&to_sum, original_len);
+    /* If read failed, `aws_input_stream_read` will handle the error to restore the dest. No need to handle error here
+     */
+    return aws_checksum_update(impl->checksum, &to_sum);
 }
 
 static int s_aws_input_checksum_stream_get_status(struct aws_input_stream *stream, struct aws_stream_status *status) {
@@ -116,7 +110,6 @@ struct aws_input_stream *aws_checksum_stream_new(
     }
     aws_byte_buf_init(&impl->checksum_result, allocator, impl->checksum->digest_size);
     impl->encoded_checksum_output = checksum_output;
-    impl->did_seek = false;
     AWS_FATAL_ASSERT(impl->old_stream);
 
     return stream;
