@@ -684,10 +684,12 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             goto error_clean_up;
         }
         /* set input stream to chunk stream */
-        input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
-        if (!input_stream) {
+        struct aws_input_stream *chunk_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
+        if (!chunk_stream) {
             goto error_clean_up;
         }
+        aws_input_stream_release(input_stream);
+        input_stream = chunk_stream;
     }
     int64_t stream_length = 0;
     if (aws_input_stream_get_length(input_stream, &stream_length)) {

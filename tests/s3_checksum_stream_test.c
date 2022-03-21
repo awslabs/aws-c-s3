@@ -28,6 +28,7 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
         struct aws_input_stream *cursor_stream = aws_input_stream_new_from_cursor(allocator, input);
         struct aws_input_stream *stream =
             aws_checksum_stream_new(allocator, cursor_stream, algorithm, &stream_checksum_output);
+        aws_input_stream_release(cursor_stream);
         struct aws_stream_status status;
         AWS_ZERO_STRUCT(status);
         while (!status.is_end_of_stream) {
@@ -35,7 +36,7 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
             read_buf.len = 0;
             ASSERT_TRUE(aws_input_stream_get_status(stream, &status) == 0);
         }
-        aws_input_stream_destroy(stream);
+        aws_input_stream_release(stream);
         ASSERT_TRUE(aws_byte_buf_eq(&compute_encoded_checksum_output, &stream_checksum_output));
         aws_byte_buf_clean_up(&compute_checksum_output);
         aws_byte_buf_clean_up(&stream_checksum_output);
@@ -111,6 +112,7 @@ static int s_stream_chunk(
     struct aws_byte_buf *checksum_result) {
     struct aws_input_stream *cursor_stream = aws_input_stream_new_from_cursor(allocator, input);
     struct aws_input_stream *stream = aws_chunk_stream_new(allocator, cursor_stream, algorithm, checksum_result);
+    aws_input_stream_release(cursor_stream);
     struct aws_stream_status status;
     AWS_ZERO_STRUCT(status);
     while (!status.is_end_of_stream) {
@@ -120,7 +122,7 @@ static int s_stream_chunk(
         read_buf->len = 0;
         ASSERT_TRUE(aws_input_stream_get_status(stream, &status) == 0);
     }
-    aws_input_stream_destroy(stream);
+    aws_input_stream_release(stream);
     return AWS_OP_SUCCESS;
 }
 
