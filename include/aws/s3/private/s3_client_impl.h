@@ -76,6 +76,10 @@ struct aws_s3_endpoint {
     /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
 
+    /* True, if the endpoint is created by client. So, it need to be thread safe to manage the refcount via
+     * `aws_s3_client_endpoint_release` */
+    bool handled_by_client;
+
     void *user_data;
 };
 

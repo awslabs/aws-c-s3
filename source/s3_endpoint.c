@@ -215,6 +215,7 @@ void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
 void aws_s3_client_endpoint_release(struct aws_s3_client *client, struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(endpoint->handled_by_client);
 
     /* BEGIN CRITICAL SECTION */
     {

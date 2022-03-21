@@ -695,7 +695,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 error_occurred = true;
                 goto unlock;
             }
-
+            endpoint->handled_by_client = true;
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {
