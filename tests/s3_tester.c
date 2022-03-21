@@ -595,12 +595,6 @@ static void s_s3_client_process_work_empty(struct aws_s3_client *client) {
     (void)client;
 }
 
-static bool s_s3_client_endpoint_ref_count_zero_empty(struct aws_s3_endpoint *endpoint) {
-    AWS_PRECONDITION(endpoint);
-    (void)endpoint;
-    return true;
-}
-
 static void s_s3_client_endpoint_shutdown_callback_empty(void *user_data) {
     AWS_PRECONDITION(user_data);
     (void)user_data;
@@ -618,7 +612,6 @@ struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .get_host_address_count = s_s3_client_get_host_address_count_empty,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
     .process_work = s_s3_client_process_work_empty,
-    .endpoint_ref_count_zero = s_s3_client_endpoint_ref_count_zero_empty,
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback_empty,
     .finish_destroy = s_s3_client_finish_destroy_empty,
 };
