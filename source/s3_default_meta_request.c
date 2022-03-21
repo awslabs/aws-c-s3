@@ -44,7 +44,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_s3_client *client,
     uint64_t content_length,
     bool should_compute_content_md5,
-    const struct aws_s3_meta_request_options *options) {
+    const struct aws_s3_meta_request_options *options,
+    const enum aws_s3_checksum_algorithm checksum_algorithm,
+    const bool validate_get_response_checksum) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
@@ -79,6 +81,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
             client,
             0,
             should_compute_content_md5,
+            checksum_algorithm,
+            validate_get_response_checksum,
             options,
             meta_request_default,
             &s_s3_meta_request_default_vtable,
@@ -127,71 +131,76 @@ static bool s_s3_meta_request_default_update(
     struct aws_s3_request *request = NULL;
     bool work_remaining = false;
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+        if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
-        /* If the request hasn't been sent, then create and send it now. */
-        if (!meta_request_default->synced_data.request_sent) {
-            if (out_request == NULL) {
+            /* If the request hasn't been sent, then create and send it now. */
+            if (!meta_request_default->synced_data.request_sent) {
+                if (out_request == NULL) {
+                    goto has_work_remaining;
+                }
+
+                request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Meta Request Default created request %p",
+                    (void *)meta_request,
+                    (void *)request);
+
+                meta_request_default->synced_data.request_sent = true;
                 goto has_work_remaining;
             }
 
-            request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+            /* If the request hasn't been completed, then wait for it to be completed. */
+            if (!meta_request_default->synced_data.request_completed) {
+                goto has_work_remaining;
+            }
 
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Meta Request Default created request %p",
-                (void *)meta_request,
-                (void *)request);
+            /* If delivery hasn't been attempted yet for the response body, wait for that to happen. */
+            if (meta_request->synced_data.num_parts_delivery_completed < 1) {
+                goto has_work_remaining;
+            }
 
-            meta_request_default->synced_data.request_sent = true;
-            goto has_work_remaining;
-        }
+            goto no_work_remaining;
 
-        /* If the request hasn't been completed, then wait for it to be completed. */
-        if (!meta_request_default->synced_data.request_completed) {
-            goto has_work_remaining;
-        }
+        } else {
 
-        /* If delivery hasn't been attempted yet for the response body, wait for that to happen. */
-        if (meta_request->synced_data.num_parts_delivery_completed < 1) {
-            goto has_work_remaining;
-        }
+            /* If we are canceling, and the request hasn't been sent yet, then there is nothing to wait for. */
+            if (!meta_request_default->synced_data.request_sent) {
+                goto no_work_remaining;
+            }
 
-        goto no_work_remaining;
+            /* If the request hasn't been completed yet, then wait for that to happen. */
+            if (!meta_request_default->synced_data.request_completed) {
+                goto has_work_remaining;
+            }
 
-    } else {
+            /* If some parts are still being delievered to the caller, then wait for those to finish. */
+            if (meta_request->synced_data.num_parts_delivery_completed <
+                meta_request->synced_data.num_parts_delivery_sent) {
+                goto has_work_remaining;
+            }
 
-        /* If we are canceling, and the request hasn't been sent yet, then there is nothing to wait for. */
-        if (!meta_request_default->synced_data.request_sent) {
             goto no_work_remaining;
         }
 
-        /* If the request hasn't been completed yet, then wait for that to happen. */
-        if (!meta_request_default->synced_data.request_completed) {
-            goto has_work_remaining;
+    has_work_remaining:
+        work_remaining = true;
+
+    no_work_remaining:
+
+        if (!work_remaining) {
+            aws_s3_meta_request_set_success_synced(
+                meta_request, meta_request_default->synced_data.cached_response_status);
         }
 
-        /* If some parts are still being delievered to the caller, then wait for those to finish. */
-        if (meta_request->synced_data.num_parts_delivery_completed <
-            meta_request->synced_data.num_parts_delivery_sent) {
-            goto has_work_remaining;
-        }
-
-        goto no_work_remaining;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-has_work_remaining:
-    work_remaining = true;
-
-no_work_remaining:
-
-    if (!work_remaining) {
-        aws_s3_meta_request_set_success_synced(meta_request, meta_request_default->synced_data.cached_response_status);
-    }
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     if (work_remaining) {
         if (request != NULL) {
@@ -205,6 +214,14 @@ no_work_remaining:
     }
 
     return work_remaining;
+}
+
+static bool s_is_get_request(const struct aws_http_message *message) {
+    struct aws_byte_cursor method;
+    int err = aws_http_message_get_request_method(message, &method);
+    AWS_ASSERT(err == AWS_OP_SUCCESS)
+    (void)err;
+    return aws_byte_cursor_eq(&method, &aws_http_method_get);
 }
 
 /* Given a request, prepare it for sending based on its description. */
@@ -224,14 +241,23 @@ static int s_s3_meta_request_default_prepare_request(
         }
     }
 
-    struct aws_http_message *message =
-        aws_s3_message_util_copy_http_message(meta_request->allocator, meta_request->initial_request_message, NULL, 0);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
+        meta_request->allocator, meta_request->initial_request_message, NULL, 0);
 
-    if (meta_request->should_compute_content_md5) {
+    const enum aws_s3_checksum_algorithm checksum_algorithm = meta_request->checksum_algorithm;
+    if (!checksum_algorithm && meta_request->should_compute_content_md5) {
         aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
     }
 
-    aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message);
+    bool is_get = s_is_get_request(message);
+    if (is_get && meta_request->validate_get_response_checksum) {
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        aws_http_headers_set(headers, g_request_validation_mode, g_enabled);
+    }
+    if (!is_get) {
+        aws_s3_message_util_assign_body(
+            meta_request->allocator, &request->request_body, message, checksum_algorithm, NULL /* out_checksum */);
+    }
 
     aws_s3_request_setup_send_data(request, message);
 
@@ -268,16 +294,20 @@ static void s_s3_meta_request_default_request_finished(
         meta_request->headers_callback = NULL;
     }
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    meta_request_default->synced_data.cached_response_status = request->send_data.response_status;
-    meta_request_default->synced_data.request_completed = true;
-    meta_request_default->synced_data.request_error_code = error_code;
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        meta_request_default->synced_data.cached_response_status = request->send_data.response_status;
+        meta_request_default->synced_data.request_completed = true;
+        meta_request_default->synced_data.request_error_code = error_code;
 
-    if (error_code == AWS_ERROR_SUCCESS) {
-        aws_s3_meta_request_stream_response_body_synced(meta_request, request);
-    } else {
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        if (error_code == AWS_ERROR_SUCCESS) {
+            aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+        } else {
+            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        }
+
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 }

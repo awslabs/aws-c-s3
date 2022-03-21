@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_auto_ranged_get.h"
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
@@ -10,6 +12,7 @@
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
 #include <aws/auth/signing_result.h>
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/io/event_loop.h>
@@ -69,11 +72,115 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
+static bool s_is_get_request(const struct aws_s3_meta_request_options *options) {
+    if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        return true;
+    }
+    if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+        struct aws_byte_cursor method;
+        int err = aws_http_message_get_request_method(options->message, &method);
+        AWS_ASSERT(err == AWS_OP_SUCCESS);
+        (void)err;
+        return aws_byte_cursor_eq(&method, &aws_http_method_get);
+    }
+    return false;
+}
+
+static int s_meta_request_get_response_headers_checksum_callback(
+    /* TODO take in a priority list of checksum algorithms, and use this list to determine which checksum algorithm to
+       validate */
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    int response_status,
+    void *user_data) {
+    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
+        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        if (aws_http_headers_has(headers, *algorithm_header_name)) {
+            struct aws_byte_cursor header_sum;
+            aws_http_headers_get(headers, *algorithm_header_name, &header_sum);
+            size_t encoded_len = 0;
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+            if (header_sum.len == encoded_len - 1) {
+                aws_byte_buf_init_copy_from_cursor(
+                    &meta_request->meta_request_level_response_header_checksum, aws_default_allocator(), header_sum);
+                meta_request->meta_request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+            }
+            break;
+        }
+    }
+    if (meta_request->headers_user_callback_after_checksum) {
+        return meta_request->headers_user_callback_after_checksum(meta_request, headers, response_status, user_data);
+    } else {
+        return AWS_OP_SUCCESS;
+    }
+}
+
+/* warning this might get screwed up with retrys/restarts */
+static int s_meta_request_get_response_body_checksum_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+    if (meta_request->meta_request_level_running_response_sum) {
+        aws_checksum_update(meta_request->meta_request_level_running_response_sum, body);
+    }
+    if (meta_request->body_user_callback_after_checksum) {
+        return meta_request->body_user_callback_after_checksum(meta_request, body, range_start, user_data);
+    } else {
+        return AWS_OP_SUCCESS;
+    }
+}
+
+static void s_meta_request_get_response_finish_checksum_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data) {
+    struct aws_byte_buf response_body_sum;
+    struct aws_byte_buf encoded_response_body_sum;
+    AWS_ZERO_STRUCT(response_body_sum);
+    AWS_ZERO_STRUCT(encoded_response_body_sum);
+
+    struct aws_s3_meta_request_result *mut_meta_request_result =
+        (struct aws_s3_meta_request_result *)meta_request_result;
+    if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+        mut_meta_request_result->did_validate = true;
+        mut_meta_request_result->validation_algorithm =
+            meta_request->meta_request_level_running_response_sum->algorithm;
+        size_t encoded_checksum_len = 0;
+        /* what error should I raise for these? */
+        aws_base64_compute_encoded_len(
+            meta_request->meta_request_level_running_response_sum->digest_size, &encoded_checksum_len);
+        aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
+        aws_byte_buf_init(
+            &response_body_sum,
+            aws_default_allocator(),
+            meta_request->meta_request_level_running_response_sum->digest_size);
+        aws_checksum_finalize(meta_request->meta_request_level_running_response_sum, &response_body_sum, 0);
+        struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
+        aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
+        if (!aws_byte_buf_eq(&encoded_response_body_sum, &meta_request->meta_request_level_response_header_checksum)) {
+            mut_meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+        }
+    } else {
+        mut_meta_request_result->did_validate = false;
+        mut_meta_request_result->validation_algorithm = AWS_SCA_NONE;
+    }
+    if (meta_request->finish_user_callback_after_checksum) {
+        meta_request->finish_user_callback_after_checksum(meta_request, meta_request_result, user_data);
+    }
+    aws_byte_buf_clean_up(&response_body_sum);
+    aws_byte_buf_clean_up(&encoded_response_body_sum);
+    aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
+    aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
+}
+
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
+    const enum aws_s3_checksum_algorithm checksum_algorithm,
+    bool validate_get_response_checksum,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -105,6 +212,8 @@ int aws_s3_meta_request_init_base(
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
+    *((enum aws_s3_checksum_algorithm *)&meta_request->checksum_algorithm) = checksum_algorithm;
+    *((bool *)&meta_request->validate_get_response_checksum) = validate_get_response_checksum;
 
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
@@ -136,20 +245,34 @@ int aws_s3_meta_request_init_base(
 
     meta_request->synced_data.next_streaming_part = 1;
 
+    meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
-    meta_request->headers_callback = options->headers_callback;
-    meta_request->body_callback = options->body_callback;
-    meta_request->finish_callback = options->finish_callback;
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
+
+    if (s_is_get_request(options)) {
+        meta_request->headers_user_callback_after_checksum = options->headers_callback;
+        meta_request->body_user_callback_after_checksum = options->body_callback;
+        meta_request->finish_user_callback_after_checksum = options->finish_callback;
+
+        meta_request->headers_callback = s_meta_request_get_response_headers_checksum_callback;
+        meta_request->body_callback = s_meta_request_get_response_body_checksum_callback;
+        meta_request->finish_callback = s_meta_request_get_response_finish_checksum_callback;
+    } else {
+        meta_request->headers_callback = options->headers_callback;
+        meta_request->body_callback = options->body_callback;
+        meta_request->finish_callback = options->finish_callback;
+    }
 
     return AWS_OP_SUCCESS;
 }
 
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 }
 
 void aws_s3_meta_request_set_fail_synced(
@@ -196,9 +319,11 @@ void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_req
 bool aws_s3_meta_request_has_finish_result(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     bool is_finishing = aws_s3_meta_request_has_finish_result_synced(meta_request);
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     return is_finishing;
 }
@@ -228,24 +353,6 @@ void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request) {
     aws_ref_count_release(&meta_request->ref_count);
 }
 
-void aws_s3_default_signing_config(
-    struct aws_signing_config_aws *signing_config,
-    const struct aws_byte_cursor region,
-    struct aws_credentials_provider *credentials_provider) {
-    AWS_PRECONDITION(signing_config);
-    AWS_PRECONDITION(credentials_provider);
-
-    AWS_ZERO_STRUCT(*signing_config);
-
-    signing_config->config_type = AWS_SIGNING_CONFIG_AWS;
-    signing_config->algorithm = AWS_SIGNING_ALGORITHM_V4;
-    signing_config->credentials_provider = credentials_provider;
-    signing_config->region = region;
-    signing_config->service = aws_byte_cursor_from_c_str("s3");
-    signing_config->signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
-    signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
-}
-
 static void s_s3_meta_request_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
@@ -263,6 +370,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    /* For a meta request created by client, the endpoint should always be cleaned up by meta request finish call. Just
+     * use regular release here for those meta request not really went through the client */
     aws_s3_endpoint_release(meta_request->endpoint);
     aws_s3_client_release(meta_request->client);
 
@@ -311,9 +420,11 @@ bool aws_s3_meta_request_update(
 bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     bool active = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_ACTIVE;
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     return active;
 }
@@ -321,9 +432,11 @@ bool aws_s3_meta_request_is_active(struct aws_s3_meta_request *meta_request) {
 bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
+    /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     bool is_finished = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED;
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     return is_finished;
 }
@@ -454,9 +567,13 @@ dont_send_clean_up:
         error_code,
         aws_error_str(error_code));
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
 
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
@@ -546,6 +663,12 @@ void aws_s3_meta_request_sign_request_default(
         return;
     }
 
+    if (request->part_number == 0 &&
+        aws_byte_cursor_eq(
+            &signing_config.signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
+        signing_config.signed_body_value = g_aws_signed_body_value_unsigned_payload;
+    }
+
     if (aws_sign_request_aws(
             meta_request->allocator,
             request->send_data.signable,
@@ -599,9 +722,13 @@ finish:
             error_code,
             aws_error_str(error_code));
 
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* BEGIN CRITICAL SECTION */
+        {
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+        }
+        /* END CRITICAL SECTION */
     }
 
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
@@ -678,6 +805,79 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
     return error_code;
 }
 
+static bool s_header_value_from_list(
+    const struct aws_http_header *headers,
+    size_t headers_count,
+    const struct aws_byte_cursor *name,
+    struct aws_byte_cursor *out_value) {
+    for (size_t i = 0; i < headers_count; ++i) {
+        if (aws_byte_cursor_eq(&headers[i].name, name)) {
+            *out_value = headers[i].value;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void s_get_part_response_headers_checksum_helper(
+    struct aws_s3_connection *connection,
+    const struct aws_http_header *headers,
+    size_t headers_count) {
+    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
+        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        struct aws_byte_cursor header_sum;
+        if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {
+            size_t encoded_len = 0;
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+            if (header_sum.len == encoded_len - 1) {
+                aws_byte_buf_init_copy_from_cursor(
+                    &connection->request->request_level_response_header_checksum, aws_default_allocator(), header_sum);
+                connection->request->request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+            }
+            break;
+        }
+    }
+}
+
+/* warning this might get screwed up with retrys/restarts */
+static void s_get_part_response_body_checksum_helper(
+    struct aws_s3_checksum *running_response_sum,
+    const struct aws_byte_cursor *body) {
+    if (running_response_sum) {
+        aws_checksum_update(running_response_sum, body);
+    }
+}
+
+static void s_get_response_part_finish_checksum_helper(struct aws_s3_connection *connection, int error_code) {
+    struct aws_byte_buf response_body_sum;
+    struct aws_byte_buf encoded_response_body_sum;
+    AWS_ZERO_STRUCT(response_body_sum);
+    AWS_ZERO_STRUCT(encoded_response_body_sum);
+    if (error_code == AWS_OP_SUCCESS && connection->request->request_level_running_response_sum) {
+        size_t encoded_checksum_len = 0;
+        connection->request->did_validate = true;
+        aws_base64_compute_encoded_len(
+            connection->request->request_level_running_response_sum->digest_size, &encoded_checksum_len);
+        aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
+        aws_byte_buf_init(
+            &response_body_sum,
+            aws_default_allocator(),
+            connection->request->request_level_running_response_sum->digest_size);
+        aws_checksum_finalize(connection->request->request_level_running_response_sum, &response_body_sum, 0);
+        struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
+        aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
+        connection->request->checksum_match =
+            aws_byte_buf_eq(&encoded_response_body_sum, &connection->request->request_level_response_header_checksum);
+        aws_byte_buf_clean_up(&response_body_sum);
+        aws_byte_buf_clean_up(&encoded_response_body_sum);
+        aws_checksum_destroy(connection->request->request_level_running_response_sum);
+        aws_byte_buf_clean_up(&connection->request->request_level_response_header_checksum);
+        connection->request->request_level_running_response_sum = NULL;
+    } else {
+        connection->request->did_validate = false;
+    }
+}
+
 static int s_s3_meta_request_incoming_headers(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
@@ -715,6 +915,11 @@ static int s_s3_meta_request_incoming_headers(
 
     bool successful_response =
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
+
+    if (successful_response && connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
+        connection->request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
+        s_get_part_response_headers_checksum_helper(connection, headers, headers_count);
+    }
 
     /* Only record headers if an error has taken place, or if the reqest_desc has asked for them. */
     bool should_record_headers = !successful_response || request->record_response_headers;
@@ -759,6 +964,13 @@ static int s_s3_meta_request_incoming_body(
         request->send_data.response_status,
         (uint64_t)data->len,
         (void *)connection);
+    if (request->send_data.response_status < 200 || request->send_data.response_status > 299) {
+        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
+    }
+
+    if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        s_get_part_response_body_checksum_helper(connection->request->request_level_running_response_sum, data);
+    }
 
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;
@@ -791,7 +1003,9 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
-
+    if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        s_get_response_part_finish_checksum_helper(connection, error_code);
+    }
     s_s3_meta_request_send_request_finish(connection, stream, error_code);
 }
 
@@ -843,25 +1057,39 @@ void aws_s3_meta_request_send_request_finish_default(
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: Request %p finished with error code %d and response status %d",
+        "id=%p: Request %p finished with error code %d (%s) and response status %d",
         (void *)meta_request,
         (void *)request,
         error_code,
+        aws_error_debug_str(error_code),
         response_status);
 
     enum aws_s3_connection_finish_code finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
     if (error_code == AWS_ERROR_SUCCESS) {
-
-        finish_code = AWS_S3_CONNECTION_FINISH_CODE_SUCCESS;
+        if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT && request->did_validate &&
+            !request->checksum_match) {
+            finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
+            error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Meta request cannot recover from checksum mismatch. (request=%p, response status=%d)",
+                (void *)meta_request,
+                (void *)request,
+                response_status);
+        } else {
+            finish_code = AWS_S3_CONNECTION_FINISH_CODE_SUCCESS;
+        }
 
     } else {
+        /* BEGIN CRITICAL SECTION */
         aws_s3_meta_request_lock_synced_data(meta_request);
         bool meta_request_finishing = aws_s3_meta_request_has_finish_result_synced(meta_request);
         aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* END CRITICAL SECTION */
 
-        /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already has
-         * a result, then make sure that this request isn't retried. */
+        /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
+         * has a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
@@ -878,7 +1106,8 @@ void aws_s3_meta_request_send_request_finish_default(
 
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p Meta request failed from error %d (%s). (request=%p, response status=%d). Try to setup a retry.",
+                "id=%p Meta request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
+                "retry.",
                 (void *)meta_request,
                 error_code,
                 aws_error_str(error_code),
@@ -915,15 +1144,15 @@ struct s3_stream_response_body_payload {
     struct aws_task task;
 };
 
-/* Pushes a request into the body streaming priority queue. Derived meta request types should not call this--they should
- * instead call aws_s3_meta_request_stream_response_body_synced.*/
+/* Pushes a request into the body streaming priority queue. Derived meta request types should not call this--they
+ * should instead call aws_s3_meta_request_stream_response_body_synced.*/
 static void s_s3_meta_request_body_streaming_push_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
-/* Pops the next available request from the body streaming priority queue. If the parts previous the next request in the
- * priority queue have not been placed in the priority queue yet, the priority queue will remain the same, and NULL will
- * be returned. (Should not be needed to be called by derived types.) */
+/* Pops the next available request from the body streaming priority queue. If the parts previous the next request in
+ * the priority queue have not been placed in the priority queue yet, the priority queue will remain the same, and
+ * NULL will be returned. (Should not be needed to be called by derived types.) */
 static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     struct aws_s3_meta_request *meta_request);
 
@@ -1010,7 +1239,6 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&payload->requests);
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_ASSERT(meta_request == request->meta_request);
-
         struct aws_byte_cursor body_buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
         AWS_ASSERT(request->part_number >= 1);
@@ -1034,17 +1262,19 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
         aws_atomic_fetch_sub(&client->stats.num_requests_streaming, 1);
         aws_s3_request_release(request);
     }
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        if (error_code != AWS_ERROR_SUCCESS) {
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+        }
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
-    if (error_code != AWS_ERROR_SUCCESS) {
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+        meta_request->synced_data.num_parts_delivery_completed += (num_failed + num_successful);
+        meta_request->synced_data.num_parts_delivery_failed += num_failed;
+        meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-    meta_request->synced_data.num_parts_delivery_completed += (num_failed + num_successful);
-    meta_request->synced_data.num_parts_delivery_failed += num_failed;
-    meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
+    /* END CRITICAL SECTION */
     aws_mem_release(client->allocator, payload);
     payload = NULL;
 
@@ -1111,29 +1341,33 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     struct aws_s3_meta_request_result finish_result;
     AWS_ZERO_STRUCT(finish_result);
 
-    aws_s3_meta_request_lock_synced_data(meta_request);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
-        already_finished = true;
-        goto unlock;
+        if (meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED) {
+            already_finished = true;
+            goto unlock;
+        }
+
+        meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
+
+        /* Clean out the pending-stream-to-caller priority queue*/
+        while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
+            struct aws_s3_request *request = NULL;
+            aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
+            AWS_FATAL_ASSERT(request != NULL);
+
+            aws_linked_list_push_back(&release_request_list, &request->node);
+        }
+
+        finish_result = meta_request->synced_data.finish_result;
+        AWS_ZERO_STRUCT(meta_request->synced_data.finish_result);
+
+    unlock:
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
-
-    meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
-
-    /* Clean out the pending-stream-to-caller priority queue*/
-    while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
-        struct aws_s3_request *request = NULL;
-        aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
-        AWS_FATAL_ASSERT(request != NULL);
-
-        aws_linked_list_push_back(&release_request_list, &request->node);
-    }
-
-    finish_result = meta_request->synced_data.finish_result;
-    AWS_ZERO_STRUCT(meta_request->synced_data.finish_result);
-
-unlock:
-    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
 
     if (already_finished) {
         return;
@@ -1170,7 +1404,8 @@ unlock:
 
     aws_s3_meta_request_result_clean_up(meta_request, &finish_result);
 
-    aws_s3_endpoint_release(meta_request->endpoint);
+    /* The endpoint must be created by client here */
+    aws_s3_client_endpoint_release(meta_request->client, meta_request->endpoint);
     meta_request->endpoint = NULL;
 
     aws_s3_client_release(meta_request->client);
