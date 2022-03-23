@@ -508,7 +508,6 @@ static int s_test_s3_message_util_assign_body(struct aws_allocator *allocator, v
     ASSERT_TRUE(aws_http_message_get_body_stream(message) == input_stream);
     ASSERT_SUCCESS(s_test_http_message_body_stream(allocator, message, &test_buffer));
 
-    aws_input_stream_release(input_stream);
     aws_byte_buf_clean_up(&test_buffer);
     aws_http_message_release(message);
 
@@ -727,7 +726,6 @@ static int s_test_s3_upload_part_message_new(struct aws_allocator *allocator, vo
     aws_string_destroy(upload_id);
     aws_byte_buf_clean_up(&part_buffer);
 
-    aws_input_stream_release(aws_http_message_get_body_stream(upload_part_message));
     aws_http_message_release(upload_part_message);
     aws_http_message_release(original_message);
 
@@ -866,7 +864,6 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     aws_byte_buf_clean_up(&body_buffer);
     aws_string_destroy(upload_id);
 
-    aws_input_stream_release(aws_http_message_get_body_stream(complete_multipart_message));
     aws_http_message_release(complete_multipart_message);
     aws_http_message_release(original_message);
 

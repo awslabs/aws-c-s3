@@ -1915,10 +1915,6 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
         ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));
     }
 
-    struct aws_input_stream *new_body_stream = aws_http_message_get_body_stream(new_message);
-    aws_input_stream_release(new_body_stream);
-    new_body_stream = NULL;
-
     aws_http_message_release(new_message);
     new_message = NULL;
 
