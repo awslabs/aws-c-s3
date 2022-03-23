@@ -258,7 +258,8 @@ static int s_input_get_length(struct aws_input_stream *stream, int64_t *out_leng
     return aws_input_stream_get_length(update_stream->wrapped_stream, out_length);
 }
 
-static void s_input_destroy(struct progress_update_stream *update_stream) {
+static void s_input_destroy(void *data) {
+    struct progress_update_stream *update_stream = (struct progress_update_stream *)data;
     aws_input_stream_release(update_stream->wrapped_stream);
     aws_mem_release(update_stream->allocator, update_stream);
 }
@@ -552,8 +553,7 @@ static int s_kickoff_put_object(
     update_stream->wrapped_stream = body_input;
     update_stream->allocator = cp_app_ctx->app_ctx->allocator;
     update_stream->base.vtable = &s_update_input_stream_vtable;
-    aws_ref_count_init(
-        &update_stream->base.ref_count, update_stream, (aws_simple_completion_callback *)s_input_destroy);
+    aws_ref_count_init(&update_stream->base.ref_count, update_stream, s_input_destroy);
 
     struct aws_input_stream *wrap_stream = &update_stream->base;
     aws_http_message_set_body_stream(request_options.message, wrap_stream);
