@@ -704,6 +704,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     }
 
     aws_http_message_set_body_stream(out_message, input_stream);
+    /* Let the message take the full ownership */
+    aws_input_stream_release(input_stream);
 
     return input_stream;
 
