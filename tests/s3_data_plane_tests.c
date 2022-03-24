@@ -2044,10 +2044,6 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));
 
-    struct aws_input_stream *new_body_stream = aws_http_message_get_body_stream(new_message);
-    aws_input_stream_release(new_body_stream);
-    new_body_stream = NULL;
-
     aws_http_message_release(new_message);
     new_message = NULL;
 
