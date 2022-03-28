@@ -349,6 +349,11 @@ void aws_s3_init_default_signing_config(
     const struct aws_byte_cursor region,
     struct aws_credentials_provider *credentials_provider);
 
+AWS_S3_API
+void aws_s3_init_copy_default_signing_config(
+    struct aws_signing_config_aws *signing_config,
+    struct aws_signing_config_aws *cached_config);
+
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_CLIENT_H */
