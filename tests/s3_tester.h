@@ -140,8 +140,6 @@ struct aws_s3_tester_meta_request_options {
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
 
-    bool stream_signing;
-
     bool validate_get_response_checksum;
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
@@ -205,7 +203,7 @@ struct aws_s3_meta_request_test_results {
 
 struct aws_s3_client_config;
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, bool streaming);
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester);
 
 /* Set up the aws_s3_client's shutdown callbacks to be used by the tester.  This allows the tester to wait for the
  * client to clean up. */

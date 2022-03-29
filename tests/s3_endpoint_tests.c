@@ -13,7 +13,7 @@ static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client *client = NULL;
     struct aws_s3_tester_client_options client_options;

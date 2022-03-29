@@ -249,22 +249,6 @@ void aws_s3_init_default_signing_config(
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
 }
 
-void aws_s3_init_copy_default_signing_config(
-    struct aws_signing_config_aws *signing_config,
-    struct aws_signing_config_aws *cached_config) {
-    AWS_PRECONDITION(signing_config);
-    AWS_PRECONDITION(cached_config)
-    AWS_ZERO_STRUCT(*signing_config);
-
-    signing_config->algorithm = cached_config->algorithm;
-    signing_config->config_type = cached_config->config_type;
-    signing_config->credentials_provider = cached_config->credentials_provider;
-    signing_config->region = cached_config->region;
-    signing_config->service = cached_config->service;
-    signing_config->signed_body_header = signing_config->signed_body_header;
-    signing_config->signed_body_value = cached_config->signed_body_value;
-}
-
 void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf) {
     AWS_PRECONDITION(str);
 
