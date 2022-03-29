@@ -616,10 +616,7 @@ static bool s_is_put_request(const struct aws_s3_meta_request *meta_request) {
         !aws_http_message_get_request_method(meta_request->initial_request_message, &method)) {
         return aws_byte_cursor_eq(&method, &aws_http_method_put);
     }
-    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
-        return true;
-    }
-    return false;
+    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
 }
 
 /* Handles signing a message for the caller. */
