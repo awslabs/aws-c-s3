@@ -2480,6 +2480,62 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_chunked_then_unchunked, s_test_s3_chunked_then_unchunked)
+static int s_test_s3_chunked_then_unchunked(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Test to see if signed_body_value modified when signing chunked request */
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor chunked_object_path =
+        aws_byte_cursor_from_c_str("/prefix/chunked_unchunked/test_chunked.txt");
+
+    struct aws_s3_tester_meta_request_options chunked_put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = chunked_object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &chunked_put_options, NULL));
+
+    struct aws_byte_cursor unchunked_object_path =
+        aws_byte_cursor_from_c_str("/prefix/chunked_unchunked/test_unchunked.txt");
+
+    struct aws_s3_tester_meta_request_options unchunked_put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_NONE,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = unchunked_object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &unchunked_put_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_meta_request_default, s_test_s3_meta_request_default)
 static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
