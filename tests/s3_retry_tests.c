@@ -36,7 +36,7 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
@@ -98,7 +98,7 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client_config client_config = {.part_size = 64 * 1024};
 
@@ -177,7 +177,7 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct s3_fail_prepare_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
@@ -247,7 +247,7 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client *client = NULL;
     struct aws_s3_tester_client_options client_options;
@@ -363,7 +363,7 @@ static int s_test_s3_meta_request_send_request_finish_fail(struct aws_allocator 
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client_config client_config = {
         .part_size = 64 * 1024,
@@ -429,7 +429,7 @@ static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allo
     (void)ctx;
 
     struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester, false));
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client *client = NULL;
     struct aws_s3_tester_client_options client_options;

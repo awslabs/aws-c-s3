@@ -610,6 +610,15 @@ static void s_s3_meta_request_sign_request(
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
 
+static bool s_is_put_request(const struct aws_s3_meta_request *meta_request) {
+    struct aws_byte_cursor method;
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
+        !aws_http_message_get_request_method(meta_request->initial_request_message, &method)) {
+        return aws_byte_cursor_eq(&method, &aws_http_method_put);
+    }
+    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+}
+
 /* Handles signing a message for the caller. */
 void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
@@ -663,6 +672,14 @@ void aws_s3_meta_request_sign_request_default(
         return;
     }
 
+    /* if a checksum algorithm is set for a put request the request will be chunked and we need to change the signed
+     * body value to match this type of request*/
+    if (meta_request->checksum_algorithm != AWS_SCA_NONE && s_is_put_request(meta_request) &&
+        aws_byte_cursor_eq(&signing_config.signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
+        signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+    }
+    /* However the initial request for a multipart upload does not have a trailing checksum and is not chunked so it
+     * must have an unsigned_payload signed_body value*/
     if (request->part_number == 0 &&
         aws_byte_cursor_eq(
             &signing_config.signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
