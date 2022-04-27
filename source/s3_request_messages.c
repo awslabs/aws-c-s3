@@ -684,10 +684,12 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             goto error_clean_up;
         }
         /* set input stream to chunk stream */
-        input_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
-        if (!input_stream) {
+        struct aws_input_stream *chunk_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
+        if (!chunk_stream) {
             goto error_clean_up;
         }
+        aws_input_stream_release(input_stream);
+        input_stream = chunk_stream;
     }
     int64_t stream_length = 0;
     if (aws_input_stream_get_length(input_stream, &stream_length)) {
@@ -702,12 +704,14 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     }
 
     aws_http_message_set_body_stream(out_message, input_stream);
+    /* Let the message take the full ownership */
+    aws_input_stream_release(input_stream);
 
     return input_stream;
 
 error_clean_up:
     AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     return NULL;
 }
 

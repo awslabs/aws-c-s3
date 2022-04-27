@@ -1488,7 +1488,7 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
         aws_http_message_release(messages[i]);
-        aws_input_stream_destroy(input_streams[i]);
+        aws_input_stream_release(input_streams[i]);
         aws_byte_buf_clean_up(&input_stream_buffers[i]);
     }
 
@@ -1915,10 +1915,6 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
         ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));
     }
 
-    struct aws_input_stream *new_body_stream = aws_http_message_get_body_stream(new_message);
-    aws_input_stream_destroy(new_body_stream);
-    new_body_stream = NULL;
-
     aws_http_message_release(new_message);
     new_message = NULL;
 
@@ -1928,7 +1924,7 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
     aws_string_destroy(upload_id);
     upload_id = NULL;
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&test_buffer);
@@ -1997,7 +1993,7 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
     aws_http_message_release(base_message);
     base_message = NULL;
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&test_buffer);
@@ -2048,10 +2044,6 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     ASSERT_FALSE(aws_http_headers_has(new_headers, g_content_md5_header_name));
 
-    struct aws_input_stream *new_body_stream = aws_http_message_get_body_stream(new_message);
-    aws_input_stream_destroy(new_body_stream);
-    new_body_stream = NULL;
-
     aws_http_message_release(new_message);
     new_message = NULL;
 
@@ -2065,7 +2057,7 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
 
     aws_byte_buf_clean_up(&body_buffer);
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&test_buffer);

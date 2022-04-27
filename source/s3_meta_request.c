@@ -1415,6 +1415,14 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         finish_result.error_code,
         aws_error_str(finish_result.error_code));
 
+    /* As the meta request has been finished with any HTTP message, we can safely release the http message that hold. So
+     * that, the downstream high level language doesn't need to wait for shutdown to clean related resource (eg: input
+     * stream) */
+    if (meta_request->initial_request_message) {
+        aws_http_message_release(meta_request->initial_request_message);
+        meta_request->initial_request_message = NULL;
+    }
+
     if (meta_request->finish_callback != NULL) {
         meta_request->finish_callback(meta_request, &finish_result, meta_request->user_data);
     }
