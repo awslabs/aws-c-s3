@@ -203,8 +203,8 @@ static int s_fill_byte_buf(struct aws_byte_buf *buffer, struct aws_allocator *al
 
 static int s_test_http_headers_match(
     struct aws_allocator *allocator,
-    struct aws_http_message *message0,
-    struct aws_http_message *message1,
+    const struct aws_http_message *message0,
+    const struct aws_http_message *message1,
 
     /* Headers that we know are in message0, but should NOT be in message1 */
     const struct aws_byte_cursor *excluded_message0_headers,
@@ -219,10 +219,10 @@ static int s_test_http_headers_match(
     ASSERT_TRUE(excluded_message0_headers != NULL || excluded_message0_headers_count == 0);
     ASSERT_TRUE(message1_header_exceptions != NULL || message1_header_exceptions_count == 0);
 
-    struct aws_http_headers *message0_headers = aws_http_message_get_headers(message0);
+    const struct aws_http_headers *message0_headers = aws_http_message_get_const_headers(message0);
     ASSERT_TRUE(message0_headers != NULL);
 
-    struct aws_http_headers *message1_headers = aws_http_message_get_headers(message1);
+    const struct aws_http_headers *message1_headers = aws_http_message_get_const_headers(message1);
     ASSERT_TRUE(message1_headers != NULL);
 
     struct aws_http_headers *expected_message0_headers = aws_http_headers_new(allocator);
@@ -306,8 +306,8 @@ static int s_test_http_headers_match(
 
 static int s_test_http_messages_match(
     struct aws_allocator *allocator,
-    struct aws_http_message *message0,
-    struct aws_http_message *message1,
+    const struct aws_http_message *message0,
+    const struct aws_http_message *message1,
     const struct aws_byte_cursor *excluded_headers,
     size_t excluded_headers_count) {
     ASSERT_TRUE(message0 != NULL);
@@ -338,6 +338,14 @@ static int s_test_http_messages_match(
         s_test_http_headers_match(allocator, message0, message1, excluded_headers, excluded_headers_count, NULL, 0));
 
     return AWS_OP_SUCCESS;
+}
+
+static struct aws_http_header s_http_header_from_c_str(const char *name, const char *value) {
+    struct aws_http_header header = {
+        .name = aws_byte_cursor_from_c_str(name),
+        .value = aws_byte_cursor_from_c_str(value),
+    };
+    return header;
 }
 
 static int s_test_http_message_request_path(
@@ -458,33 +466,49 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
     const struct aws_byte_cursor request_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("RequestMethod");
     const struct aws_byte_cursor request_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("RequestPath");
 
-    const struct aws_http_header included_header = {
-        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("IncludedHeader"),
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("IncludedHeaderValue"),
+    const struct aws_http_header original_headers[] = {
+        s_http_header_from_c_str("IncludedHeader", "IncludedHeaderValue"),
+        s_http_header_from_c_str("ExcludedHeader", "ExcludedHeaderValue"),
+        s_http_header_from_c_str("x-amz-meta-MyMetadata", "MyMetadataValue"),
     };
 
-    const struct aws_http_header excluded_header = {
-        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ExcludedHeader"),
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ExcludedHeaderValue"),
+    const struct aws_byte_cursor excluded_headers[] = {
+        aws_byte_cursor_from_c_str("ExcludedHeader"),
     };
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
     ASSERT_TRUE(message != NULL);
     ASSERT_SUCCESS(aws_http_message_set_request_method(message, request_method));
     ASSERT_SUCCESS(aws_http_message_set_request_path(message, request_path));
+    ASSERT_SUCCESS(aws_http_message_add_header_array(message, original_headers, AWS_ARRAY_SIZE(original_headers)));
 
-    struct aws_http_headers *message_headers = aws_http_message_get_headers(message);
-    ASSERT_TRUE(message != NULL);
-    ASSERT_SUCCESS(aws_http_headers_add(message_headers, included_header.name, included_header.value));
-    ASSERT_SUCCESS(aws_http_headers_add(message_headers, excluded_header.name, excluded_header.value));
+    { /* copy message, include "x-amz-meta-" */
+        struct aws_http_message *copied_message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), false /*exclude_x_amz_meta*/);
+        ASSERT_TRUE(copied_message != NULL);
 
-    struct aws_http_message *copied_message =
-        aws_s3_message_util_copy_http_message_no_body(allocator, message, &excluded_header.name, 1);
-    ASSERT_TRUE(copied_message != NULL);
+        ASSERT_SUCCESS(s_test_http_messages_match(
+            allocator, message, copied_message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers)));
 
-    ASSERT_SUCCESS(s_test_http_messages_match(allocator, message, copied_message, &excluded_header.name, 1));
+        aws_http_message_release(copied_message);
+    }
 
-    aws_http_message_release(copied_message);
+    { /* copy message, exclude "x-amz-meta-" */
+        struct aws_http_message *copied_message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), true /*exclude_x_amz_meta*/);
+        ASSERT_TRUE(copied_message != NULL);
+
+        const struct aws_byte_cursor expected_excluded_headers[] = {
+            aws_byte_cursor_from_c_str("ExcludedHeader"),
+            aws_byte_cursor_from_c_str("x-amz-meta-MyMetadata"),
+        };
+
+        ASSERT_SUCCESS(s_test_http_messages_match(
+            allocator, message, copied_message, expected_excluded_headers, AWS_ARRAY_SIZE(expected_excluded_headers)));
+
+        aws_http_message_release(copied_message);
+    }
+
     aws_http_message_release(message);
 
     return 0;

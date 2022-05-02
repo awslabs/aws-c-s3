@@ -121,6 +121,8 @@ const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
 };
 
+static const struct aws_byte_cursor s_x_amz_meta_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-meta-");
+
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
@@ -139,7 +141,8 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(allocator, base_message, NULL, 0);
+    struct aws_http_message *message =
+        aws_s3_message_util_copy_http_message_no_body_all_headers(allocator, base_message);
 
     if (message == NULL) {
         return NULL;
@@ -169,11 +172,12 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     AWS_PRECONDITION(allocator);
 
     /* For multipart upload, sse related headers should only be shown in create-multipart request */
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
         allocator,
         base_message,
         g_s3_create_multipart_upload_excluded_headers,
-        AWS_ARRAY_SIZE(g_s3_create_multipart_upload_excluded_headers));
+        AWS_ARRAY_SIZE(g_s3_create_multipart_upload_excluded_headers),
+        false /*exclude_x_amz_meta*/);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -233,8 +237,12 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
-        allocator, base_message, g_s3_upload_part_excluded_headers, AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers));
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+        allocator,
+        base_message,
+        g_s3_upload_part_excluded_headers,
+        AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
+        true /*exclude_x_amz_meta*/);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -284,8 +292,12 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
-        allocator, base_message, g_s3_upload_part_excluded_headers, AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers));
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+        allocator,
+        base_message,
+        g_s3_upload_part_excluded_headers,
+        AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
+        true /*exclude_x_amz_meta*/);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -491,11 +503,12 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
         allocator,
         base_message,
         g_s3_complete_multipart_upload_excluded_headers,
-        AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers));
+        AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
+        true /*exclude_x_amz_meta*/);
 
     struct aws_http_headers *headers = NULL;
 
@@ -613,11 +626,12 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_http_message *base_message,
     const struct aws_string *upload_id) {
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
         allocator,
         base_message,
         g_s3_abort_multipart_upload_excluded_headers,
-        AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers));
+        AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers),
+        true /*exclude_x_amz_meta*/);
 
     if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, false, message)) {
         goto error_clean_up;
@@ -760,11 +774,20 @@ error_clean_up:
 }
 
 /* Copy an existing HTTP message's headers, method, and path. */
-struct aws_http_message *aws_s3_message_util_copy_http_message_no_body(
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_all_headers(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message) {
+
+    return aws_s3_message_util_copy_http_message_no_body_filter_headers(allocator, base_message, NULL, 0, false);
+}
+
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_headers(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     const struct aws_byte_cursor *excluded_header_array,
-    size_t excluded_header_array_size) {
+    size_t excluded_header_array_size,
+    bool exclude_x_amz_meta) {
+
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
 
@@ -812,6 +835,12 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body(
             }
 
             if (exclude_header) {
+                continue;
+            }
+        }
+
+        if (exclude_x_amz_meta) {
+            if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_x_amz_meta_prefix)) {
                 continue;
             }
         }

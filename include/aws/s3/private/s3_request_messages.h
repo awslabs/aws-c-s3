@@ -21,11 +21,17 @@ struct aws_array_list;
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
-struct aws_http_message *aws_s3_message_util_copy_http_message_no_body(
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_all_headers(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message);
+
+AWS_S3_API
+struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_headers(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
     const struct aws_byte_cursor *excluded_headers_arrays,
-    size_t excluded_headers_size);
+    size_t excluded_headers_size,
+    bool exclude_x_amz_meta);
 
 AWS_S3_API
 struct aws_input_stream *aws_s3_message_util_assign_body(
