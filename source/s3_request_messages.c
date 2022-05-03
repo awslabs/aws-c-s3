@@ -171,7 +171,10 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
 
-    /* For multipart upload, sse related headers should only be shown in create-multipart request */
+    /* For multipart upload, some headers should ONLY be in the initial create-multipart request.
+     * Headers such as:
+     * - SSE related headers
+     * - user metadata (prefixed "x-amz-meta-") headers */
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
         allocator,
         base_message,
