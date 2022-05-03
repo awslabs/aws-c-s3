@@ -241,8 +241,8 @@ static int s_s3_meta_request_default_prepare_request(
         }
     }
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body(
-        meta_request->allocator, meta_request->initial_request_message, NULL, 0);
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_all_headers(
+        meta_request->allocator, meta_request->initial_request_message);
 
     const enum aws_s3_checksum_algorithm checksum_algorithm = meta_request->checksum_algorithm;
     if (!checksum_algorithm && meta_request->should_compute_content_md5) {
