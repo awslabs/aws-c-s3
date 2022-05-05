@@ -218,7 +218,7 @@ static bool s_s3_auto_ranged_put_update(
                 /* Check if the etag/checksum list has the result already */
                 struct aws_string *etag = NULL;
                 if (!aws_array_list_get_at(
-                        auto_ranged_put->synced_data.etag_list,
+                        &auto_ranged_put->synced_data.etag_list,
                         &etag,
                         auto_ranged_put->threaded_update_data.next_part_number) &&
                     etag) {

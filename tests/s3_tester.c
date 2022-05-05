@@ -199,7 +199,7 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     return endpoint_string;
 }
 
-int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester, bool streaming) {
+int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tester);
@@ -259,10 +259,6 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 #endif
 
     aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
-
-    if (streaming) {
-        tester->default_signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
-    }
 
     return AWS_OP_SUCCESS;
 
@@ -590,12 +586,6 @@ static void s_s3_client_process_work_empty(struct aws_s3_client *client) {
     (void)client;
 }
 
-static bool s_s3_client_endpoint_ref_count_zero_empty(struct aws_s3_endpoint *endpoint) {
-    AWS_PRECONDITION(endpoint);
-    (void)endpoint;
-    return true;
-}
-
 static void s_s3_client_endpoint_shutdown_callback_empty(void *user_data) {
     AWS_PRECONDITION(user_data);
     (void)user_data;
@@ -613,7 +603,6 @@ struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
     .get_host_address_count = s_s3_client_get_host_address_count_empty,
     .schedule_process_work_synced = s_s3_client_schedule_process_work_synced_empty,
     .process_work = s_s3_client_process_work_empty,
-    .endpoint_ref_count_zero = s_s3_client_endpoint_ref_count_zero_empty,
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback_empty,
     .finish_destroy = s_s3_client_finish_destroy_empty,
 };
@@ -1132,7 +1121,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     if (tester == NULL) {
         ASSERT_TRUE(options->allocator);
-        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester, options->stream_signing));
+        ASSERT_SUCCESS(aws_s3_tester_init(options->allocator, &local_tester));
         tester = &local_tester;
         clean_up_local_tester = true;
     } else if (allocator == NULL) {
@@ -1368,7 +1357,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     aws_s3_client_release(client);
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&input_stream_buffer);
@@ -1612,7 +1601,7 @@ int aws_s3_tester_send_put_object_meta_request(
     aws_string_destroy(host_name);
     host_name = NULL;
 
-    aws_input_stream_destroy(input_stream);
+    aws_input_stream_release(input_stream);
     input_stream = NULL;
 
     aws_byte_buf_clean_up(&test_buffer);

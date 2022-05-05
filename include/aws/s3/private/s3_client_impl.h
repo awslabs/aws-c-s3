@@ -31,22 +31,12 @@ enum aws_s3_connection_finish_code {
     AWS_S3_CONNECTION_FINISH_CODE_RETRY,
 };
 
-/* Callback for the owner of the endpoint when the ref count of this endpoint hits zero. This gives the owner a
- * chance to clean up any references to the endpoint, but also to short circuit clean-up. This can be needed in the case
- * of a synced table, where before the lock of the table can be grabbed, a reference for the endpoint is added by a
- * different critical section.*/
-typedef bool(aws_s3_endpoint_ref_zero_fn)(struct aws_s3_endpoint *endpoint);
-
 /* Callback for the owner of the endpoint when the endpoint has completely cleaned up. */
 typedef void(aws_s3_endpoint_shutdown_fn)(void *user_data);
 
 struct aws_s3_endpoint_options {
     /* URL of the host that this endpoint refers to. */
     struct aws_string *host_name;
-
-    /* Callback for the owner of the endpoint when the endpoint's refcount hits zero. (More details in the typedef of
-     * this callback.)*/
-    aws_s3_endpoint_ref_zero_fn *ref_count_zero_callback;
 
     /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
@@ -83,12 +73,12 @@ struct aws_s3_endpoint {
     /* Connection manager that manages all connections to this endpoint. */
     struct aws_http_connection_manager *http_connection_manager;
 
-    /* Callback for the owner of the endpoint when the endpoint's refcount hits zero. (More details in the typedef of
-     * this callback.)*/
-    aws_s3_endpoint_ref_zero_fn *ref_count_zero_callback;
-
     /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
+
+    /* True, if the endpoint is created by client. So, it need to be thread safe to manage the refcount via
+     * `aws_s3_client_endpoint_release` */
+    bool handled_by_client;
 
     void *user_data;
 };
@@ -128,8 +118,6 @@ struct aws_s3_client_vtable {
     void (*schedule_process_work_synced)(struct aws_s3_client *client);
 
     void (*process_work)(struct aws_s3_client *client);
-
-    bool (*endpoint_ref_count_zero)(struct aws_s3_endpoint *endpoint);
 
     void (*endpoint_shutdown_callback)(void *user_data);
 
@@ -325,6 +313,11 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
 
 AWS_S3_API
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
+
+/* If the endpoint is created by s3 client, it will be managed by the client via a hash table that need to be protected
+ * by lock. A lock will be acquired within the call, never invoke with lock held */
+AWS_S3_API
+void aws_s3_client_endpoint_release(struct aws_s3_client *client, struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_max_num_connections_per_vip;

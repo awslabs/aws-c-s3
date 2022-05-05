@@ -104,7 +104,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         goto error_cleanup;
     }
 
-    endpoint->ref_count_zero_callback = options->ref_count_zero_callback;
     endpoint->shutdown_callback = options->shutdown_callback;
     endpoint->user_data = options->user_data;
 
@@ -213,13 +212,28 @@ void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     aws_ref_count_release(&endpoint->ref_count);
 }
 
+void aws_s3_client_endpoint_release(struct aws_s3_client *client, struct aws_s3_endpoint *endpoint) {
+    AWS_PRECONDITION(endpoint);
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(endpoint->handled_by_client);
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        /* The last refcount to release */
+        if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 1) {
+            aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+        }
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
+
+    aws_ref_count_release(&endpoint->ref_count);
+}
+
 static void s_s3_endpoint_ref_count_zero(void *user_data) {
     struct aws_s3_endpoint *endpoint = user_data;
     AWS_PRECONDITION(endpoint);
-
-    if (endpoint->ref_count_zero_callback != NULL && !endpoint->ref_count_zero_callback(endpoint)) {
-        return;
-    }
 
     if (endpoint->http_connection_manager != NULL) {
         struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;

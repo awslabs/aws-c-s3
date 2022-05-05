@@ -99,6 +99,7 @@ add_net_test_case(test_s3_round_trip_multipart_get_fc)
 add_net_test_case(test_s3_round_trip_default_get_fc)
 add_net_test_case(test_s3_round_trip_mpu_multipart_get_fc)
 add_net_test_case(test_s3_round_trip_mpu_default_get_fc)
+add_net_test_case(test_s3_chunked_then_unchunked)
 
 add_net_test_case(test_s3_cancel_mpu_one_part_completed_fc)
 add_net_test_case(test_s3_cancel_mpd_one_part_completed_fc)
@@ -127,10 +128,8 @@ add_net_test_case(test_s3_default_sending_meta_request_user_agent)
 add_net_test_case(test_s3_range_requests)
 add_net_test_case(test_s3_not_satisfiable_range)
 
-add_net_test_case(test_s3_endpoint_ref)
 add_net_test_case(test_s3_bad_endpoint)
 add_net_test_case(test_s3_different_endpoints)
-add_net_test_case(test_s3_endpoint_resurrect)
 
 add_test_case(test_s3_replace_quote_entities)
 add_test_case(test_s3_parse_content_range_response_header)

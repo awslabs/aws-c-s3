@@ -361,8 +361,8 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
         /* The S3 object is not large enough for multi-part copy. Bypasses a copy of the original CopyObject request to
          * S3. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS: {
-            message = aws_s3_message_util_copy_http_message_no_body(
-                meta_request->allocator, meta_request->initial_request_message, NULL, 0);
+            message = aws_s3_message_util_copy_http_message_no_body_all_headers(
+                meta_request->allocator, meta_request->initial_request_message);
             break;
         }
 

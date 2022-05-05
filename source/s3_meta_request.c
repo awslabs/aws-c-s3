@@ -400,6 +400,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    /* For a meta request created by client, the endpoint should always be cleaned up by meta request finish call. Just
+     * use regular release here for those meta request not really went through the client */
     aws_s3_endpoint_release(meta_request->endpoint);
     aws_s3_client_release(meta_request->client);
 
@@ -638,6 +640,15 @@ static void s_s3_meta_request_sign_request(
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
 
+static bool s_is_put_request(const struct aws_s3_meta_request *meta_request) {
+    struct aws_byte_cursor method;
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
+        !aws_http_message_get_request_method(meta_request->initial_request_message, &method)) {
+        return aws_byte_cursor_eq(&method, &aws_http_method_put);
+    }
+    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+}
+
 /* Handles signing a message for the caller. */
 void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
@@ -691,6 +702,14 @@ void aws_s3_meta_request_sign_request_default(
         return;
     }
 
+    /* if a checksum algorithm is set for a put request the request will be chunked and we need to change the signed
+     * body value to match this type of request*/
+    if (meta_request->checksum_algorithm != AWS_SCA_NONE && s_is_put_request(meta_request) &&
+        aws_byte_cursor_eq(&signing_config.signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
+        signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+    }
+    /* However the initial request for a multipart upload does not have a trailing checksum and is not chunked so it
+     * must have an unsigned_payload signed_body value*/
     if (request->part_number == 0 &&
         aws_byte_cursor_eq(
             &signing_config.signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
@@ -1426,13 +1445,22 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         finish_result.error_code,
         aws_error_str(finish_result.error_code));
 
+    /* As the meta request has been finished with any HTTP message, we can safely release the http message that hold. So
+     * that, the downstream high level language doesn't need to wait for shutdown to clean related resource (eg: input
+     * stream) */
+    if (meta_request->initial_request_message) {
+        aws_http_message_release(meta_request->initial_request_message);
+        meta_request->initial_request_message = NULL;
+    }
+
     if (meta_request->finish_callback != NULL) {
         meta_request->finish_callback(meta_request, &finish_result, meta_request->user_data);
     }
 
     aws_s3_meta_request_result_clean_up(meta_request, &finish_result);
 
-    aws_s3_endpoint_release(meta_request->endpoint);
+    /* The endpoint must be created by client here */
+    aws_s3_client_endpoint_release(meta_request->client, meta_request->endpoint);
     meta_request->endpoint = NULL;
 
     aws_s3_client_release(meta_request->client);
