@@ -425,47 +425,37 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         return NULL;
     }
 
-    /* url decode */
-    struct aws_byte_buf decode_buffer;
-    AWS_ZERO_STRUCT(decode_buffer);
-    aws_byte_buf_init(&decode_buffer, allocator, 0);
-    if (aws_byte_buf_append_decoding_uri(&decode_buffer, &source_header_value) != AWS_OP_SUCCESS) {
-        goto error_cleanup;
-    }
-
-    /* extracts source bucket and key */
-    struct aws_byte_cursor source_bucket = aws_byte_cursor_from_buf(&decode_buffer);
-
-    /* x-amz-copy-source might have an optional leading slash. if so let's skip it */
-    if (decode_buffer.len > 1 && decode_buffer.buffer[0] == '/') {
+    if (source_header_value.len > 1 && source_header_value.ptr[0] == '/') {
         /* skip the leading slash */
-        aws_byte_cursor_advance(&source_bucket, 1);
+        aws_byte_cursor_advance(&source_header_value, 1);
     }
-
     /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them.
      */
-    struct aws_byte_cursor source_key = source_bucket;
+    struct aws_byte_cursor source_key = source_header_value;
 
     while (source_key.len > 0) {
         if (*source_key.ptr == '/') {
-            source_bucket.len = source_key.ptr - source_bucket.ptr;
+            source_header_value.len = source_key.ptr - source_header_value.ptr;
             aws_byte_cursor_advance(&source_key, 1); /* skip the / between bucket and key */
             break;
         }
         aws_byte_cursor_advance(&source_key, 1);
     }
 
-    if (source_bucket.len == 0 || source_key.len == 0) {
+        if (source_header_value.len == 0 || source_key.len == 0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
             "The CopyRequest x-amz-copy-source header must contain the bucket and object key separated by a slash");
         goto error_cleanup;
     }
 
-    message = aws_s3_get_object_size_message_new(allocator, base_message, source_bucket, source_key);
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "source_header_value: " PRInSTR "\" :source_header_value",
+        AWS_BYTE_CURSOR_PRI(source_header_value));
+    message = aws_s3_get_object_size_message_new(allocator, base_message, source_header_value, source_key);
 
 error_cleanup:
-    aws_byte_buf_clean_up(&decode_buffer);
     return message;
 }
 
