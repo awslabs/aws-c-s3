@@ -442,7 +442,7 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         aws_byte_cursor_advance(&source_key, 1);
     }
 
-        if (source_header_value.len == 0 || source_key.len == 0) {
+    if (source_header_value.len == 0 || source_key.len == 0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
             "The CopyRequest x-amz-copy-source header must contain the bucket and object key separated by a slash");
