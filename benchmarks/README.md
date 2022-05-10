@@ -41,7 +41,7 @@ when the instance boots. Usually controlled by dashboard-stack, user don't need 
 
 `benchmark-config.json` controls all the configuration for benchmark test.
 
-The configuration are listed here **(TO BE FINALIZED)**:
+The configuration for `benchmarks-stack` are listed here **(TO BE FINALIZED)**, which is the defined context value for cdk to deploy:
 
 * StackName (string): Name of the stack to be created
 * UserName (string): *Optional* default: ec2-user
@@ -50,4 +50,15 @@ The configuration are listed here **(TO BE FINALIZED)**:
 * InstanceConfigName (string): The ec2 instance type to create
 * ThroughputGbps (string): String of the thought put target in Gbp
 * AutoTearDown (1 or 0): Whether to tear down the benchmarks stack after test or not, default: 1
-* KeyPairName (string): Set to the key pair name to an existing EC2 key pair for the EC2 instance to use, if not set, CDK will create one and it can be accessed via aws CLI `aws secretsmanager get-secret-value --secret-id ec2-ssh-key/S3-EC2-Canary-key-pair/private`
+
+The configuration for `benchmark-config.json` are listed here **(TO BE FINALIZED)**, which is defined :
+
+* `projects`, the name of the project to run, eg `aws-crt-java`, will run the performance test within aws-crt-java, which can be found [here](https://github.com/awslabs/aws-crt-java).
+  * Each projects contains configuration for the project:
+    * `shell_script`: the script to run the test.
+    * `branch`: the branch of the repo that test against.
+    * `s3_bucket_name`: the S3 bucket to use for the test
+* `instances`: The ec2 instance type to create
+  * `throughput_gbps`: the target throughput to test against
+* `auto-tear-down`: Tear down the tests automatically after it runs or not.
+* `key-pair-name`: Set to the key pair name to an existing EC2 key pair for the EC2 instance to use, if not set, CDK will create one and it can be accessed via aws CLI `aws secretsmanager get-secret-value --secret-id ec2-ssh-key/S3-EC2-Canary-key-pair/private`

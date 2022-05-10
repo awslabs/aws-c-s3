@@ -2,7 +2,8 @@
   "projects": {
     "aws-crt-java": {
       "shell_script": "project_scripts/run_java_crt.sh",
-      "branch": "main"
+      "branch": "main",
+      "s3_bucket_name": "aws-crt-canary-bucket"
     }
   },
   "instances": {

@@ -80,7 +80,7 @@ export class DashboardStack extends cdk.Stack {
             enableDnsHostnames: true
         })
 
-        cdk.Tags.of(vpc).add('S3BenchmarkResources', 'VPC');
+        cdk.Tags.of(vpc).add('S3BenchmarkResources', 'DashboardVPC');
 
         const metrics_namespace = "S3Benchmark";
 
