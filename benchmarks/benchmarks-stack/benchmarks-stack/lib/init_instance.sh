@@ -34,6 +34,8 @@ function publish_bytes_in_metric() {
         --dimensions Project=$PROJECT_NAME,Branch=$BRANCH_NAME,InstanceType=$INSTANCE_TYPE \
         --storage-resolution 1 \
         --value $3 >> $PUBLISH_METRICS_LOG_FN
+    # Store the value to a temp file
+    echo $3 >> "/tmp/${@: -1}_BytesIn.txt"
 }
 
 function publish_bytes_out_metric() {
@@ -46,6 +48,8 @@ function publish_bytes_out_metric() {
         --dimensions Project=$PROJECT_NAME,Branch=$BRANCH_NAME,InstanceType=$INSTANCE_TYPE \
         --storage-resolution 1 \
         --value $2 >> $PUBLISH_METRICS_LOG_FN
+    # Store the value to a temp file
+    echo $2 >> "/tmp/${@: -1}_BytesOut.txt"
 }
 
 export -f publish_bytes_in_metric
@@ -104,23 +108,29 @@ awk "{sub(\"{RUN_COMMAND}\", \"UPLOAD_PERFORMANCE\"); print}" $PERF_SCRIPT_TEMP 
 sudo chmod +x $DOWNLOAD_PERF_SCRIPT
 sudo chmod +x $UPLOAD_PERF_SCRIPT
 
+CURRENT_TIME=`date +"%Y-%m-%d:%H"`
+
 if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
     truncate -s 5G $TEST_OBJECT_NAME
     aws s3 cp $TEST_OBJECT_NAME s3://$S3_BUCKET_NAME
     stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
         | stdbuf -o0 grep -v total \
         | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
-        | xargs -n3 -t -P 32 bash -c 'publish_bytes_in_metric "$@"' _ &
+        | xargs -n3 -t -P 32 bash -c 'publish_bytes_in_metric "$@" '\"${CURRENT_TIME}\"'' _ &
 
     sudo $DOWNLOAD_PERF_SCRIPT
 elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
     stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
         | stdbuf -o0 grep -v total \
         | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
-        | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@"' _ &
+        | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@" '\"${CURRENT_TIME}\"'' _ &
 
     sudo $UPLOAD_PERF_SCRIPT
 fi
+
+# Store the data to an S3 bucket for future refrence.
+aws s3 cp "/tmp/${CURRENT_TIME}_BytesIn.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
+aws s3 cp "/tmp/${CURRENT_TIME}_BytesOut.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
 
 if [ $AUTO_TEAR_DOWN = 1 ]; then
     aws lambda invoke \
