@@ -39,8 +39,6 @@ when the instance boots. Usually controlled by dashboard-stack, user don't need 
 
 ### Configuration
 
-`benchmark-config.json` controls all the configuration for benchmark test.
-
 The configuration for `benchmarks-stack` are listed here **(TO BE FINALIZED)**, which is the defined context value for cdk to deploy:
 
 * StackName (string): Name of the stack to be created
@@ -62,3 +60,7 @@ The configuration for `benchmark-config.json` are listed here **(TO BE FINALIZED
   * `throughput_gbps`: the target throughput to test against
 * `auto-tear-down`: Tear down the tests automatically after it runs or not.
 * `key-pair-name`: Set to the key pair name to an existing EC2 key pair for the EC2 instance to use, if not set, CDK will create one and it can be accessed via aws CLI `aws secretsmanager get-secret-value --secret-id ec2-ssh-key/S3-EC2-Canary-key-pair/private`
+
+The dashboard-stack has been deployed to AWS account associated with aws-sdk-common-runtime@amazon.com at us-west-2. If you have access to that and need to update the config (eg: test performance from another branch), you can update `aws-c-s3/benchmarks/benchmark-config.json` and rerun the deploy steps for dashboard stack as shown above.
+
+Note: Once you deploy the stack, the benchmark stack will be trigger by event that runs once per day. If you want to trigger the benchmark stack to run performance test, you can manually start the codebuild job that associated with the dashboard stack.
