@@ -7,7 +7,7 @@ import * as events from '@aws-cdk/aws-events';
 import * as targets from '@aws-cdk/aws-events-targets';
 import * as s3 from '@aws-cdk/aws-s3';
 import * as ec2 from '@aws-cdk/aws-ec2';
-import * as s3deploy from '@aws-cdk/aws-s3-deployment'
+import * as s3deploy from '@aws-cdk/aws-s3-deployment';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -80,7 +80,7 @@ export class DashboardStack extends cdk.Stack {
             enableDnsHostnames: true
         })
 
-        cdk.Tags.of(vpc).add('S3BenchmarkResources', 'DashboardVPC');
+        cdk.Tags.of(vpc).add('S3CanaryResources', 'VPC');
 
         const metrics_namespace = "S3Benchmark";
 
@@ -186,6 +186,40 @@ export class DashboardStack extends cdk.Stack {
         const dashboard = new cloudwatch.CfnDashboard(this, id, {
             dashboardBody: JSON.stringify(dashboard_body),
             dashboardName: id + "_" + region
+        });
+
+        const cfnAlarm = new cloudwatch.CfnAlarm(this, 'MyCfnAlarm', {
+            comparisonOperator: 'LessThanOrEqualToThreshold',
+            evaluationPeriods: 1,
+
+            // the properties below are optional
+            actionsEnabled: true,
+            alarmActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN"],
+            alarmDescription: "No data from S3 canary for a day. S3 Canary is probably broken",
+            alarmName: "S3 Canary Alarm",
+            datapointsToAlarm: 1,
+            dimensions: [
+                {
+                    name: "Project",
+                    value: "aws-crt-java"
+                },
+                {
+                    name: "Branch",
+                    value: "main"
+                },
+                {
+                    name: "InstanceType",
+                    value: "c5n.18xlarge"
+                }
+            ],
+            insufficientDataActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN"],
+            metricName: 'BytesOut',
+            namespace: 'S3Benchmark',
+            okActions: [],
+            period: 86400,
+            statistic: 'Maximum',
+            threshold: 5000000000.0,
+            treatMissingData: 'breaching',
         });
 
         // Permission to create CFN stack with ec2,s3, iam and security group in it.
