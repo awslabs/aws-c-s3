@@ -416,32 +416,19 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     /* find the x-amz-copy-source header */
     struct aws_http_headers *headers = aws_http_message_get_headers(base_message);
 
-    struct aws_byte_cursor source_header_value;
-    AWS_ZERO_STRUCT(source_header_value);
+    struct aws_byte_cursor source_bucket;
+    AWS_ZERO_STRUCT(source_bucket);
 
     const struct aws_byte_cursor copy_source_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
-    if (aws_http_headers_get(headers, copy_source_header, &source_header_value) != AWS_OP_SUCCESS) {
+    if (aws_http_headers_get(headers, copy_source_header, &source_bucket) != AWS_OP_SUCCESS) {
         AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the x-amz-copy-source header");
         return NULL;
     }
 
-    /* url decode */
-    struct aws_byte_buf decode_buffer;
-    AWS_ZERO_STRUCT(decode_buffer);
-    aws_byte_buf_init(&decode_buffer, allocator, 0);
-    if (aws_byte_buf_append_decoding_uri(&decode_buffer, &source_header_value) != AWS_OP_SUCCESS) {
-        goto error_cleanup;
-    }
-
-    /* extracts source bucket and key */
-    struct aws_byte_cursor source_bucket = aws_byte_cursor_from_buf(&decode_buffer);
-
-    /* x-amz-copy-source might have an optional leading slash. if so let's skip it */
-    if (decode_buffer.len > 1 && decode_buffer.buffer[0] == '/') {
+    if (source_bucket.len > 1 && source_bucket.ptr[0] == '/') {
         /* skip the leading slash */
         aws_byte_cursor_advance(&source_bucket, 1);
     }
-
     /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them.
      */
     struct aws_byte_cursor source_key = source_bucket;
@@ -461,11 +448,9 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
             "The CopyRequest x-amz-copy-source header must contain the bucket and object key separated by a slash");
         goto error_cleanup;
     }
-
     message = aws_s3_get_object_size_message_new(allocator, base_message, source_bucket, source_key);
 
 error_cleanup:
-    aws_byte_buf_clean_up(&decode_buffer);
     return message;
 }
 
