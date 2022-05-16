@@ -11,7 +11,7 @@ export INSTANCE_TYPE=$8
 export REGION=$9
 export RUN_COMMAND=${10}
 export CFN_NAME=${11}
-export S3_BUCKET_NAME=${12}
+export P90_SCRIPT=${12}
 # TODO the auto tear down should be a flag that makes more sense
 export AUTO_TEAR_DOWN=${13:-1}
 
@@ -23,6 +23,7 @@ export PERF_SCRIPT_TEMP=/tmp/perf_script_temp.tmp
 export DOWNLOAD_PERF_SCRIPT=/home/$USER_NAME/download_performance.sh
 export UPLOAD_PERF_SCRIPT=/home/$USER_NAME/upload_performance.sh
 export USER_DIR=/home/$USER_NAME/
+export S3_BUCKET_NAME=automatic-canary-test-bucket-tmp
 
 function publish_bytes_in_metric() {
 
@@ -76,6 +77,11 @@ unzip awscliv2.zip
 sudo ./aws/install
 rm -rf aws
 rm -rf awscliv2.zip
+
+# create a temp bucket for test
+aws s3 mb s3://$S3_BUCKET_NAME --region $REGION
+
+pip3 install numpy
 
 INSTANCE_ID=`curl http://169.254.169.254/latest/meta-data/instance-id`
 aws ec2 monitor-instances --instance-ids $INSTANCE_ID
@@ -132,11 +138,16 @@ fi
 aws s3 cp "/tmp/${CURRENT_TIME}_BytesIn.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
 aws s3 cp "/tmp/${CURRENT_TIME}_BytesOut.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
 
-if [ $AUTO_TEAR_DOWN = 1 ]; then
-    aws lambda invoke \
-        --cli-binary-format raw-in-base64-out \
-        --function-name BenchmarkManager \
-        --invocation-type Event \
-        --payload '{ "action": "delete", "stack_name": '\"${CFN_NAME}\"' }' \
-        response.json
-fi
+python3 $P90_SCRIPT "/tmp/${CURRENT_TIME}_BytesIn.txt" "/tmp/${CURRENT_TIME}_BytesOut.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
+
+# delete the tempary bucket
+aws s3 rb s3://$S3_BUCKET_NAME --force
+
+# if [ $AUTO_TEAR_DOWN = 1 ]; then
+#     aws lambda invoke \
+#         --cli-binary-format raw-in-base64-out \
+#         --function-name BenchmarkManager \
+#         --invocation-type Event \
+#         --payload '{ "action": "delete", "stack_name": '\"${CFN_NAME}\"' }' \
+#         response.json
+# fi

@@ -41,6 +41,10 @@ export class BenchmarksStack extends cdk.Stack {
       path: path.join(__dirname, 'run_project_template.sh')
     });
 
+    const get_p90_py = new assets.Asset(this, 'get_p90.py', {
+      path: path.join(__dirname, 'get_p90.py')
+    });
+
     const project_shell_script_sh = new assets.Asset(this, project_config.shell_script, {
       path: path.join(__dirname, project_config.shell_script)
     });
@@ -109,6 +113,11 @@ export class BenchmarksStack extends cdk.Stack {
         bucketKey: project_shell_script_sh.s3ObjectKey
       })
 
+      const get_p90_py_path = instance_user_data.addS3DownloadCommand({
+        bucket: assetBucket,
+        bucketKey: get_p90_py.s3ObjectKey
+      })
+
       const init_instance_arguments = user_name + ' ' +
         show_instance_dashboard_sh_path + ' ' +
         run_project_template_sh_path + ' ' +
@@ -120,7 +129,7 @@ export class BenchmarksStack extends cdk.Stack {
         region + ' ' +
         run_command + ' ' +
         this.stackName + ' ' +
-        project_config.s3_bucket_name + ' ' +
+        get_p90_py_path + ' ' +
         auto_tear_down;
 
       instance_user_data.addExecuteFileCommand({

@@ -153,6 +153,62 @@ export class DashboardStack extends cdk.Stack {
                                 }
                             ],
                             [
+                                metrics_namespace,
+                                "BytesInP90",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "p1",
+                                    visible: false,
+                                }
+                            ],
+                            [
+                                metrics_namespace,
+                                "BytesOutP90",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "p2",
+                                    visible: false,
+                                }
+                            ],
+                            [
+                                metrics_namespace,
+                                "BytesInMax",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "max1",
+                                    visible: false,
+                                }
+                            ],
+                            [
+                                metrics_namespace,
+                                "BytesOutMax",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "max2",
+                                    visible: false,
+                                }
+                            ],
+                            [
                                 {
                                     expression: "m1*8/1000/1000/1000",
                                     "label": "Gbps Download",
@@ -178,7 +234,40 @@ export class DashboardStack extends cdk.Stack {
                         title: instance_config_name
                     }
                 };
+                const tagName = project_name + "/" + branch_name + '-' + instance_config_name;
+                const cfnAlarm = new cloudwatch.CfnAlarm(this, tagName, {
+                    comparisonOperator: 'LessThanOrEqualToThreshold',
+                    evaluationPeriods: 1,
 
+                    // the properties below are optional
+                    actionsEnabled: true,
+                    alarmActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
+                    alarmDescription: "No data from S3 canary for a day. S3 Canary is probably broken" + tagName,
+                    alarmName: "S3 Canary Alarm " + tagName,
+                    datapointsToAlarm: 1,
+                    dimensions: [
+                        {
+                            name: "Project",
+                            value: project_name
+                        },
+                        {
+                            name: "Branch",
+                            value: branch_name
+                        },
+                        {
+                            name: "InstanceType",
+                            value: instance_config_name
+                        }
+                    ],
+                    insufficientDataActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
+                    metricName: 'BytesOut',
+                    namespace: 'S3Benchmark',
+                    okActions: [],
+                    period: 86400,
+                    statistic: 'Maximum',
+                    threshold: 5000000000.0,
+                    treatMissingData: 'breaching',
+                });
                 dashboard_body.widgets.push(instance_widget);
             }
         }
@@ -186,40 +275,6 @@ export class DashboardStack extends cdk.Stack {
         const dashboard = new cloudwatch.CfnDashboard(this, id, {
             dashboardBody: JSON.stringify(dashboard_body),
             dashboardName: id + "_" + region
-        });
-
-        const cfnAlarm = new cloudwatch.CfnAlarm(this, 'MyCfnAlarm', {
-            comparisonOperator: 'LessThanOrEqualToThreshold',
-            evaluationPeriods: 1,
-
-            // the properties below are optional
-            actionsEnabled: true,
-            alarmActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN"],
-            alarmDescription: "No data from S3 canary for a day. S3 Canary is probably broken",
-            alarmName: "S3 Canary Alarm",
-            datapointsToAlarm: 1,
-            dimensions: [
-                {
-                    name: "Project",
-                    value: "aws-crt-java"
-                },
-                {
-                    name: "Branch",
-                    value: "main"
-                },
-                {
-                    name: "InstanceType",
-                    value: "c5n.18xlarge"
-                }
-            ],
-            insufficientDataActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN"],
-            metricName: 'BytesOut',
-            namespace: 'S3Benchmark',
-            okActions: [],
-            period: 86400,
-            statistic: 'Maximum',
-            threshold: 5000000000.0,
-            treatMissingData: 'breaching',
         });
 
         // Permission to create CFN stack with ec2,s3, iam and security group in it.
