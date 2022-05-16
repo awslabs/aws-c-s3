@@ -241,8 +241,8 @@ export class DashboardStack extends cdk.Stack {
 
                     // the properties below are optional
                     actionsEnabled: true,
-                    alarmActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
-                    alarmDescription: "No data from S3 canary for a day. S3 Canary is probably broken" + tagName,
+                    alarmActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+or+performance+issue+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
+                    alarmDescription: "S3 canary has no data or low performance for a day. Check the canary is working or not or something related to performance has been merged. For " + tagName,
                     alarmName: "S3 Canary Alarm " + tagName,
                     datapointsToAlarm: 1,
                     dimensions: [
@@ -259,13 +259,13 @@ export class DashboardStack extends cdk.Stack {
                             value: instance_config_name
                         }
                     ],
-                    insufficientDataActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
-                    metricName: 'BytesOut',
+                    insufficientDataActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+or+performance+issue+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
+                    metricName: 'BytesInP90',
                     namespace: 'S3Benchmark',
                     okActions: [],
                     period: 86400,
                     statistic: 'Maximum',
-                    threshold: 5000000000.0,
+                    threshold: 70.0, // Set a 70 Gbps threshold for now, we can update it later.
                     treatMissingData: 'breaching',
                 });
                 dashboard_body.widgets.push(instance_widget);

@@ -25,18 +25,18 @@ def publish_metric(metric_name, project_name, branch_name, instance_name, value)
             --value {}".format(metric_name, project_name, branch_name, instance_name, value))
 
 
-byte_in_file_path = sys.argv[1]
-byte_out_file_path = sys.argv[2]
-project_name = sys.argv[3]
-branch_name = sys.argv[4]
-instance_name = sys.argv[5]
+file_path = sys.argv[1]
+project_name = sys.argv[2]
+branch_name = sys.argv[3]
+instance_name = sys.argv[4]
 
-in_p90, in_max = get_p90_max(byte_in_file_path)
-publish_metric("BytesInP90", project_name, branch_name, instance_name, in_p90)
-publish_metric("BytesInMax", project_name, branch_name, instance_name, in_max)
 
-out_p90, out_max = get_p90_max(byte_out_file_path)
-publish_metric("BytesOutP90", project_name,
-               branch_name, instance_name, out_p90)
-publish_metric("BytesOutMax", project_name,
-               branch_name, instance_name, out_max)
+p90, max = get_p90_max(file_path)
+
+metric_prefix = "BytesIn"
+if "BytesOut" in file_path:
+    metric_prefix = "BytesOut"
+publish_metric("{}P90".format(metric_prefix), project_name,
+               branch_name, instance_name, p90)
+publish_metric("{}Max".format(metric_prefix), project_name,
+               branch_name, instance_name, max)

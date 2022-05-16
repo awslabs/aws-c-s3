@@ -23,7 +23,13 @@ export PERF_SCRIPT_TEMP=/tmp/perf_script_temp.tmp
 export DOWNLOAD_PERF_SCRIPT=/home/$USER_NAME/download_performance.sh
 export UPLOAD_PERF_SCRIPT=/home/$USER_NAME/upload_performance.sh
 export USER_DIR=/home/$USER_NAME/
-export S3_BUCKET_NAME=automatic-canary-test-bucket-tmp
+
+
+if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
+    export S3_BUCKET_NAME=automatic-canary-test-bucket-tmp-download
+elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
+    export S3_BUCKET_NAME=automatic-canary-test-bucket-tmp-upload
+fi
 
 function publish_bytes_in_metric() {
 
@@ -78,8 +84,6 @@ sudo ./aws/install
 rm -rf aws
 rm -rf awscliv2.zip
 
-# create a temp bucket for test
-aws s3 mb s3://$S3_BUCKET_NAME --region $REGION
 
 pip3 install numpy
 
@@ -117,6 +121,8 @@ sudo chmod +x $UPLOAD_PERF_SCRIPT
 CURRENT_TIME=`date +"%Y-%m-%d:%H"`
 
 if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
+    # create a temp bucket for test
+    aws s3 mb s3://$S3_BUCKET_NAME --region $REGION
     truncate -s 5G $TEST_OBJECT_NAME
     aws s3 cp $TEST_OBJECT_NAME s3://$S3_BUCKET_NAME
     stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
@@ -125,23 +131,27 @@ if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
         | xargs -n3 -t -P 32 bash -c 'publish_bytes_in_metric "$@" '\"${CURRENT_TIME}\"'' _ &
 
     sudo $DOWNLOAD_PERF_SCRIPT
+    # Store the data to an S3 bucket for future refrence.
+    aws s3 cp "/tmp/${CURRENT_TIME}_BytesIn.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
+    python3 $P90_SCRIPT "/tmp/${CURRENT_TIME}_BytesIn.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
+    # delete the tempary bucket
+    aws s3 rb s3://$S3_BUCKET_NAME --force
 elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
+    # create a temp bucket for test
+    aws s3 mb s3://$S3_BUCKET_NAME --region $REGION
     stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
         | stdbuf -o0 grep -v total \
         | stdbuf -o0 cut -f1,3,4 -d\; --output-delimiter=' ' \
         | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@" '\"${CURRENT_TIME}\"'' _ &
 
     sudo $UPLOAD_PERF_SCRIPT
+    # Store the data to an S3 bucket for future refrence.
+    aws s3 cp "/tmp/${CURRENT_TIME}_BytesOut.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
+    python3 $P90_SCRIPT "/tmp/${CURRENT_TIME}_BytesOut.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
+    # delete the tempary bucket
+    aws s3 rb s3://$S3_BUCKET_NAME --force
 fi
 
-# Store the data to an S3 bucket for future refrence.
-aws s3 cp "/tmp/${CURRENT_TIME}_BytesIn.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
-aws s3 cp "/tmp/${CURRENT_TIME}_BytesOut.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
-
-python3 $P90_SCRIPT "/tmp/${CURRENT_TIME}_BytesIn.txt" "/tmp/${CURRENT_TIME}_BytesOut.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
-
-# delete the tempary bucket
-aws s3 rb s3://$S3_BUCKET_NAME --force
 
 # if [ $AUTO_TEAR_DOWN = 1 ]; then
 #     aws lambda invoke \
