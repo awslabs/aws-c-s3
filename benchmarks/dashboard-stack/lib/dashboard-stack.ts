@@ -235,15 +235,18 @@ export class DashboardStack extends cdk.Stack {
                     }
                 };
                 const tagName = project_name + "/" + branch_name + '-' + instance_config_name;
-                const cfnAlarm = new cloudwatch.CfnAlarm(this, tagName, {
+                const alarmAction = "arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+\
+                    Runtime:AWS+SDKs+Common+Runtime:Data+missing+or+performance+issue+from+S3+canary.+\
+                    Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName;
+                const cfnAlarmDownload = new cloudwatch.CfnAlarm(this, tagName, {
                     comparisonOperator: 'LessThanOrEqualToThreshold',
                     evaluationPeriods: 1,
 
                     // the properties below are optional
                     actionsEnabled: true,
-                    alarmActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+or+performance+issue+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
-                    alarmDescription: "S3 canary has no data or low performance for a day. Check the canary is working or not or something related to performance has been merged. For " + tagName,
-                    alarmName: "S3 Canary Alarm " + tagName,
+                    alarmActions: [alarmAction],
+                    alarmDescription: "S3 canary has no data or low performance for a day. Check the canary is working or not or something related to performance has been merged. For download " + tagName,
+                    alarmName: "S3 Canary Alarm Download " + tagName,
                     datapointsToAlarm: 1,
                     dimensions: [
                         {
@@ -259,8 +262,41 @@ export class DashboardStack extends cdk.Stack {
                             value: instance_config_name
                         }
                     ],
-                    insufficientDataActions: ["arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+Runtime:AWS+SDKs+Common+Runtime:Data+missing+or+performance+issue+from+S3+canary.+Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName],
+                    insufficientDataActions: [alarmAction],
                     metricName: 'BytesInP90',
+                    namespace: 'S3Benchmark',
+                    okActions: [],
+                    period: 86400,
+                    statistic: 'Maximum',
+                    threshold: 70.0, // Set a 70 Gbps threshold for now, we can update it later.
+                    treatMissingData: 'breaching',
+                });
+                const cfnAlarmUpload = new cloudwatch.CfnAlarm(this, tagName, {
+                    comparisonOperator: 'LessThanOrEqualToThreshold',
+                    evaluationPeriods: 1,
+
+                    // the properties below are optional
+                    actionsEnabled: true,
+                    alarmActions: [alarmAction],
+                    alarmDescription: "S3 canary has no data or low performance for a day. Check the canary is working or not or something related to performance has been merged. For upload " + tagName,
+                    alarmName: "S3 Canary Alarm Upload " + tagName,
+                    datapointsToAlarm: 1,
+                    dimensions: [
+                        {
+                            name: "Project",
+                            value: project_name
+                        },
+                        {
+                            name: "Branch",
+                            value: branch_name
+                        },
+                        {
+                            name: "InstanceType",
+                            value: instance_config_name
+                        }
+                    ],
+                    insufficientDataActions: [alarmAction],
+                    metricName: 'BytesOutP90',
                     namespace: 'S3Benchmark',
                     okActions: [],
                     period: 86400,
