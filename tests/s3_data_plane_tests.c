@@ -4134,8 +4134,8 @@ AWS_TEST_CASE(test_s3_multipart_copy_large_object, s_test_s3_multipart_copy_larg
 static int s_test_s3_multipart_copy_large_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("put_object_test_5GB_1.txt");
-    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/put_object_test_5GB_1.txt");
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("get_object_test_5120MB.txt");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/get_object_test_5120MB.txt");
     return s_test_s3_copy_object_helper(
         allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
 }
@@ -4193,8 +4193,8 @@ AWS_TEST_CASE(test_s3_copy_source_prefixed_by_slash_multipart, s_test_s3_copy_so
 static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("put_object_test_5GB_1.txt");
-    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/put_object_test_5GB_1.txt");
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("get_object_test_5120MB.txt");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/get_object_test_5120MB.txt");
 
     struct aws_byte_cursor source_bucket = g_test_bucket_name;
 
