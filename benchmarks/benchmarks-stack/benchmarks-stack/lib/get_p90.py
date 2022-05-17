@@ -10,7 +10,7 @@ def get_p90_max(filepath: string):
         for i in f.readlines():
             bytes_result.append(float(i)*8/1000/1000/1000)
     npy_array = np.array(bytes_result)
-    p90 = np.percentile(npy_array, 90)
+    p90 = np.percentile(npy_array, 10)
     localmax = max(bytes_result)
     return p90, localmax
 
