@@ -238,7 +238,7 @@ export class DashboardStack extends cdk.Stack {
                 const alarmAction = "arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+\
                     Runtime:AWS+SDKs+Common+Runtime:Data+missing+or+performance+issue+from+S3+canary.+\
                     Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName;
-                const cfnAlarmDownload = new cloudwatch.CfnAlarm(this, tagName, {
+                const cfnAlarmDownload = new cloudwatch.CfnAlarm(this, tagName + "download", {
                     comparisonOperator: 'LessThanOrEqualToThreshold',
                     evaluationPeriods: 1,
 
@@ -271,7 +271,7 @@ export class DashboardStack extends cdk.Stack {
                     threshold: 70.0, // Set a 70 Gbps threshold for now, we can update it later.
                     treatMissingData: 'breaching',
                 });
-                const cfnAlarmUpload = new cloudwatch.CfnAlarm(this, tagName, {
+                const cfnAlarmUpload = new cloudwatch.CfnAlarm(this, tagName + "upload", {
                     comparisonOperator: 'LessThanOrEqualToThreshold',
                     evaluationPeriods: 1,
 

@@ -11,8 +11,8 @@ def get_p90_max(filepath: string):
             bytes_result.append(float(i)*8/1000/1000/1000)
     npy_array = np.array(bytes_result)
     p90 = np.percentile(npy_array, 90)
-    max = max(bytes_result)
-    return p90, max
+    localmax = max(bytes_result)
+    return p90, localmax
 
 
 def publish_metric(metric_name, project_name, branch_name, instance_name, value):
@@ -31,7 +31,7 @@ branch_name = sys.argv[3]
 instance_name = sys.argv[4]
 
 
-p90, max = get_p90_max(file_path)
+p90, localmax = get_p90_max(file_path)
 
 metric_prefix = "BytesIn"
 if "BytesOut" in file_path:
@@ -39,4 +39,4 @@ if "BytesOut" in file_path:
 publish_metric("{}P90".format(metric_prefix), project_name,
                branch_name, instance_name, p90)
 publish_metric("{}Max".format(metric_prefix), project_name,
-               branch_name, instance_name, max)
+               branch_name, instance_name, localmax)

@@ -50,6 +50,13 @@ export class BenchmarksStack extends cdk.Stack {
     });
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
+    const canaryBucketName = "s3canary-temp-bucket";
+
+    const tempBucket = new s3.Bucket(this, 'TempBucketForCanary', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      bucketName: canaryBucketName,
+      autoDeleteObjects: true,
+    });
 
     const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
       tags: { 'S3CanaryResources': 'VPC' }
@@ -129,6 +136,7 @@ export class BenchmarksStack extends cdk.Stack {
         region + ' ' +
         run_command + ' ' +
         this.stackName + ' ' +
+        canaryBucketName + ' ' +
         get_p90_py_path + ' ' +
         auto_tear_down;
 
