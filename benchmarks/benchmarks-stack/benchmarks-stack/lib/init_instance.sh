@@ -124,7 +124,7 @@ if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
 
     sudo $DOWNLOAD_PERF_SCRIPT
     # Store the data to an S3 bucket for future refrence.
-    aws s3 cp "/tmp/BytesIn.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
+    aws s3 cp "/tmp/BytesIn.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/${PROJECT_NAME}_${BRANCH_NAME}_${CURRENT_TIME}_${INSTANCE_TYPE}_BytesIn.txt"
     python3 $P90_SCRIPT "/tmp/BytesIn.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
 
 elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
@@ -135,7 +135,7 @@ elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
 
     sudo $UPLOAD_PERF_SCRIPT
     # Store the data to an S3 bucket for future refrence.
-    aws s3 cp "/tmp/BytesOut.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/"
+    aws s3 cp "/tmp/BytesOut.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/${PROJECT_NAME}_${BRANCH_NAME}_${CURRENT_TIME}_${INSTANCE_TYPE}_BytesOut.txt"
     python3 $P90_SCRIPT "/tmp/BytesOut.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
 fi
 
