@@ -7,7 +7,7 @@ import * as events from '@aws-cdk/aws-events';
 import * as targets from '@aws-cdk/aws-events-targets';
 import * as s3 from '@aws-cdk/aws-s3';
 import * as ec2 from '@aws-cdk/aws-ec2';
-import * as s3deploy from '@aws-cdk/aws-s3-deployment'
+import * as s3deploy from '@aws-cdk/aws-s3-deployment';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -80,7 +80,7 @@ export class DashboardStack extends cdk.Stack {
             enableDnsHostnames: true
         })
 
-        cdk.Tags.of(vpc).add('S3BenchmarkResources', 'VPC');
+        cdk.Tags.of(vpc).add('S3CanaryResources', 'VPC');
 
         const metrics_namespace = "S3Benchmark";
 
@@ -153,6 +153,62 @@ export class DashboardStack extends cdk.Stack {
                                 }
                             ],
                             [
+                                metrics_namespace,
+                                "BytesInP90",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "p1",
+                                    visible: false,
+                                }
+                            ],
+                            [
+                                metrics_namespace,
+                                "BytesOutP90",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "p2",
+                                    visible: false,
+                                }
+                            ],
+                            [
+                                metrics_namespace,
+                                "BytesInMax",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "max1",
+                                    visible: false,
+                                }
+                            ],
+                            [
+                                metrics_namespace,
+                                "BytesOutMax",
+                                "Project",
+                                project_name,
+                                "Branch",
+                                branch_name,
+                                "InstanceType",
+                                instance_config_name,
+                                {
+                                    id: "max2",
+                                    visible: false,
+                                }
+                            ],
+                            [
                                 {
                                     expression: "m1*8/1000/1000/1000",
                                     "label": "Gbps Download",
@@ -178,7 +234,76 @@ export class DashboardStack extends cdk.Stack {
                         title: instance_config_name
                     }
                 };
+                const tagName = project_name + "/" + branch_name + '-' + instance_config_name;
+                const alarmAction = "arn:aws:cloudwatch::cwa-internal:ticket:3:AWS:SDKs+and+Tools:Common+\
+                    Runtime:AWS+SDKs+Common+Runtime:Data+missing+or+performance+issue+from+S3+canary.+\
+                    Check+the+status+of+S3+canary+in+us-west-2%2C+which+is+the+DashboardStack+CFN+for+" + tagName;
+                const cfnAlarmDownload = new cloudwatch.CfnAlarm(this, tagName + "download", {
+                    comparisonOperator: 'LessThanOrEqualToThreshold',
+                    evaluationPeriods: 1,
 
+                    // the properties below are optional
+                    actionsEnabled: true,
+                    alarmActions: [alarmAction],
+                    alarmDescription: "S3 canary has no data or low performance for a day. Check the canary is working or not or something related to performance has been merged. For download " + tagName,
+                    alarmName: "S3 Canary Alarm Download " + tagName,
+                    datapointsToAlarm: 1,
+                    dimensions: [
+                        {
+                            name: "Project",
+                            value: project_name
+                        },
+                        {
+                            name: "Branch",
+                            value: branch_name
+                        },
+                        {
+                            name: "InstanceType",
+                            value: instance_config_name
+                        }
+                    ],
+                    insufficientDataActions: [alarmAction],
+                    metricName: 'BytesInP90',
+                    namespace: 'S3Benchmark',
+                    okActions: [],
+                    period: 86400,
+                    statistic: 'Maximum',
+                    threshold: 70.0, // Set a 70 Gbps threshold for now, we can update it later.
+                    treatMissingData: 'breaching',
+                });
+                const cfnAlarmUpload = new cloudwatch.CfnAlarm(this, tagName + "upload", {
+                    comparisonOperator: 'LessThanOrEqualToThreshold',
+                    evaluationPeriods: 1,
+
+                    // the properties below are optional
+                    actionsEnabled: true,
+                    alarmActions: [alarmAction],
+                    alarmDescription: "S3 canary has no data or low performance for a day. Check the canary is working or not or something related to performance has been merged. For upload " + tagName,
+                    alarmName: "S3 Canary Alarm Upload " + tagName,
+                    datapointsToAlarm: 1,
+                    dimensions: [
+                        {
+                            name: "Project",
+                            value: project_name
+                        },
+                        {
+                            name: "Branch",
+                            value: branch_name
+                        },
+                        {
+                            name: "InstanceType",
+                            value: instance_config_name
+                        }
+                    ],
+                    insufficientDataActions: [alarmAction],
+                    metricName: 'BytesOutP90',
+                    namespace: 'S3Benchmark',
+                    okActions: [],
+                    period: 86400,
+                    statistic: 'Maximum',
+                    threshold: 70.0, // Set a 70 Gbps threshold for now, we can update it later.
+                    treatMissingData: 'breaching',
+                });
                 dashboard_body.widgets.push(instance_widget);
             }
         }
