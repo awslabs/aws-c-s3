@@ -63,7 +63,7 @@ export class DashboardStack extends cdk.Stack {
         });
 
         new events.Rule(this, 'ScheduleRule', {
-            schedule: events.Schedule.rate(cdk.Duration.days(1)),
+            schedule: events.Schedule.cron({ minute: '0', hour: '8' }), /* Runs every day at 1am PDT */
             targets: [lambda_target],
             ruleName: 'BenchmarksTrigger',
             description: 'Trigger Benchmarks test.'
