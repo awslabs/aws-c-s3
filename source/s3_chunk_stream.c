@@ -127,7 +127,6 @@ static int s_aws_input_chunk_stream_read(struct aws_input_stream *stream, struct
     struct aws_stream_status status;
     AWS_ZERO_STRUCT(status);
     while (impl->current_stream != NULL && dest->len < dest->capacity) {
-        size_t start = dest->len;
         int err = aws_input_stream_read(impl->current_stream, dest);
         if (err) {
             return err;
