@@ -348,17 +348,6 @@ struct aws_s3_meta_request_persistable_state {
      */
     uint32_t num_parts_completed;
 
-    /**
-     * Etags of the uploaded parts.
-     */
-    struct aws_array_list etag_list;
-
-    /**
-     * Total bytes completed at the moment the operation was paused.
-     * The resume operation should begin streaming at this offset.
-     */
-    uint64_t total_bytes_transferred;
-
     struct aws_allocator *allocator;
 };
 

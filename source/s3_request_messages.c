@@ -90,6 +90,40 @@ const struct aws_byte_cursor g_s3_complete_multipart_upload_excluded_headers[] =
 const size_t g_s3_complete_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers);
 
+const struct aws_byte_cursor g_s3_list_parts_excluded_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Disposition"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Language"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Expires"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-full-control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-write-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-storage-class"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-website-redirect-location"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
+};
+
+const size_t g_s3_list_parts_excluded_headers_count =
+    AWS_ARRAY_SIZE(g_s3_list_parts_excluded_headers);
+
 const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
@@ -818,13 +852,40 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
         goto error_clean_up;
     }
 
-    size_t num_headers = aws_http_message_get_header_count(base_message);
+    if (aws_s3_message_util_copy_headers(base_message,
+        message,
+        excluded_header_array,
+        excluded_header_array_size,
+        exclude_x_amz_meta)) {
+        goto error_clean_up;
+    }
+
+    return message;
+
+error_clean_up:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+int aws_s3_message_util_copy_headers(
+    struct aws_http_message *source_message,
+    struct aws_http_message *dest_message,
+    const struct aws_byte_cursor *excluded_header_array,
+    size_t excluded_header_array_size,
+    bool exclude_x_amz_meta) {
+    
+    size_t num_headers = aws_http_message_get_header_count(source_message);
 
     for (size_t header_index = 0; header_index < num_headers; ++header_index) {
         struct aws_http_header header;
 
-        if (aws_http_message_get_header(base_message, &header, header_index)) {
-            goto error_clean_up;
+        if (aws_http_message_get_header(source_message, &header, header_index)) {
+            return AWS_OP_ERR;
         }
 
         if (excluded_header_array && excluded_header_array_size > 0) {
@@ -848,21 +909,12 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
             }
         }
 
-        if (aws_http_message_add_header(message, header)) {
-            goto error_clean_up;
+        if (aws_http_message_add_header(dest_message, header)) {
+            return AWS_OP_ERR;;
         }
     }
 
-    return message;
-
-error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
+    return AWS_OP_SUCCESS;
 }
 
 /* Add a content-range header.*/

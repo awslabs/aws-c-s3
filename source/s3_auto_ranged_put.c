@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
+#include "aws/s3/private/s3_list_parts.h"
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
 
@@ -36,6 +37,21 @@ static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static int s_s3_auto_ranged_put_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_persistable_state **persistable_state);
+
+
+bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
+    struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
+
+    aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list,
+        aws_string_new_from_cursor(auto_ranged_put->base.allocator, &info->e_tag),
+        info->part_number);
+
+    return true;
+}
+
 /**
  * Loads the persistable state used to resume an upload that was previously paused.
  */
@@ -50,25 +66,26 @@ static int s_load_persistable_state(
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
     auto_ranged_put->upload_id = aws_string_new_from_string(allocator, persistable_state->multipart_upload_id);
 
-    struct aws_array_list *persisted_etag_list = &persistable_state->etag_list;
-
-    for (size_t etag_index = 0; etag_index < aws_array_list_length(persisted_etag_list); etag_index++) {
-        /* TODO: copy the etag and checksum to the resumed auto range put. */
-        struct aws_string *etag = NULL;
-        aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
-        if (etag != NULL) {
-            /* Mark the num of parts has been sent and completed and copy the etag/check list to resume */
-            ++auto_ranged_put->synced_data.num_parts_sent;
-            ++auto_ranged_put->synced_data.num_parts_completed;
-        }
+    struct aws_byte_cursor request_path;
+    if(aws_http_message_get_request_path(auto_ranged_put->base.initial_request_message, &request_path)) {
+        AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return AWS_ERROR_UNKNOWN;
     }
+
+    struct aws_s3_list_parts_params list_parts_params = {
+        .key = request_path,
+        .upload_id = aws_byte_cursor_from_string(auto_ranged_put->upload_id),
+        .on_part = s_process_part_info,
+        .user_data = auto_ranged_put
+    };
+
+    auto_ranged_put->synced_data.list_parts_operation = aws_s3_list_parts_operation_new(allocator, &list_parts_params);
 
     return AWS_ERROR_SUCCESS;
 }
-
-static int s_s3_auto_ranged_put_pause(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_meta_request_persistable_state **persistable_state);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
@@ -133,7 +150,12 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             aws_mem_release(allocator, etag_c_array);
             goto error_clean_up;
         }
+    } else {
+        /* skip list parts during normal flow */
+        auto_ranged_put->synced_data.list_parts_sent = true; 
+        auto_ranged_put->synced_data.list_parts_completed = true; 
     }
+
     auto_ranged_put->checksums_list = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf), num_parts);
 
     AWS_LOGF_DEBUG(
@@ -155,6 +177,8 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     aws_string_destroy(auto_ranged_put->upload_id);
     auto_ranged_put->upload_id = NULL;
+
+    aws_s3_paginated_operation_release(auto_ranged_put->synced_data.list_parts_operation);
 
     for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
          ++etag_index) {
@@ -192,6 +216,23 @@ static bool s_s3_auto_ranged_put_update(
         aws_s3_meta_request_lock_synced_data(meta_request);
 
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+            /* If resuming and list part has not be sent, do it now. */
+            if (!auto_ranged_put->synced_data.list_parts_sent) {
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
+                    0,
+                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+
+                auto_ranged_put->synced_data.list_parts_sent = true;
+
+                goto has_work_remaining;
+            }
+
+            /* waiting on list parts to finish. */
+            if (!auto_ranged_put->synced_data.list_parts_completed) {
+                goto has_work_remaining;
+            }
 
             /* If we haven't already sent a create-multipart-upload message, do so now. */
             if (!auto_ranged_put->synced_data.create_multipart_upload_sent) {
@@ -388,6 +429,26 @@ static int s_s3_auto_ranged_put_prepare_request(
     struct aws_http_message *message = NULL;
 
     switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS: {
+            /* BEGIN CRITICAL SECTION */
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            struct aws_byte_cursor continuation_cur = aws_byte_cursor_from_string(auto_ranged_put->synced_data.continuation_token);
+            if (aws_s3_construct_next_request_http_message(auto_ranged_put->synced_data.list_parts_operation, &continuation_cur, &message)) {
+                goto message_create_failed;
+            }
+
+            aws_s3_message_util_copy_headers(meta_request->initial_request_message,
+                message,
+                g_s3_list_parts_excluded_headers,
+                g_s3_list_parts_excluded_headers_count,
+                true);
+
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            /* END CRITICAL SECTION */
+
+            break;
+        }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
 
             /* Create the message to create a new multipart upload. */
@@ -525,6 +586,53 @@ static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     switch (request->request_tag) {
+
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS: {
+            /* BEGIN CRITICAL SECTION */
+            {
+                aws_s3_meta_request_lock_synced_data(meta_request);
+
+                bool has_more_results = false;
+
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                    aws_string_destroy(auto_ranged_put->synced_data.continuation_token);
+                    if (aws_s3_paginated_operation_on_response(
+                        auto_ranged_put->synced_data.list_parts_operation,
+                        &body_cursor,
+                        &auto_ranged_put->synced_data.continuation_token,
+                        &has_more_results)) {
+
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p Failed to parse list parts response.",
+                            (void *)meta_request);    
+                        aws_raise_error(AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED);
+                        error_code = AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED;
+                    } else if (!has_more_results) {
+                        for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list); etag_index++) {
+                            struct aws_string *etag = NULL;
+                            aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
+                            if (etag != NULL) {
+                                /* Update the number of parts sent/completed previously */
+                                ++auto_ranged_put->synced_data.num_parts_sent;
+                                ++auto_ranged_put->synced_data.num_parts_completed;
+                            }
+                        }
+                    }
+                }
+
+                auto_ranged_put->synced_data.list_parts_completed = !has_more_results;
+                auto_ranged_put->synced_data.create_multipart_upload_error_code = error_code;
+
+                if (error_code != AWS_ERROR_SUCCESS) {
+                    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+                }
+
+                aws_s3_meta_request_unlock_synced_data(meta_request);
+            }
+            /* END CRITICAL SECTION */  
+        }
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
             struct aws_http_headers *needed_response_headers = NULL;
@@ -763,24 +871,6 @@ static int s_s3_auto_ranged_put_pause(
     state->multipart_upload_id = aws_string_new_from_string(meta_request->allocator, auto_ranged_put->upload_id);
     state->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
     state->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
-
-    /* copy etag list to persistable state */
-    AWS_FATAL_ASSERT(
-        aws_array_list_init_dynamic(
-            &state->etag_list,
-            meta_request->allocator,
-            auto_ranged_put->synced_data.total_num_parts,
-            sizeof(struct aws_string *)) == 0);
-
-    for (size_t i = 0; i < aws_array_list_length(&auto_ranged_put->synced_data.etag_list); i++) {
-        struct aws_string *etag = NULL;
-        aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, i);
-        struct aws_string *etag_copy =
-            (etag == NULL) ? NULL : aws_string_new_from_string(meta_request->allocator, etag);
-        aws_array_list_push_back(&state->etag_list, &etag_copy);
-    }
-
-    state->total_bytes_transferred = auto_ranged_put->synced_data.num_parts_successful * meta_request->part_size;
 
     /**
      * cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.

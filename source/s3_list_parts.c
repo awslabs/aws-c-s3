@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/private/s3_list_objects.h>
+#include <aws/s3/private/s3_list_parts.h>
 #include <aws/s3/private/s3_util.h>
 #include <aws/s3/private/s3_paginator.h>
 
@@ -17,13 +17,14 @@
 
 struct aws_s3_operation_data {
     struct aws_allocator *allocator;
-
-    struct aws_string *prefix;
-    struct aws_string *delimiter;
+    
+    struct aws_string *key;
+    struct aws_string *upload_id;
+    struct aws_string *endpoint;
 
     struct aws_ref_count ref_count;
 
-    aws_s3_on_object_fn *on_object;
+    aws_s3_on_part_fn *on_part;
 
     void* user_data;
 };
@@ -31,12 +32,16 @@ struct aws_s3_operation_data {
 static void s_ref_count_zero_callback(void *arg) {
     struct aws_s3_operation_data *operation_data = arg;
 
-    if (operation_data->delimiter) {
-        aws_string_destroy(operation_data->delimiter);
+    if (operation_data->key) {
+        aws_string_destroy(operation_data->key);
     }
 
-    if (operation_data->prefix) {
-        aws_string_destroy(operation_data->prefix);
+    if (operation_data->upload_id) {
+        aws_string_destroy(operation_data->upload_id);
+    }
+
+    if (operation_data->endpoint) {
+        aws_string_destroy(operation_data->endpoint);
     }
 
     aws_mem_release(operation_data->allocator, operation_data);
@@ -50,24 +55,20 @@ static void s_on_paginator_cleanup(void *user_data) {
 
 struct fs_parser_wrapper {
     struct aws_allocator *allocator;
-    struct aws_s3_object_info fs_info;
+    struct aws_s3_part_info fs_info;
 };
 
-/* invoked when the ListBucketResult/Contents node is iterated. */
-static bool s_on_contents_node(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
+/* invoked when the ListPartResult/Parts node is iterated. */
+static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
     struct fs_parser_wrapper *fs_wrapper = user_data;
-    struct aws_s3_object_info *fs_info = &fs_wrapper->fs_info;
+    struct aws_s3_part_info *fs_info = &fs_wrapper->fs_info;
 
-    /* for each Contents node, get the info from it and send it off as an object we've encountered */
+    /* for each Parts node, get the info from it and send it off as an part we've encountered */
     struct aws_byte_cursor node_name;
     aws_xml_node_get_name(node, &node_name);
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ETag")) {
         return aws_xml_node_as_body(parser, node, &fs_info->e_tag) == AWS_OP_SUCCESS;
-    }
-
-    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Key")) {
-        return aws_xml_node_as_body(parser, node, &fs_info->key) == AWS_OP_SUCCESS;
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "LastModified")) {
@@ -91,18 +92,15 @@ static bool s_on_contents_node(struct aws_xml_parser *parser, struct aws_xml_nod
         }
     }
 
-    return true;
-}
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "PartNumber")) {
+        struct aws_byte_cursor part_number_cur;
 
-/* invoked when the ListBucketResult/CommonPrefixes node is iterated. */
-static bool s_on_common_prefixes_node(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
-    struct fs_parser_wrapper *fs_wrapper = user_data;
-
-    struct aws_byte_cursor node_name;
-    aws_xml_node_get_name(node, &node_name);
-
-    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Prefix")) {
-        return aws_xml_node_as_body(parser, node, &fs_wrapper->fs_info.prefix) == AWS_OP_SUCCESS;
+        if (aws_xml_node_as_body(parser, node, &part_number_cur) == AWS_OP_SUCCESS) {
+            struct aws_string *part_number_str = aws_string_new_from_cursor(fs_wrapper->allocator, &part_number_cur);
+            fs_info->part_number = strtoull((const char *)part_number_str->bytes, NULL, 10);
+            aws_string_destroy(part_number_str);
+            return true;
+        }
     }
 
     return true;
@@ -120,15 +118,11 @@ static bool s_on_list_bucket_result_node_encountered(
     struct fs_parser_wrapper fs_wrapper;
     AWS_ZERO_STRUCT(fs_wrapper);
 
-    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Contents")) {
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Parts")) {
         fs_wrapper.allocator = operation_data->allocator;
-        /* this will traverse the current Contents node, get the metadata necessary to construct
-         * an instance of fs_info so we can invoke the callback on it. This happens once per object. */
-        bool ret_val = aws_xml_node_traverse(parser, node, s_on_contents_node, &fs_wrapper) == AWS_OP_SUCCESS;
-
-        if (operation_data->prefix && !fs_wrapper.fs_info.prefix.len) {
-            fs_wrapper.fs_info.prefix = aws_byte_cursor_from_string(operation_data->prefix);
-        }
+        /* this will traverse the current Parts node, get the metadata necessary to construct
+         * an instance of fs_info so we can invoke the callback on it. This happens once per part. */
+        bool ret_val = aws_xml_node_traverse(parser, node, s_on_parts_node, &fs_wrapper) == AWS_OP_SUCCESS;
 
         struct aws_byte_buf trimmed_etag;
         AWS_ZERO_STRUCT(trimmed_etag);
@@ -141,9 +135,8 @@ static bool s_on_list_bucket_result_node_encountered(
             aws_string_destroy(quoted_etag_str);
         }
 
-        if (ret_val && operation_data->on_object) {
-            ret_val |= operation_data->on_object(&fs_wrapper.fs_info, 
-                operation_data->user_data);
+        if (ret_val && operation_data->on_part) {
+            ret_val |= operation_data->on_part(&fs_wrapper.fs_info, operation_data->user_data);
         }
 
         if (trimmed_etag.len) {
@@ -153,52 +146,36 @@ static bool s_on_list_bucket_result_node_encountered(
         return ret_val;
     }
 
-    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "CommonPrefixes")) {
-        /* this will traverse the current CommonPrefixes node, get the metadata necessary to construct
-         * an instance of fs_info so we can invoke the callback on it. This happens once per prefix. */
-        bool ret_val = aws_xml_node_traverse(parser, node, s_on_common_prefixes_node, &fs_wrapper) == AWS_OP_SUCCESS;
-
-        if (ret_val && operation_data->on_object) {
-            ret_val |= operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
-        }
-
-        return ret_val;
-    }
-
     return true;
 }
 
 static int s_construct_next_request_http_message(struct aws_byte_cursor *continuation_token, void *user_data, struct aws_http_message **out_message) {
+    
     AWS_PRECONDITION(user_data);
 
     struct aws_s3_operation_data *operation_data = user_data;
 
-    struct aws_byte_cursor s_path_start = aws_byte_cursor_from_c_str("/?list-type=2");
     struct aws_byte_buf request_path;
-    aws_byte_buf_init_copy_from_cursor(&request_path, operation_data->allocator, s_path_start);
+    aws_byte_buf_init(&request_path, operation_data->allocator, 0);
 
-    if (operation_data->prefix) {
-        struct aws_byte_cursor s_prefix = aws_byte_cursor_from_c_str("&prefix=");
-        aws_byte_buf_append_dynamic(&request_path, &s_prefix);
-        struct aws_byte_cursor s_prefix_val = aws_byte_cursor_from_string(operation_data->prefix);
-        aws_byte_buf_append_encoding_uri_param(&request_path, &s_prefix_val);
-    }
+    struct aws_byte_cursor key_val = aws_byte_cursor_from_string(operation_data->key);
+    aws_byte_buf_append_encoding_uri_param(&request_path, &key_val);
 
-    if (operation_data->delimiter) {
-        struct aws_byte_cursor s_delimiter = aws_byte_cursor_from_c_str("&delimiter=");
-        aws_byte_buf_append_dynamic(&request_path, &s_delimiter);
-        struct aws_byte_cursor s_delimiter_val = aws_byte_cursor_from_string(operation_data->delimiter);
-        aws_byte_buf_append_dynamic(&request_path, &s_delimiter_val);
+    if (operation_data->upload_id) {
+        struct aws_byte_cursor upload_id = aws_byte_cursor_from_c_str("&uploadId=");
+        aws_byte_buf_append_dynamic(&request_path, &upload_id);
+        struct aws_byte_cursor upload_id_val = aws_byte_cursor_from_string(operation_data->upload_id);
+        aws_byte_buf_append_dynamic(&request_path, &upload_id_val);
     }
 
     if (continuation_token) {
-        struct aws_byte_cursor s_continuation = aws_byte_cursor_from_c_str("&continuation-token=");
-        aws_byte_buf_append_dynamic(&request_path, &s_continuation);
+        struct aws_byte_cursor continuation = aws_byte_cursor_from_c_str("&part-number-marker=");
+        aws_byte_buf_append_dynamic(&request_path, &continuation);
         aws_byte_buf_append_encoding_uri_param(&request_path, continuation_token);
     }
 
-    struct aws_http_message *list_objects_v2_request = aws_http_message_new_request(operation_data->allocator);
-    aws_http_message_set_request_path(list_objects_v2_request, aws_byte_cursor_from_buf(&request_path));
+    struct aws_http_message *list_parts_request = aws_http_message_new_request(operation_data->allocator);
+    aws_http_message_set_request_path(list_parts_request, aws_byte_cursor_from_buf(&request_path));
 
     aws_byte_buf_clean_up(&request_path);
 
@@ -207,36 +184,38 @@ static int s_construct_next_request_http_message(struct aws_byte_cursor *continu
         .value = aws_byte_cursor_from_c_str("application/xml"),
     };
 
-    aws_http_message_add_header(list_objects_v2_request, accept_header);
+    aws_http_message_add_header(list_parts_request, accept_header);
 
-    aws_http_message_set_request_method(list_objects_v2_request, aws_http_method_get);
+    aws_http_message_set_request_method(list_parts_request, aws_http_method_get);
 
-    *out_message = list_objects_v2_request;
+    *out_message = list_parts_request;
     return AWS_OP_SUCCESS;
 }
 
-struct aws_s3_paginator *aws_s3_initiate_list_objects(
+struct aws_s3_paginator *aws_s3_initiate_list_parts(
     struct aws_allocator *allocator,
-    const struct aws_s3_list_objects_params *params) {
+    const struct aws_s3_list_parts_params *params) {
     AWS_FATAL_PRECONDITION(params);
     AWS_FATAL_PRECONDITION(params->client);
     AWS_FATAL_PRECONDITION(params->bucket_name.len);
+    AWS_FATAL_PRECONDITION(params->key.len);
+    AWS_FATAL_PRECONDITION(params->upload_id.len);
     AWS_FATAL_PRECONDITION(params->endpoint.len);
 
     struct aws_s3_operation_data *operation_data 
         = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
-    operation_data->delimiter = params->delimiter.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->delimiter) : NULL;
-    operation_data->prefix = params->prefix.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->prefix) : NULL;
-    operation_data->on_object = params->on_object;
+    operation_data->endpoint = aws_string_new_from_cursor(allocator, &params->endpoint);
+    operation_data->key = aws_string_new_from_cursor(allocator, &params->key);
+    operation_data->upload_id = aws_string_new_from_cursor(allocator, &params->upload_id);
+    operation_data->on_part = params->on_part;
     operation_data->user_data = params->user_data;
 
     aws_ref_count_init(&operation_data->ref_count, operation_data, s_ref_count_zero_callback);
 
-    struct aws_byte_cursor xml_result_node_name = aws_byte_cursor_from_c_str("ListBucketResult");
-    const struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextContinuationToken");
+    struct aws_byte_cursor xml_result_node_name = aws_byte_cursor_from_c_str("ListPartsResult");
+    const struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextPartNumberMarker");
+
     struct aws_s3_paginated_operation_params operation_params = {
         .next_message = s_construct_next_request_http_message,
         .on_result_node_encountered_fn = s_on_list_bucket_result_node_encountered,
@@ -250,8 +229,8 @@ struct aws_s3_paginator *aws_s3_initiate_list_objects(
 
     struct aws_s3_paginator_params paginator_params = {
         .client = params->client,
-        .on_page_finished_fn = params->on_list_finished,
         .operation = operation,
+        .on_page_finished_fn = params->on_list_finished
     };
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_paginator(allocator, &paginator_params);
@@ -259,28 +238,29 @@ struct aws_s3_paginator *aws_s3_initiate_list_objects(
     return paginator;
 }
 
-struct aws_s3_paginated_operation *aws_s3_list_objects_operation_new(
+struct aws_s3_paginated_operation *aws_s3_list_parts_operation_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_list_objects_params *params) {
+    const struct aws_s3_list_parts_params *params) {
     AWS_FATAL_PRECONDITION(params);
-    AWS_FATAL_PRECONDITION(params->client);
     AWS_FATAL_PRECONDITION(params->bucket_name.len);
+    AWS_FATAL_PRECONDITION(params->key.len);
+    AWS_FATAL_PRECONDITION(params->upload_id.len);
     AWS_FATAL_PRECONDITION(params->endpoint.len);
 
     struct aws_s3_operation_data *operation_data 
         = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
-    operation_data->delimiter = params->delimiter.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->delimiter) : NULL;
-    operation_data->prefix = params->prefix.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->prefix) : NULL;
-    operation_data->on_object = params->on_object;
+    operation_data->endpoint = aws_string_new_from_cursor(allocator, &params->endpoint);
+    operation_data->key = aws_string_new_from_cursor(allocator, &params->key);
+    operation_data->upload_id = aws_string_new_from_cursor(allocator, &params->upload_id);
+    operation_data->on_part = params->on_part;
     operation_data->user_data = params->user_data;
 
     aws_ref_count_init(&operation_data->ref_count, operation_data, s_ref_count_zero_callback);
 
-    struct aws_byte_cursor xml_result_node_name = aws_byte_cursor_from_c_str("ListBucketResult");
-    const struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextContinuationToken");
+    struct aws_byte_cursor xml_result_node_name = aws_byte_cursor_from_c_str("ListPartsResult");
+    const struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextPartNumberMarker");
+
     struct aws_s3_paginated_operation_params operation_params = {
         .next_message = s_construct_next_request_http_message,
         .on_result_node_encountered_fn = s_on_list_bucket_result_node_encountered,
