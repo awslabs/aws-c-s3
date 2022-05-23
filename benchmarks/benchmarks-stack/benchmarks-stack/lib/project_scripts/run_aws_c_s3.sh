@@ -19,6 +19,14 @@ if [ $1 = "SETUP" ]; then
     cmake -S aws-c-common -B aws-c-common/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH
     cmake --build aws-c-common/build --target install
 
+    git clone https://github.com/awslabs/aws-checksums.git
+    cmake -S aws-checksums -B aws-checksums/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_PREFIX_PATH=$INSTALL_PATH
+    cmake --build aws-checksums/build --target install
+
+    git clone https://github.com/awslabs/aws-c-sdkutils.git
+    cmake -S aws-c-sdkutils -B aws-c-sdkutils/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_PREFIX_PATH=$INSTALL_PATH
+    cmake --build aws-c-sdkutils/build --target install
+
     git clone https://github.com/awslabs/aws-c-cal.git
     cmake -S aws-c-cal -B aws-c-cal/build -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH -DCMAKE_PREFIX_PATH=$INSTALL_PATH
     cmake --build aws-c-cal/build --target install

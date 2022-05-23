@@ -12,8 +12,9 @@ export REGION=$9
 export RUN_COMMAND=${10}
 export CFN_NAME=${11}
 export S3_BUCKET_NAME=${12}
+export P90_SCRIPT=${13}
 # TODO the auto tear down should be a flag that makes more sense
-export AUTO_TEAR_DOWN=${13:-1}
+export AUTO_TEAR_DOWN=${14:-1}
 
 export TEST_OBJECT_NAME=crt-canary-obj-multipart
 export RUN_PROJECT_LOG_FN=/tmp/benchmark.log
@@ -34,6 +35,8 @@ function publish_bytes_in_metric() {
         --dimensions Project=$PROJECT_NAME,Branch=$BRANCH_NAME,InstanceType=$INSTANCE_TYPE \
         --storage-resolution 1 \
         --value $3 >> $PUBLISH_METRICS_LOG_FN
+    # Store the value to a temp file
+    echo $3 >> "/tmp/BytesIn.txt"
 }
 
 function publish_bytes_out_metric() {
@@ -46,6 +49,8 @@ function publish_bytes_out_metric() {
         --dimensions Project=$PROJECT_NAME,Branch=$BRANCH_NAME,InstanceType=$INSTANCE_TYPE \
         --storage-resolution 1 \
         --value $2 >> $PUBLISH_METRICS_LOG_FN
+    # Store the value to a temp file
+    echo $2 >> "/tmp/BytesOut.txt"
 }
 
 export -f publish_bytes_in_metric
@@ -72,6 +77,9 @@ unzip awscliv2.zip
 sudo ./aws/install
 rm -rf aws
 rm -rf awscliv2.zip
+
+
+pip3 install numpy
 
 INSTANCE_ID=`curl http://169.254.169.254/latest/meta-data/instance-id`
 aws ec2 monitor-instances --instance-ids $INSTANCE_ID
@@ -104,6 +112,8 @@ awk "{sub(\"{RUN_COMMAND}\", \"UPLOAD_PERFORMANCE\"); print}" $PERF_SCRIPT_TEMP 
 sudo chmod +x $DOWNLOAD_PERF_SCRIPT
 sudo chmod +x $UPLOAD_PERF_SCRIPT
 
+CURRENT_TIME=`date +"%Y-%m-%d-%H"`
+
 if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
     truncate -s 5G $TEST_OBJECT_NAME
     aws s3 cp $TEST_OBJECT_NAME s3://$S3_BUCKET_NAME
@@ -113,6 +123,10 @@ if [ $RUN_COMMAND = "DOWNLOAD_PERFORMANCE" ]; then
         | xargs -n3 -t -P 32 bash -c 'publish_bytes_in_metric "$@"' _ &
 
     sudo $DOWNLOAD_PERF_SCRIPT
+    # Store the data to an S3 bucket for future refrence.
+    aws s3 cp "/tmp/BytesIn.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/${PROJECT_NAME}_${BRANCH_NAME}_${CURRENT_TIME}_${INSTANCE_TYPE}_BytesIn.txt"
+    python3 $P90_SCRIPT "/tmp/BytesIn.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
+
 elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
     stdbuf -i0 -o0 -e0 bwm-ng -I eth0 -o csv -u bits -d -c 0 \
         | stdbuf -o0 grep -v total \
@@ -120,7 +134,11 @@ elif [ $RUN_COMMAND = "UPLOAD_PERFORMANCE" ]; then
         | xargs -n3 -t -P 32 bash -c 'publish_bytes_out_metric "$@"' _ &
 
     sudo $UPLOAD_PERF_SCRIPT
+    # Store the data to an S3 bucket for future refrence.
+    aws s3 cp "/tmp/BytesOut.txt"  "s3://s3-canary-logs/${PROJECT_NAME}_${BRANCH_NAME}/${CURRENT_TIME}_${INSTANCE_TYPE}/${PROJECT_NAME}_${BRANCH_NAME}_${CURRENT_TIME}_${INSTANCE_TYPE}_BytesOut.txt"
+    python3 $P90_SCRIPT "/tmp/BytesOut.txt" $PROJECT_NAME $BRANCH_NAME $INSTANCE_TYPE
 fi
+
 
 if [ $AUTO_TEAR_DOWN = 1 ]; then
     aws lambda invoke \
