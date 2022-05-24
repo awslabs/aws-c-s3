@@ -4223,6 +4223,7 @@ static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool mul
     struct aws_signing_config_aws signing_config = tester.default_signing_config;
     /* Use Sigv4A for signing */
     signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4_ASYMMETRIC;
+    /* Use * for region to sign */
     signing_config.region = aws_byte_cursor_from_c_str("*");
 
     struct aws_s3_client_config client_config = {
@@ -4273,7 +4274,6 @@ static int s_test_s3_get_object_multipart_mrap(struct aws_allocator *allocator, 
     return s_s3_get_object_mrap_helper(allocator, true /*multipart*/);
 }
 
-/* Test single-part put object through MRAP (multi-region access point) */
 static int s_s3_put_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -4281,6 +4281,7 @@ static int s_s3_put_object_mrap_helper(struct aws_allocator *allocator, bool mul
     struct aws_signing_config_aws signing_config = tester.default_signing_config;
     /* Use Sigv4A for signing */
     signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4_ASYMMETRIC;
+    /* Use * for region to sign */
     signing_config.region = aws_byte_cursor_from_c_str("*");
 
     struct aws_s3_client_config client_config = {
@@ -4321,6 +4322,7 @@ static int s_s3_put_object_mrap_helper(struct aws_allocator *allocator, bool mul
     return 0;
 }
 
+/* Test single-part put object through MRAP (multi-region access point) */
 AWS_TEST_CASE(test_s3_put_object_less_than_part_size_mrap, s_test_s3_put_object_less_than_part_size_mrap)
 static int s_test_s3_put_object_less_than_part_size_mrap(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
