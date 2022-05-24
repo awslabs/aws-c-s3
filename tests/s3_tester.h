@@ -176,6 +176,8 @@ struct aws_s3_tester_meta_request_options {
     enum aws_s3_tester_validate_type validate_type;
 
     uint32_t dont_wait_for_shutdown : 1;
+
+    uint32_t mrap_test : 1;
 };
 
 /* TODO Rename to something more generic such as "aws_s3_meta_request_test_data" */
