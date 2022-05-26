@@ -5,9 +5,9 @@
 
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_checksums.h"
+#include "aws/s3/private/s3_list_parts.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
-#include "aws/s3/private/s3_list_parts.h"
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
 
@@ -41,11 +41,11 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_persistable_state **persistable_state);
 
-
 bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
 
-    aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list,
+    aws_array_list_set_at(
+        &auto_ranged_put->synced_data.etag_list,
         aws_string_new_from_cursor(auto_ranged_put->base.allocator, &info->e_tag),
         info->part_number);
 
@@ -67,10 +67,10 @@ static int s_load_persistable_state(
     auto_ranged_put->upload_id = aws_string_new_from_string(allocator, persistable_state->multipart_upload_id);
 
     struct aws_byte_cursor request_path;
-    if(aws_http_message_get_request_path(auto_ranged_put->base.initial_request_message, &request_path)) {
+    if (aws_http_message_get_request_path(auto_ranged_put->base.initial_request_message, &request_path)) {
         AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
+            AWS_LS_S3_META_REQUEST,
+            "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return AWS_ERROR_UNKNOWN;
     }
@@ -79,8 +79,7 @@ static int s_load_persistable_state(
         .key = request_path,
         .upload_id = aws_byte_cursor_from_string(auto_ranged_put->upload_id),
         .on_part = s_process_part_info,
-        .user_data = auto_ranged_put
-    };
+        .user_data = auto_ranged_put};
 
     auto_ranged_put->synced_data.list_parts_operation = aws_s3_list_parts_operation_new(allocator, &list_parts_params);
 
@@ -152,8 +151,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         }
     } else {
         /* skip list parts during normal flow */
-        auto_ranged_put->synced_data.list_parts_sent = true; 
-        auto_ranged_put->synced_data.list_parts_completed = true; 
+        auto_ranged_put->synced_data.list_parts_sent = true;
+        auto_ranged_put->synced_data.list_parts_completed = true;
     }
 
     auto_ranged_put->checksums_list = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf), num_parts);
@@ -433,12 +432,15 @@ static int s_s3_auto_ranged_put_prepare_request(
             /* BEGIN CRITICAL SECTION */
             aws_s3_meta_request_lock_synced_data(meta_request);
 
-            struct aws_byte_cursor continuation_cur = aws_byte_cursor_from_string(auto_ranged_put->synced_data.continuation_token);
-            if (aws_s3_construct_next_request_http_message(auto_ranged_put->synced_data.list_parts_operation, &continuation_cur, &message)) {
+            struct aws_byte_cursor continuation_cur =
+                aws_byte_cursor_from_string(auto_ranged_put->synced_data.continuation_token);
+            if (aws_s3_construct_next_request_http_message(
+                    auto_ranged_put->synced_data.list_parts_operation, &continuation_cur, &message)) {
                 goto message_create_failed;
             }
 
-            aws_s3_message_util_copy_headers(meta_request->initial_request_message,
+            aws_s3_message_util_copy_headers(
+                meta_request->initial_request_message,
                 message,
                 g_s3_list_parts_excluded_headers,
                 g_s3_list_parts_excluded_headers_count,
@@ -598,19 +600,19 @@ static void s_s3_auto_ranged_put_request_finished(
                     struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
                     aws_string_destroy(auto_ranged_put->synced_data.continuation_token);
                     if (aws_s3_paginated_operation_on_response(
-                        auto_ranged_put->synced_data.list_parts_operation,
-                        &body_cursor,
-                        &auto_ranged_put->synced_data.continuation_token,
-                        &has_more_results)) {
+                            auto_ranged_put->synced_data.list_parts_operation,
+                            &body_cursor,
+                            &auto_ranged_put->synced_data.continuation_token,
+                            &has_more_results)) {
 
                         AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "id=%p Failed to parse list parts response.",
-                            (void *)meta_request);    
+                            AWS_LS_S3_META_REQUEST, "id=%p Failed to parse list parts response.", (void *)meta_request);
                         aws_raise_error(AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED);
                         error_code = AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED;
                     } else if (!has_more_results) {
-                        for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list); etag_index++) {
+                        for (size_t etag_index = 0;
+                             etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
+                             etag_index++) {
                             struct aws_string *etag = NULL;
                             aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
                             if (etag != NULL) {
