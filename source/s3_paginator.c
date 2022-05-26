@@ -171,14 +171,14 @@ struct aws_s3_paginated_operation *aws_s3_paginated_operation_new(
 }
 
 void aws_s3_paginated_operation_acquire(struct aws_s3_paginated_operation *operation) {
-    if (operation) {
-        aws_ref_count_release(&operation->ref_count);
-    }
+    AWS_FATAL_PRECONDITION(operation);
+    aws_ref_count_acquire(&operation->ref_count);
 }
 
 void aws_s3_paginated_operation_release(struct aws_s3_paginated_operation *operation) {
-    AWS_FATAL_PRECONDITION(operation);
-    aws_ref_count_acquire(&operation->ref_count);
+    if (operation) {
+        aws_ref_count_release(&operation->ref_count);
+    }
 }
 
 bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator) {

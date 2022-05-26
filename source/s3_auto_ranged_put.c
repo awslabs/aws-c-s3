@@ -79,7 +79,8 @@ static int s_load_persistable_state(
         .key = request_path,
         .upload_id = aws_byte_cursor_from_string(auto_ranged_put->upload_id),
         .on_part = s_process_part_info,
-        .user_data = auto_ranged_put};
+        .user_data = auto_ranged_put,
+    };
 
     auto_ranged_put->synced_data.list_parts_operation = aws_s3_list_parts_operation_new(allocator, &list_parts_params);
 
