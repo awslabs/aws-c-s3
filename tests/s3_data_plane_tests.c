@@ -4480,7 +4480,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new(allocator, object_length);
     struct aws_s3_meta_request_persistable_state *persistable_state =
         aws_atomic_load_ptr(&test_data.persistable_state_ptr);
- 
+
     size_t bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
 
     /* offset where pause should be requested is set to a value greater than content length,

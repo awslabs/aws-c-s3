@@ -121,8 +121,7 @@ const struct aws_byte_cursor g_s3_list_parts_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
 };
 
-const size_t g_s3_list_parts_excluded_headers_count =
-    AWS_ARRAY_SIZE(g_s3_list_parts_excluded_headers);
+const size_t g_s3_list_parts_excluded_headers_count = AWS_ARRAY_SIZE(g_s3_list_parts_excluded_headers);
 
 const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
@@ -837,11 +836,8 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
         goto error_clean_up;
     }
 
-    if (aws_s3_message_util_copy_headers(base_message,
-        message,
-        excluded_header_array,
-        excluded_header_array_size,
-        exclude_x_amz_meta)) {
+    if (aws_s3_message_util_copy_headers(
+            base_message, message, excluded_header_array, excluded_header_array_size, exclude_x_amz_meta)) {
         goto error_clean_up;
     }
 
@@ -863,7 +859,7 @@ int aws_s3_message_util_copy_headers(
     const struct aws_byte_cursor *excluded_header_array,
     size_t excluded_header_array_size,
     bool exclude_x_amz_meta) {
-    
+
     size_t num_headers = aws_http_message_get_header_count(source_message);
 
     for (size_t header_index = 0; header_index < num_headers; ++header_index) {
@@ -895,7 +891,8 @@ int aws_s3_message_util_copy_headers(
         }
 
         if (aws_http_message_add_header(dest_message, header)) {
-            return AWS_OP_ERR;;
+            return AWS_OP_ERR;
+            ;
         }
     }
 
