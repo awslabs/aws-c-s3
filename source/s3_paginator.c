@@ -6,11 +6,11 @@
 #include <aws/s3/private/s3_paginator.h>
 #include <aws/s3/s3_client.h>
 
-#include <aws/common/atomics.h>
-#include <aws/common/ref_count.h>
-#include <aws/common/mutex.h>
-#include <aws/common/byte_buf.h>
 #include <aws/common/assert.h>
+#include <aws/common/atomics.h>
+#include <aws/common/byte_buf.h>
+#include <aws/common/mutex.h>
+#include <aws/common/ref_count.h>
 #include <aws/common/string.h>
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
@@ -68,7 +68,7 @@ struct aws_s3_paginator {
 static void s_operation_ref_count_zero_callback(void *arg) {
     struct aws_s3_paginated_operation *operation = arg;
 
-    if(operation->on_paginated_operation_cleanup) {
+    if (operation->on_paginated_operation_cleanup) {
         operation->on_paginated_operation_cleanup(operation->user_data);
     }
 
@@ -104,7 +104,7 @@ static void s_paginator_ref_count_zero_callback(void *arg) {
         aws_string_destroy(paginator->endpoint);
     }
 
-    if(paginator->shared_mt_state.continuation_token) {
+    if (paginator->shared_mt_state.continuation_token) {
         aws_string_destroy(paginator->shared_mt_state.continuation_token);
     }
 
@@ -127,7 +127,7 @@ struct aws_s3_paginator *aws_s3_initiate_paginator(
 
     aws_s3_client_acquire(params->client);
     aws_s3_paginated_operation_acquire(params->operation);
-    
+
     aws_byte_buf_init(&paginator->result_body, allocator, s_dynamic_body_initial_buf_size);
     aws_ref_count_init(&paginator->ref_count, paginator, s_paginator_ref_count_zero_callback);
     aws_mutex_init(&paginator->shared_mt_state.lock);
@@ -151,8 +151,9 @@ void aws_s3_paginator_acquire(struct aws_s3_paginator *paginator) {
 struct aws_s3_paginated_operation *aws_s3_paginated_operation_new(
     struct aws_allocator *allocator,
     const struct aws_s3_paginated_operation_params *params) {
-    
-    struct aws_s3_paginated_operation *operation = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_paginated_operation));
+
+    struct aws_s3_paginated_operation *operation =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_paginated_operation));
     operation->allocator = allocator;
 
     operation->result_xml_node_name = aws_string_new_from_cursor(allocator, params->result_xml_node_name);
@@ -192,12 +193,13 @@ bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator)
 
 struct aws_string *s_paginator_get_continuation_token(const struct aws_s3_paginator *paginator) {
     AWS_PRECONDITION(paginator);
-    struct aws_string * continuation_token = NULL;
+    struct aws_string *continuation_token = NULL;
     struct aws_s3_paginator *paginator_mut = (struct aws_s3_paginator *)paginator;
     aws_mutex_lock(&paginator_mut->shared_mt_state.lock);
-    if(paginator->shared_mt_state.continuation_token) {
-        continuation_token = aws_string_clone_or_reuse(paginator->allocator, paginator->shared_mt_state.continuation_token);
-    }      
+    if (paginator->shared_mt_state.continuation_token) {
+        continuation_token =
+            aws_string_clone_or_reuse(paginator->allocator, paginator->shared_mt_state.continuation_token);
+    }
     aws_mutex_unlock(&paginator_mut->shared_mt_state.lock);
     return continuation_token;
 }
@@ -242,17 +244,15 @@ struct parser_wrapper {
     bool has_more_results;
 };
 
-static bool s_on_result_node_encountered(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data) {
+static bool s_on_result_node_encountered(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
 
     struct parser_wrapper *wrapper = user_data;
 
     struct aws_byte_cursor node_name;
     aws_xml_node_get_name(node, &node_name);
-    
-    struct aws_byte_cursor continuation_name_val = aws_byte_cursor_from_string(wrapper->operation->continuation_xml_node_name);
+
+    struct aws_byte_cursor continuation_name_val =
+        aws_byte_cursor_from_string(wrapper->operation->continuation_xml_node_name);
     if (aws_byte_cursor_eq_ignore_case(&node_name, &continuation_name_val)) {
         struct aws_byte_cursor continuation_token_cur;
         bool ret_val = aws_xml_node_as_body(parser, node, &continuation_token_cur) == AWS_OP_SUCCESS;
@@ -315,14 +315,15 @@ static void s_on_request_finished(
         struct aws_byte_cursor result_body_cursor = aws_byte_cursor_from_buf(&paginator->result_body);
         struct aws_string *continuation_token = NULL;
         bool has_more_results = false;
-        aws_s3_paginated_operation_on_response(paginator->operation, &result_body_cursor, &continuation_token, &has_more_results);
+        aws_s3_paginated_operation_on_response(
+            paginator->operation, &result_body_cursor, &continuation_token, &has_more_results);
 
         aws_mutex_lock(&paginator->shared_mt_state.lock);
 
         if (paginator->shared_mt_state.continuation_token) {
             aws_string_destroy(paginator->shared_mt_state.continuation_token);
         }
-                
+
         paginator->shared_mt_state.continuation_token = continuation_token;
         paginator->shared_mt_state.has_more_results = has_more_results;
         aws_mutex_unlock(&paginator->shared_mt_state.lock);
@@ -346,19 +347,20 @@ static void s_on_request_finished(
     aws_s3_paginator_release(paginator);
 }
 
-int aws_s3_paginated_operation_on_response(struct aws_s3_paginated_operation *operation,
-    struct aws_byte_cursor* response_body, struct aws_string **continuation_token_out, bool *has_more_results_out) {
+int aws_s3_paginated_operation_on_response(
+    struct aws_s3_paginated_operation *operation,
+    struct aws_byte_cursor *response_body,
+    struct aws_string **continuation_token_out,
+    bool *has_more_results_out) {
     struct aws_xml_parser_options parser_options = {
         .doc = *response_body,
         .max_depth = 16U,
     };
 
-    struct parser_wrapper wrapper = {
-        .operation = operation
-    };
+    struct parser_wrapper wrapper = {.operation = operation};
 
     /* we've got a full xml document now and the request succeeded, parse the document and fire all the callbacks
-        * for each object and prefix. All of that happens in these three lines. */
+     * for each object and prefix. All of that happens in these three lines. */
     struct aws_xml_parser *parser = aws_xml_parser_new(operation->allocator, &parser_options);
     aws_xml_parser_parse(parser, s_on_root_node_encountered, &wrapper);
     aws_xml_parser_destroy(parser);
@@ -369,7 +371,8 @@ int aws_s3_paginated_operation_on_response(struct aws_s3_paginated_operation *op
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_construct_next_request_http_message(struct aws_s3_paginated_operation *operation,
+int aws_s3_construct_next_request_http_message(
+    struct aws_s3_paginated_operation *operation,
     struct aws_byte_cursor *continuation_token,
     struct aws_http_message **out_message) {
     return operation->next_http_message(continuation_token, operation->user_data, out_message);
@@ -398,7 +401,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         .value = aws_byte_cursor_from_buf(&host_buf),
     };
 
-    struct aws_string* continuation_string = s_paginator_get_continuation_token(paginator);
+    struct aws_string *continuation_string = s_paginator_get_continuation_token(paginator);
     struct aws_byte_cursor continuation = aws_byte_cursor_from_string(continuation_string);
     paginator->operation->next_http_message(&continuation, paginator->operation->user_data, &paginated_request_message);
     aws_string_destroy(continuation_string);

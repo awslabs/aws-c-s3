@@ -4,8 +4,8 @@
  */
 
 #include <aws/s3/private/s3_list_parts.h>
-#include <aws/s3/private/s3_util.h>
 #include <aws/s3/private/s3_paginator.h>
+#include <aws/s3/private/s3_util.h>
 
 #include <aws/common/ref_count.h>
 #include <aws/common/xml_parser.h>
@@ -17,7 +17,7 @@
 
 struct aws_s3_operation_data {
     struct aws_allocator *allocator;
-    
+
     struct aws_string *key;
     struct aws_string *upload_id;
     struct aws_string *endpoint;
@@ -26,7 +26,7 @@ struct aws_s3_operation_data {
 
     aws_s3_on_part_fn *on_part;
 
-    void* user_data;
+    void *user_data;
 };
 
 static void s_ref_count_zero_callback(void *arg) {
@@ -149,8 +149,11 @@ static bool s_on_list_bucket_result_node_encountered(
     return true;
 }
 
-static int s_construct_next_request_http_message(struct aws_byte_cursor *continuation_token, void *user_data, struct aws_http_message **out_message) {
-    
+static int s_construct_next_request_http_message(
+    struct aws_byte_cursor *continuation_token,
+    void *user_data,
+    struct aws_http_message **out_message) {
+
     AWS_PRECONDITION(user_data);
 
     struct aws_s3_operation_data *operation_data = user_data;
@@ -202,8 +205,7 @@ struct aws_s3_paginator *aws_s3_initiate_list_parts(
     AWS_FATAL_PRECONDITION(params->upload_id.len);
     AWS_FATAL_PRECONDITION(params->endpoint.len);
 
-    struct aws_s3_operation_data *operation_data 
-        = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
+    struct aws_s3_operation_data *operation_data = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
     operation_data->endpoint = aws_string_new_from_cursor(allocator, &params->endpoint);
     operation_data->key = aws_string_new_from_cursor(allocator, &params->key);
@@ -228,10 +230,7 @@ struct aws_s3_paginator *aws_s3_initiate_list_parts(
     struct aws_s3_paginated_operation *operation = aws_s3_paginated_operation_new(allocator, &operation_params);
 
     struct aws_s3_paginator_params paginator_params = {
-        .client = params->client,
-        .operation = operation,
-        .on_page_finished_fn = params->on_list_finished
-    };
+        .client = params->client, .operation = operation, .on_page_finished_fn = params->on_list_finished};
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_paginator(allocator, &paginator_params);
 
@@ -247,8 +246,7 @@ struct aws_s3_paginated_operation *aws_s3_list_parts_operation_new(
     AWS_FATAL_PRECONDITION(params->upload_id.len);
     AWS_FATAL_PRECONDITION(params->endpoint.len);
 
-    struct aws_s3_operation_data *operation_data 
-        = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
+    struct aws_s3_operation_data *operation_data = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
     operation_data->endpoint = aws_string_new_from_cursor(allocator, &params->endpoint);
     operation_data->key = aws_string_new_from_cursor(allocator, &params->key);

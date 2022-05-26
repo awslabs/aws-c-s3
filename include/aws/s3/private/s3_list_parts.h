@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/s3_client.h>
 #include <aws/s3/private/s3_paginator.h>
+#include <aws/s3/s3_client.h>
 
 #include <aws/common/date_time.h>
 #include <aws/common/string.h>

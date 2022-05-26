@@ -6,9 +6,9 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/auth/signing_config.h>
 #include <aws/s3/exports.h>
 #include <aws/s3/s3_client.h>
-#include <aws/auth/signing_config.h>
 
 #include <aws/common/common.h>
 #include <aws/common/xml_parser.h>
@@ -22,10 +22,8 @@ typedef int(aws_s3_next_http_message_fn)(
     void *user_data,
     struct aws_http_message **out_message);
 
-typedef bool(aws_s3_on_result_node_encountered_fn)(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data);
+typedef bool(
+    aws_s3_on_result_node_encountered_fn)(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data);
 
 typedef void(aws_s3_on_page_finished_fn)(struct aws_s3_paginator *paginator, int error_code, void *user_data);
 
@@ -109,10 +107,16 @@ AWS_S3_API int aws_s3_paginator_continue(
  */
 AWS_S3_API bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator);
 
-AWS_S3_API int aws_s3_construct_next_request_http_message(struct aws_s3_paginated_operation *operation, struct aws_byte_cursor *continuation_token, struct aws_http_message **out_message);
+AWS_S3_API int aws_s3_construct_next_request_http_message(
+    struct aws_s3_paginated_operation *operation,
+    struct aws_byte_cursor *continuation_token,
+    struct aws_http_message **out_message);
 
-AWS_S3_API int aws_s3_paginated_operation_on_response(struct aws_s3_paginated_operation *operation, 
-    struct aws_byte_cursor* response_body, struct aws_string **continuation_token_out, bool *has_more_results_out);
+AWS_S3_API int aws_s3_paginated_operation_on_response(
+    struct aws_s3_paginated_operation *operation,
+    struct aws_byte_cursor *response_body,
+    struct aws_string **continuation_token_out,
+    bool *has_more_results_out);
 
 AWS_EXTERN_C_END
 

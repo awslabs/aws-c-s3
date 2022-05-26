@@ -4,8 +4,8 @@
  */
 
 #include <aws/s3/private/s3_list_objects.h>
-#include <aws/s3/private/s3_util.h>
 #include <aws/s3/private/s3_paginator.h>
+#include <aws/s3/private/s3_util.h>
 
 #include <aws/common/ref_count.h>
 #include <aws/common/xml_parser.h>
@@ -25,7 +25,7 @@ struct aws_s3_operation_data {
 
     aws_s3_on_object_fn *on_object;
 
-    void* user_data;
+    void *user_data;
 };
 
 static void s_ref_count_zero_callback(void *arg) {
@@ -142,8 +142,7 @@ static bool s_on_list_bucket_result_node_encountered(
         }
 
         if (ret_val && operation_data->on_object) {
-            ret_val |= operation_data->on_object(&fs_wrapper.fs_info, 
-                operation_data->user_data);
+            ret_val |= operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
         }
 
         if (trimmed_etag.len) {
@@ -168,7 +167,10 @@ static bool s_on_list_bucket_result_node_encountered(
     return true;
 }
 
-static int s_construct_next_request_http_message(struct aws_byte_cursor *continuation_token, void *user_data, struct aws_http_message **out_message) {
+static int s_construct_next_request_http_message(
+    struct aws_byte_cursor *continuation_token,
+    void *user_data,
+    struct aws_http_message **out_message) {
     AWS_PRECONDITION(user_data);
 
     struct aws_s3_operation_data *operation_data = user_data;
@@ -223,13 +225,11 @@ struct aws_s3_paginator *aws_s3_initiate_list_objects(
     AWS_FATAL_PRECONDITION(params->bucket_name.len);
     AWS_FATAL_PRECONDITION(params->endpoint.len);
 
-    struct aws_s3_operation_data *operation_data 
-        = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
+    struct aws_s3_operation_data *operation_data = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
-    operation_data->delimiter = params->delimiter.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->delimiter) : NULL;
-    operation_data->prefix = params->prefix.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->prefix) : NULL;
+    operation_data->delimiter =
+        params->delimiter.len > 0 ? aws_string_new_from_cursor(allocator, &params->delimiter) : NULL;
+    operation_data->prefix = params->prefix.len > 0 ? aws_string_new_from_cursor(allocator, &params->prefix) : NULL;
     operation_data->on_object = params->on_object;
     operation_data->user_data = params->user_data;
 
@@ -267,13 +267,11 @@ struct aws_s3_paginated_operation *aws_s3_list_objects_operation_new(
     AWS_FATAL_PRECONDITION(params->bucket_name.len);
     AWS_FATAL_PRECONDITION(params->endpoint.len);
 
-    struct aws_s3_operation_data *operation_data 
-        = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
+    struct aws_s3_operation_data *operation_data = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
-    operation_data->delimiter = params->delimiter.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->delimiter) : NULL;
-    operation_data->prefix = params->prefix.len > 0 ?
-        aws_string_new_from_cursor(allocator, &params->prefix) : NULL;
+    operation_data->delimiter =
+        params->delimiter.len > 0 ? aws_string_new_from_cursor(allocator, &params->delimiter) : NULL;
+    operation_data->prefix = params->prefix.len > 0 ? aws_string_new_from_cursor(allocator, &params->prefix) : NULL;
     operation_data->on_object = params->on_object;
     operation_data->user_data = params->user_data;
 

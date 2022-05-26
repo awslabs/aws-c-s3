@@ -631,7 +631,8 @@ static void s_s3_auto_ranged_put_request_finished(
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }
-            /* END CRITICAL SECTION */  
+            /* END CRITICAL SECTION */
+            break;
         }
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
