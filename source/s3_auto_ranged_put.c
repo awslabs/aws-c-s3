@@ -268,7 +268,6 @@ static bool s_s3_auto_ranged_put_update(
                     struct aws_string *etag = NULL;
 
                     if (!aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index) && etag) {
-                        AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "Skipping previously uploaded part %d", etag_index + 1);
                         size_t request_body_size = meta_request->part_size;
                         /* Last part--adjust size to match remaining content length. */
                         if ((etag_index + 1) == auto_ranged_put->synced_data.total_num_parts) {
@@ -318,7 +317,7 @@ static bool s_s3_auto_ranged_put_update(
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
                     0,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
-                    
+
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
                 ++auto_ranged_put->threaded_update_data.next_part_number;
