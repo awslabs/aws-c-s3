@@ -4461,7 +4461,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     const int object_length = 128 * 1024 * 1024;
 
     /* offset of the upload where pause should be requested by test client */
-    aws_atomic_store_int(&test_data.request_pause_offset, object_length / 3);
+    aws_atomic_store_int(&test_data.request_pause_offset, 8 * 1024 * 1024);
 
     /* stream used to initiate upload */
     struct aws_input_stream *initial_upload_stream = aws_s3_test_input_stream_new(allocator, object_length);
@@ -4500,8 +4500,9 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         AWS_HTTP_STATUS_CODE_200_OK));
 
     bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
-    /* TODO: this should be smaller, but since the upload resume stars from the beginning, it's now always equal. */
-    ASSERT_INT_EQUALS(bytes_uploaded, object_length);
+
+    /* bytes uploaded is smaller since we are skipping uploaded parts */
+    ASSERT_TRUE(bytes_uploaded < object_length);
     /* TODO: perform further validations of content integrity */
 
     aws_s3_meta_request_persistable_state_destroy(persistable_state);

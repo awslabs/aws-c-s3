@@ -20,7 +20,6 @@ struct aws_s3_operation_data {
 
     struct aws_string *key;
     struct aws_string *upload_id;
-    struct aws_string *endpoint;
 
     struct aws_ref_count ref_count;
 
@@ -38,10 +37,6 @@ static void s_ref_count_zero_callback(void *arg) {
 
     if (operation_data->upload_id) {
         aws_string_destroy(operation_data->upload_id);
-    }
-
-    if (operation_data->endpoint) {
-        aws_string_destroy(operation_data->endpoint);
     }
 
     aws_mem_release(operation_data->allocator, operation_data);
@@ -118,7 +113,7 @@ static bool s_on_list_bucket_result_node_encountered(
     struct fs_parser_wrapper fs_wrapper;
     AWS_ZERO_STRUCT(fs_wrapper);
 
-    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Parts")) {
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Part")) {
         fs_wrapper.allocator = operation_data->allocator;
         /* this will traverse the current Parts node, get the metadata necessary to construct
          * an instance of fs_info so we can invoke the callback on it. This happens once per part. */
@@ -159,13 +154,11 @@ static int s_construct_next_request_http_message(
     struct aws_s3_operation_data *operation_data = user_data;
 
     struct aws_byte_buf request_path;
-    aws_byte_buf_init(&request_path, operation_data->allocator, 0);
-
     struct aws_byte_cursor key_val = aws_byte_cursor_from_string(operation_data->key);
-    aws_byte_buf_append_encoding_uri_param(&request_path, &key_val);
+    aws_byte_buf_init_copy_from_cursor(&request_path, operation_data->allocator, key_val);
 
     if (operation_data->upload_id) {
-        struct aws_byte_cursor upload_id = aws_byte_cursor_from_c_str("&uploadId=");
+        struct aws_byte_cursor upload_id = aws_byte_cursor_from_c_str("?uploadId=");
         aws_byte_buf_append_dynamic(&request_path, &upload_id);
         struct aws_byte_cursor upload_id_val = aws_byte_cursor_from_string(operation_data->upload_id);
         aws_byte_buf_append_dynamic(&request_path, &upload_id_val);
@@ -207,7 +200,6 @@ struct aws_s3_paginator *aws_s3_initiate_list_parts(
 
     struct aws_s3_operation_data *operation_data = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
-    operation_data->endpoint = aws_string_new_from_cursor(allocator, &params->endpoint);
     operation_data->key = aws_string_new_from_cursor(allocator, &params->key);
     operation_data->upload_id = aws_string_new_from_cursor(allocator, &params->upload_id);
     operation_data->on_part = params->on_part;
@@ -230,7 +222,11 @@ struct aws_s3_paginator *aws_s3_initiate_list_parts(
     struct aws_s3_paginated_operation *operation = aws_s3_paginated_operation_new(allocator, &operation_params);
 
     struct aws_s3_paginator_params paginator_params = {
-        .client = params->client, .operation = operation, .on_page_finished_fn = params->on_list_finished};
+        .client = params->client,
+        .operation = operation,
+        .endpoint = params->endpoint,
+        .on_page_finished_fn = params->on_list_finished, 
+    };
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_paginator(allocator, &paginator_params);
 
@@ -241,14 +237,11 @@ struct aws_s3_paginated_operation *aws_s3_list_parts_operation_new(
     struct aws_allocator *allocator,
     const struct aws_s3_list_parts_params *params) {
     AWS_FATAL_PRECONDITION(params);
-    AWS_FATAL_PRECONDITION(params->bucket_name.len);
     AWS_FATAL_PRECONDITION(params->key.len);
     AWS_FATAL_PRECONDITION(params->upload_id.len);
-    AWS_FATAL_PRECONDITION(params->endpoint.len);
 
     struct aws_s3_operation_data *operation_data = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;
-    operation_data->endpoint = aws_string_new_from_cursor(allocator, &params->endpoint);
     operation_data->key = aws_string_new_from_cursor(allocator, &params->key);
     operation_data->upload_id = aws_string_new_from_cursor(allocator, &params->upload_id);
     operation_data->on_part = params->on_part;
