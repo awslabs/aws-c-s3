@@ -250,13 +250,16 @@ struct aws_s3_paginator *aws_s3_initiate_list_objects(
 
     struct aws_s3_paginator_params paginator_params = {
         .client = params->client,
+        .bucket_name = params->bucket_name,
+        .endpoint = params->endpoint,
         .on_page_finished_fn = params->on_list_finished,
         .operation = operation,
+        .user_data = params->user_data,
     };
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_paginator(allocator, &paginator_params);
 
-    //transfer control to paginator
+    // transfer control to paginator
     aws_s3_paginated_operation_release(operation);
 
     return paginator;

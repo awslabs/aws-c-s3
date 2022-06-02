@@ -58,6 +58,8 @@ struct aws_s3_paginator_params {
      */
 
     aws_s3_on_page_finished_fn *on_page_finished_fn;
+
+    void *user_data;
 };
 
 struct aws_s3_paginated_operation_params {

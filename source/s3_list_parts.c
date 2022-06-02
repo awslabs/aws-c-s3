@@ -92,7 +92,7 @@ static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *
 
         if (aws_xml_node_as_body(parser, node, &part_number_cur) == AWS_OP_SUCCESS) {
             struct aws_string *part_number_str = aws_string_new_from_cursor(fs_wrapper->allocator, &part_number_cur);
-            fs_info->part_number = strtoull((const char *)part_number_str->bytes, NULL, 10);
+            fs_info->part_number = strtoul((const char *)part_number_str->bytes, NULL, 10);
             aws_string_destroy(part_number_str);
             return true;
         }
@@ -223,14 +223,16 @@ struct aws_s3_paginator *aws_s3_initiate_list_parts(
 
     struct aws_s3_paginator_params paginator_params = {
         .client = params->client,
-        .operation = operation,
+        .bucket_name = params->bucket_name,
         .endpoint = params->endpoint,
-        .on_page_finished_fn = params->on_list_finished, 
+        .operation = operation,
+        .on_page_finished_fn = params->on_list_finished,
+        .user_data = params->user_data,
     };
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_paginator(allocator, &paginator_params);
 
-    //transfer control to paginator
+    // transfer control to paginator
     aws_s3_paginated_operation_release(operation);
 
     return paginator;

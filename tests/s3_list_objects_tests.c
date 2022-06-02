@@ -113,10 +113,13 @@ static void s_on_list_bucket_page_finished_fn(struct aws_s3_paginator *paginator
     struct list_bucket_test_data *test_data = user_data;
 
     test_data->error_code = error_code;
+    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "error code %d", error_code);
 
     if (!error_code && aws_s3_paginator_has_more_results(paginator)) {
+        AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Here");
         aws_s3_paginator_continue(paginator, &test_data->signing_config);
     } else {
+        AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "NotHere");
         aws_mutex_lock(&test_data->mutex);
         test_data->done = true;
         aws_mutex_unlock(&test_data->mutex);

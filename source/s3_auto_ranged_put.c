@@ -46,10 +46,7 @@ bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
 
     struct aws_string *etag = aws_string_new_from_cursor(auto_ranged_put->base.allocator, &info->e_tag);
 
-    aws_array_list_set_at(
-        &auto_ranged_put->synced_data.etag_list,
-        &etag,
-        info->part_number - 1);
+    aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, info->part_number - 1);
 
     return true;
 }
@@ -263,8 +260,9 @@ static bool s_s3_auto_ranged_put_update(
                 /* Check if the etag/checksum list has the result already */
                 int part_index = auto_ranged_put->threaded_update_data.next_part_number - 1;
 
-                for (size_t etag_index = part_index; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
-                    ++etag_index) {
+                for (size_t etag_index = part_index;
+                     etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
+                     ++etag_index) {
                     struct aws_string *etag = NULL;
 
                     if (!aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index) && etag) {
@@ -272,7 +270,7 @@ static bool s_s3_auto_ranged_put_update(
                         /* Last part--adjust size to match remaining content length. */
                         if ((etag_index + 1) == auto_ranged_put->synced_data.total_num_parts) {
                             size_t content_remainder =
-                            (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+                                (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
 
                             if (content_remainder > 0) {
                                 request_body_size = content_remainder;
@@ -286,14 +284,15 @@ static bool s_s3_auto_ranged_put_update(
                         aws_byte_buf_clean_up(&temp_body_buf);
 
                         if (aws_s3_meta_request_read_body(meta_request, &temp_body_buf)) {
-                            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_SKIP_UPLOADED_PART_FAILED);
+                            aws_s3_meta_request_set_fail_synced(
+                                meta_request, NULL, AWS_ERROR_S3_SKIP_UPLOADED_PART_FAILED);
                             aws_byte_buf_clean_up(&temp_body_buf);
                             goto no_work_remaining;
                         }
                         aws_byte_buf_clean_up(&temp_body_buf);
 
                         ++auto_ranged_put->threaded_update_data.next_part_number;
-                    
+
                     } else {
                         break;
                     }
@@ -462,14 +461,15 @@ static int s_s3_auto_ranged_put_prepare_request(
             int message_creation_result = AWS_OP_ERR;
 
             if (auto_ranged_put->synced_data.continuation_token) {
-                struct aws_byte_cursor continuation_cur = aws_byte_cursor_from_string(auto_ranged_put->synced_data.continuation_token);
+                struct aws_byte_cursor continuation_cur =
+                    aws_byte_cursor_from_string(auto_ranged_put->synced_data.continuation_token);
                 message_creation_result = aws_s3_construct_next_request_http_message(
                     auto_ranged_put->synced_data.list_parts_operation, &continuation_cur, &message);
             } else {
                 message_creation_result = aws_s3_construct_next_request_http_message(
-                    auto_ranged_put->synced_data.list_parts_operation, NULL, &message);            
+                    auto_ranged_put->synced_data.list_parts_operation, NULL, &message);
             }
-                
+
             if (message_creation_result) {
                 goto message_create_failed;
             }
@@ -663,7 +663,7 @@ static void s_s3_auto_ranged_put_request_finished(
                             (void *)meta_request,
                             auto_ranged_put->synced_data.num_parts_completed,
                             auto_ranged_put->synced_data.total_num_parts);
-                        }
+                    }
                 }
 
                 auto_ranged_put->synced_data.list_parts_completed = !has_more_results;
