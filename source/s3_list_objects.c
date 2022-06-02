@@ -236,7 +236,7 @@ struct aws_s3_paginator *aws_s3_initiate_list_objects(
     aws_ref_count_init(&operation_data->ref_count, operation_data, s_ref_count_zero_callback);
 
     struct aws_byte_cursor xml_result_node_name = aws_byte_cursor_from_c_str("ListBucketResult");
-    const struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextContinuationToken");
+    struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextContinuationToken");
     struct aws_s3_paginated_operation_params operation_params = {
         .next_message = s_construct_next_request_http_message,
         .on_result_node_encountered_fn = s_on_list_bucket_result_node_encountered,
@@ -255,6 +255,9 @@ struct aws_s3_paginator *aws_s3_initiate_list_objects(
     };
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_paginator(allocator, &paginator_params);
+
+    //transfer control to paginator
+    aws_s3_paginated_operation_release(operation);
 
     return paginator;
 }
@@ -278,7 +281,7 @@ struct aws_s3_paginated_operation *aws_s3_list_objects_operation_new(
     aws_ref_count_init(&operation_data->ref_count, operation_data, s_ref_count_zero_callback);
 
     struct aws_byte_cursor xml_result_node_name = aws_byte_cursor_from_c_str("ListBucketResult");
-    const struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextContinuationToken");
+    struct aws_byte_cursor continuation_node_name = aws_byte_cursor_from_c_str("NextContinuationToken");
     struct aws_s3_paginated_operation_params operation_params = {
         .next_message = s_construct_next_request_http_message,
         .on_result_node_encountered_fn = s_on_list_bucket_result_node_encountered,

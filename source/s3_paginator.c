@@ -120,6 +120,7 @@ struct aws_s3_paginator *aws_s3_initiate_paginator(
     struct aws_s3_paginator *paginator = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_paginator));
     paginator->allocator = allocator;
     paginator->client = params->client;
+    paginator->operation = params->operation;
     paginator->on_page_finished = params->on_page_finished_fn;
 
     paginator->bucket_name = aws_string_new_from_cursor(allocator, &params->bucket_name);

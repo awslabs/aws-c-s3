@@ -230,6 +230,9 @@ struct aws_s3_paginator *aws_s3_initiate_list_parts(
 
     struct aws_s3_paginator *paginator = aws_s3_initiate_paginator(allocator, &paginator_params);
 
+    //transfer control to paginator
+    aws_s3_paginated_operation_release(operation);
+
     return paginator;
 }
 
