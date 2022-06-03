@@ -26,6 +26,9 @@
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif
 
+const struct aws_byte_cursor g_test_mrap_endpoint =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("moujmk3izc19y.mrap.accesspoint.s3-global.amazonaws.com");
+
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
 
@@ -1167,8 +1170,12 @@ int aws_s3_tester_send_meta_request_with_options(
             bucket_name = &g_test_bucket_name;
         }
 
-        struct aws_string *host_name = aws_s3_tester_build_endpoint_string(allocator, bucket_name, &g_test_s3_region);
-
+        struct aws_string *host_name = NULL;
+        if (options->mrap_test) {
+            host_name = aws_string_new_from_cursor(allocator, &g_test_mrap_endpoint);
+        } else {
+            host_name = aws_s3_tester_build_endpoint_string(allocator, bucket_name, &g_test_s3_region);
+        }
         if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET)) {

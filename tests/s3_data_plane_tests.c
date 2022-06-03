@@ -4216,6 +4216,128 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
         allocator, x_amz_copy_source, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
 }
 
+
+static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_signing_config_aws signing_config = tester.default_signing_config;
+    /* Use Sigv4A for signing */
+    signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4_ASYMMETRIC;
+    /* Use * for region to sign */
+    signing_config.region = aws_byte_cursor_from_c_str("*");
+
+    struct aws_s3_client_config client_config = {
+        .part_size = multipart ? 64 * 1024 : 20 * 1024 * 1024,
+        .region = aws_byte_cursor_from_c_str("*"),
+        .signing_config = &signing_config,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0 /*flag*/));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .mrap_test = true,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .get_options =
+            {
+                .object_path = g_s3_path_get_object_test_1MB,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test single-part get object through MRAP (multi-region access point) */
+AWS_TEST_CASE(test_s3_get_object_less_than_part_size_mrap, s_test_s3_get_object_less_than_part_size_mrap)
+static int s_test_s3_get_object_less_than_part_size_mrap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_s3_get_object_mrap_helper(allocator, false /*multipart*/);
+}
+
+/* Test multi-part get object through MRAP (multi-region access point) */
+AWS_TEST_CASE(test_s3_get_object_multipart_mrap, s_test_s3_get_object_multipart_mrap)
+static int s_test_s3_get_object_multipart_mrap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_s3_get_object_mrap_helper(allocator, true /*multipart*/);
+}
+
+static int s_s3_put_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_signing_config_aws signing_config = tester.default_signing_config;
+    /* Use Sigv4A for signing */
+    signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4_ASYMMETRIC;
+    /* Use * for region to sign */
+    signing_config.region = aws_byte_cursor_from_c_str("*");
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+        .region = aws_byte_cursor_from_c_str("*"),
+        .signing_config = &signing_config,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0 /*flag*/));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    AWS_ZERO_STRUCT(meta_request_test_results);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .mrap_test = true,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .put_options =
+            {
+                .object_size_mb = multipart ? 10 : 1,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test single-part put object through MRAP (multi-region access point) */
+AWS_TEST_CASE(test_s3_put_object_less_than_part_size_mrap, s_test_s3_put_object_less_than_part_size_mrap)
+static int s_test_s3_put_object_less_than_part_size_mrap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_s3_put_object_mrap_helper(allocator, false /*multipart*/);
+}
+/* Test multi-part put object through MRAP (multi-region access point) */
+AWS_TEST_CASE(test_s3_put_object_multipart_mrap, s_test_s3_put_object_multipart_mrap)
+static int s_test_s3_put_object_multipart_mrap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_s3_put_object_mrap_helper(allocator, true /*multipart*/);
+}
+
 struct aws_http_message *put_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor key,
