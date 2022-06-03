@@ -4377,6 +4377,7 @@ static int s_pause_resume_receive_body_callback(
 
     (void)meta_request;
     (void)range_start;
+    (void)user_data;
 
     // TODO: this is a bit hacky, as it will try to compare every partial get result we receive to the input stream.
     // Something better?
