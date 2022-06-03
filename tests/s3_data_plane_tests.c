@@ -4386,7 +4386,7 @@ static int s_pause_resume_receive_body_callback(
         aws_s3_test_input_stream_new(meta_request->allocator, s_pause_resume_object_length_128MB);
 
     struct aws_byte_buf buf;
-    aws_byte_buf_init(&buf, meta_request->allocator, range_start);
+    aws_byte_buf_init(&buf, meta_request->allocator, (size_t)range_start);
     aws_input_stream_read(input_stream, &buf);
 
     aws_byte_buf_clean_up(&buf);
