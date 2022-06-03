@@ -4216,7 +4216,6 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
         allocator, x_amz_copy_source, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
 }
 
-
 static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
 
     struct aws_s3_tester tester;
