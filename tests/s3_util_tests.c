@@ -80,6 +80,63 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
     return 0;
 }
 
+struct strip_quotes_test_case {
+    struct aws_byte_cursor test_cursor;
+    struct aws_byte_cursor expected_result;
+};
+
+AWS_TEST_CASE(test_s3_strip_quotes, s_test_s3_strip_quotes)
+static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct strip_quotes_test_case test_cases[] = {
+        {
+            .test_cursor = aws_byte_cursor_from_c_str("\"test\""),
+            .expected_result = aws_byte_cursor_from_c_str("test"),
+        },
+        {
+            .test_cursor = aws_byte_cursor_from_c_str("test\""),
+            .expected_result = aws_byte_cursor_from_c_str("test\""),
+        },
+        {
+            .test_cursor = aws_byte_cursor_from_c_str("\"test"),
+            .expected_result = aws_byte_cursor_from_c_str("\"test"),
+        },
+        {
+            .test_cursor = aws_byte_cursor_from_c_str("test"),
+            .expected_result = aws_byte_cursor_from_c_str("test"),
+        },
+        {
+            .test_cursor = aws_byte_cursor_from_c_str(""),
+            .expected_result = aws_byte_cursor_from_c_str(""),
+        },
+    };
+
+    for (size_t i = 0; i < (sizeof(test_cases) / sizeof(struct strip_quotes_test_case)); ++i) {
+        struct strip_quotes_test_case *test_case = &test_cases[i];
+
+        struct aws_byte_buf result_byte_buf;
+        AWS_ZERO_STRUCT(result_byte_buf);
+
+        struct aws_string *result = strip_quotes(allocator, test_case->test_cursor);
+
+        struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_string(result);
+
+        ASSERT_TRUE(aws_byte_cursor_eq(&test_case->expected_result, &result_byte_cursor));
+
+        aws_byte_buf_clean_up(&result_byte_buf);
+        aws_string_destroy(result);
+    }
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_parse_content_range_response_header, s_test_s3_parse_content_range_response_header)
 static int s_test_s3_parse_content_range_response_header(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

@@ -98,6 +98,22 @@ static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *
         }
     }
 
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumCRC32")) {
+        return aws_xml_node_as_body(parser, node, &fs_info->checksumCRC32) == AWS_OP_SUCCESS;       
+    }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumCRC32C")) {
+        return aws_xml_node_as_body(parser, node, &fs_info->checksumCRC32C) == AWS_OP_SUCCESS;       
+    }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumSHA1")) {
+        return aws_xml_node_as_body(parser, node, &fs_info->checksumSHA1) == AWS_OP_SUCCESS;       
+    }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumSHA256")) {
+        return aws_xml_node_as_body(parser, node, &fs_info->checksumSHA256) == AWS_OP_SUCCESS;       
+    }
+
     return true;
 }
 

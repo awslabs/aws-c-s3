@@ -92,7 +92,7 @@ struct aws_s3_checksum *aws_checksum_new(struct aws_allocator *allocator, enum a
 
 /**
  * Compute an aws_checksum corresponding to the provided enum, passing a function pointer around instead of using a
- * conditional would be faster, but would be a negligble improvment compared to the cost of processing data twice
+ * conditional would be faster, but would be a negligble improvement compared to the cost of processing data twice
  * which would be the only time this function would be used, and would be harder to follow.
  */
 AWS_S3_API

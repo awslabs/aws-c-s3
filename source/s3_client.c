@@ -884,13 +884,53 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return aws_s3_meta_request_auto_ranged_put_new(
                 client->allocator, client, part_size, content_length, num_parts, options);
         } else {
+            // sanity check persisted values
+            if (options->persistable_state->partition_size < g_s3_min_upload_part_size) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create auto-ranged-put meta request; part size of %" PRIu64
+                    " is below minimum threshold for multi-part.",
+                    (uint64_t)options->persistable_state->partition_size);
+
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+
+            if (options->persistable_state->total_num_parts > g_s3_max_num_upload_parts) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create auto-ranged-put meta request; total number of parts %" PRIu32
+                    " is too large for platform.",
+                    options->persistable_state->total_num_parts);
+
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+
+            uint32_t num_parts = (uint32_t)(content_length / options->persistable_state->partition_size);
+
+            if ((content_length % options->persistable_state->partition_size) > 0) {
+                ++num_parts;
+            }
+
+            if (options->persistable_state->total_num_parts != num_parts) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create auto-ranged-put meta request; persisted number of parts %" PRIu32
+                    " does not match expected number of parts based on content length.",
+                    options->persistable_state->total_num_parts);
+
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+
             /* use partition info from persistable state of an upload being resumed */
             return aws_s3_meta_request_auto_ranged_put_new(
                 client->allocator,
                 client,
                 options->persistable_state->partition_size,
                 content_length,
-                options->persistable_state->total_num_parts,
+                num_parts,
                 options);
         }
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {

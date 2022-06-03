@@ -177,8 +177,13 @@ struct aws_string *get_top_level_xml_tag_value(
     const struct aws_byte_cursor *tag_name,
     struct aws_byte_cursor *xml_body);
 
+/* replace &quot; with escaped /" */
 AWS_S3_API
 void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf);
+
+/* strip quotes if string is enclosed in quotes. does not remove quotes if they only appear on either side of the string */
+AWS_S3_API 
+struct aws_string *strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur);
 
 /* TODO could be moved to aws-c-common. */
 AWS_S3_API

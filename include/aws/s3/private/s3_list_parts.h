@@ -31,6 +31,26 @@ struct aws_s3_part_info {
      * Etag for the object, usually an MD5 hash. you COULD also use this to implement caching.
      */
     struct aws_byte_cursor e_tag;
+
+    /**
+     * CRC32 checksum for the part. Optional.
+     */
+    struct aws_byte_cursor checksumCRC32;
+
+    /**
+     * CRC32C checksum for the part. Optional.
+     */
+    struct aws_byte_cursor checksumCRC32C;
+
+    /**
+     * SHA1 checksum for the part. Optional.
+     */
+    struct aws_byte_cursor checksumSHA1;
+
+    /**
+     * SHA256 checksum for the part. Optional.
+     */
+    struct aws_byte_cursor checksumSHA256;
 };
 
 /**

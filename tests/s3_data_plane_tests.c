@@ -4458,7 +4458,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
     /* total length of the object to simulate for upload */
-    const int object_length = 128 * 1024 * 1024;
+    const size_t object_length = 128 * 1024 * 1024;
 
     /* offset of the upload where pause should be requested by test client */
     aws_atomic_store_int(&test_data.request_pause_offset, 8 * 1024 * 1024);

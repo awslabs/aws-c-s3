@@ -44,7 +44,39 @@ static int s_s3_auto_ranged_put_pause(
 bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
 
-    struct aws_string *etag = aws_string_new_from_cursor(auto_ranged_put->base.allocator, &info->e_tag);
+    struct aws_string *etag = strip_quotes(auto_ranged_put->base.allocator, info->e_tag);
+
+    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_CRC32 
+        && info->checksumCRC32.len > 0) {
+        aws_byte_buf_init_copy_from_cursor(
+            &auto_ranged_put->checksums_list[info->part_number - 1], 
+            auto_ranged_put->base.allocator,
+            info->checksumCRC32);
+    }
+
+    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_CRC32C 
+        && info->checksumCRC32C.len > 0) {
+        aws_byte_buf_init_copy_from_cursor(
+            &auto_ranged_put->checksums_list[info->part_number - 1], 
+            auto_ranged_put->base.allocator,
+            info->checksumCRC32C);
+    }
+
+    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_SHA1 
+        && info->checksumSHA1.len > 0) {
+        aws_byte_buf_init_copy_from_cursor(
+            &auto_ranged_put->checksums_list[info->part_number - 1], 
+            auto_ranged_put->base.allocator,
+            info->checksumSHA1);
+    }
+
+    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_SHA256 
+        && info->checksumSHA256.len > 0) {
+        aws_byte_buf_init_copy_from_cursor(
+            &auto_ranged_put->checksums_list[info->part_number - 1], 
+            auto_ranged_put->base.allocator,
+            info->checksumSHA256);
+    }
 
     aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, info->part_number - 1);
 
@@ -69,8 +101,8 @@ static int s_load_persistable_state(
     if (aws_http_message_get_request_path(auto_ranged_put->base.initial_request_message, &request_path)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            "Could not load persisted state. Request path could not be read. Upload will re-start from "
+                "beginning.");
         return AWS_ERROR_UNKNOWN;
     }
 
@@ -140,17 +172,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
 
     auto_ranged_put->threaded_update_data.next_part_number = 1;
 
-    if (options->persistable_state != NULL) {
-        if (s_load_persistable_state(allocator, auto_ranged_put, options->persistable_state)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not load persisted state for auto-ranged-put meta request. Upload will re-start from "
-                "beginning.");
-            aws_mem_release(allocator, etag_c_array);
-            goto error_clean_up;
-        }
-    } else {
-        /* skip list parts during normal flow */
+    if (options->persistable_state == NULL ||  
+        s_load_persistable_state(allocator, auto_ranged_put, options->persistable_state)) {
         auto_ranged_put->synced_data.list_parts_operation = NULL;
         auto_ranged_put->synced_data.list_parts_sent = true;
         auto_ranged_put->synced_data.list_parts_completed = true;
@@ -259,13 +282,14 @@ static bool s_s3_auto_ranged_put_update(
 
                 /* Check if the etag/checksum list has the result already */
                 int part_index = auto_ranged_put->threaded_update_data.next_part_number - 1;
-
                 for (size_t etag_index = part_index;
                      etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
                      ++etag_index) {
                     struct aws_string *etag = NULL;
 
                     if (!aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index) && etag) {
+                        //part already downloaded, adjust stream and go to the next part
+
                         size_t request_body_size = meta_request->part_size;
                         /* Last part--adjust size to match remaining content length. */
                         if ((etag_index + 1) == auto_ranged_put->synced_data.total_num_parts) {
@@ -277,26 +301,56 @@ static bool s_s3_auto_ranged_put_update(
                             }
                         }
 
-                        /* TODO: calculate checksum on skipped parts and compare to what list parts returned?*/
                         struct aws_byte_buf temp_body_buf;
                         aws_byte_buf_init(&temp_body_buf, meta_request->allocator, request_body_size);
 
-                        aws_byte_buf_clean_up(&temp_body_buf);
-
                         if (aws_s3_meta_request_read_body(meta_request, &temp_body_buf)) {
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "Failed to resume upload. Input steam cannot be read.");
                             aws_s3_meta_request_set_fail_synced(
                                 meta_request, NULL, AWS_ERROR_S3_SKIP_UPLOADED_PART_FAILED);
                             aws_byte_buf_clean_up(&temp_body_buf);
                             goto no_work_remaining;
                         }
+
+                        //compare skipped checksum to previously uploaded checksum
+                        if(meta_request->checksum_algorithm != AWS_SCA_NONE && 
+                            auto_ranged_put->checksums_list[etag_index].len > 0) {
+                            struct aws_byte_buf checksum;
+                            struct aws_byte_cursor body_cur = aws_byte_cursor_from_buf(&temp_body_buf);
+                            if(!aws_checksum_compute(meta_request->allocator, 
+                                meta_request->checksum_algorithm,
+                                &body_cur,
+                                &checksum,
+                                0)) {
+                                if(!aws_byte_buf_eq(&checksum, 
+                                    &auto_ranged_put->checksums_list[etag_index])) {
+                                    AWS_LOGF_ERROR(
+                                        AWS_LS_S3_META_REQUEST,
+                                        "Failed to resume upload. Checksum for previously uploaded part does not match new part.");
+                                    aws_s3_meta_request_set_fail_synced(
+                                        meta_request, NULL, AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+                                    aws_byte_buf_clean_up(&temp_body_buf);
+                                    aws_byte_buf_clean_up(&checksum);
+                                    goto no_work_remaining;
+                                }
+                            }
+                        }
+
                         aws_byte_buf_clean_up(&temp_body_buf);
 
                         ++auto_ranged_put->threaded_update_data.next_part_number;
 
                     } else {
+                        // incomplete part found. break out and create request for it.
                         break;
                     }
                 }
+
+                // Something went really wrong. we still have parts to send, but have etags for all parts
+                AWS_FATAL_ASSERT(auto_ranged_put->threaded_update_data.next_part_number 
+                    <= auto_ranged_put->synced_data.total_num_parts)
 
                 if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
                     uint32_t num_parts_in_flight =
@@ -762,14 +816,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 } else {
                     /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up
                      * later, so just get rid of the quotes now. */
-                    if (etag_within_quotes.len >= 2 && etag_within_quotes.ptr[0] == '"' &&
-                        etag_within_quotes.ptr[etag_within_quotes.len - 1] == '"') {
-
-                        aws_byte_cursor_advance(&etag_within_quotes, 1);
-                        --etag_within_quotes.len;
-                    }
-
-                    etag = aws_string_new_from_cursor(meta_request->allocator, &etag_within_quotes);
+                    etag = strip_quotes(meta_request->allocator, etag_within_quotes);
                 }
             }
             if (error_code == AWS_ERROR_SUCCESS && meta_request->progress_callback != NULL) {
@@ -912,10 +959,9 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     state->allocator = meta_request->allocator;
-    state->partition_size = meta_request->part_size;
     state->multipart_upload_id = aws_string_new_from_string(meta_request->allocator, auto_ranged_put->upload_id);
+    state->partition_size = meta_request->part_size;
     state->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
-    state->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
 
     /**
      * cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.

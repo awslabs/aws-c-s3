@@ -306,8 +306,6 @@ static void s_on_request_finished(
     struct aws_s3_paginator *paginator = user_data;
 
     if (meta_request_result->response_status == 200) {
-        AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "good response");
-
         /* clears previous continuation token */
         aws_mutex_lock(&paginator->shared_mt_state.lock);
         if (paginator->shared_mt_state.continuation_token) {
@@ -320,7 +318,6 @@ static void s_on_request_finished(
         struct aws_byte_cursor result_body_cursor = aws_byte_cursor_from_buf(&paginator->result_body);
         struct aws_string *continuation_token = NULL;
         bool has_more_results = false;
-        AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "response body" PRInSTR, AWS_BYTE_CURSOR_PRI(result_body_cursor));
         aws_s3_paginated_operation_on_response(
             paginator->operation, &result_body_cursor, &continuation_token, &has_more_results);
 
@@ -402,8 +399,6 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     struct aws_byte_cursor endpoint_val = aws_byte_cursor_from_string(paginator->endpoint);
     aws_byte_buf_append_dynamic(&host_buf, &period_cur);
     aws_byte_buf_append_dynamic(&host_buf, &endpoint_val);
-
-    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Foo " PRInSTR, AWS_BYTE_CURSOR_PRI(endpoint_val));
 
     struct aws_http_header host_header = {
         .name = aws_byte_cursor_from_c_str("host"),

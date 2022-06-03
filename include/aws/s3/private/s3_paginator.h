@@ -13,9 +13,18 @@
 #include <aws/common/common.h>
 #include <aws/common/xml_parser.h>
 
-struct aws_s3_paginator;
-
+/**
+ * Wrapper for a generic paginated operation.
+ * Provides implementations for how to construct next paginated and how to read the request.
+ * Can be used with either paginator or plugged into request loop.
+ */
 struct aws_s3_paginated_operation;
+
+/**
+ * Generic driver for paginated operations.
+ * Provides functionality to send requests to iterate over pages of the operation.
+ */
+struct aws_s3_paginator;
 
 typedef int(aws_s3_next_http_message_fn)(
     struct aws_byte_cursor *continuation_token,
@@ -30,7 +39,7 @@ typedef void(aws_s3_on_page_finished_fn)(struct aws_s3_paginator *paginator, int
 typedef void(aws_s3_on_paginated_operation_cleanup_fn)(void *user_data);
 
 /**
- * Parameters for calling aws_s3_initiate_list_objects(). All values are copied out or re-seated and reference counted.
+ * Parameters for initiating paginator. All values are copied out or re-seated and reference counted.
  */
 struct aws_s3_paginator_params {
     /**
@@ -38,7 +47,11 @@ struct aws_s3_paginator_params {
      */
     struct aws_s3_client *client;
 
+    /**
+     * Underlying paginated operation. Must not be NULL.
+     */
     struct aws_s3_paginated_operation *operation;
+
     /**
      * Optional. The continuation token for fetching the next page. You likely shouldn't set this
      * unless you have a special use case.
@@ -49,30 +62,55 @@ struct aws_s3_paginator_params {
      * Must not be empty. Name of the bucket to list.
      */
     struct aws_byte_cursor bucket_name;
+
     /**
      * Must not be empty. Key with which multipart upload was initiated.
      */
     struct aws_byte_cursor endpoint;
+
     /**
      * Callback to invoke on each part that's listed.
      */
-
     aws_s3_on_page_finished_fn *on_page_finished_fn;
 
+    /**
+     * User data passed back into callbacks.
+     */
     void *user_data;
 };
 
+/**
+ * Parameters for initiating paginated operation. All values are copied out or re-seated and reference counted.
+ */
 struct aws_s3_paginated_operation_params {
-
+    /**
+     * Name of the top level result node. Must not be NULL.
+     */
     const struct aws_byte_cursor *result_xml_node_name;
 
+    /**
+     * Name of the continuation token node. Must not be NULL.
+     */
     const struct aws_byte_cursor *continuation_token_node_name;
 
+    /**
+     * Function to generate next message.
+     */
     aws_s3_next_http_message_fn *next_message;
+
+    /**
+     * Function to parse result node.
+     */
     aws_s3_on_result_node_encountered_fn *on_result_node_encountered_fn;
 
+    /**
+     * Callback for when operation is cleaned.
+     */
     aws_s3_on_paginated_operation_cleanup_fn *on_paginated_operation_cleanup;
 
+    /**
+     * Associated user data.
+     */
     void *user_data;
 };
 
@@ -109,11 +147,17 @@ AWS_S3_API int aws_s3_paginator_continue(
  */
 AWS_S3_API bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator);
 
+/**
+ * Construct next message for the given operation.
+ */
 AWS_S3_API int aws_s3_construct_next_request_http_message(
     struct aws_s3_paginated_operation *operation,
     struct aws_byte_cursor *continuation_token,
     struct aws_http_message **out_message);
 
+/**
+ * Parse received response for operation.
+ */
 AWS_S3_API int aws_s3_paginated_operation_on_response(
     struct aws_s3_paginated_operation *operation,
     struct aws_byte_cursor *response_body,

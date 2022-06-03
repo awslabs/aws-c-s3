@@ -328,10 +328,7 @@ struct aws_s3_meta_request_result {
  */
 struct aws_s3_meta_request_persistable_state {
 
-    /**
-     * Size of the partition used in the operation being resumed.
-     */
-    size_t partition_size;
+    struct aws_allocator *allocator;
 
     /**
      * Multipart Upload Id of the operation being resumed.
@@ -339,16 +336,14 @@ struct aws_s3_meta_request_persistable_state {
     struct aws_string *multipart_upload_id;
 
     /**
+     * Size of the partition used in the operation being resumed.
+     */
+    size_t partition_size;
+
+    /**
      * Total number of parts.
      */
     uint32_t total_num_parts;
-
-    /**
-     * Number of upload parts completed.
-     */
-    uint32_t num_parts_completed;
-
-    struct aws_allocator *allocator;
 };
 
 AWS_EXTERN_C_BEGIN
