@@ -87,7 +87,7 @@ struct aws_s3_meta_request_vtable {
     void (*destroy)(struct aws_s3_meta_request *);
 
     /* Pause the given request */
-    int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_persistable_state **resume_token);
+    int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_string **resume_token);
 };
 
 /**

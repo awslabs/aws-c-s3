@@ -24,6 +24,7 @@ struct aws_s3_request;
 struct aws_s3_meta_request;
 struct aws_s3_meta_request_result;
 struct aws_uri;
+struct aws_string;
 
 /**
  * A Meta Request represents a group of generated requests that are being done on behalf of the
@@ -286,7 +287,7 @@ struct aws_s3_meta_request_options {
      * For meta requests that support pause/resume (e.g. PutObject), the resume token returned by
      * aws_s3_meta_request_pause() can be provided here.
      */
-    struct aws_s3_meta_request_persistable_state *persistable_state;
+    struct aws_byte_cursor *resume_token;
 };
 
 /* Result details of a meta request.
@@ -323,29 +324,6 @@ struct aws_s3_meta_request_result {
     int error_code;
 };
 
-/**
- * Persistable state used to resume a paused upload.
- */
-struct aws_s3_meta_request_persistable_state {
-
-    struct aws_allocator *allocator;
-
-    /**
-     * Multipart Upload Id of the operation being resumed.
-     */
-    struct aws_string *multipart_upload_id;
-
-    /**
-     * Size of the partition used in the operation being resumed.
-     */
-    size_t partition_size;
-
-    /**
-     * Total number of parts.
-     */
-    uint32_t total_num_parts;
-};
-
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
@@ -373,17 +351,11 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  * request options structure member aws_s3_meta_request_options.persistable_state.
  * The upload can be resumed either from the same client or a different one.
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
- * @param resume_token outputs the structure with the state that can be used to resume the upload. Use
- * `aws_s3_meta_request_persistable_state_destroy` to release the memory allocated for this structure.
+ * @param resume_token outputs the json string with the state that can be used to resume the operation.
  * @return
  */
 AWS_S3_API
-int aws_s3_meta_request_pause(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_meta_request_persistable_state **resume_token);
-
-AWS_S3_API
-void aws_s3_meta_request_persistable_state_destroy(struct aws_s3_meta_request_persistable_state *state);
+int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_string **resume_token);
 
 AWS_S3_API
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);
