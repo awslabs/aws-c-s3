@@ -4566,8 +4566,6 @@ static int s_test_s3_put_pause_resume_helper(
     aws_mutex_init(&test_data->mutex);
     test_data->execution_completed = false;
 
-    struct aws_byte_cursor resume_state_cur = aws_byte_cursor_from_string(resume_state);
-
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = test_data,
         .body_callback = NULL,
@@ -4577,10 +4575,16 @@ static int s_test_s3_put_pause_resume_helper(
         .progress_callback = s_pause_meta_request_progress,
         .message = message,
         .shutdown_callback = NULL,
+        .resume_token = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .resume_token = &resume_state_cur,
         .checksum_algorithm = checksum_algorithm,
     };
+
+    struct aws_byte_cursor resume_state_cur;
+    if (resume_state) {
+        resume_state_cur = aws_byte_cursor_from_string(resume_state);
+        meta_request_options.resume_token = &resume_state_cur;
+    }
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
     ASSERT_NOT_NULL(meta_request);
