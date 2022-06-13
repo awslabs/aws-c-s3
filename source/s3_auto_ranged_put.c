@@ -88,7 +88,7 @@ static int s_parse_resume_info_from_token(
     if (!resume_token) {
         return AWS_ERROR_SUCCESS;
     }
-    
+
     aws_json_module_init(allocator);
 
     struct aws_json_value *root = aws_json_value_new_from_string(allocator, *resume_token);
@@ -228,12 +228,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
     struct aws_string *multipart_upload_id = NULL;
-    int token_parse_error = AWS_ERROR_SUCCESS;
-    if ((token_parse_error = s_parse_resume_info_from_token(allocator,
-            options->resume_token,
-            &multipart_upload_id,
-            &part_size,
-            &num_parts))) {
+    int token_parse_error =
+        s_parse_resume_info_from_token(allocator, options->resume_token, &multipart_upload_id, &part_size, &num_parts);
+    if (token_parse_error) {
         aws_raise_error(token_parse_error);
         goto error_clean_up;
     }
@@ -262,13 +259,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->threaded_update_data.next_part_number = 1;
 
     if (options->resume_token) {
-        int load_persistable_state_error = AWS_ERROR_SUCCESS;
-        if ((load_persistable_state_error = s_load_persistable_state(allocator,
-                auto_ranged_put,
-                content_length,
-                multipart_upload_id,
-                part_size,
-                num_parts))) {
+        int load_persistable_state_error = s_load_persistable_state(
+            allocator, auto_ranged_put, content_length, multipart_upload_id, part_size, num_parts);
+        if (load_persistable_state_error) {
             aws_raise_error(load_persistable_state_error);
             goto error_clean_up;
         }
@@ -380,7 +373,8 @@ static bool s_s3_auto_ranged_put_update(
             if (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts) {
 
                 struct aws_byte_buf temp_body_buf;
-                bool is_temp_body_initialized = false;
+                aws_byte_buf_init(&temp_body_buf, meta_request->allocator, 0);
+
                 /* Check if the etag/checksum list has the result already */
                 int part_index = auto_ranged_put->threaded_update_data.next_part_number - 1;
                 for (size_t etag_index = part_index;
@@ -402,10 +396,7 @@ static bool s_s3_auto_ranged_put_update(
                             }
                         }
 
-                        if (!is_temp_body_initialized) {
-                            aws_byte_buf_init(&temp_body_buf, meta_request->allocator, request_body_size);
-                            is_temp_body_initialized = true;
-                        } else if (temp_body_buf.capacity != request_body_size) {
+                        if (temp_body_buf.capacity != request_body_size) {
                             // reinit with correct size
                             aws_byte_buf_clean_up(&temp_body_buf);
                             aws_byte_buf_init(&temp_body_buf, meta_request->allocator, request_body_size);
@@ -456,11 +447,7 @@ static bool s_s3_auto_ranged_put_update(
                     }
                 }
 
-                AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "FOO1");
-                if (is_temp_body_initialized) {
-                    aws_byte_buf_clean_up(&temp_body_buf);
-                }
-                AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "FOO2");
+                aws_byte_buf_clean_up(&temp_body_buf);
 
                 // Something went really wrong. we still have parts to send, but have etags for all parts
                 AWS_FATAL_ASSERT(
