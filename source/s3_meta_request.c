@@ -1321,7 +1321,7 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     if (0 == aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests)) {
         return NULL;
     }
- 
+
     struct aws_s3_request **top_request = NULL;
 
     aws_priority_queue_top(&meta_request->synced_data.pending_body_streaming_requests, (void **)&top_request);
