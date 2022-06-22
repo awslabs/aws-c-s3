@@ -892,7 +892,6 @@ int aws_s3_message_util_copy_headers(
 
         if (aws_http_message_add_header(dest_message, header)) {
             return AWS_OP_ERR;
-            ;
         }
     }
 

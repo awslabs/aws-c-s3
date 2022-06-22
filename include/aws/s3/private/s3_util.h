@@ -184,7 +184,7 @@ void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *
 /* strip quotes if string is enclosed in quotes. does not remove quotes if they only appear on either side of the string
  */
 AWS_S3_API
-struct aws_string *strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur);
+struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur);
 
 /* TODO could be moved to aws-c-common. */
 AWS_S3_API

@@ -122,7 +122,7 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
         struct aws_byte_buf result_byte_buf;
         AWS_ZERO_STRUCT(result_byte_buf);
 
-        struct aws_string *result = strip_quotes(allocator, test_case->test_cursor);
+        struct aws_string *result = aws_strip_quotes(allocator, test_case->test_cursor);
 
         struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_string(result);
 

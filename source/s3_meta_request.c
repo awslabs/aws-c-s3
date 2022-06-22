@@ -275,14 +275,17 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     /* END CRITICAL SECTION */
 }
 
-int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_string **resume_token) {
+int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_string **out_resume_token) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
+
+    *out_resume_token = NULL;
+
     if (!meta_request->vtable->pause) {
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
 
-    return meta_request->vtable->pause(meta_request, resume_token);
+    return meta_request->vtable->pause(meta_request, out_resume_token);
 }
 
 void aws_s3_meta_request_set_fail_synced(

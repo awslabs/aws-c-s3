@@ -22,7 +22,7 @@ enum aws_s3_auto_ranged_put_request_tag {
 struct aws_s3_auto_ranged_put {
     struct aws_s3_meta_request base;
 
-    /* Initialized either during creation in resume flow or as result of create multi part upload during normal flow. */
+    /* Initialized either during creation in resume flow or as result of create multipart upload during normal flow. */
     struct aws_string *upload_id;
 
     uint64_t content_length;
@@ -45,7 +45,7 @@ struct aws_s3_auto_ranged_put {
         struct aws_array_list etag_list;
 
         struct aws_s3_paginated_operation *list_parts_operation;
-        struct aws_string *continuation_token;
+        struct aws_string *list_parts_continuation_token;
 
         uint32_t total_num_parts;
         uint32_t num_parts_sent;

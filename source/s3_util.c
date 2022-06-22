@@ -276,7 +276,7 @@ void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *
     }
 }
 
-struct aws_string *strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur) {
+struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur) {
 
     if (in_cur.len >= 2 && in_cur.ptr[0] == '"' && in_cur.ptr[in_cur.len - 1] == '"') {
         aws_byte_cursor_advance(&in_cur, 1);
