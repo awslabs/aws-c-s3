@@ -32,6 +32,13 @@ struct aws_s3_auto_ranged_put {
         uint32_t next_part_number;
     } threaded_update_data;
 
+    /* Should only be used during prepare requests. Note: prepare requests are done sequentially,
+     * since we have to read sequentially from buffer 
+     */ 
+    struct {
+        uint32_t read_parts_number; 
+    } prepare_data; 
+
     /* very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
      * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
      * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
