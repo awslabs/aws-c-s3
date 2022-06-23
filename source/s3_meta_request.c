@@ -251,6 +251,9 @@ int aws_s3_meta_request_init_base(
     meta_request->progress_callback = options->progress_callback;
 
     if (s_is_get_request(options)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "id=%p set custom checksum callbacks for get request", (void *)meta_request);
+
         meta_request->headers_user_callback_after_checksum = options->headers_callback;
         meta_request->body_user_callback_after_checksum = options->body_callback;
         meta_request->finish_user_callback_after_checksum = options->finish_callback;
