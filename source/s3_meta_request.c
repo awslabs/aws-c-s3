@@ -106,13 +106,9 @@ static int s_meta_request_get_response_headers_checksum_callback(
                 (void *)meta_request,
                 header_sum.len,
                 encoded_len);
-            if (header_sum.len <= encoded_len - 1) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST, "id=%p checksum header len matches expected!", (void *)meta_request);
-                aws_byte_buf_init_copy_from_cursor(
-                    &meta_request->meta_request_level_response_header_checksum, aws_default_allocator(), header_sum);
-                meta_request->meta_request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
-            }
+            aws_byte_buf_init_copy_from_cursor(
+                &meta_request->meta_request_level_response_header_checksum, aws_default_allocator(), header_sum);
+            meta_request->meta_request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
             break;
         }
     }
