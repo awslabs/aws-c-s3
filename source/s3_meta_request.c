@@ -87,20 +87,22 @@ static bool s_is_get_request(const struct aws_s3_meta_request_options *options) 
 }
 
 static int s_meta_request_get_response_headers_checksum_callback(
-    /* TODO take in a priority list of checksum algorithms, and use this list to determine which checksum algorithm to
-       validate */
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
+    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p checksum headers custom callback", (void *)meta_request);
     for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         if (aws_http_headers_has(headers, *algorithm_header_name)) {
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p found checksum in header!", (void *)meta_request);
             struct aws_byte_cursor header_sum;
             aws_http_headers_get(headers, *algorithm_header_name, &header_sum);
             size_t encoded_len = 0;
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
             if (header_sum.len == encoded_len - 1) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST, "id=%p checksum header len matches expected!", (void *)meta_request);
                 aws_byte_buf_init_copy_from_cursor(
                     &meta_request->meta_request_level_response_header_checksum, aws_default_allocator(), header_sum);
                 meta_request->meta_request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
@@ -121,7 +123,9 @@ static int s_meta_request_get_response_body_checksum_callback(
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     void *user_data) {
+    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p checksum body custom callback", (void *)meta_request);
     if (meta_request->meta_request_level_running_response_sum) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p checksum body calculating checksum", (void *)meta_request);
         aws_checksum_update(meta_request->meta_request_level_running_response_sum, body);
     }
     if (meta_request->body_user_callback_after_checksum) {
@@ -135,6 +139,7 @@ static void s_meta_request_get_response_finish_checksum_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
     void *user_data) {
+    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p checksum finish custom callback", (void *)meta_request);
     struct aws_byte_buf response_body_sum;
     struct aws_byte_buf encoded_response_body_sum;
     AWS_ZERO_STRUCT(response_body_sum);
@@ -143,6 +148,8 @@ static void s_meta_request_get_response_finish_checksum_callback(
     struct aws_s3_meta_request_result *mut_meta_request_result =
         (struct aws_s3_meta_request_result *)meta_request_result;
     if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "id=%p finish erroc code success and running response sum!", (void *)meta_request);
         mut_meta_request_result->did_validate = true;
         mut_meta_request_result->validation_algorithm =
             meta_request->meta_request_level_running_response_sum->algorithm;
@@ -162,6 +169,10 @@ static void s_meta_request_get_response_finish_checksum_callback(
             mut_meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
         }
     } else {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p finish error code not success or missing response_sum!",
+            (void *)meta_request);
         mut_meta_request_result->did_validate = false;
         mut_meta_request_result->validation_algorithm = AWS_SCA_NONE;
     }
@@ -210,8 +221,6 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
-    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p begin init base", (void *)meta_request);
-
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     *((enum aws_s3_checksum_algorithm *)&meta_request->checksum_algorithm) = checksum_algorithm;
@@ -252,7 +261,6 @@ int aws_s3_meta_request_init_base(
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
 
-    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Are new logs working!?", (void *)meta_request);
     if (s_is_get_request(options)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p set custom checksum callbacks for get request", (void *)meta_request);
