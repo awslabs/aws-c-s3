@@ -1326,9 +1326,7 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
 
     aws_priority_queue_top(&meta_request->synced_data.pending_body_streaming_requests, (void **)&top_request);
 
-    if (top_request == NULL) {
-        return NULL;
-    }
+    AWS_ASSERT(top_request);
 
     AWS_FATAL_ASSERT(*top_request);
 
