@@ -75,6 +75,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_get));
 
     /* Try to initialize the base type. */
+    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "preinit base");
     if (aws_s3_meta_request_init_base(
             allocator,
             client,
@@ -93,6 +94,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             (void *)auto_ranged_get);
         goto error_clean_up;
     }
+    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "postinit base");
 
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
     AWS_ASSERT(headers != NULL);

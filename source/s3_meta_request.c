@@ -210,6 +210,8 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
+    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p begin init base", (void *)meta_request);
+
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     *((enum aws_s3_checksum_algorithm *)&meta_request->checksum_algorithm) = checksum_algorithm;
