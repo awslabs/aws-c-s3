@@ -100,6 +100,12 @@ static int s_meta_request_get_response_headers_checksum_callback(
             aws_http_headers_get(headers, *algorithm_header_name, &header_sum);
             size_t encoded_len = 0;
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p header_sum.len: %d, expected len: %d",
+                (void *)meta_request,
+                header_sum.len,
+                encoded_len);
             if (header_sum.len <= encoded_len - 1) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST, "id=%p checksum header len matches expected!", (void *)meta_request);
