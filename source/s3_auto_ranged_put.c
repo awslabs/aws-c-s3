@@ -287,7 +287,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
 error_clean_up:
     aws_string_destroy(multipart_upload_id);
     aws_mem_release(allocator, auto_ranged_put);
-    
+
     return NULL;
 }
 
@@ -326,22 +326,32 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 static int s_skip_uploaded_parts(struct aws_s3_meta_request *meta_request, uint32_t skip_until_part_number) {
 
     AWS_PRECONDITION(meta_request);
-    
+
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     AWS_PRECONDITION(skip_until_part_number <= auto_ranged_put->synced_data.total_num_parts);
 
+    if (auto_ranged_put->prepare_data.read_parts_number == skip_until_part_number - 1) {
+        return AWS_ERROR_SUCCESS;
+    }
+
     struct aws_byte_buf temp_body_buf;
     aws_byte_buf_init(&temp_body_buf, meta_request->allocator, 0);
 
-    for (uint32_t part_index = auto_ranged_put->prepare_data.read_parts_number - 1;
-        part_index < skip_until_part_number - 1; ++part_index) {
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Skipping parts %d through %d",
+        (void *)meta_request,
+        auto_ranged_put->prepare_data.read_parts_number,
+        skip_until_part_number);
+
+    for (uint32_t part_index = auto_ranged_put->prepare_data.read_parts_number; part_index < skip_until_part_number - 1;
+         ++part_index) {
 
         size_t request_body_size = meta_request->part_size;
         /* Last part--adjust size to match remaining content length. */
         if ((part_index + 1) == auto_ranged_put->synced_data.total_num_parts) {
-            size_t content_remainder =
-                (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+            size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
 
             if (content_remainder > 0) {
                 request_body_size = content_remainder;
@@ -358,44 +368,36 @@ static int s_skip_uploaded_parts(struct aws_s3_meta_request *meta_request, uint3
         }
 
         if (aws_s3_meta_request_read_body(meta_request, &temp_body_buf)) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST, "Failed to resume upload. Input steam cannot be read.");
-            aws_s3_meta_request_set_fail_synced(
-                meta_request, NULL, AWS_ERROR_S3_SKIP_UPLOADED_PART_FAILED);
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to resume upload. Input steam cannot be read.");
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_SKIP_UPLOADED_PART_FAILED);
             aws_byte_buf_clean_up(&temp_body_buf);
             return AWS_ERROR_S3_SKIP_UPLOADED_PART_FAILED;
         }
 
         // compare skipped checksum to previously uploaded checksum
-        if (meta_request->checksum_algorithm != AWS_SCA_NONE &&
-            auto_ranged_put->checksums_list[part_index].len > 0) {
+        if (meta_request->checksum_algorithm != AWS_SCA_NONE && auto_ranged_put->checksums_list[part_index].len > 0) {
             struct aws_byte_buf checksum;
             struct aws_byte_cursor body_cur = aws_byte_cursor_from_buf(&temp_body_buf);
             if (!aws_checksum_compute(
-                    meta_request->allocator,
-                    meta_request->checksum_algorithm,
-                    &body_cur,
-                    &checksum,
-                    0)) {
+                    meta_request->allocator, meta_request->checksum_algorithm, &body_cur, &checksum, 0)) {
                 if (!aws_byte_buf_eq(&checksum, &auto_ranged_put->checksums_list[part_index])) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "Failed to resume upload. Checksum for previously uploaded part does not match "
                         "new part.");
-                    aws_s3_meta_request_set_fail_synced(
-                        meta_request, NULL, AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+                    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
                     aws_byte_buf_clean_up(&temp_body_buf);
                     aws_byte_buf_clean_up(&checksum);
                     return AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
                 }
             }
-        }   
+        }
     }
 
     aws_byte_buf_clean_up(&temp_body_buf);
     return AWS_ERROR_SUCCESS;
 }
- 
+
 static bool s_s3_auto_ranged_put_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
@@ -632,7 +634,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS: {
-            /* BEGIN CRITICAL SECTION */ 
+            /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
 
@@ -1090,12 +1092,12 @@ static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     /**
-     * generate pause token for put. 
+     * generate pause token for put.
      * current format is json with the following structure
      * {
      *      multipart_upload_id: String
      *      partition_size: number
-     *      total_num_parts: number 
+     *      total_num_parts: number
      * }
      */
 
