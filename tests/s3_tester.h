@@ -361,9 +361,22 @@ int aws_s3_tester_validate_put_object_results(
  * mutex/signal.) */
 void aws_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester);
 
+/*
+ * Value to populate test stream with. Useful for cases where we need to verify that cheksums fail.
+ */
+enum aws_s3_test_stream_value {
+    TEST_STREAM_VALUE_1,
+    TEST_STREAM_VALUE_2,
+};
+
 struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
+
+struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
+    struct aws_allocator *allocator,
+    size_t length,
+    enum aws_s3_test_stream_value stream_value);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 

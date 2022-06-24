@@ -286,6 +286,8 @@ struct aws_s3_meta_request_options {
      * Optional.
      * For meta requests that support pause/resume (e.g. PutObject), the resume token returned by
      * aws_s3_meta_request_pause() can be provided here.
+     * Note: If PutObject request specifies a checksum algorithm, client will calculate checksums while skipping parts
+     * from the buffer and compare them them to previously uploaded part checksums.
      */
     const struct aws_byte_cursor *resume_token;
 };
@@ -350,7 +352,8 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  * persisted and used to resume the upload. To resume an upload that was paused, supply the resume token in the meta
  * request options structure member aws_s3_meta_request_options.persistable_state.
  * The upload can be resumed either from the same client or a different one.
- * Resume token is opaque and format will vary depending on the type of operation.
+ * Resume token is opaque with format varying based on operation.
+ * Clients should not parse the token. For format details refer to pause method comments for a given operation.
  * Resume token will be set to null in case of failures.
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
  * @param resume_token outputs the json string with the state that can be used to resume the operation.

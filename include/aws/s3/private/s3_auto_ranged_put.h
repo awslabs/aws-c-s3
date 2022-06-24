@@ -29,14 +29,23 @@ struct aws_s3_auto_ranged_put {
 
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
+        /*
+         * Next part number to send.
+         * Note: this follows s3 part number convention and counting starts with 1.
+         * Throughout codebase 0 based part numbers are usually reffered to as part index.
+         */
         uint32_t next_part_number;
     } threaded_update_data;
 
-    /* Should only be used during prepare requests. Note: prepare requests are done sequentially,
-     * since we have to read sequentially from buffer
+    /* Should only be used during prepare requests. Note: stream reads must be sequential,
+     * so prepare currently never runs concurrently with another prepare
      */
     struct {
-        uint32_t read_parts_number;
+        /* How many parts have been read from input steam.
+         * Since reads are always sequential, this is esentially the number of how many parts were read from start of
+         * stream.
+         */
+        uint32_t num_parts_read_from_stream;
     } prepare_data;
 
     /* very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
