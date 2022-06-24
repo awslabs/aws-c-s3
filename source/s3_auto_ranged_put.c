@@ -207,10 +207,10 @@ static int s_load_persistable_state(
     auto_ranged_put->synced_data.list_parts_operation = aws_s3_list_parts_operation_new(allocator, &list_parts_params);
 
     struct aws_http_headers *needed_response_headers = aws_http_headers_new(allocator);
-    const size_t copy_header_count =
-        sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
-    
-    /* Copy headers that would have been used for create multi part from initial message, since create will never be called in this flow */
+    const size_t copy_header_count = sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
+
+    /* Copy headers that would have been used for create multi part from initial message, since create will never be
+     * called in this flow */
     for (size_t header_index = 0; header_index < copy_header_count; ++header_index) {
         const struct aws_byte_cursor *header_name = &s_create_multipart_upload_copy_headers[header_index];
         struct aws_byte_cursor header_value;
