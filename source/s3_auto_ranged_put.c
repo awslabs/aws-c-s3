@@ -130,7 +130,7 @@ static int s_parse_resume_info_from_token(
             " is below minimum threshold for multi-part.",
             (uint64_t)partition_size_value);
 
-        return AWS_ERROR_INVALID_ARGUMENT;
+        goto invalid_argument_cleanup;
     }
 
     if ((uint32_t)total_num_parts_value > g_s3_max_num_upload_parts) {
@@ -140,7 +140,7 @@ static int s_parse_resume_info_from_token(
             " is too large for platform.",
             (uint32_t)total_num_parts_value);
 
-        return AWS_ERROR_INVALID_ARGUMENT;
+        goto invalid_argument_cleanup;
     }
 
     *upload_id_out = aws_string_new_from_cursor(allocator, &multipart_upload_id_value);
@@ -205,6 +205,23 @@ static int s_load_persistable_state(
     };
 
     auto_ranged_put->synced_data.list_parts_operation = aws_s3_list_parts_operation_new(allocator, &list_parts_params);
+
+    struct aws_http_headers *needed_response_headers = aws_http_headers_new(allocator);
+    const size_t copy_header_count =
+        sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
+    
+    /* Copy headers that would have been used for create multi part from initial message, since create will never be called in this flow */
+    for (size_t header_index = 0; header_index < copy_header_count; ++header_index) {
+        const struct aws_byte_cursor *header_name = &s_create_multipart_upload_copy_headers[header_index];
+        struct aws_byte_cursor header_value;
+        AWS_ZERO_STRUCT(header_value);
+
+        if (!aws_http_headers_get(auto_ranged_put->base.initial_request_message, *header_name, &header_value)) {
+            aws_http_headers_set(needed_response_headers, *header_name, header_value);
+        }
+    }
+
+    auto_ranged_put->synced_data.needed_response_headers = needed_response_headers;
 
     return AWS_ERROR_SUCCESS;
 }
