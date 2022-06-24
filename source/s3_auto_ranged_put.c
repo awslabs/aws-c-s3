@@ -761,12 +761,12 @@ static int s_s3_auto_ranged_put_prepare_request(
                     auto_ranged_put->synced_data.total_num_parts);
                 if (skip_error) {
                     /* BEGIN CRITICAL SECTION */
-                   {
+                    {
                         aws_s3_meta_request_lock_synced_data(meta_request);
                         aws_raise_error(skip_error);
                         aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_RESUME_FAILED);
                         aws_s3_meta_request_unlock_synced_data(meta_request);
-                   }
+                    }
                     /* END CRITICAL SECTION */
                     goto message_create_failed;
                 }
