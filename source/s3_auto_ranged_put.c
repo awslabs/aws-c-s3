@@ -561,7 +561,7 @@ static bool s_s3_auto_ranged_put_update(
  * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
  * part.
  */
-static int s_compute_request_body_size(struct aws_s3_meta_request *meta_request, uint32_t part_number) {
+static size_t s_compute_request_body_size(struct aws_s3_meta_request *meta_request, uint32_t part_number) {
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
@@ -712,11 +712,11 @@ static int s_s3_auto_ranged_put_prepare_request(
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
 
-            size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number - 1);
+            size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
 
             if (request->num_times_prepared == 0) {
                 int skip_error = s_skip_parts_from_stream(
-                    meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number);
+                    meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
                 if (skip_error) {
                     /* BEGIN CRITICAL SECTION */
                     {
@@ -753,19 +753,20 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             if (request->num_times_prepared == 0) {
 
-                /* Corner case of last part being previosly uploaded during resume. 
+                /* Corner case of last part being previosly uploaded during resume.
                  * Read it from input stream and potentially verify checksum */
                 int skip_error = s_skip_parts_from_stream(
-                    meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream,
+                    meta_request,
+                    auto_ranged_put->prepare_data.num_parts_read_from_stream,
                     auto_ranged_put->synced_data.total_num_parts);
                 if (skip_error) {
                     /* BEGIN CRITICAL SECTION */
-                    {
+                   {
                         aws_s3_meta_request_lock_synced_data(meta_request);
                         aws_raise_error(skip_error);
                         aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_RESUME_FAILED);
                         aws_s3_meta_request_unlock_synced_data(meta_request);
-                    }
+                   }
                     /* END CRITICAL SECTION */
                     goto message_create_failed;
                 }

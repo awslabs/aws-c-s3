@@ -28,7 +28,8 @@ static struct aws_cli_subcommand_dispatch s_dispatch_table[] = {
     {
         .command_name = "cp",
         .subcommand_fn = s3_cp_main,
-    }};
+    },
+};
 
 static void s_usage(int exit_code) {
 
