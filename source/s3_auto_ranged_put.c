@@ -208,6 +208,7 @@ static int s_load_persistable_state(
 
     struct aws_http_headers *needed_response_headers = aws_http_headers_new(allocator);
     const size_t copy_header_count = sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
+    struct aws_http_headers *initial_headers = aws_http_message_get_headers(auto_ranged_put->base.initial_request_message);
 
     /* Copy headers that would have been used for create multi part from initial message, since create will never be
      * called in this flow */
@@ -216,7 +217,7 @@ static int s_load_persistable_state(
         struct aws_byte_cursor header_value;
         AWS_ZERO_STRUCT(header_value);
 
-        if (!aws_http_headers_get(auto_ranged_put->base.initial_request_message, *header_name, &header_value)) {
+        if (!aws_http_headers_get(initial_headers, *header_name, &header_value)) {
             aws_http_headers_set(needed_response_headers, *header_name, header_value);
         }
     }
