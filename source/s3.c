@@ -33,7 +33,6 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, "response checksum header does not match calculated checksum"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED, "failed to calculate a checksum for the provided stream"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED, "Failed to parse result from list parts"),
-    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_SKIP_UPLOADED_PART_FAILED, "Failed to skip previously uploaded part"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH, "Checksum does not match previously uploaded part"),
 };
 /* clang-format on */
