@@ -29,11 +29,11 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_RANGE_HEADER, "Range header has invalid syntax"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_MULTIRANGE_HEADER_UNSUPPORTED, "Range header specifies multiple ranges which is unsupported"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_PAUSED, "Request successfully paused"),
-    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RESUME_FAILED, "Resuming request failed"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, "response checksum header does not match calculated checksum"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED, "failed to calculate a checksum for the provided stream"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED, "Failed to parse result from list parts"),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH, "Checksum does not match previously uploaded part"),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RESUME_FAILED, "Resuming request failed"),
 };
 /* clang-format on */
 
