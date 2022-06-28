@@ -369,7 +369,7 @@ int aws_s3_paginated_operation_on_response(
     int error_code = aws_xml_parser_parse(parser, s_on_root_node_encountered, &wrapper);
     aws_xml_parser_destroy(parser);
 
-    if(error_code == AWS_OP_SUCCESS) {
+    if (error_code == AWS_OP_SUCCESS) {
         *continuation_token_out = wrapper.next_continuation_token;
         *has_more_results_out = wrapper.has_more_results;
     }
