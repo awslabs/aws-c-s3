@@ -11,6 +11,8 @@
 #include <aws/common/date_time.h>
 #include <aws/common/string.h>
 
+#include <aws/s3/private/s3_paginator.h>
+
 /** Struct representing the file system relevant data for an object returned from a ListObjectsV2 API call. */
 struct aws_s3_object_info {
     /**
@@ -38,8 +40,6 @@ struct aws_s3_object_info {
     struct aws_byte_cursor e_tag;
 };
 
-struct aws_s3_paginator;
-
 /**
  * Invoked when an object or prefix is encountered during a ListObjectsV2 API call. Return false, to immediately
  * terminate the list operation. Returning true will continue until at least the current page is iterated.
@@ -51,7 +51,7 @@ typedef bool(aws_s3_on_object_fn)(const struct aws_s3_object_info *info, void *u
  * aws_s3_paginator_has_more_results() returns true, you may want to call,
  * aws_s3_paginator_continue() from here to fetch the rest of the bucket contents.
  */
-typedef void(aws_s3_on_object_list_finished)(struct aws_s3_paginator *paginator, int error_code, void *user_data);
+typedef void(aws_s3_on_object_list_finished_fn)(struct aws_s3_paginator *paginator, int error_code, void *user_data);
 
 /**
  * Parameters for calling aws_s3_initiate_list_objects(). All values are copied out or re-seated and reference counted.
@@ -90,7 +90,7 @@ struct aws_s3_list_objects_params {
     /**
      * Callback to invoke when each page of the bucket listing completes.
      */
-    aws_s3_on_object_list_finished *on_list_finished;
+    aws_s3_on_object_list_finished_fn *on_list_finished;
     void *user_data;
 };
 
@@ -111,26 +111,11 @@ AWS_EXTERN_C_BEGIN
 AWS_S3_API struct aws_s3_paginator *aws_s3_initiate_list_objects(
     struct aws_allocator *allocator,
     const struct aws_s3_list_objects_params *params);
-AWS_S3_API void aws_s3_paginator_acquire(struct aws_s3_paginator *paginator);
-AWS_S3_API void aws_s3_paginator_release(struct aws_s3_paginator *paginator);
 
-/**
- * Start the paginated operation. If there are more results to fetch, it will begin that work.
- *
- * Signing_config contains information for SigV4 signing for the operation. It must not be NULL. It will be copied.
- *
- * Returns AWS_OP_SUCCESS on successful start of the operation, and AWS_OP_ERR otherwise. Check aws_last_error() for
- * more information on the error that occurred.
- */
-AWS_S3_API int aws_s3_paginator_continue(
-    struct aws_s3_paginator *paginator,
-    const struct aws_signing_config_aws *signing_config);
-
-/**
- * If the paginator has more results to fetch, returns true.
- */
-AWS_S3_API bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator *paginator);
+AWS_S3_API struct aws_s3_paginated_operation *aws_s3_list_objects_operation_new(
+    struct aws_allocator *allocator,
+    const struct aws_s3_list_objects_params *params);
 
 AWS_EXTERN_C_END
 
-#endif /* AWS_S3_FILE_SYSTEM_SUPPORT_H */
+#endif /* AWS_S3_LIST_OBJECTS_H */

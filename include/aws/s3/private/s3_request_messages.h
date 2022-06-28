@@ -36,6 +36,16 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     size_t excluded_headers_size,
     bool exclude_x_amz_meta);
 
+/* Copy headers from one message to the other and exclude specific headers.
+ * exclude_x_amz_meta controls whether S3 user metadata headers (prefixed with "x-amz-meta) are excluded.*/
+AWS_S3_API
+int aws_s3_message_util_copy_headers(
+    struct aws_http_message *source_message,
+    struct aws_http_message *dest_message,
+    const struct aws_byte_cursor *excluded_headers_arrays,
+    size_t excluded_headers_size,
+    bool exclude_x_amz_meta);
+
 AWS_S3_API
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
@@ -158,6 +168,12 @@ extern const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers
 
 AWS_S3_API
 extern const size_t g_s3_abort_multipart_upload_excluded_headers_count;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_s3_list_parts_excluded_headers[];
+
+AWS_S3_API
+extern const size_t g_s3_list_parts_excluded_headers_count;
 
 AWS_EXTERN_C_END
 

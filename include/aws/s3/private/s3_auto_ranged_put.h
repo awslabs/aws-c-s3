@@ -7,8 +7,10 @@
  */
 
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "s3_paginator.h"
 
 enum aws_s3_auto_ranged_put_request_tag {
+    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
@@ -20,15 +22,31 @@ enum aws_s3_auto_ranged_put_request_tag {
 struct aws_s3_auto_ranged_put {
     struct aws_s3_meta_request base;
 
-    /* Useable after the Create Multipart Upload request succeeds. */
+    /* Initialized either during creation in resume flow or as result of create multipart upload during normal flow. */
     struct aws_string *upload_id;
 
     uint64_t content_length;
 
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
+        /*
+         * Next part number to send.
+         * Note: this follows s3 part number convention and counting starts with 1.
+         * Throughout codebase 0 based part numbers are usually reffered to as part index.
+         */
         uint32_t next_part_number;
     } threaded_update_data;
+
+    /* Should only be used during prepare requests. Note: stream reads must be sequential,
+     * so prepare currently never runs concurrently with another prepare
+     */
+    struct {
+        /* How many parts have been read from input steam.
+         * Since reads are always sequential, this is esentially the number of how many parts were read from start of
+         * stream.
+         */
+        uint32_t num_parts_read_from_stream;
+    } prepare_data;
 
     /* very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
      * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
@@ -39,7 +57,11 @@ struct aws_s3_auto_ranged_put {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
+        /* Array list of `struct aws_string *` */
         struct aws_array_list etag_list;
+
+        struct aws_s3_paginated_operation *list_parts_operation;
+        struct aws_string *list_parts_continuation_token;
 
         uint32_t total_num_parts;
         uint32_t num_parts_sent;
@@ -49,10 +71,13 @@ struct aws_s3_auto_ranged_put {
 
         struct aws_http_headers *needed_response_headers;
 
+        int list_parts_error_code;
         int create_multipart_upload_error_code;
         int complete_multipart_upload_error_code;
         int abort_multipart_upload_error_code;
 
+        uint32_t list_parts_sent : 1;
+        uint32_t list_parts_completed : 1;
         uint32_t create_multipart_upload_sent : 1;
         uint32_t create_multipart_upload_completed : 1;
         uint32_t complete_multipart_upload_sent : 1;

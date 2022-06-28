@@ -215,7 +215,7 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_CANCELED);
+        ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_CANCELED);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

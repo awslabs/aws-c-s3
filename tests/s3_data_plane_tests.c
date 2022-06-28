@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
+#include "aws/s3/s3_client.h"
 #include "s3_tester.h"
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
@@ -3008,6 +3009,7 @@ static int s_test_s3_default_invoke_headers_callback_on_error(struct aws_allocat
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .headers_callback = s_s3_test_headers_callback_check_returns_success,
+
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .default_type_options =
             {
@@ -4333,4 +4335,459 @@ AWS_TEST_CASE(test_s3_put_object_multipart_mrap, s_test_s3_put_object_multipart_
 static int s_test_s3_put_object_multipart_mrap(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     return s_s3_put_object_mrap_helper(allocator, true /*multipart*/);
+}
+
+struct aws_http_message *put_object_request_new(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor key,
+    struct aws_byte_cursor endpoint,
+    struct aws_input_stream *body_stream) {
+
+    AWS_PRECONDITION(allocator);
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    /* the URI path is / followed by the key */
+    char destination_path[1024];
+    snprintf(destination_path, sizeof(destination_path), "/%.*s", (int)key.len, key.ptr);
+
+    if (aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str(destination_path))) {
+        goto error_clean_up_message;
+    }
+
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = endpoint,
+    };
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    char content_length_c_str[1024];
+    int64_t content_length = 0;
+    aws_input_stream_get_length(body_stream, &content_length);
+    snprintf(content_length_c_str, sizeof(content_length_c_str), "%" PRIu64, content_length);
+
+    struct aws_http_header content_length_header = {
+        .name = g_content_length_header_name,
+        .value = aws_byte_cursor_from_c_str(content_length_c_str),
+    };
+
+    if (aws_http_message_add_header(message, content_length_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_method(message, aws_http_method_put)) {
+        goto error_clean_up_message;
+    }
+
+    aws_http_message_set_body_stream(message, body_stream);
+
+    return message;
+
+error_clean_up_message:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+struct put_object_pause_resume_test_data {
+    struct aws_mutex mutex;
+    struct aws_condition_variable c_var;
+
+    /* execution of the test meta request completed */
+    bool execution_completed;
+
+    /* accumulator of amount of bytes uploaded */
+    struct aws_atomic_var total_bytes_uploaded;
+
+    /* the offset where upload should be paused */
+    struct aws_atomic_var request_pause_offset;
+
+    struct aws_atomic_var pause_requested;
+
+    struct aws_atomic_var pause_result;
+
+    /* the persistable state of the paused request */
+    struct aws_atomic_var persistable_state_ptr;
+
+    int meta_request_error_code;
+    int response_status_code;
+};
+
+static void s_put_pause_resume_meta_request_finish(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data) {
+
+    (void)meta_request;
+
+    struct put_object_pause_resume_test_data *test_data = user_data;
+
+    /* if error response body is available, dump it to test result to help investigation of failed tests */
+    if (meta_request_result->error_response_body != NULL && meta_request_result->error_response_body->len > 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Response error body: %.*s",
+            (int)meta_request_result->error_response_body->len,
+            meta_request_result->error_response_body->buffer);
+    }
+
+    aws_mutex_lock(&test_data->mutex);
+    test_data->meta_request_error_code = meta_request_result->error_code;
+    test_data->response_status_code = meta_request_result->response_status;
+    test_data->execution_completed = true;
+    aws_mutex_unlock(&test_data->mutex);
+    aws_condition_variable_notify_one(&test_data->c_var);
+}
+
+static bool s_put_pause_resume_test_completion_predicate(void *arg) {
+    struct put_object_pause_resume_test_data *test_data = arg;
+    return test_data->execution_completed;
+}
+
+static void s_pause_meta_request_progress(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+
+    AWS_ASSERT(meta_request);
+    AWS_ASSERT(progress);
+    AWS_ASSERT(user_data);
+
+    struct put_object_pause_resume_test_data *test_data = user_data;
+
+    aws_atomic_fetch_add(&test_data->total_bytes_uploaded, (size_t)progress->bytes_transferred);
+
+    size_t total_bytes_uploaded = aws_atomic_load_int(&test_data->total_bytes_uploaded);
+    size_t offset_to_pause = aws_atomic_load_int(&test_data->request_pause_offset);
+
+    if (total_bytes_uploaded >= offset_to_pause) {
+        /* offset of the upload at which we should pause was reached. let's pause the upload */
+
+        size_t expected = false;
+        bool request_pause = aws_atomic_compare_exchange_int(&test_data->pause_requested, &expected, true);
+        if (!request_pause) {
+            /* if the meta request has already been paused previously, do nothing. */
+            return;
+        }
+
+        struct aws_string *persistable_state = NULL;
+        int pause_result = aws_s3_meta_request_pause(meta_request, &persistable_state);
+        aws_atomic_store_int(&test_data->pause_result, pause_result);
+        aws_atomic_store_ptr(&test_data->persistable_state_ptr, persistable_state);
+    }
+}
+
+/* total length of the object to simulate for upload */
+static const size_t s_pause_resume_object_length_128MB = 128 * 1024 * 1024;
+
+static int s_pause_resume_receive_body_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+
+    (void)meta_request;
+    (void)range_start;
+    (void)user_data;
+
+    // TODO: this is a bit hacky, as it will try to compare every partial get result we receive to the input stream.
+    // Something better?
+
+    struct aws_input_stream *input_stream =
+        aws_s3_test_input_stream_new(meta_request->allocator, s_pause_resume_object_length_128MB);
+
+    struct aws_byte_buf buf;
+    aws_byte_buf_init(&buf, meta_request->allocator, (size_t)range_start);
+    aws_input_stream_read(input_stream, &buf);
+
+    aws_byte_buf_clean_up(&buf);
+    aws_byte_buf_init(&buf, meta_request->allocator, body->len);
+    aws_input_stream_read(input_stream, &buf);
+
+    struct aws_byte_cursor input_cur = aws_byte_cursor_from_buf(&buf);
+
+    bool body_matches_expected = aws_byte_cursor_eq(&input_cur, body);
+
+    aws_input_stream_destroy(input_stream);
+    aws_byte_buf_clean_up(&buf);
+
+    ASSERT_TRUE(body_matches_expected);
+    return AWS_OP_SUCCESS;
+}
+
+static int s_test_s3_put_pause_resume_helper(
+    struct aws_s3_tester *tester,
+    struct aws_allocator *allocator,
+    void *ctx,
+    struct put_object_pause_resume_test_data *test_data,
+    struct aws_byte_cursor destination_key,
+    struct aws_input_stream *upload_body_stream,
+    struct aws_string *resume_state,
+    enum aws_s3_checksum_algorithm checksum_algorithm,
+    int expected_error_code,
+    int expected_response_status) {
+
+    (void)ctx;
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_byte_cursor destination_bucket = g_test_bucket_name;
+
+    char endpoint[1024];
+    snprintf(
+        endpoint,
+        sizeof(endpoint),
+        "%.*s.s3.%s.amazonaws.com",
+        (int)destination_bucket.len,
+        destination_bucket.ptr,
+        g_test_s3_region.ptr);
+
+    /* creates a PutObject request */
+    struct aws_http_message *message =
+        put_object_request_new(allocator, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_body_stream);
+
+    test_data->c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
+    aws_mutex_init(&test_data->mutex);
+    test_data->execution_completed = false;
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .user_data = test_data,
+        .body_callback = NULL,
+        .signing_config = client_config.signing_config,
+        .finish_callback = s_put_pause_resume_meta_request_finish,
+        .headers_callback = NULL,
+        .progress_callback = s_pause_meta_request_progress,
+        .message = message,
+        .shutdown_callback = NULL,
+        .resume_token = NULL,
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = checksum_algorithm,
+    };
+
+    struct aws_byte_cursor resume_state_cur;
+    if (resume_state) {
+        resume_state_cur = aws_byte_cursor_from_string(resume_state);
+        meta_request_options.resume_token = &resume_state_cur;
+    }
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    /* wait completion of the meta request */
+    aws_mutex_lock(&test_data->mutex);
+    aws_condition_variable_wait_pred(
+        &test_data->c_var, &test_data->mutex, s_put_pause_resume_test_completion_predicate, test_data);
+    aws_mutex_unlock(&test_data->mutex);
+
+    /* assert error_code and response_status_code */
+    ASSERT_INT_EQUALS(expected_error_code, test_data->meta_request_error_code);
+    ASSERT_INT_EQUALS(expected_response_status, test_data->response_status_code);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_mutex_clean_up(&test_data->mutex);
+    aws_http_message_destroy(message);
+
+    if (expected_error_code == AWS_ERROR_SUCCESS) {
+        /* get the file and verify it matches what we uploaded */
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .body_callback = s_pause_resume_receive_body_callback,
+            .client = client,
+            .get_options =
+                {
+                    .object_path = destination_key,
+                },
+        };
+
+        struct aws_s3_meta_request_test_results results;
+        AWS_ZERO_STRUCT(results);
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(tester, &options, &results));
+        aws_s3_meta_request_test_results_clean_up(&results);
+    }
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_pause_resume, s_test_s3_put_pause_resume)
+static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx) {
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume.txt");
+
+    struct put_object_pause_resume_test_data test_data;
+    AWS_ZERO_STRUCT(test_data);
+
+    /* initialize the atomic members */
+    aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
+    aws_atomic_init_int(&test_data.request_pause_offset, 0);
+    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.pause_result, 0);
+    aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
+
+    /* offset of the upload where pause should be requested by test client */
+    aws_atomic_store_int(&test_data.request_pause_offset, 8 * 1024 * 1024);
+
+    /* stream used to initiate upload */
+    struct aws_input_stream *initial_upload_stream =
+        aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+
+    /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
+        &tester,
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        initial_upload_stream,
+        NULL,
+        AWS_SCA_NONE,
+        AWS_ERROR_S3_PAUSED,
+        0));
+    if (tester.bound_to_client) {
+        aws_s3_tester_wait_for_client_shutdown(&tester);
+        tester.bound_to_client = false;
+    }
+
+    aws_input_stream_destroy(initial_upload_stream);
+
+    /* new stream used to resume upload. it begins at the offset specified in the persistable state */
+    struct aws_input_stream *resume_upload_stream =
+        aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+    struct aws_string *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
+
+    size_t bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
+
+    /* offset where pause should be requested is set to a value greater than content length,
+     * to avoid any more pause when resuming the upload */
+    aws_atomic_store_int(&test_data.request_pause_offset, s_pause_resume_object_length_128MB * 2);
+    aws_atomic_store_int(&test_data.total_bytes_uploaded, 0);
+
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
+        &tester,
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        resume_upload_stream,
+        persistable_state,
+        AWS_SCA_NONE,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK));
+
+    bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
+
+    /* bytes uploaded is smaller since we are skipping uploaded parts */
+    ASSERT_TRUE(bytes_uploaded < s_pause_resume_object_length_128MB);
+
+    aws_string_destroy(persistable_state);
+    aws_input_stream_destroy(resume_upload_stream);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_ERROR_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_put_pause_resume_invalid_checksum, s_test_s3_put_pause_resume_invalid_checksum)
+static int s_test_s3_put_pause_resume_invalid_checksum(struct aws_allocator *allocator, void *ctx) {
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor destination_key =
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_checksum.txt");
+
+    struct put_object_pause_resume_test_data test_data;
+    AWS_ZERO_STRUCT(test_data);
+
+    /* initialize the atomic members */
+    aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
+    aws_atomic_init_int(&test_data.request_pause_offset, 0);
+    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.pause_result, 0);
+    aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
+
+    /* offset of the upload where pause should be requested by test client */
+    aws_atomic_store_int(&test_data.request_pause_offset, 8 * 1024 * 1024);
+
+    /* stream used to initiate upload */
+    struct aws_input_stream *initial_upload_stream =
+        aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+
+    /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
+        &tester,
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        initial_upload_stream,
+        NULL,
+        AWS_SCA_CRC32,
+        AWS_ERROR_S3_PAUSED,
+        0));
+    if (tester.bound_to_client) {
+        aws_s3_tester_wait_for_client_shutdown(&tester);
+        tester.bound_to_client = false;
+    }
+
+    aws_input_stream_destroy(initial_upload_stream);
+
+    /* new stream used to resume upload. it begins at the offset specified in the persistable state */
+    struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new_with_value_type(
+        allocator, s_pause_resume_object_length_128MB, TEST_STREAM_VALUE_2);
+
+    struct aws_string *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
+
+    size_t bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
+
+    /* offset where pause should be requested is set to a value greater than content length,
+     * to avoid any more pause when resuming the upload */
+    aws_atomic_store_int(&test_data.request_pause_offset, s_pause_resume_object_length_128MB * 2);
+    aws_atomic_store_int(&test_data.total_bytes_uploaded, 0);
+
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
+        &tester,
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        resume_upload_stream,
+        persistable_state,
+        AWS_SCA_CRC32,
+        AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH,
+        0));
+
+    bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
+
+    /* bytes uploaded is smaller since we are skipping uploaded parts */
+    ASSERT_TRUE(bytes_uploaded < s_pause_resume_object_length_128MB);
+
+    aws_string_destroy(persistable_state);
+    aws_input_stream_destroy(resume_upload_stream);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_ERROR_SUCCESS;
 }

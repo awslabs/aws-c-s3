@@ -127,13 +127,11 @@ static int s_aws_input_chunk_stream_read(struct aws_input_stream *stream, struct
     struct aws_stream_status status;
     AWS_ZERO_STRUCT(status);
     while (impl->current_stream != NULL && dest->len < dest->capacity) {
-        size_t start = dest->len;
         int err = aws_input_stream_read(impl->current_stream, dest);
         if (err) {
             return err;
         }
         if (aws_input_stream_get_status(impl->current_stream, &status)) {
-            dest->len = start;
             return AWS_OP_ERR;
         }
         if (status.is_end_of_stream && impl->set_current_stream_fn(impl)) {
@@ -153,6 +151,8 @@ static int s_aws_input_chunk_stream_get_status(struct aws_input_stream *stream, 
     }
     int res = aws_input_stream_get_status(impl->current_stream, status);
     if (res != AWS_OP_SUCCESS) {
+        /* Only when the current_stream is NULL, it is end of stream, as the current stream will be updated to feed to
+         * data */
         status->is_end_of_stream = false;
     }
     return res;

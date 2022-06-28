@@ -172,11 +172,6 @@ static void s_s3_test_meta_request_shutdown(void *user_data) {
     aws_s3_tester_notify_meta_request_shutdown(tester);
 }
 
-/* Wait for the cleanup notification.  This, and the s_s3_test_client_shutdown function are meant to be used for
- * sequential clean up only, and should not overlap with the "finish" callback.  (Both currently use the same
- * mutex/signal.) */
-static void s_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester);
-
 /* Notify the tester that a particular clean up step has finished. */
 static void s_s3_test_client_shutdown(void *user_data);
 
@@ -510,7 +505,7 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
     if (tester->bound_to_client) {
-        s_s3_tester_wait_for_client_shutdown(tester);
+        aws_s3_tester_wait_for_client_shutdown(tester);
         tester->bound_to_client = false;
     }
 
@@ -837,7 +832,7 @@ static bool s_s3_tester_has_client_shutdown(void *user_data) {
     return tester->synced_data.client_shutdown > 0;
 }
 
-static void s_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester) {
+void aws_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
     aws_s3_tester_lock_synced_data(tester);
