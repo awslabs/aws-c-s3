@@ -150,7 +150,7 @@ AWS_S3_API bool aws_s3_paginator_has_more_results(const struct aws_s3_paginator 
 /**
  * Construct next message for the given operation.
  */
-AWS_S3_API int aws_s3_construct_next_request_http_message(
+AWS_S3_API int aws_s3_construct_next_paginated_request_http_message(
     struct aws_s3_paginated_operation *operation,
     struct aws_byte_cursor *continuation_token,
     struct aws_http_message **out_message);

@@ -375,7 +375,7 @@ int aws_s3_paginated_operation_on_response(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_construct_next_request_http_message(
+int aws_s3_construct_next_paginated_request_http_message(
     struct aws_s3_paginated_operation *operation,
     struct aws_byte_cursor *continuation_token,
     struct aws_http_message **out_message) {

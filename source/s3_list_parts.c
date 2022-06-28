@@ -48,28 +48,28 @@ static void s_on_paginator_cleanup(void *user_data) {
     aws_ref_count_release(&operation_data->ref_count);
 }
 
-struct fs_parser_wrapper {
+struct result_wrapper {
     struct aws_allocator *allocator;
-    struct aws_s3_part_info fs_info;
+    struct aws_s3_part_info part_info;
 };
 
 /* invoked when the ListPartResult/Parts node is iterated. */
 static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *node, void *user_data) {
-    struct fs_parser_wrapper *fs_wrapper = user_data;
-    struct aws_s3_part_info *fs_info = &fs_wrapper->fs_info;
+    struct result_wrapper *result_wrapper = user_data;
+    struct aws_s3_part_info *part_info = &result_wrapper->part_info;
 
     /* for each Parts node, get the info from it and send it off as an part we've encountered */
     struct aws_byte_cursor node_name;
     aws_xml_node_get_name(node, &node_name);
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ETag")) {
-        return aws_xml_node_as_body(parser, node, &fs_info->e_tag) == AWS_OP_SUCCESS;
+        return aws_xml_node_as_body(parser, node, &part_info->e_tag) == AWS_OP_SUCCESS;
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "LastModified")) {
         struct aws_byte_cursor date_cur;
         if (aws_xml_node_as_body(parser, node, &date_cur) == AWS_OP_SUCCESS) {
-            aws_date_time_init_from_str_cursor(&fs_info->last_modified, &date_cur, AWS_DATE_FORMAT_ISO_8601);
+            aws_date_time_init_from_str_cursor(&part_info->last_modified, &date_cur, AWS_DATE_FORMAT_ISO_8601);
             return true;
         }
 
@@ -80,8 +80,8 @@ static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *
         struct aws_byte_cursor size_cur;
 
         if (aws_xml_node_as_body(parser, node, &size_cur) == AWS_OP_SUCCESS) {
-            struct aws_string *size_str = aws_string_new_from_cursor(fs_wrapper->allocator, &size_cur);
-            fs_info->size = strtoull((const char *)size_str->bytes, NULL, 10);
+            struct aws_string *size_str = aws_string_new_from_cursor(result_wrapper->allocator, &size_cur);
+            part_info->size = strtoull((const char *)size_str->bytes, NULL, 10);
             aws_string_destroy(size_str);
             return true;
         }
@@ -91,27 +91,28 @@ static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *
         struct aws_byte_cursor part_number_cur;
 
         if (aws_xml_node_as_body(parser, node, &part_number_cur) == AWS_OP_SUCCESS) {
-            struct aws_string *part_number_str = aws_string_new_from_cursor(fs_wrapper->allocator, &part_number_cur);
-            fs_info->part_number = strtoul((const char *)part_number_str->bytes, NULL, 10);
+            struct aws_string *part_number_str =
+                aws_string_new_from_cursor(result_wrapper->allocator, &part_number_cur);
+            part_info->part_number = strtoul((const char *)part_number_str->bytes, NULL, 10);
             aws_string_destroy(part_number_str);
             return true;
         }
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumCRC32")) {
-        return aws_xml_node_as_body(parser, node, &fs_info->checksumCRC32) == AWS_OP_SUCCESS;
+        return aws_xml_node_as_body(parser, node, &part_info->checksumCRC32) == AWS_OP_SUCCESS;
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumCRC32C")) {
-        return aws_xml_node_as_body(parser, node, &fs_info->checksumCRC32C) == AWS_OP_SUCCESS;
+        return aws_xml_node_as_body(parser, node, &part_info->checksumCRC32C) == AWS_OP_SUCCESS;
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumSHA1")) {
-        return aws_xml_node_as_body(parser, node, &fs_info->checksumSHA1) == AWS_OP_SUCCESS;
+        return aws_xml_node_as_body(parser, node, &part_info->checksumSHA1) == AWS_OP_SUCCESS;
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumSHA256")) {
-        return aws_xml_node_as_body(parser, node, &fs_info->checksumSHA256) == AWS_OP_SUCCESS;
+        return aws_xml_node_as_body(parser, node, &part_info->checksumSHA256) == AWS_OP_SUCCESS;
     }
 
     return true;
@@ -126,28 +127,28 @@ static bool s_on_list_bucket_result_node_encountered(
     struct aws_byte_cursor node_name;
     aws_xml_node_get_name(node, &node_name);
 
-    struct fs_parser_wrapper fs_wrapper;
-    AWS_ZERO_STRUCT(fs_wrapper);
+    struct result_wrapper result_wrapper;
+    AWS_ZERO_STRUCT(result_wrapper);
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "Part")) {
-        fs_wrapper.allocator = operation_data->allocator;
+        result_wrapper.allocator = operation_data->allocator;
         /* this will traverse the current Parts node, get the metadata necessary to construct
          * an instance of fs_info so we can invoke the callback on it. This happens once per part. */
-        bool ret_val = aws_xml_node_traverse(parser, node, s_on_parts_node, &fs_wrapper) == AWS_OP_SUCCESS;
+        bool ret_val = aws_xml_node_traverse(parser, node, s_on_parts_node, &result_wrapper) == AWS_OP_SUCCESS;
 
         struct aws_byte_buf trimmed_etag;
         AWS_ZERO_STRUCT(trimmed_etag);
 
-        if (fs_wrapper.fs_info.e_tag.len) {
+        if (result_wrapper.part_info.e_tag.len) {
             struct aws_string *quoted_etag_str =
-                aws_string_new_from_cursor(fs_wrapper.allocator, &fs_wrapper.fs_info.e_tag);
-            replace_quote_entities(fs_wrapper.allocator, quoted_etag_str, &trimmed_etag);
-            fs_wrapper.fs_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
+                aws_string_new_from_cursor(result_wrapper.allocator, &result_wrapper.part_info.e_tag);
+            replace_quote_entities(result_wrapper.allocator, quoted_etag_str, &trimmed_etag);
+            result_wrapper.part_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
             aws_string_destroy(quoted_etag_str);
         }
 
         if (ret_val && operation_data->on_part) {
-            ret_val |= operation_data->on_part(&fs_wrapper.fs_info, operation_data->user_data);
+            ret_val |= operation_data->on_part(&result_wrapper.part_info, operation_data->user_data);
         }
 
         if (trimmed_etag.len) {

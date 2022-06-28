@@ -45,32 +45,31 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
 
     struct aws_string *etag = aws_strip_quotes(auto_ranged_put->base.allocator, info->e_tag);
 
-    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_CRC32 && info->checksumCRC32.len > 0) {
-        aws_byte_buf_init_copy_from_cursor(
-            &auto_ranged_put->checksums_list[info->part_number - 1],
-            auto_ranged_put->base.allocator,
-            info->checksumCRC32);
+    const struct aws_byte_cursor *checksum_cur = NULL;
+    switch (auto_ranged_put->base.checksum_algorithm) {
+        case AWS_SCA_CRC32:
+            checksum_cur = &info->checksumCRC32;
+            break;
+        case AWS_SCA_CRC32C:
+            checksum_cur = &info->checksumCRC32C;
+            break;
+        case AWS_SCA_SHA1:
+            checksum_cur = &info->checksumSHA1;
+            break;
+        case AWS_SCA_SHA256:
+            checksum_cur = &info->checksumSHA256;
+            break;
+        case AWS_SCA_NONE:
+        case AWS_SCA_COUNT:
+            break;
+        default:
+            AWS_ASSERT(false);
+            break;
     }
 
-    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_CRC32C && info->checksumCRC32C.len > 0) {
+    if (checksum_cur) {
         aws_byte_buf_init_copy_from_cursor(
-            &auto_ranged_put->checksums_list[info->part_number - 1],
-            auto_ranged_put->base.allocator,
-            info->checksumCRC32C);
-    }
-
-    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_SHA1 && info->checksumSHA1.len > 0) {
-        aws_byte_buf_init_copy_from_cursor(
-            &auto_ranged_put->checksums_list[info->part_number - 1],
-            auto_ranged_put->base.allocator,
-            info->checksumSHA1);
-    }
-
-    if (auto_ranged_put->base.checksum_algorithm == AWS_SCA_SHA256 && info->checksumSHA256.len > 0) {
-        aws_byte_buf_init_copy_from_cursor(
-            &auto_ranged_put->checksums_list[info->part_number - 1],
-            auto_ranged_put->base.allocator,
-            info->checksumSHA256);
+            &auto_ranged_put->checksums_list[info->part_number - 1], auto_ranged_put->base.allocator, *checksum_cur);
     }
 
     aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, info->part_number - 1);
@@ -182,7 +181,13 @@ static int s_load_persistable_state(
             " does not match expected number of parts based on length of the body.",
             total_num_parts);
 
-        return AWS_ERROR_INVALID_ARGUMENT;
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    struct aws_byte_cursor request_path;
+    if (aws_http_message_get_request_path(auto_ranged_put->base.initial_request_message, &request_path)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not load persisted state. Request path could not be read.");
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
     auto_ranged_put->synced_data.num_parts_sent = 0;
@@ -190,12 +195,6 @@ static int s_load_persistable_state(
     auto_ranged_put->synced_data.create_multipart_upload_sent = true;
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
     auto_ranged_put->upload_id = upload_id;
-
-    struct aws_byte_cursor request_path;
-    if (aws_http_message_get_request_path(auto_ranged_put->base.initial_request_message, &request_path)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not load persisted state. Request path could not be read.");
-        return AWS_ERROR_INVALID_ARGUMENT;
-    }
 
     struct aws_s3_list_parts_params list_parts_params = {
         .key = request_path,
@@ -225,7 +224,7 @@ static int s_load_persistable_state(
 
     auto_ranged_put->synced_data.needed_response_headers = needed_response_headers;
 
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
@@ -260,10 +259,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
     struct aws_string *multipart_upload_id = NULL;
-    int token_parse_error =
-        s_parse_resume_info_from_token(allocator, options->resume_token, &multipart_upload_id, &part_size, &num_parts);
-    if (token_parse_error) {
-        aws_raise_error(token_parse_error);
+    if (s_parse_resume_info_from_token(
+            allocator, options->resume_token, &multipart_upload_id, &part_size, &num_parts)) {
         goto error_clean_up;
     }
 
@@ -289,13 +286,10 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->threaded_update_data.next_part_number = 1;
     auto_ranged_put->prepare_data.num_parts_read_from_stream = 0;
 
-    if (options->resume_token) {
-        int load_persistable_state_error = s_load_persistable_state(
-            allocator, auto_ranged_put, content_length, multipart_upload_id, part_size, num_parts);
-        if (load_persistable_state_error) {
-            aws_raise_error(load_persistable_state_error);
-            goto error_clean_up;
-        }
+    if (options->resume_token &&
+        s_load_persistable_state(
+            allocator, auto_ranged_put, content_length, multipart_upload_id, part_size, num_parts)) {
+        goto error_clean_up;
     } else {
         auto_ranged_put->synced_data.list_parts_operation = NULL;
         auto_ranged_put->synced_data.list_parts_sent = true;
@@ -644,11 +638,10 @@ static int s_skip_parts_from_stream(
             aws_byte_buf_reset(&temp_body_buf, false);
         }
 
-        int read_error = aws_s3_meta_request_read_body(meta_request, &temp_body_buf);
-        if (read_error) {
+        if (aws_s3_meta_request_read_body(meta_request, &temp_body_buf)) {
             AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to resume upload. Input steam cannot be read.");
             aws_byte_buf_clean_up(&temp_body_buf);
-            return aws_raise_error(read_error);
+            return AWS_OP_ERR;
         }
 
         // compare skipped checksum to previously uploaded checksum
@@ -682,7 +675,7 @@ static int s_skip_parts_from_stream(
     }
 
     aws_byte_buf_clean_up(&temp_body_buf);
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 /* Given a request, prepare it for sending based on its description. */
@@ -698,36 +691,36 @@ static int s_s3_auto_ranged_put_prepare_request(
 
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS: {
+
+            int message_creation_result = AWS_OP_ERR;
             /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
 
-                int message_creation_result = AWS_OP_ERR;
-
                 if (auto_ranged_put->synced_data.list_parts_continuation_token) {
                     struct aws_byte_cursor continuation_cur =
                         aws_byte_cursor_from_string(auto_ranged_put->synced_data.list_parts_continuation_token);
-                    message_creation_result = aws_s3_construct_next_request_http_message(
+                    message_creation_result = aws_s3_construct_next_paginated_request_http_message(
                         auto_ranged_put->synced_data.list_parts_operation, &continuation_cur, &message);
                 } else {
-                    message_creation_result = aws_s3_construct_next_request_http_message(
+                    message_creation_result = aws_s3_construct_next_paginated_request_http_message(
                         auto_ranged_put->synced_data.list_parts_operation, NULL, &message);
                 }
-
-                if (message_creation_result) {
-                    goto message_create_failed;
-                }
-
-                aws_s3_message_util_copy_headers(
-                    meta_request->initial_request_message,
-                    message,
-                    g_s3_list_parts_excluded_headers,
-                    g_s3_list_parts_excluded_headers_count,
-                    true);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }
             /* END CRITICAL SECTION */
+
+            if (message_creation_result) {
+                goto message_create_failed;
+            }
+
+            aws_s3_message_util_copy_headers(
+                meta_request->initial_request_message,
+                message,
+                g_s3_list_parts_excluded_headers,
+                g_s3_list_parts_excluded_headers_count,
+                true);
 
             break;
         }
@@ -748,13 +741,6 @@ static int s_s3_auto_ranged_put_prepare_request(
                         meta_request,
                         auto_ranged_put->prepare_data.num_parts_read_from_stream,
                         request->part_number - 1)) {
-                    /* BEGIN CRITICAL SECTION */
-                    {
-                        aws_s3_meta_request_lock_synced_data(meta_request);
-                        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_RESUME_FAILED);
-                        aws_s3_meta_request_unlock_synced_data(meta_request);
-                    }
-                    /* END CRITICAL SECTION */
                     goto message_create_failed;
                 }
                 auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
@@ -784,19 +770,10 @@ static int s_s3_auto_ranged_put_prepare_request(
 
                 /* Corner case of last part being previosly uploaded during resume.
                  * Read it from input stream and potentially verify checksum */
-                int skip_error = s_skip_parts_from_stream(
-                    meta_request,
-                    auto_ranged_put->prepare_data.num_parts_read_from_stream,
-                    auto_ranged_put->synced_data.total_num_parts);
-                if (skip_error) {
-                    /* BEGIN CRITICAL SECTION */
-                    {
-                        aws_s3_meta_request_lock_synced_data(meta_request);
-                        aws_raise_error(skip_error);
-                        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_RESUME_FAILED);
-                        aws_s3_meta_request_unlock_synced_data(meta_request);
-                    }
-                    /* END CRITICAL SECTION */
+                if (s_skip_parts_from_stream(
+                        meta_request,
+                        auto_ranged_put->prepare_data.num_parts_read_from_stream,
+                        auto_ranged_put->synced_data.total_num_parts)) {
                     goto message_create_failed;
                 }
                 auto_ranged_put->prepare_data.num_parts_read_from_stream = auto_ranged_put->synced_data.total_num_parts;
@@ -913,7 +890,6 @@ static void s_s3_auto_ranged_put_request_finished(
                             &has_more_results)) {
                         AWS_LOGF_ERROR(
                             AWS_LS_S3_META_REQUEST, "id=%p Failed to parse list parts response.", (void *)meta_request);
-                        aws_raise_error(AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED);
                         error_code = AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED;
                     } else if (!has_more_results) {
                         for (size_t etag_index = 0;
