@@ -1163,47 +1163,64 @@ static void s_s3_auto_ranged_put_request_finished(
 
 static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, struct aws_string **out_resume_token) {
 
-    (void)meta_request;
-
-    aws_json_module_init(meta_request->allocator);
-
-    struct aws_json_value *root = aws_json_value_new_object(meta_request->allocator);
-
     /* lock */
     aws_s3_meta_request_lock_synced_data(meta_request);
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    /**
-     * generate pause token for put.
-     * current format is json with the following structure
-     * {
-     *      type: String
-     *      multipart_upload_id: String
-     *      partition_size: number
-     *      total_num_parts: number
-     * }
-     */
+    /* only generate token if multipart upload was completed, since there is nothing to resume otherwise*/
+    int token_generated_error = AWS_OP_SUCCESS;
+    *out_resume_token = NULL;
+    if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
+        aws_json_module_init(meta_request->allocator);
 
-    aws_json_value_add_to_object(
-        root,
-        aws_byte_cursor_from_c_str("type"),
-        aws_json_value_new_string(
-            meta_request->allocator, aws_byte_cursor_from_c_str("AWS_S3_META_REQUEST_TYPE_PUT_OBJECT")));
+        struct aws_json_value *root = aws_json_value_new_object(meta_request->allocator);
 
-    aws_json_value_add_to_object(
-        root,
-        aws_byte_cursor_from_c_str("multipart_upload_id"),
-        aws_json_value_new_string(meta_request->allocator, aws_byte_cursor_from_string(auto_ranged_put->upload_id)));
+        /**
+         * generate pause token for put.
+         * current format is json with the following structure
+         * {
+         *      type: String
+         *      multipart_upload_id: String
+         *      partition_size: number
+         *      total_num_parts: number
+         * }
+         */
 
-    aws_json_value_add_to_object(
-        root,
-        aws_byte_cursor_from_c_str("partition_size"),
-        aws_json_value_new_number(meta_request->allocator, (double)meta_request->part_size));
+        aws_json_value_add_to_object(
+            root,
+            aws_byte_cursor_from_c_str("type"),
+            aws_json_value_new_string(
+                meta_request->allocator, aws_byte_cursor_from_c_str("AWS_S3_META_REQUEST_TYPE_PUT_OBJECT")));
 
-    aws_json_value_add_to_object(
-        root,
-        aws_byte_cursor_from_c_str("total_num_parts"),
-        aws_json_value_new_number(meta_request->allocator, (double)auto_ranged_put->synced_data.total_num_parts));
+        aws_json_value_add_to_object(
+            root,
+            aws_byte_cursor_from_c_str("multipart_upload_id"),
+            aws_json_value_new_string(
+                meta_request->allocator, aws_byte_cursor_from_string(auto_ranged_put->upload_id)));
+
+        aws_json_value_add_to_object(
+            root,
+            aws_byte_cursor_from_c_str("partition_size"),
+            aws_json_value_new_number(meta_request->allocator, (double)meta_request->part_size));
+
+        aws_json_value_add_to_object(
+            root,
+            aws_byte_cursor_from_c_str("total_num_parts"),
+            aws_json_value_new_number(meta_request->allocator, (double)auto_ranged_put->synced_data.total_num_parts));
+
+        struct aws_byte_buf result_string_buf;
+        aws_byte_buf_init(&result_string_buf, meta_request->allocator, 0);
+
+        int token_generated_error = aws_byte_buf_append_json_string(root, &result_string_buf);
+
+        if (!token_generated_error) {
+            *out_resume_token = aws_string_new_from_buf(meta_request->allocator, &result_string_buf);
+        }
+
+        aws_byte_buf_clean_up(&result_string_buf);
+        aws_json_value_destroy(root);
+        aws_json_module_cleanup();
+    }
 
     /**
      * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
@@ -1214,18 +1231,5 @@ static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, 
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    struct aws_byte_buf result_string_buf;
-    aws_byte_buf_init(&result_string_buf, meta_request->allocator, 0);
-
-    int json_append_error = aws_byte_buf_append_json_string(root, &result_string_buf);
-
-    if (!json_append_error) {
-        *out_resume_token = aws_string_new_from_buf(meta_request->allocator, &result_string_buf);
-    }
-
-    aws_byte_buf_clean_up(&result_string_buf);
-    aws_json_value_destroy(root);
-    aws_json_module_cleanup();
-
-    return json_append_error;
+    return token_generated_error;
 }
