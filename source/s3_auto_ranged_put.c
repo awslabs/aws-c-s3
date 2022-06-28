@@ -1211,7 +1211,7 @@ static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, 
         struct aws_byte_buf result_string_buf;
         aws_byte_buf_init(&result_string_buf, meta_request->allocator, 0);
 
-        int token_generated_error = aws_byte_buf_append_json_string(root, &result_string_buf);
+        token_generated_error = aws_byte_buf_append_json_string(root, &result_string_buf);
 
         if (!token_generated_error) {
             *out_resume_token = aws_string_new_from_buf(meta_request->allocator, &result_string_buf);
