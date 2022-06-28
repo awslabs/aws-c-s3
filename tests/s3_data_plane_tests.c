@@ -4777,7 +4777,7 @@ static int s_test_s3_put_pause_resume_invalid_checksum(struct aws_allocator *all
         resume_upload_stream,
         persistable_state,
         AWS_SCA_CRC32,
-        AWS_ERROR_S3_RESUME_FAILED,
+        AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH,
         0));
 
     bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);

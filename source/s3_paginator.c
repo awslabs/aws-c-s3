@@ -366,13 +366,15 @@ int aws_s3_paginated_operation_on_response(
     /* we've got a full xml document now and the request succeeded, parse the document and fire all the callbacks
      * for each object and prefix. All of that happens in these three lines. */
     struct aws_xml_parser *parser = aws_xml_parser_new(operation->allocator, &parser_options);
-    aws_xml_parser_parse(parser, s_on_root_node_encountered, &wrapper);
+    int error_code = aws_xml_parser_parse(parser, s_on_root_node_encountered, &wrapper);
     aws_xml_parser_destroy(parser);
 
-    *continuation_token_out = wrapper.next_continuation_token;
-    *has_more_results_out = wrapper.has_more_results;
+    if(error_code == AWS_OP_SUCCESS) {
+        *continuation_token_out = wrapper.next_continuation_token;
+        *has_more_results_out = wrapper.has_more_results;
+    }
 
-    return AWS_OP_SUCCESS;
+    return error_code;
 }
 
 int aws_s3_construct_next_paginated_request_http_message(

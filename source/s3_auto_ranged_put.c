@@ -262,7 +262,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     if (s_parse_resume_info_from_token(
             allocator, options->resume_token, &multipart_upload_id, &part_size, &num_parts)) {
         goto error_clean_up;
-    }
+    } 
 
     if (aws_s3_meta_request_init_base(
             allocator,
@@ -286,10 +286,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->threaded_update_data.next_part_number = 1;
     auto_ranged_put->prepare_data.num_parts_read_from_stream = 0;
 
-    if (options->resume_token &&
-        s_load_persistable_state(
-            allocator, auto_ranged_put, content_length, multipart_upload_id, part_size, num_parts)) {
-        goto error_clean_up;
+    if (options->resume_token) {
+        if (s_load_persistable_state(allocator, auto_ranged_put,
+            content_length, multipart_upload_id, part_size, num_parts)) {
+            goto error_clean_up;
+        }
     } else {
         auto_ranged_put->synced_data.list_parts_operation = NULL;
         auto_ranged_put->synced_data.list_parts_sent = true;
@@ -653,13 +654,12 @@ static int s_skip_parts_from_stream(
                 aws_get_digest_size_from_algorithm(meta_request->checksum_algorithm));
             struct aws_byte_cursor body_cur = aws_byte_cursor_from_buf(&temp_body_buf);
 
-            int compute_error = aws_checksum_compute(
-                meta_request->allocator, meta_request->checksum_algorithm, &body_cur, &checksum, 0);
-            if (compute_error) {
+            if (aws_checksum_compute(
+                meta_request->allocator, meta_request->checksum_algorithm, &body_cur, &checksum, 0)) {
                 AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum.");
                 aws_byte_buf_clean_up(&temp_body_buf);
                 aws_byte_buf_clean_up(&checksum);
-                return aws_raise_error(compute_error);
+                return aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
             }
 
             if (!aws_byte_buf_eq(&checksum, &auto_ranged_put->checksums_list[part_index])) {
