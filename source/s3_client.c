@@ -285,35 +285,6 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->process_work_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
 
-    /* Set up body streaming ELG */
-    {
-        uint16_t num_event_loops =
-            (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
-        uint16_t num_streaming_threads = num_event_loops;
-
-        if (num_streaming_threads < 1) {
-            num_streaming_threads = 1;
-        }
-
-        struct aws_shutdown_callback_options body_streaming_elg_shutdown_options = {
-            .shutdown_callback_fn = s_s3_client_body_streaming_elg_shutdown,
-            .shutdown_callback_user_data = client,
-        };
-
-        if (aws_get_cpu_group_count() > 1) {
-            client->body_streaming_elg = aws_event_loop_group_new_default_pinned_to_cpu_group(
-                client->allocator, num_streaming_threads, 1, &body_streaming_elg_shutdown_options);
-        } else {
-            client->body_streaming_elg = aws_event_loop_group_new_default(
-                client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
-        }
-        if (!client->body_streaming_elg) {
-            /* Fail to create elg, we should fail the call */
-            goto elg_create_fail;
-        }
-        client->synced_data.body_streaming_elg_allocated = true;
-    }
-
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
@@ -361,6 +332,36 @@ struct aws_s3_client *aws_s3_client_new(
 #endif
         }
     }
+
+    /* Set up body streaming ELG */
+    {
+        uint16_t num_event_loops =
+            (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+        uint16_t num_streaming_threads = num_event_loops;
+
+        if (num_streaming_threads < 1) {
+            num_streaming_threads = 1;
+        }
+
+        struct aws_shutdown_callback_options body_streaming_elg_shutdown_options = {
+            .shutdown_callback_fn = s_s3_client_body_streaming_elg_shutdown,
+            .shutdown_callback_user_data = client,
+        };
+
+        if (aws_get_cpu_group_count() > 1) {
+            client->body_streaming_elg = aws_event_loop_group_new_default_pinned_to_cpu_group(
+                client->allocator, num_streaming_threads, 1, &body_streaming_elg_shutdown_options);
+        } else {
+            client->body_streaming_elg = aws_event_loop_group_new_default(
+                client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
+        }
+        if (!client->body_streaming_elg) {
+            /* Fail to create elg, we should fail the call */
+            goto on_error;
+        }
+        client->synced_data.body_streaming_elg_allocated = true;
+    }
+    /* Setup cannot fail after this point. */
 
     if (client_config->throughput_target_gbps != 0.0) {
         *((double *)&client->throughput_target_gbps) = client_config->throughput_target_gbps;
@@ -415,14 +416,11 @@ struct aws_s3_client *aws_s3_client_new(
     return client;
 
 on_error:
-    aws_event_loop_group_release(client->body_streaming_elg);
-    client->body_streaming_elg = NULL;
     if (client->tls_connection_options) {
         aws_tls_connection_options_clean_up(client->tls_connection_options);
         aws_mem_release(client->allocator, client->tls_connection_options);
         client->tls_connection_options = NULL;
     }
-elg_create_fail:
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
