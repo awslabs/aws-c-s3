@@ -4726,7 +4726,7 @@ static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *alloc
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
     /* offset of the upload where pause should be requested by test client */
-    aws_atomic_store_int(&test_data.request_pause_offset, 100 * 1024 * 1024);
+    aws_atomic_store_int(&test_data.request_pause_offset, 128 * 1024 * 1024);
 
     /* stream used to initiate upload */
     struct aws_input_stream *initial_upload_stream =
