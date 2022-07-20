@@ -88,8 +88,6 @@ static int s_parse_resume_info_from_token(
         return AWS_OP_SUCCESS;
     }
 
-    aws_json_module_init(allocator);
-
     struct aws_json_value *root = aws_json_value_new_from_string(allocator, *resume_token);
 
     struct aws_json_value *type_node = aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("type"));
@@ -147,13 +145,11 @@ static int s_parse_resume_info_from_token(
     *total_num_parts_out = (uint32_t)total_num_parts_value;
 
     aws_json_value_destroy(root);
-    aws_json_module_cleanup();
 
     return AWS_OP_SUCCESS;
 
 invalid_argument_cleanup:
     aws_json_value_destroy(root);
-    aws_json_module_cleanup();
     return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
 }
 
@@ -1147,8 +1143,6 @@ static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, 
     int token_generated_error = AWS_OP_SUCCESS;
     *out_resume_token = NULL;
     if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
-        aws_json_module_init(meta_request->allocator);
-
         struct aws_json_value *root = aws_json_value_new_object(meta_request->allocator);
 
         /**
@@ -1195,7 +1189,6 @@ static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, 
 
         aws_byte_buf_clean_up(&result_string_buf);
         aws_json_value_destroy(root);
-        aws_json_module_cleanup();
     }
 
     /**

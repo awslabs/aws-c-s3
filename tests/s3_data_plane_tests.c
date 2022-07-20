@@ -4351,11 +4351,7 @@ struct aws_http_message *put_object_request_new(
         return NULL;
     }
 
-    /* the URI path is / followed by the key */
-    char destination_path[1024];
-    snprintf(destination_path, sizeof(destination_path), "/%.*s", (int)key.len, key.ptr);
-
-    if (aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str(destination_path))) {
+    if (aws_http_message_set_request_path(message, key)) {
         goto error_clean_up_message;
     }
 
@@ -4702,6 +4698,89 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
 
     /* bytes uploaded is smaller since we are skipping uploaded parts */
     ASSERT_TRUE(bytes_uploaded < s_pause_resume_object_length_128MB);
+
+    aws_string_destroy(persistable_state);
+    aws_input_stream_destroy(resume_upload_stream);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_ERROR_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_put_pause_resume_all_parts_done, s_test_s3_put_pause_resume_all_parts_done)
+static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *allocator, void *ctx) {
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor destination_key =
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_all_parts_done.txt");
+
+    struct put_object_pause_resume_test_data test_data;
+    AWS_ZERO_STRUCT(test_data);
+
+    /* initialize the atomic members */
+    aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
+    aws_atomic_init_int(&test_data.request_pause_offset, 0);
+    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.pause_result, 0);
+    aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
+
+    /* offset of the upload where pause should be requested by test client */
+    aws_atomic_store_int(&test_data.request_pause_offset, 128 * 1024 * 1024);
+
+    /* stream used to initiate upload */
+    struct aws_input_stream *initial_upload_stream =
+        aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+
+    /* starts the upload request that will be paused by s_s3_put_pause_resume_stream_on_read() */
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
+        &tester,
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        initial_upload_stream,
+        NULL,
+        AWS_SCA_NONE,
+        AWS_ERROR_S3_PAUSED,
+        0));
+    if (tester.bound_to_client) {
+        aws_s3_tester_wait_for_client_shutdown(&tester);
+        tester.bound_to_client = false;
+    }
+
+    aws_input_stream_destroy(initial_upload_stream);
+
+    /* new stream used to resume upload. it begins at the offset specified in the persistable state */
+    struct aws_input_stream *resume_upload_stream =
+        aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+    struct aws_string *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
+
+    AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Persistable state %p", persistable_state);
+
+    size_t bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
+
+    /* offset where pause should be requested is set to a value greater than content length,
+     * to avoid any more pause when resuming the upload */
+    aws_atomic_store_int(&test_data.request_pause_offset, s_pause_resume_object_length_128MB * 2);
+    aws_atomic_store_int(&test_data.total_bytes_uploaded, 0);
+
+    ASSERT_SUCCESS(s_test_s3_put_pause_resume_helper(
+        &tester,
+        allocator,
+        ctx,
+        &test_data,
+        destination_key,
+        resume_upload_stream,
+        persistable_state,
+        AWS_SCA_NONE,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK));
+
+    bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
+
+    /* bytes uploaded is smaller since we are skipping uploaded parts */
+    ASSERT_INT_EQUALS(bytes_uploaded, 0);
 
     aws_string_destroy(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
