@@ -1162,11 +1162,6 @@ static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, 
             aws_json_value_new_string(
                 meta_request->allocator, aws_byte_cursor_from_c_str("AWS_S3_META_REQUEST_TYPE_PUT_OBJECT")));
 
-        AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "Upload id %s.",
-                aws_string_c_str(auto_ranged_put->upload_id));
-
         aws_json_value_add_to_object(
             root,
             aws_byte_cursor_from_c_str("multipart_upload_id"),

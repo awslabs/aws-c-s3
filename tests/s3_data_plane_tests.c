@@ -4706,14 +4706,14 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     return AWS_ERROR_SUCCESS;
 }
 
-
 AWS_TEST_CASE(test_s3_put_pause_resume_all_parts_done, s_test_s3_put_pause_resume_all_parts_done)
 static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_all_parts_done.txt");
+    struct aws_byte_cursor destination_key =
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_all_parts_done.txt");
 
     struct put_object_pause_resume_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
