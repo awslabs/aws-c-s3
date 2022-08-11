@@ -200,6 +200,27 @@ struct aws_s3_client_config {
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
+
+    /**
+     * Set to true to manually manage the flow-control window of each meta request.
+     *
+     * If false, no back-pressure is applied and data will download as fast as possible.
+     *
+     * If true, the flow-control window of each meta request will shrink as
+     * response body data is downloaded (headers do not affect the window).
+     * `initial_window_size` determines the starting size of each meta request's window.
+     *
+     * If a meta requests's flow-control window reaches 0, no further data will be received.
+     * The user must call aws_s3_meta_request_update_window() to increment the window and keep data flowing.
+     */
+    bool manual_window_management;
+
+    /**
+     * The starting size of each meta-request's flow-control window.
+     * Required if `manual_window_management` is true,
+     * ignored if `manual_window_management` is false.
+     */
+    size_t initial_window_size;
 };
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
@@ -343,6 +364,25 @@ AWS_S3_API
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
+
+/**
+ * Increment the flow-control window so that data continues downloading.
+ *
+ * If the client was created with `manual_window_management` set true,
+ * the flow-control window of each meta request will shrink as response
+ * body data is downloaded (headers do not affect the size of the window).
+ * The client's `initial_window_size` determines the starting size of each meta request's window.
+ * If a meta request's flow-control window reaches 0, no further data will be received.
+ * If the `initial_window_size` is 0, the request will not start until the window is incremented.
+ * Maintain a large window to keep up a high download throughput.
+ * Parts cannot download in parallel unless the window is large enough to hold multiple parts.
+ *
+ * If `manual_window_management` is false, this call will have no effect.
+ * The connection maintains its flow-control windows such that
+ * no back-pressure is applied and data arrives as fast as possible.
+ */
+AWS_S3_API
+void aws_s3_meta_request_update_window(struct aws_s3_meta_request *meta_request, size_t increment_size);
 
 AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
