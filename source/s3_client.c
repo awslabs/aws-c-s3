@@ -759,6 +759,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
     if (!aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor)) {
         if (aws_byte_cursor_utf8_parse_u64(content_length_cursor, &content_length)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not parse Content-Length header. header value is:" PRInSTR "",
+                AWS_BYTE_CURSOR_PRI(content_length_cursor));
+            aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
             return NULL;
         }
         content_length_header_found = true;
