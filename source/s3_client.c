@@ -134,7 +134,7 @@ void aws_s3_set_dns_ttl(size_t ttl) {
  * When meta request is NULL, this will return the overall allowed number of connections.
  *
  * If meta_request is not NULL, this will give the max number of connections allowed for that meta request type on
- * thatendpoint.
+ * that endpoint.
  */
 uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
@@ -758,13 +758,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     bool content_length_header_found = false;
 
     if (!aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor)) {
-        struct aws_string *content_length_str = aws_string_new_from_cursor(client->allocator, &content_length_cursor);
-        char *content_length_str_end = NULL;
-
-        content_length = strtoull((const char *)content_length_str->bytes, &content_length_str_end, 10);
-        aws_string_destroy(content_length_str);
-
-        content_length_str = NULL;
+        if (aws_byte_cursor_utf8_parse_u64(content_length_cursor, &content_length)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not parse Content-Length header. header value is:" PRInSTR "",
+                AWS_BYTE_CURSOR_PRI(content_length_cursor));
+            aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
+            return NULL;
+        }
         content_length_header_found = true;
     }
 
