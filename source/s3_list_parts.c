@@ -80,9 +80,9 @@ static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *
         struct aws_byte_cursor size_cur;
 
         if (aws_xml_node_as_body(parser, node, &size_cur) == AWS_OP_SUCCESS) {
-            struct aws_string *size_str = aws_string_new_from_cursor(result_wrapper->allocator, &size_cur);
-            part_info->size = strtoull((const char *)size_str->bytes, NULL, 10);
-            aws_string_destroy(size_str);
+            if (aws_byte_cursor_utf8_parse_u64(size_cur, &part_info->size)) {
+                return false;
+            }
             return true;
         }
     }
@@ -96,6 +96,7 @@ static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *
                 return false;
             }
             if (part_number > UINT32_MAX) {
+                aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
                 return false;
             }
             part_info->part_number = (uint32_t)part_number;
