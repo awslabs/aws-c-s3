@@ -91,10 +91,14 @@ static bool s_on_parts_node(struct aws_xml_parser *parser, struct aws_xml_node *
         struct aws_byte_cursor part_number_cur;
 
         if (aws_xml_node_as_body(parser, node, &part_number_cur) == AWS_OP_SUCCESS) {
-            struct aws_string *part_number_str =
-                aws_string_new_from_cursor(result_wrapper->allocator, &part_number_cur);
-            part_info->part_number = strtoul((const char *)part_number_str->bytes, NULL, 10);
-            aws_string_destroy(part_number_str);
+            uint64_t part_number = 0;
+            if (aws_byte_cursor_utf8_parse_u64(part_number_cur, &part_number)) {
+                return false;
+            }
+            if (part_number > UINT32_MAX) {
+                return false;
+            }
+            part_info->part_number = (uint32_t)part_number;
             return true;
         }
     }

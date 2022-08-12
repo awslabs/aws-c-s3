@@ -134,7 +134,7 @@ void aws_s3_set_dns_ttl(size_t ttl) {
  * When meta request is NULL, this will return the overall allowed number of connections.
  *
  * If meta_request is not NULL, this will give the max number of connections allowed for that meta request type on
- * thatendpoint.
+ * that endpoint.
  */
 uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
