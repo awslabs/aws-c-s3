@@ -758,13 +758,9 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     bool content_length_header_found = false;
 
     if (!aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor)) {
-        struct aws_string *content_length_str = aws_string_new_from_cursor(client->allocator, &content_length_cursor);
-        char *content_length_str_end = NULL;
-
-        content_length = strtoull((const char *)content_length_str->bytes, &content_length_str_end, 10);
-        aws_string_destroy(content_length_str);
-
-        content_length_str = NULL;
+        if (aws_byte_cursor_utf8_parse_u64(content_length_cursor, &content_length)) {
+            return NULL;
+        }
         content_length_header_found = true;
     }
 
