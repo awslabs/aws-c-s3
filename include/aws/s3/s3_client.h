@@ -78,7 +78,20 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
     void *user_data);
 
 /**
- * Invoked to provide the request body as it is received.
+ * Invoked to provide the response body as it is received.
+ *
+ * Note: If the S3 client was created with `manual_window_management` set true,
+ * you must maintain the flow-control window.
+ * You will stop receiving data whenever the flow-control window reaches zero.
+ * The S3 client's `initial_window_size` determines the starting size of each response's window.
+ * The flow-control window shrinks as you receive body data via this callback.
+ * Use aws_s3_meta_request_update_window() to increment the window.
+ * Maintain a larger window to keep up a high download throughput,
+ * parts cannot download in parallel unless the window is large enough to hold multiple parts.
+ * Maintain a smaller window to limit the amount of data buffered in memory.
+ *
+ * If `manual_window_management` is false, you do not need to maintain the flow-control window.
+ * No back-pressure is applied and data arrives as fast as possible.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
  * Return AWS_OP_ERR to indicate failure and cancel the request.
@@ -273,7 +286,7 @@ struct aws_s3_meta_request_options {
     aws_s3_meta_request_headers_callback_fn *headers_callback;
 
     /**
-     * Invoked to provide the request body as it is received.
+     * Invoked to provide the response body as it is received.
      * See `aws_s3_meta_request_receive_body_callback_fn`.
      */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
@@ -374,8 +387,9 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  * The client's `initial_window_size` determines the starting size of each meta request's window.
  * If a meta request's flow-control window reaches 0, no further data will be received.
  * If the `initial_window_size` is 0, the request will not start until the window is incremented.
- * Maintain a large window to keep up a high download throughput.
- * Parts cannot download in parallel unless the window is large enough to hold multiple parts.
+ * Maintain a larger window to keep up a high download throughput,
+ * parts cannot download in parallel unless the window is large enough to hold multiple parts.
+ * Maintain a smaller window to limit the amount of data buffered in memory.
  *
  * If `manual_window_management` is false, this call will have no effect.
  * The connection maintains its flow-control windows such that
