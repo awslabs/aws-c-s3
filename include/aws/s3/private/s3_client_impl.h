@@ -59,11 +59,9 @@ struct aws_s3_endpoint_options {
     /* HTTP port override. If zero, determine port based on TLS context */
     uint16_t port;
 
-    /*
+    /**
      * Optional.
-     * Configuration for using proxy from environment variable.
-     * Defaults to true
-     * Only works when proxy_options is not set.
+     * Proxy configuration for http connection.
      */
     struct aws_http_proxy_options *proxy_options;
 };
@@ -191,11 +189,9 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    /*
+    /**
      * Optional.
-     * Configuration for using proxy from environment variable.
-     * Defaults to true
-     * Only works when proxy_options is not set.
+     * Proxy configuration for http connection.
      */
     struct aws_http_proxy_options *proxy_options;
 
