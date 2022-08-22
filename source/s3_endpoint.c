@@ -127,8 +127,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
     uint16_t port,
-    const struct aws_http_proxy_options *proxy_options
-) {
+    const struct aws_http_proxy_options *proxy_options) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
     AWS_PRECONDITION(host_name);
