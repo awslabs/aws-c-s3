@@ -51,7 +51,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
-    uint16_t port);
+    uint16_t port,
+    const struct aws_http_proxy_options *proxy_options);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
@@ -98,7 +99,8 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->client_bootstrap,
         options->tls_connection_options,
         options->max_connections,
-        options->port);
+        options->port,
+        options->proxy_options);
 
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
@@ -124,13 +126,14 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
-    uint16_t port) {
+    uint16_t port,
+    const struct aws_http_proxy_options *proxy_options
+) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
     AWS_PRECONDITION(host_name);
 
     struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
-
     /* Try to set up an HTTP connection manager. */
     struct aws_socket_options socket_options;
     AWS_ZERO_STRUCT(socket_options);
@@ -152,6 +155,10 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.shutdown_complete_callback = s_s3_endpoint_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = endpoint;
     manager_options.proxy_ev_settings = &proxy_ev_settings;
+
+    if (proxy_options != NULL) {
+        manager_options.proxy_options = proxy_options;
+    }
 
     struct aws_tls_connection_options *manager_tls_options = NULL;
 
