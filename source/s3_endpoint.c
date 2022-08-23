@@ -216,6 +216,7 @@ static void s_s3_endpoint_ref_count_zero(void *user_data) {
     struct aws_s3_endpoint *endpoint = user_data;
     AWS_PRECONDITION(endpoint);
 
+    aws_string_destroy(endpoint->host_name);
     if (endpoint->http_connection_manager != NULL) {
         struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
         endpoint->http_connection_manager = NULL;
@@ -230,13 +231,12 @@ static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_d
     AWS_ASSERT(endpoint);
 
     aws_s3_endpoint_shutdown_fn *shutdown_callback = endpoint->shutdown_callback;
-    struct aws_string *endpoint_host_name = endpoint->host_name;
     void *endpoint_user_data = endpoint->user_data;
 
     aws_mem_release(endpoint->allocator, endpoint);
 
     if (shutdown_callback != NULL) {
-        shutdown_callback(endpoint_host_name, endpoint_user_data);
+        shutdown_callback(endpoint_user_data);
     }
 }
 

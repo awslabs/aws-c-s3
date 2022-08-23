@@ -32,7 +32,7 @@ enum aws_s3_connection_finish_code {
 };
 
 /* Callback for the owner of the endpoint when the endpoint has completely cleaned up. */
-typedef void(aws_s3_endpoint_shutdown_fn)(struct aws_string *host_name, void *user_data);
+typedef void(aws_s3_endpoint_shutdown_fn)(void *user_data);
 
 struct aws_s3_endpoint_options {
     /* URL of the host that this endpoint refers to. */
