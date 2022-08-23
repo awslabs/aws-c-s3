@@ -224,11 +224,11 @@ void aws_s3_client_endpoint_release(struct aws_s3_client *client, struct aws_s3_
         if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 1) {
             aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
         }
-        aws_ref_count_release(&endpoint->ref_count);
-
         aws_s3_client_unlock_synced_data(client);
     }
     /* END CRITICAL SECTION */
+
+    aws_ref_count_release(&endpoint->ref_count);
 }
 
 static void s_s3_endpoint_ref_count_zero(void *user_data) {
