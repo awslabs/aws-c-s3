@@ -108,7 +108,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
-static void s_s3_client_endpoint_shutdown_callback(void *user_data);
+static void s_s3_client_endpoint_shutdown_callback(struct aws_string *endpoint_host_name, void *user_data);
 
 /* Default factory function for creating a meta request. */
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
@@ -693,7 +693,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 error_occurred = true;
                 goto unlock;
             }
-            endpoint->handled_by_client = true;
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {
@@ -730,14 +729,16 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     return meta_request;
 }
 
-static void s_s3_client_endpoint_shutdown_callback(void *user_data) {
+static void s_s3_client_endpoint_shutdown_callback(struct aws_string *endpoint_host_name, void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(endpoint_host_name);
 
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
         --client->synced_data.num_endpoints_allocated;
+        aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
@@ -1650,8 +1651,7 @@ reset_connection:
     aws_retry_token_release(connection->retry_token);
     connection->retry_token = NULL;
 
-    /* The endpoint must be created by client here */
-    aws_s3_client_endpoint_release(client, connection->endpoint);
+    aws_s3_endpoint_release(connection->endpoint);
     connection->endpoint = NULL;
 
     aws_mem_release(client->allocator, connection);

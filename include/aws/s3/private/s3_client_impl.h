@@ -32,7 +32,7 @@ enum aws_s3_connection_finish_code {
 };
 
 /* Callback for the owner of the endpoint when the endpoint has completely cleaned up. */
-typedef void(aws_s3_endpoint_shutdown_fn)(void *user_data);
+typedef void(aws_s3_endpoint_shutdown_fn)(struct aws_string *host_name, void *user_data);
 
 struct aws_s3_endpoint_options {
     /* URL of the host that this endpoint refers to. */
@@ -75,10 +75,6 @@ struct aws_s3_endpoint {
 
     /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
-
-    /* True, if the endpoint is created by client. So, it need to be thread safe to manage the refcount via
-     * `aws_s3_client_endpoint_release` */
-    bool handled_by_client;
 
     void *user_data;
 };
@@ -313,11 +309,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
 
 AWS_S3_API
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
-
-/* If the endpoint is created by s3 client, it will be managed by the client via a hash table that need to be protected
- * by lock. A lock will be acquired within the call, never invoke with lock held */
-AWS_S3_API
-void aws_s3_client_endpoint_release(struct aws_s3_client *client, struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_max_num_connections_per_vip;
