@@ -189,12 +189,6 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    /**
-     * Optional.
-     * Proxy configuration for http connection.
-     */
-    struct aws_http_proxy_options *proxy_options;
-
     struct {
         /* Number of overall requests currently being processed by the client. */
         struct aws_atomic_var num_requests_in_flight;

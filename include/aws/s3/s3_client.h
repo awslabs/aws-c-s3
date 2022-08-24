@@ -200,14 +200,6 @@ struct aws_s3_client_config {
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
-
-    /*
-     * Optional.
-     * Configuration for using proxy from environment variable.
-     * Defaults to true
-     * Only works when proxy_options is not set.
-     */
-    // struct proxy_env_var_settings *proxy_ev_settings;
 };
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
