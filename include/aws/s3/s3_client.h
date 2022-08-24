@@ -201,12 +201,6 @@ struct aws_s3_client_config {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    /**
-     * Optional.
-     * Proxy configuration for http connection.
-     */
-    struct aws_http_proxy_options *proxy_options;
-
     /*
      * Optional.
      * Configuration for using proxy from environment variable.
@@ -304,6 +298,12 @@ struct aws_s3_meta_request_options {
      * from the buffer and compare them them to previously uploaded part checksums.
      */
     const struct aws_byte_cursor *resume_token;
+
+    /**
+     * Optional.
+     * Proxy configuration for http connection.
+     */
+    struct aws_http_proxy_options *proxy_options;
 };
 
 /* Result details of a meta request.

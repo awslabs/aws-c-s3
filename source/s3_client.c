@@ -288,15 +288,6 @@ struct aws_s3_client *aws_s3_client_new(
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
-    if (client_config->proxy_options != NULL) {
-        client->proxy_options = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_http_proxy_options));
-        // TODO: aws_proxy_options_copy(client->proxy_options, client_config->pro);
-        // TODO: deep copy
-        // TODO: What about clean up?
-    } else {
-        client->proxy_options = NULL;
-    }
-
     if (client_config->part_size != 0) {
         *((size_t *)&client->part_size) = client_config->part_size;
     } else {
@@ -692,7 +683,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .user_data = client,
                 .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
                 .port = port,
-                .proxy_options = client->proxy_options,
+                .proxy_options = options->proxy_options,
             };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
