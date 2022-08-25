@@ -685,7 +685,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .port = port,
                 .proxy_options = options->proxy_options,
                 .proxy_ev_settings = options->proxy_ev_settings,
-            };
+                .connect_timeout_ms = options->connect_timeout_ms,
+                .tcp_keep_alive_options = options->tcp_keep_alive_options};
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
 

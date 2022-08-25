@@ -72,6 +72,18 @@ struct aws_s3_endpoint_options {
      * Only works when proxy_options is not set.
      */
     struct proxy_env_var_settings *proxy_ev_settings;
+
+    /**
+     * Optional.
+     * If set to 0, default value is used.
+     */
+    uint32_t connect_timeout_ms;
+
+    /**
+     * Optional.
+     * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
+     */
+    struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
 };
 
 struct aws_s3_endpoint {

@@ -53,7 +53,9 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     uint32_t max_connections,
     uint16_t port,
     const struct aws_http_proxy_options *proxy_options,
-    const struct proxy_env_var_settings *proxy_ev_settings);
+    const struct proxy_env_var_settings *proxy_ev_settings,
+    uint32_t connect_timeout_ms,
+    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
@@ -102,7 +104,9 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->max_connections,
         options->port,
         options->proxy_options,
-        options->proxy_ev_settings);
+        options->proxy_ev_settings,
+        options->connect_timeout_ms,
+        options->tcp_keep_alive_options);
 
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
@@ -130,18 +134,25 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     uint32_t max_connections,
     uint16_t port,
     const struct aws_http_proxy_options *proxy_options,
-    const struct proxy_env_var_settings *proxy_ev_settings) {
+    const struct proxy_env_var_settings *proxy_ev_settings,
+    uint32_t connect_timeout_ms,
+    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
     AWS_PRECONDITION(host_name);
 
     struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
     /* Try to set up an HTTP connection manager. */
+
     struct aws_socket_options socket_options;
     AWS_ZERO_STRUCT(socket_options);
     socket_options.type = AWS_SOCKET_STREAM;
     socket_options.domain = AWS_SOCKET_IPV4;
-    socket_options.connect_timeout_ms = s_connection_timeout_ms;
+    socket_options.connect_timeout_ms = connect_timeout_ms == 0 ? s_connection_timeout_ms : connect_timeout_ms;
+    socket_options.keepalive = tcp_keep_alive_options.keepalive;
+    socket_options.keep_alive_interval_sec = tcp_keep_alive_options.keep_alive_interval_sec;
+    socket_options.keep_alive_timeout_sec = tcp_keep_alive_options.keep_alive_timeout_sec;
+    socket_options.keep_alive_max_failed_probes = tcp_keep_alive_options.keep_alive_max_failed_probes;
 
     struct proxy_env_var_settings proxy_ev_settings_default;
     AWS_ZERO_STRUCT(proxy_ev_settings_default);
