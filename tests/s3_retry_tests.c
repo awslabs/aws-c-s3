@@ -115,8 +115,6 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
-
-    return 0;
 }
 
 struct s3_fail_prepare_test_data {

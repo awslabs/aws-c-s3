@@ -684,6 +684,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
                 .port = port,
                 .proxy_options = options->proxy_options,
+                .proxy_ev_settings = options->proxy_ev_settings,
             };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);

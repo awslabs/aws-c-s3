@@ -64,6 +64,14 @@ struct aws_s3_endpoint_options {
      * Proxy configuration for http connection.
      */
     struct aws_http_proxy_options *proxy_options;
+
+    /*
+     * Optional.
+     * Configuration for using proxy from environment variable.
+     * Defaults to true
+     * Only works when proxy_options is not set.
+     */
+    struct proxy_env_var_settings *proxy_ev_settings;
 };
 
 struct aws_s3_endpoint {
