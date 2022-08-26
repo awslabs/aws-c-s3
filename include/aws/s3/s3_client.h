@@ -223,15 +223,14 @@ struct aws_s3_client_config {
      * response body data is downloaded (headers do not affect the window).
      * `initial_window_size` determines the starting size of each meta request's window.
      *
-     * If a meta requests's flow-control window reaches 0, no further data will be received.
+     * If a meta request's flow-control window reaches 0, no further data will be received.
      * The user must call aws_s3_meta_request_update_window() to increment the window and keep data flowing.
      */
     bool manual_window_management;
 
     /**
-     * The starting size of each meta-request's flow-control window.
-     * Required if `manual_window_management` is true,
-     * ignored if `manual_window_management` is false.
+     * The starting size of each meta request's flow-control window.
+     * Ignored unless `manual_window_management` is true.
      */
     size_t initial_window_size;
 };

@@ -413,6 +413,9 @@ struct aws_s3_client *aws_s3_client_new(
     client->shutdown_callback = client_config->shutdown_callback;
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
 
+    *((bool *)&client->manual_window_management) = client_config->manual_window_management;
+    *((size_t *)&client->initial_window_size) = client_config->initial_window_size;
+
     return client;
 
 on_error:
@@ -684,6 +687,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .user_data = client,
                 .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
                 .port = port,
+                .manual_window_management = client->manual_window_management,
+                .initial_window_size = client->initial_window_size,
             };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
