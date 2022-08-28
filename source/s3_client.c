@@ -312,6 +312,18 @@ struct aws_s3_client *aws_s3_client_new(
     }
     client->connect_timeout_ms = client_config->connect_timeout_ms;
     client->proxy_ev_settings = client_config->proxy_ev_settings; // Todo: deep copy
+    if (client_config->proxy_ev_settings) {
+        *client->proxy_ev_settings = *client_config->proxy_ev_settings; // shallow copy
+        if (client_config->proxy_ev_settings->tls_options) {
+            client->proxy_ev_settings->tls_options =
+                aws_mem_calloc(allocator, 1, sizeof(struct aws_tls_connection_options));
+            if (aws_tls_connection_options_copy(
+                    client->proxy_ev_settings->tls_options, client_config->proxy_ev_settings->tls_options)) {
+                goto on_error;
+            }
+        }
+    }
+
     client->tcp_keep_alive_options = client_config->tcp_keep_alive_options;
 
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
@@ -434,8 +446,12 @@ on_error:
     if (client->proxy_config) {
         aws_http_proxy_config_destroy(client->proxy_config);
     }
-
-    // Todo: clean proxy config
+    if (client->proxy_ev_settings->tls_options) {
+        // Todo: need a null check for proxy_ev_settings?
+        aws_tls_connection_options_clean_up(client->proxy_ev_settings->tls_options);
+        aws_mem_release(client->allocator, client->proxy_ev_settings->tls_options);
+        client->proxy_ev_settings->tls_options = NULL;
+    }
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
@@ -513,6 +529,13 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     if (client->proxy_config) {
         aws_http_proxy_config_destroy(client->proxy_config);
+    }
+
+    if (client->proxy_ev_settings->tls_options) {
+        // Todo: need a null check for proxy_ev_settings?
+        aws_tls_connection_options_clean_up(client->proxy_ev_settings->tls_options);
+        aws_mem_release(client->allocator, client->proxy_ev_settings->tls_options);
+        client->proxy_ev_settings->tls_options = NULL;
     }
 
     aws_mutex_clean_up(&client->synced_data.lock);
