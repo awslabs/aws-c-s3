@@ -310,6 +310,9 @@ struct aws_s3_client *aws_s3_client_new(
             goto on_error;
         }
     }
+    client->connect_timeout_ms = client_config->connect_timeout_ms;
+    client->proxy_ev_settings = client_config->proxy_ev_settings; // Todo: deep copy
+    client->tcp_keep_alive_options = client_config->tcp_keep_alive_options;
 
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
@@ -701,9 +704,9 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
                 .port = port,
                 .proxy_config = client->proxy_config,
-                .proxy_ev_settings = options->proxy_ev_settings,
-                .connect_timeout_ms = options->connect_timeout_ms,
-                .tcp_keep_alive_options = options->tcp_keep_alive_options};
+                .proxy_ev_settings = client->proxy_ev_settings,
+                .connect_timeout_ms = client->connect_timeout_ms,
+                .tcp_keep_alive_options = client->tcp_keep_alive_options};
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
 

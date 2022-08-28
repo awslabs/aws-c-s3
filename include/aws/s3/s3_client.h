@@ -150,6 +150,22 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_COUNT,
 };
 
+/* Keepalive properties are TCP only.
+ * If interval or timeout are zero, then default values are used.
+ */
+struct aws_s3_tcp_keep_alive_options {
+
+    /* Set keepalive true to periodically transmit messages for detecting a disconnected peer.*/
+    bool keepalive; // Todo: remove
+
+    uint16_t keep_alive_interval_sec;
+    uint16_t keep_alive_timeout_sec;
+
+    /* If set, sets the number of keep alive probes allowed to fail before the connection is considered
+     * lost. If zero OS defaults are used. On Windows, this option is meaningless until Windows 10 1703.*/
+    uint16_t keep_alive_max_failed_probes;
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
 
@@ -206,22 +222,26 @@ struct aws_s3_client_config {
      * Proxy configuration for http connection.
      */
     struct aws_http_proxy_options *proxy_options;
-};
 
-/* Keepalive properties are TCP only.
- * If interval or timeout are zero, then default values are used.
- */
-struct aws_s3_tcp_keep_alive_options {
+    /*
+     * Optional.
+     * Configuration for using proxy from environment variable.
+     * Defaults to true
+     * Only works when proxy_options is not set.
+     */
+    struct proxy_env_var_settings *proxy_ev_settings; // Todo: update comment
 
-    /* Set keepalive true to periodically transmit messages for detecting a disconnected peer.*/
-    bool keepalive;
+    /**
+     * Optional.
+     * If set to 0, default value is used.
+     */
+    uint32_t connect_timeout_ms;
 
-    uint16_t keep_alive_interval_sec;
-    uint16_t keep_alive_timeout_sec;
-
-    /* If set, sets the number of keep alive probes allowed to fail before the connection is considered
-     * lost. If zero OS defaults are used. On Windows, this option is meaningless until Windows 10 1703.*/
-    uint16_t keep_alive_max_failed_probes;
+    /*
+     * Optional.
+     * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
+     */
+    struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
 };
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
@@ -312,32 +332,6 @@ struct aws_s3_meta_request_options {
      * from the buffer and compare them them to previously uploaded part checksums.
      */
     const struct aws_byte_cursor *resume_token;
-
-    /**
-     * Optional.
-     * Proxy configuration for http connection.
-     */
-    struct aws_http_proxy_options *proxy_options;
-
-    /*
-     * Optional.
-     * Configuration for using proxy from environment variable.
-     * Defaults to true
-     * Only works when proxy_options is not set.
-     */
-    struct proxy_env_var_settings *proxy_ev_settings;
-
-    /**
-     * Optional.
-     * If set to 0, default value is used.
-     */
-    uint32_t connect_timeout_ms;
-
-    /*
-     * Optional.
-     * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
-     */
-    struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
 };
 
 /* Result details of a meta request.
