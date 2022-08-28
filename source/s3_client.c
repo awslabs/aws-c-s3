@@ -314,13 +314,13 @@ struct aws_s3_client *aws_s3_client_new(
     client->proxy_ev_settings = client_config->proxy_ev_settings; // Todo: deep copy
     if (client_config->proxy_ev_settings) {
         *client->proxy_ev_settings = *client_config->proxy_ev_settings; // shallow copy
+
         if (client_config->proxy_ev_settings->tls_options) {
-            client->proxy_ev_settings->tls_options =
-                aws_mem_calloc(allocator, 1, sizeof(struct aws_tls_connection_options));
-            if (aws_tls_connection_options_copy(
-                    client->proxy_ev_settings->tls_options, client_config->proxy_ev_settings->tls_options)) {
+            client->proxy_ev_tls_options = aws_mem_calloc(allocator, 1, sizeof(struct aws_tls_connection_options));
+            if (aws_tls_connection_options_copy(client->proxy_ev_tls_options, client->proxy_ev_settings->tls_options)) {
                 goto on_error;
             }
+            client->proxy_ev_settings->tls_options = client->proxy_ev_tls_options;
         }
     }
 
@@ -448,8 +448,9 @@ on_error:
     }
     if (client->proxy_ev_settings->tls_options) {
         // Todo: need a null check for proxy_ev_settings?
-        aws_tls_connection_options_clean_up(client->proxy_ev_settings->tls_options);
-        aws_mem_release(client->allocator, client->proxy_ev_settings->tls_options);
+        // Todo: Why a constant and need for copying it somewhere else?
+        aws_tls_connection_options_clean_up(client->proxy_ev_tls_options);
+        aws_mem_release(client->allocator, client->proxy_ev_tls_options);
         client->proxy_ev_settings->tls_options = NULL;
     }
 
@@ -533,8 +534,8 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     if (client->proxy_ev_settings->tls_options) {
         // Todo: need a null check for proxy_ev_settings?
-        aws_tls_connection_options_clean_up(client->proxy_ev_settings->tls_options);
-        aws_mem_release(client->allocator, client->proxy_ev_settings->tls_options);
+        aws_tls_connection_options_clean_up(client->proxy_ev_tls_options);
+        aws_mem_release(client->allocator, client->proxy_ev_tls_options);
         client->proxy_ev_settings->tls_options = NULL;
     }
 

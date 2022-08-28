@@ -231,6 +231,8 @@ struct aws_s3_client {
      */
     struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
 
+    struct aws_tls_connection_options *proxy_ev_tls_options;
+
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
