@@ -6,10 +6,10 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/auth/signing_config.h>
+#include <aws/http/proxy.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
-
-#include <aws/auth/signing_config.h>
 
 struct aws_allocator;
 
@@ -200,6 +200,12 @@ struct aws_s3_client_config {
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
+
+    /**
+     * Optional.
+     * Proxy configuration for http connection.
+     */
+    struct aws_http_proxy_options *proxy_options;
 };
 
 /* Keepalive properties are TCP only.

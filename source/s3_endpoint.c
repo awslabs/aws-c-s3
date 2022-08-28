@@ -20,7 +20,7 @@
 #include <aws/common/system_info.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
-#include <aws/http/proxy.h>
+#include <aws/http/proxy.h> //Todo: maybe remove from here
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -52,7 +52,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
     uint16_t port,
-    const struct aws_http_proxy_options *proxy_options,
+    const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
     const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options);
@@ -103,7 +103,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->tls_connection_options,
         options->max_connections,
         options->port,
-        options->proxy_options,
+        options->proxy_config,
         options->proxy_ev_settings,
         options->connect_timeout_ms,
         options->tcp_keep_alive_options);
@@ -133,10 +133,11 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
     uint16_t port,
-    const struct aws_http_proxy_options *proxy_options,
+    const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
     const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options) {
+
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
     AWS_PRECONDITION(host_name);
@@ -161,6 +162,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     if (proxy_ev_settings == NULL) {
         proxy_ev_settings = &proxy_ev_settings_default;
     }
+    socket_options.connect_timeout_ms = s_connection_timeout_ms;
+    struct aws_http_proxy_options *proxy_options;
 
     struct aws_http_connection_manager_options manager_options;
     AWS_ZERO_STRUCT(manager_options);
@@ -172,7 +175,11 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.shutdown_complete_callback = s_s3_endpoint_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = endpoint;
     manager_options.proxy_ev_settings = proxy_ev_settings;
-    manager_options.proxy_options = proxy_options;
+    if (proxy_config != NULL) {
+        proxy_options = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_http_proxy_options));
+        aws_http_proxy_options_init_from_config(proxy_options, proxy_config);
+        manager_options.proxy_options = proxy_options;
+    }
 
     struct aws_tls_connection_options *manager_tls_options = NULL;
 

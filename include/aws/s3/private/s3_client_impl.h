@@ -63,7 +63,7 @@ struct aws_s3_endpoint_options {
      * Optional.
      * Proxy configuration for http connection.
      */
-    struct aws_http_proxy_options *proxy_options;
+    struct aws_http_proxy_config *proxy_config;
 
     /*
      * Optional.
@@ -204,6 +204,12 @@ struct aws_s3_client {
 
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
+
+    /**
+     * Optional.
+     * Proxy configuration for http connection.
+     */
+    struct aws_http_proxy_config *proxy_config;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;

@@ -304,6 +304,13 @@ struct aws_s3_client *aws_s3_client_new(
         *((size_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
+    if (client_config->proxy_options) {
+        client->proxy_config = aws_http_proxy_config_new_from_proxy_options(allocator, client_config->proxy_options);
+        if (client->proxy_config == NULL) {
+            goto on_error;
+        }
+    }
+
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
@@ -421,6 +428,12 @@ on_error:
         aws_mem_release(client->allocator, client->tls_connection_options);
         client->tls_connection_options = NULL;
     }
+    if (client->proxy_config) {
+        aws_http_proxy_config_destroy(client->proxy_config);
+    }
+
+    // Todo: clean proxy config
+
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
@@ -493,6 +506,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
         aws_tls_connection_options_clean_up(client->tls_connection_options);
         aws_mem_release(client->allocator, client->tls_connection_options);
         client->tls_connection_options = NULL;
+    }
+
+    if (client->proxy_config) {
+        aws_http_proxy_config_destroy(client->proxy_config);
     }
 
     aws_mutex_clean_up(&client->synced_data.lock);
@@ -683,7 +700,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .user_data = client,
                 .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
                 .port = port,
-                .proxy_options = options->proxy_options,
+                .proxy_config = client->proxy_config,
                 .proxy_ev_settings = options->proxy_ev_settings,
                 .connect_timeout_ms = options->connect_timeout_ms,
                 .tcp_keep_alive_options = options->tcp_keep_alive_options};
