@@ -143,8 +143,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     AWS_PRECONDITION(host_name);
 
     struct aws_byte_cursor host_name_cursor = aws_byte_cursor_from_string(host_name);
-    /* Try to set up an HTTP connection manager. */
 
+    /* Try to set up an HTTP connection manager. */
     struct aws_socket_options socket_options;
     AWS_ZERO_STRUCT(socket_options);
     socket_options.type = AWS_SOCKET_STREAM;
