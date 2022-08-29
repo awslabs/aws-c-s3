@@ -15,6 +15,7 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
 #include <aws/http/proxy.h>
 
@@ -66,7 +67,7 @@ struct aws_s3_endpoint_options {
      */
     struct aws_http_proxy_config *proxy_config;
 
-    /*
+    /**
      * Optional.
      * Configuration for fetching proxy configuration from environment.
      * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
@@ -86,6 +87,13 @@ struct aws_s3_endpoint_options {
      * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
      */
     struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
+
+    /**
+     * Optional.
+     * Configuration options for connection monitoring.
+     * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     */
+    struct aws_http_connection_monitoring_options *monitoring_options;
 };
 
 struct aws_s3_endpoint {
@@ -213,7 +221,7 @@ struct aws_s3_client {
      */
     struct aws_http_proxy_config *proxy_config;
 
-    /*
+    /**
      * Optional.
      * Configuration for fetching proxy configuration from environment.
      * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
@@ -228,11 +236,18 @@ struct aws_s3_client {
      */
     uint32_t connect_timeout_ms;
 
-    /*
+    /**
      * Optional.
      * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
      */
     struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
+
+    /**
+     * Optional.
+     * Configuration options for connection monitoring.
+     * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     */
+    struct aws_http_connection_monitoring_options *monitoring_options;
 
     /* tls options from proxy environment settings. */
     struct aws_tls_connection_options *proxy_ev_tls_options;

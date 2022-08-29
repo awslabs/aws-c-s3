@@ -222,7 +222,7 @@ struct aws_s3_client_config {
      */
     struct aws_http_proxy_options *proxy_options;
 
-    /*
+    /**
      * Optional.
      * Configuration for fetching proxy configuration from environment.
      * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
@@ -237,11 +237,18 @@ struct aws_s3_client_config {
      */
     uint32_t connect_timeout_ms;
 
-    /*
+    /**
      * Optional.
      * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
      */
     struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
+
+    /**
+     * Optional.
+     * Configuration options for connection monitoring.
+     * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     */
+    struct aws_http_connection_monitoring_options *monitoring_options;
 };
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */

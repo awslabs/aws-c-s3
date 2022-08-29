@@ -326,6 +326,12 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->tcp_keep_alive_options = client_config->tcp_keep_alive_options;
 
+    if (client_config->monitoring_options) {
+        client->monitoring_options =
+            aws_mem_calloc(allocator, 1, sizeof(struct aws_http_connection_monitoring_options));
+        *client->monitoring_options = *client_config->monitoring_options;
+    }
+
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
@@ -451,9 +457,8 @@ on_error:
         aws_mem_release(client->allocator, client->proxy_ev_tls_options);
         client->proxy_ev_settings->tls_options = NULL;
     }
-    if (client->proxy_ev_settings) {
-        aws_mem_release(client->allocator, client->proxy_ev_settings);
-    }
+    aws_mem_release(client->allocator, client->proxy_ev_settings);
+    aws_mem_release(client->allocator, client->monitoring_options);
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
@@ -538,10 +543,8 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
         aws_mem_release(client->allocator, client->proxy_ev_tls_options);
         client->proxy_ev_settings->tls_options = NULL;
     }
-
-    if (client->proxy_ev_settings) {
-        aws_mem_release(client->allocator, client->proxy_ev_settings);
-    }
+    aws_mem_release(client->allocator, client->proxy_ev_settings);
+    aws_mem_release(client->allocator, client->monitoring_options);
 
     aws_mutex_clean_up(&client->synced_data.lock);
 
@@ -734,7 +737,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .proxy_config = client->proxy_config,
                 .proxy_ev_settings = client->proxy_ev_settings,
                 .connect_timeout_ms = client->connect_timeout_ms,
-                .tcp_keep_alive_options = client->tcp_keep_alive_options};
+                .tcp_keep_alive_options = client->tcp_keep_alive_options,
+                .monitoring_options = client->monitoring_options};
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
 

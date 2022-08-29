@@ -54,7 +54,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
-    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options);
+    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options,
+    const struct aws_http_connection_monitoring_options *monitoring_options);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
@@ -105,7 +106,8 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->proxy_config,
         options->proxy_ev_settings,
         options->connect_timeout_ms,
-        options->tcp_keep_alive_options);
+        options->tcp_keep_alive_options,
+        options->monitoring_options);
 
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
@@ -135,7 +137,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
-    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options) {
+    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options,
+    const struct aws_http_connection_monitoring_options *monitoring_options) {
 
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
@@ -172,6 +175,9 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.shutdown_complete_callback = s_s3_endpoint_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = endpoint;
     manager_options.proxy_ev_settings = proxy_ev_settings;
+    if (monitoring_options != NULL) {
+        manager_options.monitoring_options = monitoring_options;
+    }
 
     struct aws_http_proxy_options proxy_options;
     if (proxy_config != NULL) {
