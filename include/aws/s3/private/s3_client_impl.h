@@ -187,7 +187,7 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    /* TODO: agonize over naming enable_read_backpressure*/
+    /* TODO: agonize over naming enable_read_backpressure */
     const bool manual_window_management;
     const size_t initial_window_size;
 
