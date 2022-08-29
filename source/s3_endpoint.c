@@ -154,12 +154,11 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     socket_options.keep_alive_interval_sec = tcp_keep_alive_options.keep_alive_interval_sec;
     socket_options.keep_alive_timeout_sec = tcp_keep_alive_options.keep_alive_timeout_sec;
     socket_options.keep_alive_max_failed_probes = tcp_keep_alive_options.keep_alive_max_failed_probes;
-
     struct proxy_env_var_settings proxy_ev_settings_default;
-    AWS_ZERO_STRUCT(proxy_ev_settings_default);
-    proxy_ev_settings_default.env_var_type = AWS_HPEV_ENABLE;
     /* Turn on envrionment variable for proxy by default */
     if (proxy_ev_settings == NULL) {
+        AWS_ZERO_STRUCT(proxy_ev_settings_default);
+        proxy_ev_settings_default.env_var_type = AWS_HPEV_ENABLE;
         proxy_ev_settings = &proxy_ev_settings_default;
     }
     socket_options.connect_timeout_ms = s_connection_timeout_ms;

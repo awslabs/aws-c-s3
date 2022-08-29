@@ -226,14 +226,15 @@ struct aws_s3_client_config {
     /*
      * Optional.
      * Configuration for using proxy from environment variable.
-     * Defaults to true
-     * Only works when proxy_options is not set.
+     * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
+     * configuration from environment variables.
+     * Only works when proxy_options is not set. If both are set, configuration from proxy_options is used.
      */
-    struct proxy_env_var_settings *proxy_ev_settings; // Todo: update comment
+    struct proxy_env_var_settings *proxy_ev_settings;
 
     /**
      * Optional.
-     * If set to 0, default value is used.
+     * If set to 0, default value (3000) is used.
      */
     uint32_t connect_timeout_ms;
 

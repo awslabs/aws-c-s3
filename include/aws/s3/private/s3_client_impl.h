@@ -68,14 +68,15 @@ struct aws_s3_endpoint_options {
     /*
      * Optional.
      * Configuration for using proxy from environment variable.
-     * Defaults to true
-     * Only works when proxy_options is not set.
+     * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
+     * configuration from environment variables.
+     * Only works when proxy_config is not set. If both are set, configuration from proxy_config is used.
      */
     struct proxy_env_var_settings *proxy_ev_settings;
 
     /**
      * Optional.
-     * If set to 0, default value is used.
+     * If set to 0, default value (3000) is used.
      */
     uint32_t connect_timeout_ms;
 
@@ -214,14 +215,15 @@ struct aws_s3_client {
     /*
      * Optional.
      * Configuration for using proxy from environment variable.
-     * Defaults to true
-     * Only works when proxy_options is not set.
+     * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
+     * configuration from environment variables.
+     * Only works when proxy_config is not set. If both are set, configuration from proxy_config is used.
      */
-    struct proxy_env_var_settings *proxy_ev_settings; // Todo: update comment
+    struct proxy_env_var_settings *proxy_ev_settings;
 
     /**
      * Optional.
-     * If set to 0, default value is used.
+     * If set to 0, default value (3000) is used.
      */
     uint32_t connect_timeout_ms;
 
@@ -231,6 +233,7 @@ struct aws_s3_client {
      */
     struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options;
 
+    /* tls options from proxy environment settings. */
     struct aws_tls_connection_options *proxy_ev_tls_options;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
