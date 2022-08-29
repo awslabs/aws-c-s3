@@ -224,7 +224,7 @@ struct aws_s3_client_config {
 
     /*
      * Optional.
-     * Configuration for using proxy from environment variable.
+     * Configuration for fetching proxy options from environment.
      * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
      * configuration from environment variables.
      * Only works when proxy_options is not set. If both are set, configuration from proxy_options is used.
