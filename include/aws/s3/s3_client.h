@@ -80,6 +80,7 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
 /**
  * Invoked to provide the response body as it is received.
  *
+ * TODO: UPDATE THESE DOCS
  * Note: If the S3 client was created with `manual_window_management` set true,
  * you must maintain the flow-control window.
  * You will stop receiving data whenever the flow-control window reaches zero.
@@ -215,6 +216,7 @@ struct aws_s3_client_config {
     void *shutdown_callback_user_data;
 
     /**
+     * TODO: UPDATE THESE DOCS
      * Set to true to manually manage the flow-control window of each meta request.
      *
      * If false, no back-pressure is applied and data will download as fast as possible.
@@ -226,13 +228,14 @@ struct aws_s3_client_config {
      * If a meta request's flow-control window reaches 0, no further data will be received.
      * The user must call aws_s3_meta_request_update_window() to increment the window and keep data flowing.
      */
-    bool manual_window_management;
+    bool enable_read_backpressure;
 
     /**
+     * TODO: UPDATE THESE DOCS
      * The starting size of each meta request's flow-control window.
      * Ignored unless `manual_window_management` is true.
      */
-    size_t initial_window_size;
+    size_t initial_read_window;
 };
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
@@ -378,6 +381,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     const struct aws_s3_meta_request_options *options);
 
 /**
+ * TODO: UPDATE THESE DOCS
  * Increment the flow-control window so that data continues downloading.
  *
  * If the client was created with `manual_window_management` set true,
@@ -395,7 +399,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  * no back-pressure is applied and data arrives as fast as possible.
  */
 AWS_S3_API
-void aws_s3_meta_request_update_window(struct aws_s3_meta_request *meta_request, size_t increment_size);
+void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, size_t bytes);
 
 AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);

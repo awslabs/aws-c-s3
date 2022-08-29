@@ -60,8 +60,8 @@ struct aws_s3_endpoint_options {
     uint16_t port;
 
     /* TODO: document */
-    bool manual_window_management;
-    size_t initial_window_size;
+    bool enable_read_backpressure;
+    size_t initial_read_window;
 };
 
 struct aws_s3_endpoint {
@@ -187,9 +187,9 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    /* TODO: agonize over naming enable_read_backpressure */
-    const bool manual_window_management;
-    const size_t initial_window_size;
+    /* TODO: document */
+    const bool enable_read_backpressure;
+    const size_t initial_read_window;
 
     struct {
         /* Number of overall requests currently being processed by the client. */

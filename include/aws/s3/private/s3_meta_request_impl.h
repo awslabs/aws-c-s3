@@ -172,7 +172,7 @@ struct aws_s3_meta_request {
         uint32_t finish_result_set : 1;
 
         /* TODO document me */
-        size_t window_update_size;
+        size_t increment_read_window;
 
     } synced_data;
 

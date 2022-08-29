@@ -267,14 +267,16 @@ int aws_s3_meta_request_init_base(
     return AWS_OP_SUCCESS;
 }
 
-void aws_s3_meta_request_update_window(struct aws_s3_meta_request *meta_request, size_t increment_size) {
-    if (increment_size == 0) {
+void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, size_t bytes) {
+    if (bytes == 0) {
         return;
     }
 
-    if (!meta_request->client->manual_window_management) {
+    if (!meta_request->client->enable_read_backpressure) {
         AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST, "id=%p: Ignoring TODO NAME ME because TODO NAME ME", (void *)meta_request);
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Ignoring call to increment_read_window(), this client has not enabled read backpressure.",
+            (void *)meta_request);
         return;
     }
 
@@ -283,11 +285,12 @@ void aws_s3_meta_request_update_window(struct aws_s3_meta_request *meta_request,
     bool success = false;
 
     if (aws_add_size_checked(
-            increment_size,
-            meta_request->synced_data.window_update_size,
-            &meta_request->synced_data.window_update_size)) {
+            bytes, meta_request->synced_data.increment_read_window, &meta_request->synced_data.increment_read_window)) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "id=%p: TODO NAME ME overflowed max value %zu", (void *)meta_request, SIZE_MAX);
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: The read window has been incremented beyond max value %zu. Failing request.",
+            (void *)meta_request,
+            SIZE_MAX);
         goto unlock;
     }
 
@@ -298,6 +301,7 @@ unlock:
     }
 
     /* TODO: need to reschedule work thread? */
+    /* TODO: special list of meta-requests that have window-updates? */
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
