@@ -267,10 +267,47 @@ int aws_s3_meta_request_init_base(
     return AWS_OP_SUCCESS;
 }
 
+void aws_s3_meta_request_update_window(struct aws_s3_meta_request *meta_request, size_t increment_size) {
+    if (increment_size == 0) {
+        return;
+    }
+
+    if (!meta_request->client->manual_window_management) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST, "id=%p: Ignoring TODO NAME ME because TODO NAME ME", (void *)meta_request);
+        return;
+    }
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    bool success = false;
+
+    if (aws_add_size_checked(
+            increment_size,
+            meta_request->synced_data.window_update_size,
+            &meta_request->synced_data.window_update_size)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "id=%p: TODO NAME ME overflowed max value %zu", (void *)meta_request, SIZE_MAX);
+        goto unlock;
+    }
+
+    success = true;
+unlock:
+    if (!success) {
+        aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
+    }
+
+    /* TODO: need to reschedule work thread? */
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+}
+
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
+    /* TODO: does this need to reschedule work thread? */
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 }
@@ -294,6 +331,8 @@ void aws_s3_meta_request_set_fail_synced(
     int error_code) {
     AWS_PRECONDITION(meta_request);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    /* TODO: cancel existing HTTP requests */
 
     if (meta_request->synced_data.finish_result_set) {
         return;
