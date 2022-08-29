@@ -20,7 +20,6 @@
 #include <aws/common/system_info.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
-#include <aws/http/proxy.h> //Todo: maybe remove from here
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>

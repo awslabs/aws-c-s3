@@ -7,7 +7,6 @@
  */
 
 #include <aws/auth/signing_config.h>
-#include <aws/http/proxy.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 
