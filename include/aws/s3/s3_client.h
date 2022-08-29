@@ -156,7 +156,7 @@ enum aws_s3_checksum_algorithm {
 struct aws_s3_tcp_keep_alive_options {
 
     /* Set keepalive true to periodically transmit messages for detecting a disconnected peer.*/
-    bool keepalive; // Todo: remove
+    bool keepalive;
 
     uint16_t keep_alive_interval_sec;
     uint16_t keep_alive_timeout_sec;

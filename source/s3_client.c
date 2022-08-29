@@ -311,10 +311,10 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
     client->connect_timeout_ms = client_config->connect_timeout_ms;
-    client->proxy_ev_settings = client_config->proxy_ev_settings;
     if (client_config->proxy_ev_settings) {
-        *client->proxy_ev_settings = *client_config->proxy_ev_settings; // shallow copy
-        // Todo: Is there a better way to fix issues due to const proxy_ev_settings->tls_options?
+        client->proxy_ev_settings = aws_mem_calloc(allocator, 1, sizeof(struct proxy_env_var_settings));
+        *client->proxy_ev_settings = *client_config->proxy_ev_settings;
+
         if (client_config->proxy_ev_settings->tls_options) {
             client->proxy_ev_tls_options = aws_mem_calloc(allocator, 1, sizeof(struct aws_tls_connection_options));
             if (aws_tls_connection_options_copy(client->proxy_ev_tls_options, client->proxy_ev_settings->tls_options)) {
@@ -446,10 +446,13 @@ on_error:
     if (client->proxy_config) {
         aws_http_proxy_config_destroy(client->proxy_config);
     }
-    if (client->proxy_ev_settings->tls_options) {
+    if (client->proxy_ev_tls_options) {
         aws_tls_connection_options_clean_up(client->proxy_ev_tls_options);
         aws_mem_release(client->allocator, client->proxy_ev_tls_options);
         client->proxy_ev_settings->tls_options = NULL;
+    }
+    if (client->proxy_ev_settings) {
+        aws_mem_release(client->allocator, client->proxy_ev_settings);
     }
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
@@ -534,6 +537,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
         aws_tls_connection_options_clean_up(client->proxy_ev_tls_options);
         aws_mem_release(client->allocator, client->proxy_ev_tls_options);
         client->proxy_ev_settings->tls_options = NULL;
+    }
+
+    if (client->proxy_ev_settings) {
+        aws_mem_release(client->allocator, client->proxy_ev_settings);
     }
 
     aws_mutex_clean_up(&client->synced_data.lock);
