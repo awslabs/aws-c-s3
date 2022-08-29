@@ -86,9 +86,9 @@ static int s_test_s3_client_proxy_ev_settings_override(struct aws_allocator *all
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_tls_connection_options tls_conn_options;
     AWS_ZERO_STRUCT(tls_conn_options);
-    
-    struct proxy_env_var_settings proxy_ev_settings = {
-        .env_var_type = AWS_HPEV_ENABLE, .tls_options = &tls_conn_options};
+
+    struct proxy_env_var_settings proxy_ev_settings = {.env_var_type = AWS_HPEV_ENABLE,
+                                                       .tls_options = &tls_conn_options};
 
     struct aws_s3_client_config client_config = {.proxy_ev_settings = &proxy_ev_settings};
 
