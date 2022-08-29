@@ -324,7 +324,10 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    client->tcp_keep_alive_options = client_config->tcp_keep_alive_options;
+    if (client_config->tcp_keep_alive_options) {
+        client->tcp_keep_alive_options = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_tcp_keep_alive_options));
+        *client->tcp_keep_alive_options = *client_config->tcp_keep_alive_options;
+    }
 
     if (client_config->monitoring_options) {
         client->monitoring_options =
@@ -459,6 +462,7 @@ on_error:
     }
     aws_mem_release(client->allocator, client->proxy_ev_settings);
     aws_mem_release(client->allocator, client->monitoring_options);
+    aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
@@ -545,6 +549,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     }
     aws_mem_release(client->allocator, client->proxy_ev_settings);
     aws_mem_release(client->allocator, client->monitoring_options);
+    aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_mutex_clean_up(&client->synced_data.lock);
 

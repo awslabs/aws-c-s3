@@ -54,7 +54,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
-    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options,
+    const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
     const struct aws_http_connection_monitoring_options *monitoring_options);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
@@ -137,7 +137,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
-    const struct aws_s3_tcp_keep_alive_options tcp_keep_alive_options,
+    const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
     const struct aws_http_connection_monitoring_options *monitoring_options) {
 
     AWS_PRECONDITION(endpoint);
@@ -152,11 +152,12 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     socket_options.type = AWS_SOCKET_STREAM;
     socket_options.domain = AWS_SOCKET_IPV4;
     socket_options.connect_timeout_ms = connect_timeout_ms == 0 ? s_connection_timeout_ms : connect_timeout_ms;
-    socket_options.keepalive = tcp_keep_alive_options.keepalive;
-    socket_options.keep_alive_interval_sec = tcp_keep_alive_options.keep_alive_interval_sec;
-    socket_options.keep_alive_timeout_sec = tcp_keep_alive_options.keep_alive_timeout_sec;
-    socket_options.keep_alive_max_failed_probes = tcp_keep_alive_options.keep_alive_max_failed_probes;
-
+    if (tcp_keep_alive_options != NULL) {
+        socket_options.keepalive = true;
+        socket_options.keep_alive_interval_sec = tcp_keep_alive_options->keep_alive_interval_sec;
+        socket_options.keep_alive_timeout_sec = tcp_keep_alive_options->keep_alive_timeout_sec;
+        socket_options.keep_alive_max_failed_probes = tcp_keep_alive_options->keep_alive_max_failed_probes;
+    }
     struct proxy_env_var_settings proxy_ev_settings_default;
     /* Turn on envrionment variable for proxy by default */
     if (proxy_ev_settings == NULL) {

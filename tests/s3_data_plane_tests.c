@@ -113,15 +113,17 @@ static int s_test_s3_client_tcp_keep_alive_options_override(struct aws_allocator
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_tcp_keep_alive_options keep_alive_options = {.keepalive = true};
+    struct aws_s3_tcp_keep_alive_options keep_alive_options = {.keep_alive_interval_sec = 20};
 
-    struct aws_s3_client_config client_config = {.tcp_keep_alive_options = keep_alive_options};
+    struct aws_s3_client_config client_config = {.tcp_keep_alive_options = &keep_alive_options};
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_TRUE(client->tcp_keep_alive_options.keepalive, client_config.tcp_keep_alive_options.keepalive);
+    ASSERT_TRUE(
+        client->tcp_keep_alive_options->keep_alive_interval_sec,
+        client_config.tcp_keep_alive_options->keep_alive_interval_sec);
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
