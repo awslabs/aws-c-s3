@@ -78,7 +78,7 @@ struct aws_s3_endpoint_options {
 
     /**
      * Optional.
-     * If not set, default value is used.
+     * If set to 0, default value is used.
      */
     uint32_t connect_timeout_ms;
 
@@ -232,7 +232,7 @@ struct aws_s3_client {
 
     /**
      * Optional.
-     * If not set, default value is used.
+     * If set to 0, default value is used.
      */
     uint32_t connect_timeout_ms;
 

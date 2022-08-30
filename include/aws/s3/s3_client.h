@@ -230,7 +230,7 @@ struct aws_s3_client_config {
 
     /**
      * Optional.
-     * If not set, default value is used.
+     * If set to 0, default value is used.
      */
     uint32_t connect_timeout_ms;
 
