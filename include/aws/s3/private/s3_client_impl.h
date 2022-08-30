@@ -84,7 +84,7 @@ struct aws_s3_endpoint_options {
 
     /**
      * Optional.
-     * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
+     * Set keepalive to periodically transmit messages for detecting a disconnected peer.
      */
     struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
 
@@ -238,7 +238,7 @@ struct aws_s3_client {
 
     /**
      * Optional.
-     * Set keepalive true to periodically transmit messages for detecting a disconnected peer.
+     * Set keepalive to periodically transmit messages for detecting a disconnected peer.
      */
     struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
 
