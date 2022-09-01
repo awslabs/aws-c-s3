@@ -693,11 +693,12 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 error_occurred = true;
                 goto unlock;
             }
-            endpoint->handled_by_client = true;
+            endpoint->client = client;
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {
             endpoint = aws_s3_endpoint_acquire(endpoint_hash_element->value);
+            AWS_FATAL_ASSERT(endpoint->http_connection_manager != NULL);
 
             aws_string_destroy(endpoint_host_name);
             endpoint_host_name = NULL;
@@ -1424,6 +1425,7 @@ static void s_s3_client_acquired_retry_token(
 
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_ASSERT(endpoint != NULL);
+    AWS_ASSERT(endpoint->http_connection_manager != NULL);
 
     struct aws_s3_client *client = endpoint->user_data;
     AWS_ASSERT(client != NULL);
@@ -1651,7 +1653,7 @@ reset_connection:
     connection->retry_token = NULL;
 
     /* The endpoint must be created by client here */
-    aws_s3_client_endpoint_release(client, connection->endpoint);
+    aws_s3_endpoint_release(connection->endpoint);
     connection->endpoint = NULL;
 
     aws_mem_release(client->allocator, connection);
