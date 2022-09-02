@@ -196,7 +196,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     return http_connection_manager;
 }
 
-struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint) {
+struct aws_s3_endpoint *aws_s3_endpoint_acquire_synced(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
 
     aws_ref_count_acquire(&endpoint->ref_count);

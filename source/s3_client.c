@@ -732,7 +732,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {
-            endpoint = aws_s3_endpoint_acquire(endpoint_hash_element->value);
+            endpoint = aws_s3_endpoint_acquire_synced(endpoint_hash_element->value);
             AWS_FATAL_ASSERT(endpoint->http_connection_manager != NULL);
 
             aws_string_destroy(endpoint_host_name);
@@ -1405,8 +1405,14 @@ static void s_s3_client_create_connection_for_request_default(
 
     struct aws_s3_connection *connection = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_connection));
 
-    connection->endpoint = aws_s3_endpoint_acquire(meta_request->endpoint);
-    connection->request = request;
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        connection->endpoint = aws_s3_endpoint_acquire_synced(meta_request->endpoint);
+        connection->request = request;
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
 
     struct aws_byte_cursor host_header_value;
     AWS_ZERO_STRUCT(host_header_value);

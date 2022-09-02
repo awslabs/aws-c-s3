@@ -318,7 +318,7 @@ AWS_S3_API
 void aws_s3_client_unlock_synced_data(struct aws_s3_client *client);
 
 AWS_S3_API
-struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint);
+struct aws_s3_endpoint *aws_s3_endpoint_acquire_synced(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
