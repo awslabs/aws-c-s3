@@ -78,7 +78,13 @@ struct aws_s3_endpoint {
 
     /* If the endpoint registered to the hashtable owned by client, set the pointer to client for unregister from the
      * hashtable once endpoint started to clean itself up.  */
-    struct aws_s3_client *client;
+    struct {
+        /* Protected by the client lock */
+        struct aws_s3_client *client;
+        struct aws_task *task;
+        bool task_scheduled;
+        size_t num_released;
+    } async_release;
 
     void *user_data;
 };

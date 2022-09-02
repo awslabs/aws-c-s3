@@ -575,6 +575,35 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
     return request;
 }
 
+static void s_endpoint_release_task(struct aws_task *task, void *arg, enum aws_task_status status) {
+    (void)task;
+    (void)status;
+
+    struct aws_s3_endpoint *endpoint = arg;
+    struct aws_s3_client *client = endpoint->async_release.client;
+    size_t num_released = 0;
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        endpoint->async_release.task_scheduled = false;
+        size_t current_ref = aws_atomic_load_int(&endpoint->ref_count.ref_count);
+        num_released = endpoint->async_release.num_released;
+        endpoint->async_release.num_released = 0;
+        AWS_ASSERT(num_released <= current_ref);
+        if (num_released == current_ref) {
+            /* The refcount drop to zero */
+            aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+            aws_mem_release(client->allocator, task);
+        }
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
+    for (size_t i = 0; i < num_released; ++i) {
+        aws_ref_count_release(&endpoint->ref_count);
+    }
+    aws_s3_client_release(client);
+}
+
 /* Public facing make-meta-request function. */
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
@@ -693,7 +722,13 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 error_occurred = true;
                 goto unlock;
             }
-            endpoint->client = client;
+            struct aws_task *async_release_task = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_task));
+            aws_task_init(async_release_task, s_endpoint_release_task, endpoint, "se_endpoint_refcount_task");
+
+            endpoint->async_release.client = client;
+            endpoint->async_release.task = async_release_task;
+            endpoint->async_release.task_scheduled = false;
+
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {
