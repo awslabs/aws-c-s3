@@ -191,7 +191,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         AWS_LS_S3_ENDPOINT,
         "id=%p: Created connection manager %p for endpoint",
         (void *)endpoint,
-        (void *)endpoint->http_connection_manager);
+        (void *)http_connection_manager);
 
     return http_connection_manager;
 }
