@@ -223,9 +223,9 @@ void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
         }
         /* END CRITICAL SECTION */
         if (schedule_task) {
+            aws_s3_client_acquire(endpoint->async_release.client);
             aws_event_loop_schedule_task_now(
                 endpoint->async_release.client->process_work_event_loop, endpoint->async_release.task);
-            aws_s3_client_acquire(endpoint->async_release.client);
         }
     } else {
         aws_ref_count_release(&endpoint->ref_count);
