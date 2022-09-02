@@ -76,13 +76,16 @@ struct aws_s3_endpoint {
     /* Callback for when this endpoint completely shuts down. */
     aws_s3_endpoint_shutdown_fn *shutdown_callback;
 
-    /* If the endpoint registered to the hashtable owned by client, set the pointer to client for unregister from the
-     * hashtable once endpoint started to clean itself up.  */
+    /* For S3 client to handle the hashtable of endpoints. */
     struct {
-        /* Protected by the client lock */
+        /* Point to the client. */
         struct aws_s3_client *client;
+        /* If set, the release of endpoint will be scheduled to run within the task to prevent the data race with client
+         */
         struct aws_task *task;
+        /* The task has been scheduled or not. */
         bool task_scheduled;
+        /* Number of release called before the task runs */
         size_t num_released;
     } async_release;
 
