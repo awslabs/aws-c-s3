@@ -186,6 +186,9 @@ struct aws_s3_meta_request {
         /* True if this meta request is currently in the client's list. */
         bool scheduled;
 
+        /* TODO: document*/
+        size_t read_window_size;
+
     } client_process_work_threaded_data;
 
     const bool should_compute_content_md5;

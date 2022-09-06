@@ -268,6 +268,8 @@ int aws_s3_meta_request_init_base(
 }
 
 void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, size_t bytes) {
+    AWS_PRECONDITION(meta_request);
+
     if (bytes == 0) {
         return;
     }
@@ -275,45 +277,43 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
     if (!meta_request->client->enable_read_backpressure) {
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Ignoring call to increment_read_window(), this client has not enabled read backpressure.",
+            "id=%p: Ignoring call to increment read window. This client has not enabled read backpressure.",
             (void *)meta_request);
         return;
     }
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
-    bool success = false;
 
     if (aws_add_size_checked(
             bytes, meta_request->synced_data.increment_read_window, &meta_request->synced_data.increment_read_window)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: The read window has been incremented beyond max value %zu. Failing request.",
+            "id=%p: Read window incremented beyond max value %zu. Failing request.",
             (void *)meta_request,
             SIZE_MAX);
+        aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
         goto unlock;
     }
 
-    success = true;
-unlock:
-    if (!success) {
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
-    }
-
-    /* TODO: need to reschedule work thread? */
     /* TODO: special list of meta-requests that have window-updates? */
 
+unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
+
+    /* Schedule the work task if necessary, to continue processing the meta-request */
+    aws_s3_client_schedule_process_work(meta_request->client);
 }
 
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
-    /* TODO: does this need to reschedule work thread? */
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
+
+    /* TODO: schedule the work task? */
 }
 
 int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_string **out_resume_token) {
@@ -326,6 +326,7 @@ int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct a
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
 
+    /* TODO: schedule the work task? */
     return meta_request->vtable->pause(meta_request, out_resume_token);
 }
 
