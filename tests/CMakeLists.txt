@@ -3,12 +3,12 @@ enable_testing()
 
 option(BYO_CRYPTO "Don't build a tls implementation or link against a crypto interface. This feature is only for unix builds currently." OFF)
 
-if(BYO_CRYPTO)
+if (BYO_CRYPTO)
     set(ENABLE_NET_TESTS OFF)
 
     add_test_case(test_s3_client_byo_crypto_no_options)
     add_test_case(test_s3_client_byo_crypto_with_options)
-endif()
+endif ()
 
 file(GLOB TEST_SRC "*.c")
 file(GLOB TEST_HDRS "*.h")
@@ -24,6 +24,9 @@ add_test_case(test_s3_complete_multipart_message_new)
 add_test_case(test_s3_abort_multipart_upload_message_new)
 
 add_net_test_case(test_s3_client_create_destroy)
+add_net_test_case(test_s3_client_monitoring_options_override)
+add_net_test_case(test_s3_client_proxy_ev_settings_override)
+add_net_test_case(test_s3_client_tcp_keep_alive_options_override)
 add_net_test_case(test_s3_client_max_active_connections_override)
 add_test_case(test_s3_client_get_max_active_connections)
 add_test_case(test_s3_request_create_destroy)

@@ -15,7 +15,9 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
+#include <aws/http/proxy.h>
 
 /* TODO automate this value in the future to prevent it from becoming out-of-sync. */
 #define AWS_S3_CLIENT_VERSION "0.1.x"
@@ -58,6 +60,40 @@ struct aws_s3_endpoint_options {
 
     /* HTTP port override. If zero, determine port based on TLS context */
     uint16_t port;
+
+    /**
+     * Optional.
+     * Proxy configuration for http connection.
+     */
+    struct aws_http_proxy_config *proxy_config;
+
+    /**
+     * Optional.
+     * Configuration for fetching proxy configuration from environment.
+     * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
+     * configuration from environment.
+     * Only works when proxy_config is not set. If both are set, configuration from proxy_config is used.
+     */
+    struct proxy_env_var_settings *proxy_ev_settings;
+
+    /**
+     * Optional.
+     * If set to 0, default value is used.
+     */
+    uint32_t connect_timeout_ms;
+
+    /**
+     * Optional.
+     * Set keepalive to periodically transmit messages for detecting a disconnected peer.
+     */
+    struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
+
+    /**
+     * Optional.
+     * Configuration options for connection monitoring.
+     * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     */
+    struct aws_http_connection_monitoring_options *monitoring_options;
 };
 
 struct aws_s3_endpoint {
@@ -178,6 +214,43 @@ struct aws_s3_client {
 
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
+
+    /**
+     * Optional.
+     * Proxy configuration for http connection.
+     */
+    struct aws_http_proxy_config *proxy_config;
+
+    /**
+     * Optional.
+     * Configuration for fetching proxy configuration from environment.
+     * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
+     * configuration from environment.
+     * Only works when proxy_config is not set. If both are set, configuration from proxy_config is used.
+     */
+    struct proxy_env_var_settings *proxy_ev_settings;
+
+    /**
+     * Optional.
+     * If set to 0, default value is used.
+     */
+    uint32_t connect_timeout_ms;
+
+    /**
+     * Optional.
+     * Set keepalive to periodically transmit messages for detecting a disconnected peer.
+     */
+    struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
+
+    /**
+     * Optional.
+     * Configuration options for connection monitoring.
+     * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     */
+    struct aws_http_connection_monitoring_options *monitoring_options;
+
+    /* tls options from proxy environment settings. */
+    struct aws_tls_connection_options *proxy_ev_tls_options;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
