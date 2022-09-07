@@ -1651,7 +1651,6 @@ void aws_s3_client_notify_connection_finished(
         /* Ask the retry strategy to schedule a retry of the request. */
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
-            error_code = aws_last_error_or_unknown();
 
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
@@ -1660,8 +1659,8 @@ void aws_s3_client_notify_connection_finished(
                 (void *)request,
                 (void *)meta_request,
                 (void *)connection->retry_token,
-                error_code,
-                aws_error_str(error_code));
+                aws_last_error_or_unknown(),
+                aws_error_str(aws_last_error_or_unknown()));
 
             goto reset_connection;
         }
