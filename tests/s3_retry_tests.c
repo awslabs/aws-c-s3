@@ -74,7 +74,7 @@ static void s_s3_client_acquire_http_connection_fail_first(
 
     struct aws_s3_connection *connection = user_data;
 
-    struct aws_s3_client *client = connection->request->meta_request->endpoint->user_data;
+    struct aws_s3_client *client = connection->request->meta_request->endpoint->client;
     AWS_ASSERT(client);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;

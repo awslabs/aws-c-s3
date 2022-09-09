@@ -108,7 +108,7 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
-static void s_s3_client_endpoint_shutdown_callback(void *user_data);
+static void s_s3_client_endpoint_shutdown_callback(struct aws_s3_client *client);
 
 /* Default factory function for creating a meta request. */
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
@@ -732,11 +732,10 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         if (was_created) {
             struct aws_s3_endpoint_options endpoint_options = {
                 .host_name = endpoint_host_name,
-                .shutdown_callback = client->vtable->endpoint_shutdown_callback,
                 .client_bootstrap = client->client_bootstrap,
                 .tls_connection_options = is_https ? client->tls_connection_options : NULL,
                 .dns_host_address_ttl_seconds = s_dns_host_address_ttl_seconds,
-                .user_data = client,
+                .client = client,
                 .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
                 .port = port,
                 .proxy_config = client->proxy_config,
@@ -752,11 +751,14 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 error_occurred = true;
                 goto unlock;
             }
-            endpoint->handled_by_client = true;
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {
-            endpoint = aws_s3_endpoint_acquire(endpoint_hash_element->value);
+            endpoint = endpoint_hash_element->value;
+
+            /* not calling aws_s3_endpoint_acquire() because that would grab the client lock */
+            AWS_ASSERT(endpoint->client_synced_data.ref_count > 0);
+            ++endpoint->client_synced_data.ref_count;
 
             aws_string_destroy(endpoint_host_name);
             endpoint_host_name = NULL;
@@ -789,8 +791,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     return meta_request;
 }
 
-static void s_s3_client_endpoint_shutdown_callback(void *user_data) {
-    struct aws_s3_client *client = user_data;
+static void s_s3_client_endpoint_shutdown_callback(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
     /* BEGIN CRITICAL SECTION */
@@ -1484,7 +1485,7 @@ static void s_s3_client_acquired_retry_token(
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_ASSERT(endpoint != NULL);
 
-    struct aws_s3_client *client = endpoint->user_data;
+    struct aws_s3_client *client = endpoint->client;
     AWS_ASSERT(client != NULL);
 
     if (error_code != AWS_ERROR_SUCCESS) {
@@ -1537,7 +1538,7 @@ static void s_s3_client_on_acquire_http_connection(
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_ASSERT(endpoint != NULL);
 
-    struct aws_s3_client *client = endpoint->user_data;
+    struct aws_s3_client *client = endpoint->client;
     AWS_ASSERT(client != NULL);
 
     if (error_code != AWS_ERROR_SUCCESS) {
@@ -1708,8 +1709,7 @@ reset_connection:
     aws_retry_token_release(connection->retry_token);
     connection->retry_token = NULL;
 
-    /* The endpoint must be created by client here */
-    aws_s3_client_endpoint_release(client, connection->endpoint);
+    aws_s3_endpoint_release(connection->endpoint);
     connection->endpoint = NULL;
 
     aws_mem_release(client->allocator, connection);
@@ -1746,7 +1746,7 @@ static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_cod
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_PRECONDITION(endpoint);
 
-    struct aws_s3_client *client = endpoint->user_data;
+    struct aws_s3_client *client = endpoint->client;
     AWS_PRECONDITION(client);
 
     /* If we couldn't retry this request, then bail on the entire meta request. */
@@ -1800,7 +1800,7 @@ static void s_s3_client_prepare_request_callback_retry_request(
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_ASSERT(endpoint != NULL);
 
-    struct aws_s3_client *client = endpoint->user_data;
+    struct aws_s3_client *client = endpoint->client;
     AWS_ASSERT(client != NULL);
 
     if (error_code == AWS_ERROR_SUCCESS) {
