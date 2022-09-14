@@ -304,6 +304,37 @@ struct aws_s3_client *aws_s3_client_new(
         *((size_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
+    if (client_config->proxy_options) {
+        client->proxy_config = aws_http_proxy_config_new_from_proxy_options(allocator, client_config->proxy_options);
+        if (client->proxy_config == NULL) {
+            goto on_error;
+        }
+    }
+    client->connect_timeout_ms = client_config->connect_timeout_ms;
+    if (client_config->proxy_ev_settings) {
+        client->proxy_ev_settings = aws_mem_calloc(allocator, 1, sizeof(struct proxy_env_var_settings));
+        *client->proxy_ev_settings = *client_config->proxy_ev_settings;
+
+        if (client_config->proxy_ev_settings->tls_options) {
+            client->proxy_ev_tls_options = aws_mem_calloc(allocator, 1, sizeof(struct aws_tls_connection_options));
+            if (aws_tls_connection_options_copy(client->proxy_ev_tls_options, client->proxy_ev_settings->tls_options)) {
+                goto on_error;
+            }
+            client->proxy_ev_settings->tls_options = client->proxy_ev_tls_options;
+        }
+    }
+
+    if (client_config->tcp_keep_alive_options) {
+        client->tcp_keep_alive_options = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_tcp_keep_alive_options));
+        *client->tcp_keep_alive_options = *client_config->tcp_keep_alive_options;
+    }
+
+    if (client_config->monitoring_options) {
+        client->monitoring_options =
+            aws_mem_calloc(allocator, 1, sizeof(struct aws_http_connection_monitoring_options));
+        *client->monitoring_options = *client_config->monitoring_options;
+    }
+
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
         client->tls_connection_options =
             aws_mem_calloc(client->allocator, 1, sizeof(struct aws_tls_connection_options));
@@ -412,6 +443,18 @@ on_error:
         aws_mem_release(client->allocator, client->tls_connection_options);
         client->tls_connection_options = NULL;
     }
+    if (client->proxy_config) {
+        aws_http_proxy_config_destroy(client->proxy_config);
+    }
+    if (client->proxy_ev_tls_options) {
+        aws_tls_connection_options_clean_up(client->proxy_ev_tls_options);
+        aws_mem_release(client->allocator, client->proxy_ev_tls_options);
+        client->proxy_ev_settings->tls_options = NULL;
+    }
+    aws_mem_release(client->allocator, client->proxy_ev_settings);
+    aws_mem_release(client->allocator, client->monitoring_options);
+    aws_mem_release(client->allocator, client->tcp_keep_alive_options);
+
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
@@ -485,6 +528,19 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
         aws_mem_release(client->allocator, client->tls_connection_options);
         client->tls_connection_options = NULL;
     }
+
+    if (client->proxy_config) {
+        aws_http_proxy_config_destroy(client->proxy_config);
+    }
+
+    if (client->proxy_ev_tls_options) {
+        aws_tls_connection_options_clean_up(client->proxy_ev_tls_options);
+        aws_mem_release(client->allocator, client->proxy_ev_tls_options);
+        client->proxy_ev_settings->tls_options = NULL;
+    }
+    aws_mem_release(client->allocator, client->proxy_ev_settings);
+    aws_mem_release(client->allocator, client->monitoring_options);
+    aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_mutex_clean_up(&client->synced_data.lock);
 
@@ -654,7 +710,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         .user_data = client,
         .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
         .port = port,
-    };
+        .proxy_config = client->proxy_config,
+        .proxy_ev_settings = client->proxy_ev_settings,
+        .connect_timeout_ms = client->connect_timeout_ms,
+        .tcp_keep_alive_options = client->tcp_keep_alive_options,
+        .monitoring_options = client->monitoring_options};
 
     struct aws_s3_endpoint *endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
     if (endpoint == NULL) {
@@ -1548,7 +1608,6 @@ void aws_s3_client_notify_connection_finished(
         /* Ask the retry strategy to schedule a retry of the request. */
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
-            error_code = aws_last_error_or_unknown();
 
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
@@ -1557,8 +1616,8 @@ void aws_s3_client_notify_connection_finished(
                 (void *)request,
                 (void *)meta_request,
                 (void *)connection->retry_token,
-                error_code,
-                aws_error_str(error_code));
+                aws_last_error_or_unknown(),
+                aws_error_str(aws_last_error_or_unknown()));
 
             goto reset_connection;
         }

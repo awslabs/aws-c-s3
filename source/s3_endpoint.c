@@ -20,7 +20,6 @@
 #include <aws/common/system_info.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
-#include <aws/http/proxy.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -51,7 +50,12 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
-    uint16_t port);
+    uint16_t port,
+    const struct aws_http_proxy_config *proxy_config,
+    const struct proxy_env_var_settings *proxy_ev_settings,
+    uint32_t connect_timeout_ms,
+    const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
+    const struct aws_http_connection_monitoring_options *monitoring_options);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
@@ -98,7 +102,12 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->client_bootstrap,
         options->tls_connection_options,
         options->max_connections,
-        options->port);
+        options->port,
+        options->proxy_config,
+        options->proxy_ev_settings,
+        options->connect_timeout_ms,
+        options->tcp_keep_alive_options,
+        options->monitoring_options);
 
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
@@ -124,7 +133,13 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
-    uint16_t port) {
+    uint16_t port,
+    const struct aws_http_proxy_config *proxy_config,
+    const struct proxy_env_var_settings *proxy_ev_settings,
+    uint32_t connect_timeout_ms,
+    const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
+    const struct aws_http_connection_monitoring_options *monitoring_options) {
+
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
     AWS_PRECONDITION(host_name);
@@ -136,11 +151,20 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     AWS_ZERO_STRUCT(socket_options);
     socket_options.type = AWS_SOCKET_STREAM;
     socket_options.domain = AWS_SOCKET_IPV4;
-    socket_options.connect_timeout_ms = s_connection_timeout_ms;
-    struct proxy_env_var_settings proxy_ev_settings;
-    AWS_ZERO_STRUCT(proxy_ev_settings);
+    socket_options.connect_timeout_ms = connect_timeout_ms == 0 ? s_connection_timeout_ms : connect_timeout_ms;
+    if (tcp_keep_alive_options != NULL) {
+        socket_options.keepalive = true;
+        socket_options.keep_alive_interval_sec = tcp_keep_alive_options->keep_alive_interval_sec;
+        socket_options.keep_alive_timeout_sec = tcp_keep_alive_options->keep_alive_timeout_sec;
+        socket_options.keep_alive_max_failed_probes = tcp_keep_alive_options->keep_alive_max_failed_probes;
+    }
+    struct proxy_env_var_settings proxy_ev_settings_default;
     /* Turn on envrionment variable for proxy by default */
-    proxy_ev_settings.env_var_type = AWS_HPEV_ENABLE;
+    if (proxy_ev_settings == NULL) {
+        AWS_ZERO_STRUCT(proxy_ev_settings_default);
+        proxy_ev_settings_default.env_var_type = AWS_HPEV_ENABLE;
+        proxy_ev_settings = &proxy_ev_settings_default;
+    }
 
     struct aws_http_connection_manager_options manager_options;
     AWS_ZERO_STRUCT(manager_options);
@@ -151,7 +175,16 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.max_connections = max_connections;
     manager_options.shutdown_complete_callback = s_s3_endpoint_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = endpoint;
-    manager_options.proxy_ev_settings = &proxy_ev_settings;
+    manager_options.proxy_ev_settings = proxy_ev_settings;
+    if (monitoring_options != NULL) {
+        manager_options.monitoring_options = monitoring_options;
+    }
+
+    struct aws_http_proxy_options proxy_options;
+    if (proxy_config != NULL) {
+        aws_http_proxy_options_init_from_config(&proxy_options, proxy_config);
+        manager_options.proxy_options = &proxy_options;
+    }
 
     struct aws_tls_connection_options *manager_tls_options = NULL;
 
@@ -191,7 +224,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         AWS_LS_S3_ENDPOINT,
         "id=%p: Created connection manager %p for endpoint",
         (void *)endpoint,
-        (void *)endpoint->http_connection_manager);
+        (void *)http_connection_manager);
 
     return http_connection_manager;
 }

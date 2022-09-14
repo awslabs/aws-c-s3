@@ -51,7 +51,7 @@ struct aws_s3_prepare_request_payload {
 };
 
 struct aws_s3_meta_request_vtable {
-    /* Update the meta request.  out_request is required to be non-null. Returns true if there is there is any work in
+    /* Update the meta request.  out_request is required to be non-null. Returns true if there is any work in
      * progress, false if there is not. */
     bool (*update)(struct aws_s3_meta_request *meta_request, uint32_t flags, struct aws_s3_request **out_request);
 
