@@ -756,9 +756,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         } else {
             endpoint = endpoint_hash_element->value;
 
-            /* not calling aws_s3_endpoint_acquire() because that would grab the client lock */
-            AWS_ASSERT(endpoint->client_synced_data.ref_count > 0);
-            ++endpoint->client_synced_data.ref_count;
+            aws_s3_endpoint_acquire(endpoint, true /*already_holding_lock*/);
 
             aws_string_destroy(endpoint_host_name);
             endpoint_host_name = NULL;
@@ -1429,7 +1427,7 @@ static void s_s3_client_create_connection_for_request_default(
 
     struct aws_s3_connection *connection = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_connection));
 
-    connection->endpoint = aws_s3_endpoint_acquire(meta_request->endpoint);
+    connection->endpoint = aws_s3_endpoint_acquire(meta_request->endpoint, false /*already_holding_lock*/);
     connection->request = request;
 
     struct aws_byte_cursor host_header_value;

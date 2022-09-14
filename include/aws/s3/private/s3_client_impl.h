@@ -98,7 +98,7 @@ struct aws_s3_endpoint_options {
 
 /* global vtable, only used when mocking for tests */
 struct aws_s3_endpoint_system_vtable {
-    void (*acquire)(struct aws_s3_endpoint *endpoint);
+    void (*acquire)(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
     void (*release)(struct aws_s3_endpoint *endpoint);
 };
 
@@ -390,9 +390,8 @@ AWS_S3_API
 void aws_s3_endpoint_set_system_vtable(const struct aws_s3_endpoint_system_vtable *vtable);
 
 /* Increment the endpoint's ref-count.
- * You MUST NOT call this while the client's lock is held.
- * (this call briefly holds the client's lock) */
-struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint);
+ * If `already_holding_lock` is false, then this call will briefly take hold of the client's lock */
+struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
 
 /* Decrement the endpoint's ref-count.
  * You MUST NOT call this while the client's lock is held.

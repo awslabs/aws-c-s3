@@ -742,7 +742,8 @@ struct aws_s3_empty_meta_request {
     struct aws_s3_meta_request base;
 };
 
-static void s_s3_mock_endpoint_acquire(struct aws_s3_endpoint *endpoint) {
+static void s_s3_mock_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock) {
+    (void)already_holding_lock;
     ++endpoint->client_synced_data.ref_count;
 }
 
