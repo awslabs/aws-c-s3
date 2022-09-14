@@ -59,7 +59,22 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
-static void s_s3_endpoint_ref_count_zero(void *user_data);
+static void s_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
+
+static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
+
+static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
+
+static const struct aws_s3_endpoint_system_vtable s_s3_endpoint_default_system_vtable = {
+    .acquire = s_s3_endpoint_acquire,
+    .release = s_s3_endpoint_release,
+};
+
+static const struct aws_s3_endpoint_system_vtable *s_s3_endpoint_system_vtable = &s_s3_endpoint_default_system_vtable;
+
+void aws_s3_endpoint_set_system_vtable(const struct aws_s3_endpoint_system_vtable *vtable) {
+    s_s3_endpoint_system_vtable = vtable;
+}
 
 struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_allocator *allocator,
@@ -69,7 +84,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     AWS_PRECONDITION(options->host_name);
 
     struct aws_s3_endpoint *endpoint = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_endpoint));
-    aws_ref_count_init(&endpoint->ref_count, endpoint, s_s3_endpoint_ref_count_zero);
+    endpoint->client_synced_data.ref_count = 1;
 
     endpoint->allocator = allocator;
     endpoint->host_name = options->host_name;
@@ -113,8 +128,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         goto error_cleanup;
     }
 
-    endpoint->shutdown_callback = options->shutdown_callback;
-    endpoint->user_data = options->user_data;
+    endpoint->client = options->client;
 
     return endpoint;
 
@@ -159,7 +173,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
         socket_options.keep_alive_max_failed_probes = tcp_keep_alive_options->keep_alive_max_failed_probes;
     }
     struct proxy_env_var_settings proxy_ev_settings_default;
-    /* Turn on envrionment variable for proxy by default */
+    /* Turn on environment variable for proxy by default */
     if (proxy_ev_settings == NULL) {
         AWS_ZERO_STRUCT(proxy_ev_settings_default);
         proxy_ev_settings_default.env_var_type = AWS_HPEV_ENABLE;
@@ -229,66 +243,80 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     return http_connection_manager;
 }
 
-struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint) {
-    AWS_PRECONDITION(endpoint);
-
-    aws_ref_count_acquire(&endpoint->ref_count);
-
+struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock) {
+    if (endpoint) {
+        s_s3_endpoint_system_vtable->acquire(endpoint, already_holding_lock);
+    }
     return endpoint;
 }
 
-void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
-    if (endpoint == NULL) {
-        return;
+static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock) {
+    AWS_PRECONDITION(endpoint);
+
+    if (!already_holding_lock) {
+        aws_s3_client_lock_synced_data(endpoint->client);
     }
 
-    aws_ref_count_release(&endpoint->ref_count);
+    AWS_ASSERT(endpoint->client_synced_data.ref_count > 0);
+    ++endpoint->client_synced_data.ref_count;
+
+    if (!already_holding_lock) {
+        aws_s3_client_unlock_synced_data(endpoint->client);
+    }
 }
 
-void aws_s3_client_endpoint_release(struct aws_s3_client *client, struct aws_s3_endpoint *endpoint) {
+void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
+    if (endpoint) {
+        s_s3_endpoint_system_vtable->release(endpoint);
+    }
+}
+
+static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(endpoint->handled_by_client);
+    AWS_PRECONDITION(endpoint->client);
 
     /* BEGIN CRITICAL SECTION */
-    {
-        aws_s3_client_lock_synced_data(client);
-        /* The last refcount to release */
-        if (aws_atomic_load_int(&endpoint->ref_count.ref_count) == 1) {
-            aws_hash_table_remove(&client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-        }
-        aws_s3_client_unlock_synced_data(client);
+    aws_s3_client_lock_synced_data(endpoint->client);
+
+    bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+    if (should_destroy) {
+        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+    } else {
+        --endpoint->client_synced_data.ref_count;
     }
+
+    aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
 
-    aws_ref_count_release(&endpoint->ref_count);
+    if (should_destroy) {
+        /* The endpoint may have async cleanup to do (connection manager).
+         * When that's all done we'll invoke a completion callback.
+         * Since it's a crime to hold a lock while invoking a callback,
+         * we make sure that we've released the client's lock before proceeding... */
+        s_s3_endpoint_ref_count_zero(endpoint);
+    }
 }
 
-static void s_s3_endpoint_ref_count_zero(void *user_data) {
-    struct aws_s3_endpoint *endpoint = user_data;
+static void s_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
+    AWS_PRECONDITION(endpoint->http_connection_manager);
 
-    if (endpoint->http_connection_manager != NULL) {
-        struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
-        endpoint->http_connection_manager = NULL;
-        aws_http_connection_manager_release(http_connection_manager);
-    } else {
-        s_s3_endpoint_http_connection_manager_shutdown_callback(endpoint->user_data);
-    }
+    struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
+    endpoint->http_connection_manager = NULL;
+
+    /* Cleanup continues once the manager's shutdown callback is invoked */
+    aws_http_connection_manager_release(http_connection_manager);
 }
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data) {
     struct aws_s3_endpoint *endpoint = user_data;
     AWS_ASSERT(endpoint);
 
-    aws_s3_endpoint_shutdown_fn *shutdown_callback = endpoint->shutdown_callback;
-    void *endpoint_user_data = endpoint->user_data;
+    struct aws_s3_client *client = endpoint->client;
 
     aws_mem_release(endpoint->allocator, endpoint);
 
-    if (shutdown_callback != NULL) {
-        shutdown_callback(endpoint_user_data);
-    }
+    client->vtable->endpoint_shutdown_callback(client);
 }
 
 static void s_s3_endpoint_on_host_resolver_address_resolved(
@@ -302,4 +330,5 @@ static void s_s3_endpoint_on_host_resolver_address_resolved(
     (void)err_code;
     (void)host_addresses;
     (void)user_data;
+    /* DO NOT add any logic here, unless you also ensure the endpoint lives long enough */
 }
