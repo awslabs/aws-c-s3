@@ -118,6 +118,17 @@ jobs:
         python -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
         python builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra=-DASSERT_LOCK_HELD=ON
 
+  windows-app-verifier:
+    runs-on: windows-2022 # latest
+    steps:
+    - name: Build ${{ env.PACKAGE_NAME }} + consumers
+      run: |
+        python -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+        python builder.pyz build -p ${{ env.PACKAGE_NAME }} run_tests=false --cmake-extra=-DBUILD_TESTING=ON
+    - name: Run and check AppVerifier
+      run: |
+        python .\aws-c-s3\build\deps\aws-c-common\scripts\appverifier_ctest.py --build_directory .\aws-c-s3\build\aws-c-s3
+
   osx:
     runs-on: macos-11 # latest
     steps:

@@ -51,6 +51,85 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_client_monitoring_options_override, s_test_s3_client_monitoring_options_override)
+static int s_test_s3_client_monitoring_options_override(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_http_connection_monitoring_options monitoring_options = {.minimum_throughput_bytes_per_second = 3000};
+
+    struct aws_s3_client_config client_config = {.monitoring_options = &monitoring_options};
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(
+        client->monitoring_options->minimum_throughput_bytes_per_second ==
+        client_config.monitoring_options->minimum_throughput_bytes_per_second);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_client_proxy_ev_settings_override, s_test_s3_client_proxy_ev_settings_override)
+static int s_test_s3_client_proxy_ev_settings_override(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_tls_connection_options tls_conn_options;
+    AWS_ZERO_STRUCT(tls_conn_options);
+
+    struct proxy_env_var_settings proxy_ev_settings = {.env_var_type = AWS_HPEV_ENABLE,
+                                                       .tls_options = &tls_conn_options};
+
+    struct aws_s3_client_config client_config = {.proxy_ev_settings = &proxy_ev_settings};
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client->proxy_ev_settings->env_var_type == client_config.proxy_ev_settings->env_var_type);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_client_tcp_keep_alive_options_override, s_test_s3_client_tcp_keep_alive_options_override)
+static int s_test_s3_client_tcp_keep_alive_options_override(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tcp_keep_alive_options keep_alive_options = {.keep_alive_interval_sec = 20};
+
+    struct aws_s3_client_config client_config = {.tcp_keep_alive_options = &keep_alive_options};
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(
+        client->tcp_keep_alive_options->keep_alive_interval_sec ==
+        client_config.tcp_keep_alive_options->keep_alive_interval_sec);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_client_max_active_connections_override, s_test_s3_client_max_active_connections_override)
 static int s_test_s3_client_max_active_connections_override(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

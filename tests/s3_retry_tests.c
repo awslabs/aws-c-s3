@@ -26,8 +26,8 @@ static void s_s3_client_acquire_http_connection_exceed_retries(
     AWS_ASSERT(callback);
     (void)conn_manager;
 
-    aws_raise_error(AWS_ERROR_UNKNOWN);
-    callback(NULL, AWS_ERROR_UNKNOWN, user_data);
+    aws_raise_error(AWS_ERROR_HTTP_UNKNOWN);
+    callback(NULL, AWS_ERROR_HTTP_UNKNOWN, user_data);
 }
 
 AWS_TEST_CASE(test_s3_client_exceed_retries, s_test_s3_client_exceed_retries)
@@ -56,7 +56,7 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
         &tester, client, g_s3_path_get_object_test_1MB, 0, &meta_request_test_results));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_MAX_RETRIES_EXCEEDED);
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_HTTP_UNKNOWN);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -74,7 +74,7 @@ static void s_s3_client_acquire_http_connection_fail_first(
 
     struct aws_s3_connection *connection = user_data;
 
-    struct aws_s3_client *client = connection->request->meta_request->endpoint->user_data;
+    struct aws_s3_client *client = connection->request->meta_request->endpoint->client;
     AWS_ASSERT(client);
 
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;

@@ -15,7 +15,9 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
+#include <aws/http/proxy.h>
 
 /* TODO automate this value in the future to prevent it from becoming out-of-sync. */
 #define AWS_S3_CLIENT_VERSION "0.1.x"
@@ -50,19 +52,63 @@ struct aws_s3_endpoint_options {
     /* DNS TTL to use for addresses for this endpoint. */
     size_t dns_host_address_ttl_seconds;
 
-    /* User data to be passed around with the endpoint. */
-    void *user_data;
+    /* Client that owns this endpoint */
+    struct aws_s3_client *client;
 
     /* Maximum number of connections that can be spawned for this endpoint. */
     uint32_t max_connections;
 
     /* HTTP port override. If zero, determine port based on TLS context */
     uint16_t port;
+
+    /**
+     * Optional.
+     * Proxy configuration for http connection.
+     */
+    struct aws_http_proxy_config *proxy_config;
+
+    /**
+     * Optional.
+     * Configuration for fetching proxy configuration from environment.
+     * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
+     * configuration from environment.
+     * Only works when proxy_config is not set. If both are set, configuration from proxy_config is used.
+     */
+    struct proxy_env_var_settings *proxy_ev_settings;
+
+    /**
+     * Optional.
+     * If set to 0, default value is used.
+     */
+    uint32_t connect_timeout_ms;
+
+    /**
+     * Optional.
+     * Set keepalive to periodically transmit messages for detecting a disconnected peer.
+     */
+    struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
+
+    /**
+     * Optional.
+     * Configuration options for connection monitoring.
+     * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     */
+    struct aws_http_connection_monitoring_options *monitoring_options;
+};
+
+/* global vtable, only used when mocking for tests */
+struct aws_s3_endpoint_system_vtable {
+    void (*acquire)(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
+    void (*release)(struct aws_s3_endpoint *endpoint);
 };
 
 struct aws_s3_endpoint {
-    /* Reference count for this endpoint. */
-    struct aws_ref_count ref_count;
+    struct {
+        /* This is NOT an atomic ref-count.
+         * The endpoint lives in hashtable: `aws_s3_client.synced_data.endpoints`
+         * This ref-count can only be touched while holding client's lock */
+        size_t ref_count;
+    } client_synced_data;
 
     /* What allocator was used to create this endpoint. */
     struct aws_allocator *allocator;
@@ -73,14 +119,8 @@ struct aws_s3_endpoint {
     /* Connection manager that manages all connections to this endpoint. */
     struct aws_http_connection_manager *http_connection_manager;
 
-    /* Callback for when this endpoint completely shuts down. */
-    aws_s3_endpoint_shutdown_fn *shutdown_callback;
-
-    /* True, if the endpoint is created by client. So, it need to be thread safe to manage the refcount via
-     * `aws_s3_client_endpoint_release` */
-    bool handled_by_client;
-
-    void *user_data;
+    /* Client that owns this endpoint */
+    struct aws_s3_client *client;
 };
 
 /* Represents one connection on a particular VIP. */
@@ -119,7 +159,7 @@ struct aws_s3_client_vtable {
 
     void (*process_work)(struct aws_s3_client *client);
 
-    void (*endpoint_shutdown_callback)(void *user_data);
+    void (*endpoint_shutdown_callback)(struct aws_s3_client *client);
 
     void (*finish_destroy)(struct aws_s3_client *client);
 };
@@ -178,6 +218,43 @@ struct aws_s3_client {
 
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
+
+    /**
+     * Optional.
+     * Proxy configuration for http connection.
+     */
+    struct aws_http_proxy_config *proxy_config;
+
+    /**
+     * Optional.
+     * Configuration for fetching proxy configuration from environment.
+     * By Default proxy_ev_settings.aws_http_proxy_env_var_type is set to AWS_HPEV_ENABLE which means read proxy
+     * configuration from environment.
+     * Only works when proxy_config is not set. If both are set, configuration from proxy_config is used.
+     */
+    struct proxy_env_var_settings *proxy_ev_settings;
+
+    /**
+     * Optional.
+     * If set to 0, default value is used.
+     */
+    uint32_t connect_timeout_ms;
+
+    /**
+     * Optional.
+     * Set keepalive to periodically transmit messages for detecting a disconnected peer.
+     */
+    struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
+
+    /**
+     * Optional.
+     * Configuration options for connection monitoring.
+     * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     */
+    struct aws_http_connection_monitoring_options *monitoring_options;
+
+    /* tls options from proxy environment settings. */
+    struct aws_tls_connection_options *proxy_ev_tls_options;
 
     /* Shutdown callbacks to notify when the client is completely cleaned up. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
@@ -308,16 +385,19 @@ AWS_S3_API void aws_s3_client_lock_synced_data(struct aws_s3_client *client);
 AWS_S3_API
 void aws_s3_client_unlock_synced_data(struct aws_s3_client *client);
 
+/* Used for mocking */
 AWS_S3_API
-struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint);
+void aws_s3_endpoint_set_system_vtable(const struct aws_s3_endpoint_system_vtable *vtable);
 
-AWS_S3_API
+/* Increment the endpoint's ref-count.
+ * If `already_holding_lock` is false, then this call will briefly take hold of the client's lock */
+struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
+
+/* Decrement the endpoint's ref-count.
+ * You MUST NOT call this while the client's lock is held.
+ * (this call briefly holds the client's lock and may remove the endpoint
+ * from the client's hashtable) */
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
-
-/* If the endpoint is created by s3 client, it will be managed by the client via a hash table that need to be protected
- * by lock. A lock will be acquired within the call, never invoke with lock held */
-AWS_S3_API
-void aws_s3_client_endpoint_release(struct aws_s3_client *client, struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_max_num_connections_per_vip;
