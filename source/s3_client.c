@@ -745,7 +745,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .proxy_ev_settings = client->proxy_ev_settings,
                 .connect_timeout_ms = client->connect_timeout_ms,
                 .tcp_keep_alive_options = client->tcp_keep_alive_options,
-                .monitoring_options = client->monitoring_options};
+                .monitoring_options = client->monitoring_options,
                 .enable_read_backpressure = client->enable_read_backpressure,
                 .initial_read_window = client->initial_read_window,
             };
