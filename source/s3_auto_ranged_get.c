@@ -135,7 +135,7 @@ static bool s_s3_auto_ranged_get_update(
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
 
-        /* If nothing has set the "finish result" then this meta request is still in progress and we can potentially
+        /* If nothing has set the "finish result" then this meta request is still in progress, and we can potentially
          * send additional requests. */
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 

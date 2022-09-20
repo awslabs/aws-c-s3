@@ -589,9 +589,9 @@ static void s_s3_client_process_work_empty(struct aws_s3_client *client) {
     (void)client;
 }
 
-static void s_s3_client_endpoint_shutdown_callback_empty(void *user_data) {
-    AWS_PRECONDITION(user_data);
-    (void)user_data;
+static void s_s3_client_endpoint_shutdown_callback_empty(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+    (void)client;
 }
 
 static void s_s3_client_finish_destroy_empty(struct aws_s3_client *client) {
@@ -742,17 +742,29 @@ struct aws_s3_empty_meta_request {
     struct aws_s3_meta_request base;
 };
 
-static void s_s3_mock_endpoint_zero_ref(void *user_data) {
-    struct aws_s3_endpoint *endpoint = user_data;
-
-    aws_string_destroy(endpoint->host_name);
-    aws_mem_release(endpoint->allocator, endpoint);
+static void s_s3_mock_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock) {
+    (void)already_holding_lock;
+    ++endpoint->client_synced_data.ref_count;
 }
 
+static void s_s3_mock_endpoint_release(struct aws_s3_endpoint *endpoint) {
+    if (--endpoint->client_synced_data.ref_count == 0) {
+        aws_string_destroy(endpoint->host_name);
+        aws_mem_release(endpoint->allocator, endpoint);
+    }
+}
+
+static struct aws_s3_endpoint_system_vtable s_s3_mock_endpoint_vtable = {
+    .acquire = s_s3_mock_endpoint_acquire,
+    .release = s_s3_mock_endpoint_release,
+};
+
 struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *tester) {
+    aws_s3_endpoint_set_system_vtable(&s_s3_mock_endpoint_vtable);
+
     struct aws_s3_endpoint *endpoint = aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_endpoint));
     endpoint->allocator = tester->allocator;
-    aws_ref_count_init(&endpoint->ref_count, endpoint, s_s3_mock_endpoint_zero_ref);
+    endpoint->client_synced_data.ref_count = 1;
 
     struct aws_byte_cursor empty_cursor = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("");
     endpoint->host_name = aws_string_new_from_cursor(tester->allocator, &empty_cursor);
