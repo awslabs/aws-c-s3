@@ -55,9 +55,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
     const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
-    const struct aws_http_connection_monitoring_options *monitoring_options,
-    bool enable_read_backpressure,
-    size_t initial_read_window);
+    const struct aws_http_connection_monitoring_options *monitoring_options);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
@@ -124,9 +122,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->proxy_ev_settings,
         options->connect_timeout_ms,
         options->tcp_keep_alive_options,
-        options->monitoring_options,
-        options->enable_read_backpressure,
-        options->initial_read_window);
+        options->monitoring_options);
 
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
@@ -156,9 +152,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
     const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
-    const struct aws_http_connection_monitoring_options *monitoring_options,
-    bool enable_read_backpressure,
-    size_t initial_read_window) {
+    const struct aws_http_connection_monitoring_options *monitoring_options) {
 
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
@@ -189,8 +183,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     struct aws_http_connection_manager_options manager_options;
     AWS_ZERO_STRUCT(manager_options);
     manager_options.bootstrap = client_bootstrap;
-    manager_options.enable_read_back_pressure = enable_read_backpressure;
-    manager_options.initial_window_size = enable_read_backpressure ? initial_read_window : SIZE_MAX;
+    manager_options.initial_window_size = SIZE_MAX;
     manager_options.socket_options = &socket_options;
     manager_options.host = host_name_cursor;
     manager_options.max_connections = max_connections;

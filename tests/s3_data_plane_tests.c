@@ -1017,7 +1017,7 @@ static int s_test_s3_get_object_helper(
 
     if (extra_meta_request_flag & AWS_S3_TESTER_APPLY_READ_BACKPRESSURE) {
         client_config.enable_read_backpressure = true;
-        client_config.initial_read_window = 32 * 1024;
+        client_config.initial_read_window = 1024;
     }
 
     struct aws_tls_connection_options tls_connection_options;

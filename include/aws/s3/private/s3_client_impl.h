@@ -94,10 +94,6 @@ struct aws_s3_endpoint_options {
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
-
-    /* TODO: document */
-    bool enable_read_backpressure;
-    size_t initial_read_window;
 };
 
 /* global vtable, only used when mocking for tests */

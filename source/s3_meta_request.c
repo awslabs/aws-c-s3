@@ -283,6 +283,8 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
         return;
     }
 
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Incrementing read window by %" PRIu64, (void *)meta_request, bytes);
+
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
 
@@ -290,12 +292,10 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
     meta_request->synced_data.read_window_running_total =
         aws_add_u64_saturating(bytes, meta_request->synced_data.read_window_running_total);
 
-    /* TODO: special list of meta-requests that have window-updates? */
-
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 
-    /* Schedule the work task if necessary, to continue processing the meta-request */
+    /* Schedule the work task, to continue processing the meta-request */
     aws_s3_client_schedule_process_work(meta_request->client);
 }
 
@@ -305,8 +305,6 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
-
-    /* TODO: schedule the work task? */
 }
 
 int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_string **out_resume_token) {
@@ -319,7 +317,6 @@ int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct a
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
 
-    /* TODO: schedule the work task? */
     return meta_request->vtable->pause(meta_request, out_resume_token);
 }
 
@@ -329,8 +326,6 @@ void aws_s3_meta_request_set_fail_synced(
     int error_code) {
     AWS_PRECONDITION(meta_request);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
-
-    /* TODO: cancel existing HTTP requests */
 
     if (meta_request->synced_data.finish_result_set) {
         return;
