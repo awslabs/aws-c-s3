@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/common/clock.h>
 #include <aws/common/system_info.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
@@ -98,6 +99,7 @@ static int s_s3_test_meta_request_body_callback(
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     meta_request_test_results->received_body_size += body->len;
+    aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
@@ -329,6 +331,14 @@ int aws_s3_tester_bind_meta_request(
     options->user_data = meta_request_test_results;
 
     return AWS_OP_SUCCESS;
+}
+
+void aws_s3_meta_request_test_results_init(
+    struct aws_s3_meta_request_test_results *test_meta_request,
+    struct aws_allocator *allocator) {
+
+    AWS_ZERO_STRUCT(*test_meta_request);
+    aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -1310,7 +1320,7 @@ int aws_s3_tester_send_meta_request_with_options(
     }
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
@@ -1388,6 +1398,87 @@ int aws_s3_tester_send_meta_request_with_options(
     return AWS_OP_SUCCESS;
 }
 
+/**
+ * Test read-backpressure functionality by repeatedly:
+ * - letting the download stall
+ * - incrementing the read window
+ * - repeat...
+ */
+static int s_s3_tester_apply_read_backpressure(
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_test_results *test_results) {
+
+    /* To ensure that backpressure is working, we wait a bit after download stalls
+     * before incrementing the read window again.
+     * If the magic number is too high the test will be slow,
+     * if it's too low the test will fail on slow networks */
+    const uint64_t wait_duration_with_no_incoming_data_before_incrementing_window =
+        aws_timestamp_convert(5, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+
+    const uint64_t window_increment_size = client->part_size / 2;
+
+    uint64_t accumulated_data_size = 0;
+
+    uint64_t last_time_data_received;
+    ASSERT_SUCCESS(aws_sys_clock_get_ticks(&last_time_data_received));
+
+    uint64_t accumulated_window_increments = (int64_t)client->initial_read_window;
+
+    while (true) {
+        /* Check if meta-request is done (don't exit yet, we want to check some numbers first...) */
+        aws_s3_tester_lock_synced_data(tester);
+        bool done = tester->synced_data.meta_requests_finished;
+        aws_s3_tester_unlock_synced_data(tester);
+
+        /* Check how much data we've received */
+        size_t received_body_size_delta = aws_atomic_exchange_int(&test_results->received_body_size_delta, 0);
+        accumulated_data_size += (uint64_t)received_body_size_delta;
+
+        /* Check that we haven't received more data than the window allows.
+         * TODO: Stop allowing "hacky wiggle room". The current implementation
+         *       may push more bytes to the user (up to 1 part) than they've asked for. */
+        uint64_t hacky_wiggle_room = client->part_size;
+        uint64_t max_data_allowed = accumulated_window_increments + hacky_wiggle_room;
+        ASSERT_TRUE(accumulated_data_size < max_data_allowed, "Received more data than the read window allows");
+
+        /* If we're done, we're done */
+        if (done) {
+            break;
+        }
+
+        /* Figure out how long it's been since we last received data */
+        uint64_t current_time;
+        ASSERT_SUCCESS(aws_sys_clock_get_ticks(&current_time));
+
+        uint64_t duration_since_data_received;
+        if (received_body_size_delta == 0) {
+            duration_since_data_received = aws_sub_u64_saturating(current_time, last_time_data_received);
+        } else {
+            duration_since_data_received = 0;
+            last_time_data_received = current_time;
+        }
+
+        /* If it seems like data has stopped flowing... */
+        if (duration_since_data_received >= wait_duration_with_no_incoming_data_before_incrementing_window) {
+
+            /* Assert that data stopped flowing because the window reached 0. */
+            uint64_t current_window = aws_sub_u64_saturating(accumulated_window_increments, accumulated_data_size);
+            ASSERT_INT_EQUALS(0, current_window, "Data stopped flowing but read window isn't 0 yet.");
+
+            /* Open the window a bit */
+            accumulated_window_increments += window_increment_size;
+            aws_s3_meta_request_increment_read_window(meta_request, window_increment_size);
+        }
+
+        /* Sleep a moment, and loop again... */
+        aws_thread_current_sleep(aws_timestamp_convert(100, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_tester_send_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_client *client,
@@ -1406,6 +1497,10 @@ int aws_s3_tester_send_meta_request(
         srand((uint32_t)time(NULL));
         aws_thread_current_sleep(rand() % 1000000);
         aws_s3_meta_request_cancel(meta_request);
+    }
+
+    if (flags & AWS_S3_TESTER_APPLY_READ_BACKPRESSURE && false) {
+        ASSERT_SUCCESS(s_s3_tester_apply_read_backpressure(tester, client, meta_request, test_results));
     }
 
     /* Wait for the request to finish. */
@@ -1457,7 +1552,7 @@ int aws_s3_tester_send_get_object_meta_request(
 
     /* Trigger accelerating of our Get Object request. */
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, tester->allocator);
 
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
@@ -1600,7 +1695,7 @@ int aws_s3_tester_send_put_object_meta_request(
     options.message = message;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     if (out_results == NULL) {
         out_results = &meta_request_test_results;

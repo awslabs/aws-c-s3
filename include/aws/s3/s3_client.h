@@ -445,7 +445,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  * no back-pressure is applied and data arrives as fast as possible.
  */
 AWS_S3_API
-void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, size_t bytes);
+void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, uint64_t bytes);
 
 AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);

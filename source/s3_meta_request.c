@@ -244,6 +244,7 @@ int aws_s3_meta_request_init_base(
     }
 
     meta_request->synced_data.next_streaming_part = 1;
+    meta_request->synced_data.read_window_running_total = client->initial_read_window;
 
     meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
@@ -267,7 +268,7 @@ int aws_s3_meta_request_init_base(
     return AWS_OP_SUCCESS;
 }
 
-void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, size_t bytes) {
+void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, uint64_t bytes) {
     AWS_PRECONDITION(meta_request);
 
     if (bytes == 0) {
@@ -285,20 +286,12 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if (aws_add_size_checked(
-            bytes, meta_request->synced_data.increment_read_window, &meta_request->synced_data.increment_read_window)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Read window incremented beyond max value %zu. Failing request.",
-            (void *)meta_request,
-            SIZE_MAX);
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
-        goto unlock;
-    }
+    /* Response will never approach UINT64_MAX, so do a saturating sum instead of worrying about overflow */
+    meta_request->synced_data.read_window_running_total =
+        aws_add_u64_saturating(bytes, meta_request->synced_data.read_window_running_total);
 
     /* TODO: special list of meta-requests that have window-updates? */
 
-unlock:
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 

@@ -23,7 +23,7 @@ static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *
 
     {
         struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
+        aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
         struct aws_s3_tester_meta_request_options options = {
             .allocator = allocator,
@@ -42,7 +42,7 @@ static int s_test_s3_different_endpoints(struct aws_allocator *allocator, void *
 
     {
         struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
+        aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
         struct aws_s3_tester_meta_request_options options = {
             .allocator = allocator,

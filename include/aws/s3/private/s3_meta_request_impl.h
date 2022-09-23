@@ -148,6 +148,9 @@ struct aws_s3_meta_request {
         /* Current state of the meta request. */
         enum aws_s3_meta_request_state state;
 
+        /* TODO document me */
+        uint64_t read_window_running_total;
+
         /* The next expected streaming part number needed to continue streaming part bodies.  (For example, this will
          * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. */
         uint32_t next_streaming_part;
@@ -171,9 +174,6 @@ struct aws_s3_meta_request {
         /* True if the finish result has been set. */
         uint32_t finish_result_set : 1;
 
-        /* TODO document me */
-        size_t increment_read_window;
-
     } synced_data;
 
     /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */
@@ -185,9 +185,6 @@ struct aws_s3_meta_request {
 
         /* True if this meta request is currently in the client's list. */
         bool scheduled;
-
-        /* TODO: document*/
-        size_t read_window_size;
 
     } client_process_work_threaded_data;
 
