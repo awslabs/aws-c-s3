@@ -260,8 +260,10 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    /* TODO: document */
+    /* Whether read backpressure*/
     const bool enable_read_backpressure;
+
+    /* */
     const size_t initial_read_window;
 
     struct {

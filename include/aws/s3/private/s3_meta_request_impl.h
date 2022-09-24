@@ -148,7 +148,7 @@ struct aws_s3_meta_request {
         /* Current state of the meta request. */
         enum aws_s3_meta_request_state state;
 
-        /* TODO document me */
+        /* The sum of initial_window_size, plus all window_increment() calls. This number never goes down. */
         uint64_t read_window_running_total;
 
         /* The next expected streaming part number needed to continue streaming part bodies.  (For example, this will

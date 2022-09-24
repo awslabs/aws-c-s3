@@ -79,13 +79,11 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
 /**
  * Invoked to provide the response body as it is received.
  *
- * TODO: UPDATE THESE DOCS
- * Note: If the S3 client was created with `manual_window_management` set true,
+ * Note: If you set `enable_read_backpressure` true on the S3 client,
  * you must maintain the flow-control window.
- * You will stop receiving data whenever the flow-control window reaches zero.
- * The S3 client's `initial_window_size` determines the starting size of each response's window.
  * The flow-control window shrinks as you receive body data via this callback.
- * Use aws_s3_meta_request_update_window() to increment the window.
+ * Whenever the flow-control window reaches 0 you will stop downloading data.
+ * Use aws_s3_meta_request_increment_read_window() to increment the window and keep data flowing.
  * Maintain a larger window to keep up a high download throughput,
  * parts cannot download in parallel unless the window is large enough to hold multiple parts.
  * Maintain a smaller window to limit the amount of data buffered in memory.
@@ -262,24 +260,25 @@ struct aws_s3_client_config {
     struct aws_http_connection_monitoring_options *monitoring_options;
 
     /**
-     * TODO: UPDATE THESE DOCS
-     * Set to true to manually manage the flow-control window of each meta request.
+     * Enable backpressure and prevent response data from downloading faster than you can handle it.
      *
-     * If false, no back-pressure is applied and data will download as fast as possible.
+     * If false (default), no backpressure is applied and data will download as fast as possible.
      *
-     * If true, the flow-control window of each meta request will shrink as
+     * If true, each meta request has a flow-control window that shrinks as
      * response body data is downloaded (headers do not affect the window).
      * `initial_window_size` determines the starting size of each meta request's window.
+     * You will stop downloading data whenever the flow-control window reaches 0
+     * You must call aws_s3_meta_request_increment_read_window() to keep data flowing.
      *
-     * If a meta request's flow-control window reaches 0, no further data will be received.
-     * The user must call aws_s3_meta_request_update_window() to increment the window and keep data flowing.
+     * WARNING: This feature is experimental.
+     * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
+     * and you may still receive some data after the window reaches 0.
      */
     bool enable_read_backpressure;
 
     /**
-     * TODO: UPDATE THESE DOCS
-     * The starting size of each meta request's flow-control window.
-     * Ignored unless `manual_window_management` is true.
+     * The starting size of each meta request's flow-control window, in bytes.
+     * Ignored unless `enable_read_backpressure` is true.
      */
     size_t initial_read_window;
 };
@@ -427,22 +426,24 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     const struct aws_s3_meta_request_options *options);
 
 /**
- * TODO: UPDATE THESE DOCS
- * Increment the flow-control window so that data continues downloading.
+ * Increment the flow-control window, so that response data continues downloading.
  *
- * If the client was created with `manual_window_management` set true,
- * the flow-control window of each meta request will shrink as response
+ * If the client was created with `enable_read_backpressure` set true,
+ * each meta request has a flow-control window that shrinks as response
  * body data is downloaded (headers do not affect the size of the window).
  * The client's `initial_window_size` determines the starting size of each meta request's window.
- * If a meta request's flow-control window reaches 0, no further data will be received.
+ * If a meta request's flow-control window reaches 0, no further data will be downloaded.
  * If the `initial_window_size` is 0, the request will not start until the window is incremented.
  * Maintain a larger window to keep up a high download throughput,
  * parts cannot download in parallel unless the window is large enough to hold multiple parts.
  * Maintain a smaller window to limit the amount of data buffered in memory.
  *
- * If `manual_window_management` is false, this call will have no effect.
- * The connection maintains its flow-control windows such that
- * no back-pressure is applied and data arrives as fast as possible.
+ * If `enable_read_backpressure` is false this call will have no effect,
+ * no backpressure is being applied and data is being downloaded as fast as possible.
+ *
+ * WARNING: This feature is experimental.
+ * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
+ * and you may still receive some data after the window reaches 0.
  */
 AWS_S3_API
 void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, uint64_t bytes);
