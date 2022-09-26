@@ -1015,11 +1015,6 @@ static int s_test_s3_get_object_helper(
         .part_size = 64 * 1024,
     };
 
-    if (extra_meta_request_flag & AWS_S3_TESTER_APPLY_READ_BACKPRESSURE) {
-        client_config.enable_read_backpressure = true;
-        client_config.initial_read_window = 1024;
-    }
-
     struct aws_tls_connection_options tls_connection_options;
     AWS_ZERO_STRUCT(tls_connection_options);
 
@@ -1366,14 +1361,6 @@ static int s_test_s3_get_object_empty_default(struct aws_allocator *allocator, v
         allocator, AWS_S3_TLS_ENABLED, 0, aws_byte_cursor_from_c_str("/get_object_test_0MB.txt")));
 }
 
-AWS_TEST_CASE(test_s3_get_object_backpressure, s_test_s3_get_object_backpressure)
-static int s_test_s3_get_object_backpressure(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    return (s_test_s3_get_object_helper(
-        allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_APPLY_READ_BACKPRESSURE, g_s3_path_get_object_test_1MB));
-}
-
 AWS_TEST_CASE(test_s3_get_object_sse_kms, s_test_s3_get_object_sse_kms)
 static int s_test_s3_get_object_sse_kms(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1393,6 +1380,201 @@ static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void
     /* Keep TLS enabled for SSE related download, or it will fail. */
     return s_test_s3_get_object_helper(
         allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256, g_pre_existing_object_aes256_10MB);
+}
+
+/**
+ * Test read-backpressure functionality by repeatedly:
+ * - letting the download stall
+ * - incrementing the read window
+ * - repeat...
+ */
+static int s_apply_backpressure_until_meta_request_finish(
+    struct aws_s3_tester *tester,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_test_results *test_results,
+    size_t part_size,
+    size_t window_initial_size,
+    uint64_t window_increment_size) {
+
+    /* Remember the last time something happened (we received download data, or incremented read window) */
+    uint64_t last_time_something_happened;
+    ASSERT_SUCCESS(aws_sys_clock_get_ticks(&last_time_something_happened));
+
+    /* To ensure that backpressure is working, we wait a bit after download stalls
+     * before incrementing the read window again.
+     * This number also controls the max time we wait for bytes to start arriving
+     * after incrementing the window.
+     * If the magic number is too high the test will be slow,
+     * if it's too low the test will fail on slow networks */
+    const uint64_t wait_duration_with_nothing_happening =
+        aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+
+    uint64_t accumulated_window_increments = window_initial_size;
+    uint64_t accumulated_data_size = 0;
+
+    while (true) {
+        /* Check if meta-request is done (don't exit yet, we want to check some numbers first...) */
+        aws_s3_tester_lock_synced_data(tester);
+        bool done = tester->synced_data.meta_requests_finished != 0;
+        aws_s3_tester_unlock_synced_data(tester);
+
+        /* Check how much data we've received */
+        size_t received_body_size_delta = aws_atomic_exchange_int(&test_results->received_body_size_delta, 0);
+        accumulated_data_size += (uint64_t)received_body_size_delta;
+
+        /* Check that we haven't received more data than the window allows.
+         * TODO: Stop allowing "hacky wiggle room". The current implementation
+         *       may push more bytes to the user (up to 1 part) than they've asked for. */
+        uint64_t hacky_wiggle_room = part_size;
+        uint64_t max_data_allowed = accumulated_window_increments + hacky_wiggle_room;
+        ASSERT_TRUE(accumulated_data_size <= max_data_allowed, "Received more data than the read window allows");
+
+        /* If we're done, we're done */
+        if (done) {
+            break;
+        }
+
+        /* Figure out how long it's been since we last received data */
+        uint64_t current_time;
+        ASSERT_SUCCESS(aws_sys_clock_get_ticks(&current_time));
+
+        if (received_body_size_delta != 0) {
+            last_time_something_happened = current_time;
+        }
+
+        uint64_t duration_since_something_happened = current_time - last_time_something_happened;
+
+        /* If it seems like data has stopped flowing... */
+        if (duration_since_something_happened >= wait_duration_with_nothing_happening) {
+
+            /* Assert that data stopped flowing because the window reached 0. */
+            uint64_t current_window = aws_sub_u64_saturating(accumulated_window_increments, accumulated_data_size);
+            ASSERT_INT_EQUALS(0, current_window, "Data stopped flowing but read window isn't 0 yet.");
+
+            /* Open the window a bit (this resets the "something happened" timer */
+            accumulated_window_increments += window_increment_size;
+            aws_s3_meta_request_increment_read_window(meta_request, window_increment_size);
+
+            last_time_something_happened = current_time;
+        }
+
+        /* Sleep a moment, and loop again... */
+        aws_thread_current_sleep(aws_timestamp_convert(100, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
+static int s_test_s3_get_object_backpressure_helper(
+    struct aws_allocator *allocator,
+    size_t part_size,
+    size_t window_initial_size,
+    uint64_t window_increment_size) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = part_size,
+        .enable_read_backpressure = true,
+        .initial_read_window = window_initial_size,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+
+    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+
+    /* Put together a simple S3 Get Object request. */
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+
+    struct aws_s3_meta_request_options options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+
+    ASSERT_TRUE(meta_request != NULL);
+
+    /* Increment read window bit by bit until all data is downloaded */
+    ASSERT_SUCCESS(s_apply_backpressure_until_meta_request_finish(
+        &tester, meta_request, &meta_request_test_results, part_size, window_initial_size, window_increment_size));
+
+    aws_s3_tester_lock_synced_data(&tester);
+
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+
+    aws_s3_meta_request_release(meta_request);
+    meta_request = NULL;
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_http_message_release(message);
+    message = NULL;
+
+    aws_string_destroy(host_name);
+    host_name = NULL;
+
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_get_object_backpressure_small_increments, s_test_s3_get_object_backpressure_small_increments)
+static int s_test_s3_get_object_backpressure_small_increments(struct aws_allocator *allocator, void *ctx) {
+    /* Test increments smaller than part-size.
+     * Only 1 part at a time should be in flight */
+    (void)ctx;
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t part_size = file_size / 4;
+    size_t window_initial_size = 1024;
+    uint64_t window_increment_size = part_size / 2;
+    return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
+}
+
+AWS_TEST_CASE(test_s3_get_object_backpressure_big_increments, s_test_s3_get_object_backpressure_big_increments)
+static int s_test_s3_get_object_backpressure_big_increments(struct aws_allocator *allocator, void *ctx) {
+    /* Test increments larger than part-size.
+     * Multiple parts should be in flight at a time */
+    (void)ctx;
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t part_size = file_size / 8;
+    size_t window_initial_size = 1024;
+    uint64_t window_increment_size = part_size * 3;
+    return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
+}
+
+AWS_TEST_CASE(test_s3_get_object_backpressure_initial_size_zero, s_test_s3_get_object_backpressure_initial_size_zero)
+static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_allocator *allocator, void *ctx) {
+    /* Test with initial window size of zero */
+    (void)ctx;
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t part_size = file_size / 4;
+    size_t window_initial_size = 0;
+    uint64_t window_increment_size = part_size / 2;
+    return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
 }
 
 static int s_test_s3_put_object_helper(
