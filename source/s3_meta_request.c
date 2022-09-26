@@ -241,10 +241,10 @@ int aws_s3_meta_request_init_base(
         aws_s3_client_acquire(client);
         meta_request->client = client;
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        meta_request->synced_data.read_window_running_total = client->initial_read_window;
     }
 
     meta_request->synced_data.next_streaming_part = 1;
-    meta_request->synced_data.read_window_running_total = client->initial_read_window;
 
     meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
