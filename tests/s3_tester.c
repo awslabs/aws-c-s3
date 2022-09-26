@@ -337,6 +337,7 @@ void aws_s3_meta_request_test_results_init(
     struct aws_s3_meta_request_test_results *test_meta_request,
     struct aws_allocator *allocator) {
 
+    (void)allocator;
     AWS_ZERO_STRUCT(*test_meta_request);
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
 }
