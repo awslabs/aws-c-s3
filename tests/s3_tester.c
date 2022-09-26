@@ -1415,7 +1415,7 @@ static int s_s3_tester_apply_read_backpressure(
      * If the magic number is too high the test will be slow,
      * if it's too low the test will fail on slow networks */
     const uint64_t wait_duration_with_no_incoming_data_before_incrementing_window =
-        aws_timestamp_convert(2, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+        aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
 
     const uint64_t window_increment_size = client->part_size / 2;
 

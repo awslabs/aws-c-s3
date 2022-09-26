@@ -260,10 +260,11 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
-    /* Whether read backpressure*/
+    /* Whether read backpressure (aka flow-control window) is being applied. */
     const bool enable_read_backpressure;
 
-    /* */
+    /* The starting size of each meta request's flow-control window, in bytes.
+     * Ignored unless `enable_read_backpressure` is true. */
     const size_t initial_read_window;
 
     struct {
