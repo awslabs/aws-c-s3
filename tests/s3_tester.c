@@ -1411,21 +1411,23 @@ static int s_s3_tester_apply_read_backpressure(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_test_results *test_results) {
 
+    /* Remember the last time something happened (we received download data, or incremented read window) */
+    uint64_t last_time_something_happened;
+    ASSERT_SUCCESS(aws_sys_clock_get_ticks(&last_time_something_happened));
+
     /* To ensure that backpressure is working, we wait a bit after download stalls
      * before incrementing the read window again.
+     * This number also controls the max time we wait for bytes to start arriving
+     * after incrementing the window.
      * If the magic number is too high the test will be slow,
      * if it's too low the test will fail on slow networks */
-    const uint64_t wait_duration_with_no_incoming_data_before_incrementing_window =
-        aws_timestamp_convert(2, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+    const uint64_t wait_duration_with_nothing_happening =
+        aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
 
     const uint64_t window_increment_size = client->part_size / 2;
 
-    uint64_t accumulated_data_size = 0;
-
-    uint64_t last_time_data_received;
-    ASSERT_SUCCESS(aws_sys_clock_get_ticks(&last_time_data_received));
-
     uint64_t accumulated_window_increments = (int64_t)client->initial_read_window;
+    uint64_t accumulated_data_size = 0;
 
     while (true) {
         /* Check if meta-request is done (don't exit yet, we want to check some numbers first...) */
@@ -1453,24 +1455,24 @@ static int s_s3_tester_apply_read_backpressure(
         uint64_t current_time;
         ASSERT_SUCCESS(aws_sys_clock_get_ticks(&current_time));
 
-        uint64_t duration_since_data_received;
-        if (received_body_size_delta == 0) {
-            duration_since_data_received = aws_sub_u64_saturating(current_time, last_time_data_received);
-        } else {
-            duration_since_data_received = 0;
-            last_time_data_received = current_time;
+        if (received_body_size_delta != 0) {
+            last_time_something_happened = current_time;
         }
 
+        uint64_t duration_since_something_happened = current_time - last_time_something_happened;
+
         /* If it seems like data has stopped flowing... */
-        if (duration_since_data_received >= wait_duration_with_no_incoming_data_before_incrementing_window) {
+        if (duration_since_something_happened >= wait_duration_with_nothing_happening) {
 
             /* Assert that data stopped flowing because the window reached 0. */
             uint64_t current_window = aws_sub_u64_saturating(accumulated_window_increments, accumulated_data_size);
             ASSERT_INT_EQUALS(0, current_window, "Data stopped flowing but read window isn't 0 yet.");
 
-            /* Open the window a bit */
+            /* Open the window a bit (this resets the "something happened" timer */
             accumulated_window_increments += window_increment_size;
             aws_s3_meta_request_increment_read_window(meta_request, window_increment_size);
+
+            last_time_something_happened = current_time;
         }
 
         /* Sleep a moment, and loop again... */
