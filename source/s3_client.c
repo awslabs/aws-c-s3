@@ -444,6 +444,9 @@ struct aws_s3_client *aws_s3_client_new(
     client->shutdown_callback = client_config->shutdown_callback;
     client->shutdown_callback_user_data = client_config->shutdown_callback_user_data;
 
+    *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
+    *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
+
     return client;
 
 on_error:

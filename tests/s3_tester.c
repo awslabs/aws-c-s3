@@ -98,6 +98,7 @@ static int s_s3_test_meta_request_body_callback(
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     meta_request_test_results->received_body_size += body->len;
+    aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
@@ -329,6 +330,15 @@ int aws_s3_tester_bind_meta_request(
     options->user_data = meta_request_test_results;
 
     return AWS_OP_SUCCESS;
+}
+
+void aws_s3_meta_request_test_results_init(
+    struct aws_s3_meta_request_test_results *test_meta_request,
+    struct aws_allocator *allocator) {
+
+    (void)allocator;
+    AWS_ZERO_STRUCT(*test_meta_request);
+    aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -1310,7 +1320,7 @@ int aws_s3_tester_send_meta_request_with_options(
     }
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
@@ -1457,7 +1467,7 @@ int aws_s3_tester_send_get_object_meta_request(
 
     /* Trigger accelerating of our Get Object request. */
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, tester->allocator);
 
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
@@ -1600,7 +1610,7 @@ int aws_s3_tester_send_put_object_meta_request(
     options.message = message;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     if (out_results == NULL) {
         out_results = &meta_request_test_results;

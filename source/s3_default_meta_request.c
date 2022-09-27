@@ -179,7 +179,7 @@ static bool s_s3_meta_request_default_update(
                 goto has_work_remaining;
             }
 
-            /* If some parts are still being delievered to the caller, then wait for those to finish. */
+            /* If some parts are still being delivered to the caller, then wait for those to finish. */
             if (meta_request->synced_data.num_parts_delivery_completed <
                 meta_request->synced_data.num_parts_delivery_sent) {
                 goto has_work_remaining;

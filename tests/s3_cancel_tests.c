@@ -201,7 +201,7 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
     if (cancel_type < S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES) {
 
         struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
+        aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
         struct aws_s3_tester_meta_request_options options = {
             .allocator = allocator,
@@ -228,7 +228,7 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
     } else {
 
         struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
+        aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
         // Range for the second 16k
         const struct aws_byte_cursor range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=16384-32767");
@@ -311,7 +311,7 @@ static int s3_cancel_test_helper_fc(
     if (cancel_type < S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES) {
 
         struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
+        aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
         struct aws_s3_tester_meta_request_options options = {
             .allocator = allocator,
@@ -341,7 +341,7 @@ static int s3_cancel_test_helper_fc(
     } else {
 
         struct aws_s3_meta_request_test_results meta_request_test_results;
-        AWS_ZERO_STRUCT(meta_request_test_results);
+        aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
         // Range for the second 16k
         const struct aws_byte_cursor range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=16384-32767");
