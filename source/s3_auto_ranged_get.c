@@ -233,8 +233,22 @@ static bool s_s3_auto_ranged_get_update(
                     uint64_t read_data_requested =
                         auto_ranged_get->synced_data.num_parts_requested * meta_request->part_size;
                     if (read_data_requested >= meta_request->synced_data.read_window_running_total) {
+
+                        /* Avoid spamming users with this DEBUG message */
+                        if (auto_ranged_get->synced_data.read_window_warning_issued == 0) {
+                            auto_ranged_get->synced_data.read_window_warning_issued = 1;
+
+                            AWS_LOGF_DEBUG(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p: Download paused because read window is zero. "
+                                "You must increment to window to continue.",
+                                (void *)meta_request);
+                        }
+
                         goto has_work_remaining;
                     }
+
+                    auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
                 request = aws_s3_request_new(
