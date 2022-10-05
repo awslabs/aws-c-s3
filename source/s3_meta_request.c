@@ -415,7 +415,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
-    /* endpoint and client should have already been released and set NULL by the meta request finish call.
+    /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
     aws_s3_client_release(meta_request->client);
@@ -1478,9 +1478,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     aws_s3_endpoint_release(meta_request->endpoint);
     meta_request->endpoint = NULL;
-
-    aws_s3_client_release(meta_request->client);
-    meta_request->client = NULL;
 
     meta_request->io_event_loop = NULL;
 }
