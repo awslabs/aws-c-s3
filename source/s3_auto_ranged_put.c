@@ -1071,6 +1071,12 @@ static void s_s3_auto_ranged_put_request_finished(
                 struct aws_byte_cursor response_body_cursor =
                     aws_byte_cursor_from_buf(&request->send_data.response_body);
 
+                /**
+                 * TODO: The body of the response can be ERROR, check Error specified in body part from
+                 * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html#AmazonS3-CompleteMultipartUpload-response-CompleteMultipartUploadOutput
+                 * We need to handle this case.
+                 */
+
                 /* Grab the ETag for the entire object, and set it as a header. */
                 struct aws_string *etag_header_value =
                     get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);

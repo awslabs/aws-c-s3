@@ -72,20 +72,6 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-static bool s_is_get_request(const struct aws_s3_meta_request_options *options) {
-    if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-        return true;
-    }
-    if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-        struct aws_byte_cursor method;
-        int err = aws_http_message_get_request_method(options->message, &method);
-        AWS_ASSERT(err == AWS_OP_SUCCESS);
-        (void)err;
-        return aws_byte_cursor_eq(&method, &aws_http_method_get);
-    }
-    return false;
-}
-
 static int s_meta_request_get_response_headers_checksum_callback(
     /* TODO take in a priority list of checksum algorithms, and use this list to determine which checksum algorithm to
        validate */
@@ -124,6 +110,7 @@ static int s_meta_request_get_response_body_checksum_callback(
     if (meta_request->meta_request_level_running_response_sum) {
         aws_checksum_update(meta_request->meta_request_level_running_response_sum, body);
     }
+
     if (meta_request->body_user_callback_after_checksum) {
         return meta_request->body_user_callback_after_checksum(meta_request, body, range_start, user_data);
     } else {
@@ -251,7 +238,7 @@ int aws_s3_meta_request_init_base(
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
 
-    if (s_is_get_request(options)) {
+    if (validate_get_response_checksum) {
         meta_request->headers_user_callback_after_checksum = options->headers_callback;
         meta_request->body_user_callback_after_checksum = options->body_callback;
         meta_request->finish_user_callback_after_checksum = options->finish_callback;
@@ -655,15 +642,6 @@ static void s_s3_meta_request_sign_request(
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
 
-static bool s_is_put_request(const struct aws_s3_meta_request *meta_request) {
-    struct aws_byte_cursor method;
-    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
-        !aws_http_message_get_request_method(meta_request->initial_request_message, &method)) {
-        return aws_byte_cursor_eq(&method, &aws_http_method_put);
-    }
-    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
-}
-
 /* Handles signing a message for the caller. */
 void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
@@ -718,8 +696,8 @@ void aws_s3_meta_request_sign_request_default(
     }
 
     /* if a checksum algorithm is set for a put request the request will be chunked and we need to change the signed
-     * body value to match this type of request*/
-    if (meta_request->checksum_algorithm != AWS_SCA_NONE && s_is_put_request(meta_request) &&
+     * body value to match this type of request */
+    if (meta_request->checksum_algorithm != AWS_SCA_NONE &&
         aws_byte_cursor_eq(&signing_config.signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
         signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
     }

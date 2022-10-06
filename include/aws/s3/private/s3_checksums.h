@@ -6,6 +6,9 @@
  */
 #include "aws/s3/s3_client.h"
 
+/* TODO: consider moving the flexible checksum feature to sdkutils. */
+/* TODO: consistence between naming, aws_s3_checksum* vs aws_checksum* -> aws_flexible_checksum* ?. */
+
 struct aws_s3_checksum;
 
 struct aws_checksum_vtable {
@@ -25,7 +28,9 @@ struct aws_s3_checksum {
 
 /**
  * a stream that takes in a stream, computes a running checksum as it is read, and outputs the checksum when the stream
- * is destroyed. Scanning this stream will immediatly fail, as it would prevent an accurate calcuation of the checksum.
+ * is destroyed.
+ * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
+ * checksum.
  *
  * @param allocator
  * @param existing_stream The real content to read from. Destroying the checksum stream destroys the existing stream.
@@ -43,8 +48,10 @@ struct aws_input_stream *aws_checksum_stream_new(
     struct aws_byte_buf *checksum_output);
 
 /**
- * A stream that takes in a stream, turns it into a chunk, and follows it with a aws-chunked trailer. Scanning this
- * stream will immediately fail, as it would prevent an accurate calculation of the checksum.
+ * A stream that takes in a stream, encodes it to aws_chunked. Computes a running checksum as it is read and add the
+ * checksum as trailer at the end of the stream. All of the added bytes will be counted to the length of the stream.
+ * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
+ * checksum.
  *
  * @param allocator
  * @param existing_stream   The data to be chunkified prepended by information on the stream length followed by a final

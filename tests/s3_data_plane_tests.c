@@ -1967,6 +1967,93 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_put_object_sse_c_aes256_multipart, s_test_s3_put_object_sse_c_aes256_multipart)
+static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    /* should we generate a unique path each time? */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .sse_type = AWS_S3_TESTER_SSE_C_AES256,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    aws_s3_client_release(client);
+    client = NULL;
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+// AWS_TEST_CASE(
+//     test_s3_put_object_sse_c_aes256_multipart_with_checksum,
+//     s_test_s3_put_object_sse_c_aes256_multipart_with_checksum)
+// static int s_test_s3_put_object_sse_c_aes256_multipart_with_checksum(struct aws_allocator *allocator, void *ctx) {
+//     (void)ctx;
+
+//     struct aws_s3_tester tester;
+//     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+//     struct aws_s3_client_config client_config = {
+//         .part_size = 5 * 1024 * 1024,
+//     };
+
+//     ASSERT_SUCCESS(aws_s3_tester_bind_client(
+//         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+//     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+//     ASSERT_TRUE(client != NULL);
+
+//     /* should we generate a unique path each time? */
+//     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt");
+
+//     struct aws_s3_tester_meta_request_options put_options = {
+//         .allocator = allocator,
+//         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+//         .client = client,
+//         .sse_type = AWS_S3_TESTER_SSE_C_AES256,
+//         .checksum_algorithm = AWS_SCA_CRC32,
+//         .put_options =
+//             {
+//                 .object_size_mb = 10,
+//                 .object_path_override = object_path,
+//             },
+//     };
+
+//     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+//     aws_s3_client_release(client);
+//     client = NULL;
+
+//     aws_s3_tester_clean_up(&tester);
+
+//     return 0;
+// }
+
 static int s_test_s3_put_object_content_md5_helper(
     struct aws_allocator *allocator,
     bool multipart_upload,
