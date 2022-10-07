@@ -161,6 +161,12 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_COUNT,
 };
 
+enum aws_s3_checksum_location {
+    AWS_SCL_NONE = 0,
+    AWS_SCL_HEADER,
+    AWS_SCL_TRAILER,
+};
+
 /* Keepalive properties are TCP only.
  * If interval or timeout are zero, then default values are used.
  */
@@ -288,17 +294,21 @@ struct aws_s3_client_config {
 struct aws_flexible_checksum_config {
 
     /**
-     * If true, the payload will be aws_chunked encoded, which is similar as transfer-encoding: chunked, but the HTTP
-     * request is normal request, with all the trailer and encoding stuff be in part of the body. The checksum header
-     * will be added to the trailer.
+     * The location of client added checksum header.
      *
-     * If this is set to true, the payload of the original request cannot be aws-chunked encoded already. Otherwise,
-     * error will be raised.
+     * If AWS_SCL_NONE. No request payload checksum will be add and calculated.
+     *
+     * If AWS_SCL_HEADER, the checksum will be calculated by client and added related header to the request sent.
+     *
+     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The checksum will be calculate while reading the
+     * payload by client. Related header will be added to the trailer part of the encoded payload. Note the payload of
+     * the original request cannot be aws-chunked encoded already. Otherwise, error will be raised.
      */
-    bool trailer_checksum;
+    enum aws_s3_checksum_location location;
 
     /**
-     * The checksum algorithm used. Required even if the calculated checksum was set.
+     * The checksum algorithm used.
+     * Must be set if location is not AWS_SCL_NONE. Must be AWS_SCA_NONE if location is AWS_SCL_NONE.
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
@@ -320,35 +330,16 @@ struct aws_s3_meta_request_options {
 
     /* Signing options to be used for each request created for this meta request.  If NULL, options in the client will
      * be used. If not NULL, these options will override the client options. */
-    struct aws_signing_config_aws *signing_config;
+    const struct aws_signing_config_aws *signing_config;
 
     /* Initial HTTP message that defines what operation we are doing. */
     struct aws_http_message *message;
 
     /**
-     * Checksum algorithm will cause single part put requests to append a trailing checksum of the body corresponding to
-     * the specified algorithm. Multipart uploads will have a checksum uploaded corresponding to each individual part,
-     * and the body of the complete multipart upload request will contain a list of the checksums from each part.
-     * Get requests will be unaffected by this setting. Copy object requests will have a header specifying to s3 to
-     * calculate a new checksum with the corresponding algorithm.
-     * Note: If set, it will disable compute_content_md5
+     * Optional.
+     * if set, the flexible checksum will be performed by client based on the config.
      */
-    enum aws_s3_checksum_algorithm checksum_algorithm;
-
-    /**
-     * Enable checksum mode header will be attached to get requests, this will tell s3 to send back checksums headers if
-     * they exist.
-     *
-     * - If the object to get was uploaded as a single part upload with checksums, s3 will provide a checksum of the
-     * entire object. The checksum of the entire body received will be calculated and compared to the checksum provided
-     * by s3.
-     * - If a checksum of a part object is received, the client will calculate the corresponding checksum on the
-     * response bodies. The meta request will finish with a did validate field and set the error code to
-     * AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated checksum, and checksum found in the response header do
-     * not match.
-     */
-    /* TODO add a validation list, empty validation list is equivalent to false */
-    bool validate_get_response_checksum;
+    const struct aws_flexible_checksum_config *checksum_config;
 
     /* User data for all callbacks. */
     void *user_data;

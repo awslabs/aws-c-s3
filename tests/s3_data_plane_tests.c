@@ -1985,7 +1985,6 @@ static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *all
 
     ASSERT_TRUE(client != NULL);
 
-    /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt");
 
     struct aws_s3_tester_meta_request_options put_options = {
@@ -2029,7 +2028,6 @@ static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *all
 
 //     ASSERT_TRUE(client != NULL);
 
-//     /* should we generate a unique path each time? */
 //     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt");
 
 //     struct aws_s3_tester_meta_request_options put_options = {
@@ -2265,7 +2263,7 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
 
     struct aws_http_message *new_message = aws_s3_upload_part_message_new(
-        allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5, AWS_SCA_NONE, NULL);
+        allocator, base_message, &test_buffer, part_number, upload_id, should_compute_content_md5, NULL, NULL);
 
     struct aws_http_headers *new_headers = aws_http_message_get_headers(new_message);
     if (should_compute_content_md5) {
@@ -2700,7 +2698,6 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
         .validate_get_response_checksum = true,
         .get_options =
             {
@@ -2756,7 +2753,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
+
         .validate_get_response_checksum = true,
         .get_options =
             {
@@ -4923,6 +4920,11 @@ static int s_test_s3_put_pause_resume_helper(
     aws_mutex_init(&test_data->mutex);
     test_data->execution_completed = false;
 
+    struct aws_flexible_checksum_config checksum_config = {
+        .checksum_algorithm = checksum_algorithm,
+        .location = checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
+    };
+
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = test_data,
         .body_callback = NULL,
@@ -4934,7 +4936,7 @@ static int s_test_s3_put_pause_resume_helper(
         .shutdown_callback = NULL,
         .resume_token = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .checksum_algorithm = checksum_algorithm,
+        .checksum_config = &checksum_config,
     };
 
     struct aws_byte_cursor resume_state_cur;

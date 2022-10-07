@@ -807,8 +807,6 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         NULL,
         0,
         false,
-        AWS_SCA_NONE,
-        false,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
@@ -1195,10 +1193,16 @@ int aws_s3_tester_send_meta_request_with_options(
         aws_s3_client_acquire(client);
     }
 
+    struct aws_flexible_checksum_config checksum_config = {
+        .checksum_algorithm = options->checksum_algorithm,
+        .validate_response_checksum = options->validate_get_response_checksum,
+        .location = options->checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
+    };
+
     struct aws_s3_meta_request_options meta_request_options = {
         .type = options->meta_request_type,
         .message = options->message,
-        .validate_get_response_checksum = options->validate_get_response_checksum,
+        .checksum_config = &checksum_config,
     };
 
     if (options->signing_config) {
@@ -1246,7 +1250,7 @@ int aws_s3_tester_send_meta_request_with_options(
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT)) {
 
-            meta_request_options.checksum_algorithm = options->checksum_algorithm;
+            meta_request_options.checksum_config = &checksum_config;
 
             uint32_t object_size_mb = options->put_options.object_size_mb;
             size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;

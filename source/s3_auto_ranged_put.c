@@ -46,7 +46,7 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
     struct aws_string *etag = aws_strip_quotes(auto_ranged_put->base.allocator, info->e_tag);
 
     const struct aws_byte_cursor *checksum_cur = NULL;
-    switch (auto_ranged_put->base.checksum_algorithm) {
+    switch (auto_ranged_put->base.checksum_config.checksum_algorithm) {
         case AWS_SCA_CRC32:
             checksum_cur = &info->checksumCRC32;
             break;
@@ -266,8 +266,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             part_size,
             client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
                 aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
-            options->checksum_algorithm,
-            false,
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
@@ -642,16 +640,21 @@ static int s_skip_parts_from_stream(
         }
 
         // compare skipped checksum to previously uploaded checksum
-        if (meta_request->checksum_algorithm != AWS_SCA_NONE && auto_ranged_put->checksums_list[part_index].len > 0) {
+        if (meta_request->checksum_config.checksum_algorithm != AWS_SCA_NONE &&
+            auto_ranged_put->checksums_list[part_index].len > 0) {
             struct aws_byte_buf checksum;
             aws_byte_buf_init(
                 &checksum,
                 meta_request->allocator,
-                aws_get_digest_size_from_algorithm(meta_request->checksum_algorithm));
+                aws_get_digest_size_from_algorithm(meta_request->checksum_config.checksum_algorithm));
             struct aws_byte_cursor body_cur = aws_byte_cursor_from_buf(&temp_body_buf);
 
             if (aws_checksum_compute(
-                    meta_request->allocator, meta_request->checksum_algorithm, &body_cur, &checksum, 0)) {
+                    meta_request->allocator,
+                    meta_request->checksum_config.checksum_algorithm,
+                    &body_cur,
+                    &checksum,
+                    0)) {
                 AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum.");
                 aws_byte_buf_clean_up(&temp_body_buf);
                 aws_byte_buf_clean_up(&checksum);
@@ -724,7 +727,9 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
-                meta_request->allocator, meta_request->initial_request_message, meta_request->checksum_algorithm);
+                meta_request->allocator,
+                meta_request->initial_request_message,
+                meta_request->checksum_config.checksum_algorithm);
 
             break;
         }
@@ -756,7 +761,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 request->part_number,
                 auto_ranged_put->upload_id,
                 meta_request->should_compute_content_md5,
-                meta_request->checksum_algorithm,
+                &meta_request->checksum_config,
                 &auto_ranged_put->checksums_list[request->part_number - 1]);
             break;
         }
@@ -797,7 +802,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     auto_ranged_put->upload_id,
                     &auto_ranged_put->synced_data.etag_list,
                     auto_ranged_put->checksums_list,
-                    meta_request->checksum_algorithm);
+                    meta_request->checksum_config.checksum_algorithm);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }

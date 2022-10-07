@@ -73,8 +73,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
             client,
             UNKNOWN_PART_SIZE,
             false,
-            options->checksum_algorithm,
-            false,
             options,
             copy_object,
             &s_s3_copy_object_vtable,
@@ -405,7 +403,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
-                meta_request->allocator, meta_request->initial_request_message, meta_request->checksum_algorithm);
+                meta_request->allocator, meta_request->initial_request_message, meta_request->checksum_config.checksum_algorithm);
 
             break;
         }
