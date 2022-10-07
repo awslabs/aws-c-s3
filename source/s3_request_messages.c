@@ -294,10 +294,12 @@ struct aws_http_message *aws_s3_upload_part_message_new(
             NULL) {
             goto error_clean_up;
         }
-        if (checksum_config->location == AWS_SCL_NONE && should_compute_content_md5) {
-            /* MD5 will be skiped if flexible checksum used */
-            if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
-                goto error_clean_up;
+        if (should_compute_content_md5) {
+            if (!checksum_config || checksum_config->location == AWS_SCL_NONE) {
+                /* MD5 will be skiped if flexible checksum used */
+                if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
+                    goto error_clean_up;
+                }
             }
         }
     } else {
