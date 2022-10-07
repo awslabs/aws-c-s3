@@ -676,6 +676,34 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
+    if (options->checksum_config) {
+        if (options->checksum_config->location == AWS_SCL_HEADER) {
+            /* TODO: support calculate checksum to add to header */
+            aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+            return NULL;
+        }
+
+        if (options->checksum_config->location != AWS_SCL_NONE &&
+            options->checksum_config->checksum_algorithm == AWS_SCA_NONE) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Cannot create meta s3 request; checksum algorithm must be set to calculate checksum.",
+                (void *)client);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+        if (options->checksum_config->checksum_algorithm != AWS_SCA_NONE &&
+            options->checksum_config->location == AWS_SCL_NONE) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Cannot create meta s3 request; checksum algorithm cannot be set if not calculate checksum from "
+                "client.",
+                (void *)client);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+    }
+
     struct aws_byte_cursor host_header_value;
 
     if (aws_http_headers_get(message_headers, g_host_header_name, &host_header_value)) {
