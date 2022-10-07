@@ -1368,7 +1368,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
 
-    out_results->algorithm = options->checksum_algorithm;
+    out_results->algorithm = options->validate_checksum_algorithm;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 

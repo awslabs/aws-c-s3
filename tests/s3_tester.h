@@ -144,6 +144,7 @@ struct aws_s3_tester_meta_request_options {
 
     bool validate_get_response_checksum;
     enum aws_s3_checksum_algorithm checksum_algorithm;
+    enum aws_s3_checksum_algorithm validate_checksum_algorithm;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;
