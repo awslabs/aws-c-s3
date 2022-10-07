@@ -87,6 +87,36 @@ const struct aws_byte_cursor g_s3_complete_multipart_upload_excluded_headers[] =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
 };
 
+/* The server-side encryption (SSE) is needed only when the object was created using a checksum algorithm for complete
+ * multipart upload.  */
+const struct aws_byte_cursor g_s3_complete_multipart_upload_excluded_with_checksum_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Disposition"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Language"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Expires"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-full-control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-write-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-storage-class"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-website-redirect-location"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
+};
+
 const size_t g_s3_complete_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers);
 
@@ -527,12 +557,22 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-        allocator,
-        base_message,
-        g_s3_complete_multipart_upload_excluded_headers,
-        AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+    struct aws_http_message *message = NULL;
+    if (algorithm == AWS_SCA_NONE) {
+        message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+            allocator,
+            base_message,
+            g_s3_complete_multipart_upload_excluded_headers,
+            AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
+            true /*exclude_x_amz_meta*/);
+    } else {
+        message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+            allocator,
+            base_message,
+            g_s3_complete_multipart_upload_excluded_with_checksum_headers,
+            AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_with_checksum_headers),
+            true /*exclude_x_amz_meta*/);
+    }
 
     struct aws_http_headers *headers = NULL;
 
