@@ -403,7 +403,9 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
-                meta_request->allocator, meta_request->initial_request_message, meta_request->checksum_config.checksum_algorithm);
+                meta_request->allocator,
+                meta_request->initial_request_message,
+                meta_request->checksum_config.checksum_algorithm);
 
             break;
         }
