@@ -79,7 +79,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
-    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
+    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         if (aws_http_headers_has(headers, *algorithm_header_name)) {
             struct aws_byte_cursor header_sum;
@@ -863,7 +863,7 @@ static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     const struct aws_http_header *headers,
     size_t headers_count) {
-    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
+    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         struct aws_byte_cursor header_sum;
         if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {

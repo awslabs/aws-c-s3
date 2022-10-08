@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 
 #include <aws/auth/credentials.h>
@@ -677,6 +678,23 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     }
 
     if (options->checksum_config) {
+        if (options->checksum_config->location == AWS_SCL_TRAILER) {
+            struct aws_http_headers *headers = aws_http_message_get_headers(options->message);
+            struct aws_byte_cursor existing_encoding;
+            AWS_ZERO_STRUCT(existing_encoding);
+            if (aws_http_headers_get(headers, g_content_encoding_header_name, &existing_encoding) == AWS_OP_SUCCESS) {
+                if (aws_byte_cursor_find_exact(&existing_encoding, &g_content_encoding_header_aws_chunked, NULL) ==
+                    AWS_OP_SUCCESS) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "id=%p Cannot create meta s3 request; for trailer checksum, the original request cannot be "
+                        "aws-chunked encoding. The client will encode the request instead.",
+                        (void *)client);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                }
+            }
+        }
+
         if (options->checksum_config->location == AWS_SCL_HEADER) {
             /* TODO: support calculate checksum to add to header */
             aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
@@ -922,6 +940,17 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                         !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                     options);
+            } else {
+                if (aws_s3_message_util_check_checksum_header(options->message)) {
+                    /* The checksum header has been set and the request will be splitted. We fail the request */
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "Could not create auto-ranged-put meta request; checksum headers has been set for "
+                        "auto-ranged-put that will be splitted. Pre-calculated checksum only supported for single part "
+                        "upload.");
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
             }
 
             uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;

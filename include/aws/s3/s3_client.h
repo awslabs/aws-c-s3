@@ -158,7 +158,7 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
-    AWS_SCA_COUNT,
+    AWS_SCA_END = AWS_SCA_SHA256,
 };
 
 enum aws_s3_checksum_location {
@@ -416,7 +416,13 @@ struct aws_s3_meta_request_result {
     /* Only set for GET request.
      * Was the server side checksum compared against a calculated checksum of the response body. This may be false
      * even if validate_get_response_checksum was set because the object was uploaded without a checksum, or was
-     * uploaded as a multipart object. */
+     * uploaded as a multipart object.
+     *
+     * If the object to get is multipart object, the part checksum MAY be validated if the part size to get matches the
+     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will failed with
+     * checksum mismatch. However, even if the parts checksum were validated, this will NOT be set to true, as the
+     * checksum for the whole meta request was NOT validated.
+     **/
     bool did_validate;
 
     /* algorithm used to validate checksum */

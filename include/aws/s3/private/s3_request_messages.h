@@ -54,6 +54,10 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     const struct aws_flexible_checksum_config *checksum_config,
     struct aws_byte_buf *out_checksum);
 
+/* Return true if checksum headers has been set. */
+AWS_S3_API
+bool aws_s3_message_util_check_checksum_header(struct aws_http_message *message);
+
 /* Create an HTTP request for an S3 Ranged Get Object Request, using the given request as a basis */
 AWS_S3_API
 struct aws_http_message *aws_s3_ranged_get_object_message_new(

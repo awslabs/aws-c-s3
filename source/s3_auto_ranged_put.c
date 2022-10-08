@@ -60,7 +60,6 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
             checksum_cur = &info->checksumSHA256;
             break;
         case AWS_SCA_NONE:
-        case AWS_SCA_COUNT:
             break;
         default:
             AWS_ASSERT(false);
@@ -1080,6 +1079,7 @@ static void s_s3_auto_ranged_put_request_finished(
                  * TODO: The body of the response can be ERROR, check Error specified in body part from
                  * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html#AmazonS3-CompleteMultipartUpload-response-CompleteMultipartUploadOutput
                  * We need to handle this case.
+                 * TODO: the checksum returned within the response of complete multipart upload need to be exposed?
                  */
 
                 /* Grab the ETag for the entire object, and set it as a header. */

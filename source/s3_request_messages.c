@@ -745,7 +745,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         if (checksum_config->location == AWS_SCL_TRAILER) {
             /* aws-chunked encode the payload and add related headers */
 
-            /* set Content-Encoding header */
+            /* set Content-Encoding header. TODO: the aws-chunked should be appended to the existing content encoding.
+             */
             if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
                 goto error_clean_up;
             }
@@ -800,6 +801,17 @@ error_clean_up:
     AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
     aws_input_stream_release(input_stream);
     return NULL;
+}
+
+bool aws_s3_message_util_check_checksum_header(struct aws_http_message *message) {
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
+        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
+        if (aws_http_headers_get(headers, *algorithm_header_name, NULL) == AWS_OP_SUCCESS) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Add a content-md5 header. */
