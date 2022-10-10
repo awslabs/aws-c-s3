@@ -807,7 +807,7 @@ bool aws_s3_message_util_check_checksum_header(struct aws_http_message *message)
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
-        if (aws_http_headers_get(headers, *algorithm_header_name, NULL) == AWS_OP_SUCCESS) {
+        if (aws_http_headers_has(headers, *algorithm_header_name)) {
             return true;
         }
     }
