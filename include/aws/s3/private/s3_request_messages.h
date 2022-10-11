@@ -176,8 +176,13 @@ extern const size_t g_s3_abort_multipart_upload_excluded_headers_count;
 AWS_S3_API
 extern const struct aws_byte_cursor g_s3_list_parts_excluded_headers[];
 
+AWS_S3_API extern const size_t g_s3_list_parts_excluded_headers_count;
+
 AWS_S3_API
-extern const size_t g_s3_list_parts_excluded_headers_count;
+extern const struct aws_byte_cursor g_s3_list_parts_with_checksum_excluded_headers[];
+
+AWS_S3_API
+extern const size_t g_s3_list_parts_with_checksum_excluded_headers_count;
 
 AWS_EXTERN_C_END
 
