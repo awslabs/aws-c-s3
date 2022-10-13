@@ -650,7 +650,7 @@ static void s_s3_meta_request_sign_request(
     void *user_data) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
-    AWS_PRECONDITION(meta_request->vtable->send_request_finish);
+    AWS_PRECONDITION(meta_request->vtable->sign_request);
 
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
