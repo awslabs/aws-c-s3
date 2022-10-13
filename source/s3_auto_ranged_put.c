@@ -714,7 +714,7 @@ static int s_s3_auto_ranged_put_prepare_request(
             }
             if (meta_request->checksum_config.checksum_algorithm == AWS_SCA_NONE) {
                 /* We don't need to worry about the pre-calculated checksum from user as for multipart upload, only way
-                 * to calculate checksum is from client. */
+                 * to calculate checksum for multipart upload is from client. */
                 aws_s3_message_util_copy_headers(
                     meta_request->initial_request_message,
                     message,
@@ -729,8 +729,6 @@ static int s_s3_auto_ranged_put_prepare_request(
                     g_s3_list_parts_with_checksum_excluded_headers_count,
                     true);
             }
-            /* We don't need to worry about the pre-calculated checksum from user as for multipart upload, only way to
-             * calculate checksum is from client. */
 
             break;
         }

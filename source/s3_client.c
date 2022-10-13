@@ -691,6 +691,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                         "aws-chunked encoding. The client will encode the request instead.",
                         (void *)client);
                     aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
                 }
             }
         }
@@ -946,8 +947,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "Could not create auto-ranged-put meta request; checksum headers has been set for "
-                        "auto-ranged-put that will be splitted. Pre-calculated checksum only supported for single part "
-                        "upload.");
+                        "auto-ranged-put that will be split. Pre-calculated checksums are only supported for single "
+                        "part upload.");
                     aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                     return NULL;
                 }
