@@ -198,6 +198,8 @@ struct aws_s3_meta_request_test_results {
     struct aws_http_headers *response_headers;
     uint64_t expected_range_start;
     uint64_t received_body_size;
+    /* an atomic for tests that want to check from the main thread whether data is still arriving */
+    struct aws_atomic_var received_body_size_delta;
     int finished_response_status;
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
@@ -215,6 +217,10 @@ int aws_s3_tester_bind_meta_request(
     struct aws_s3_tester *tester,
     struct aws_s3_meta_request_options *options,
     struct aws_s3_meta_request_test_results *test_meta_request);
+
+void aws_s3_meta_request_test_results_init(
+    struct aws_s3_meta_request_test_results *test_meta_request,
+    struct aws_allocator *allocator);
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request);
 

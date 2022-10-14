@@ -219,7 +219,38 @@ static bool s_s3_auto_ranged_get_update(
                 goto has_work_remaining;
             }
 
+            /* If there are still more parts to be requested */
             if (auto_ranged_get->synced_data.num_parts_requested < auto_ranged_get->synced_data.total_num_parts) {
+
+                if (meta_request->client->enable_read_backpressure) {
+                    /* Don't start a part until we have enough window to send bytes to the user.
+                     *
+                     * Note that we start a part once we have enough window to deliver ANY of its bytes.
+                     * If we waited until the window was large enough for the WHOLE part,
+                     * we could end up stuck in a situation where the user is
+                     * waiting for more bytes before they'll open the window,
+                     * and this implementation is waiting for more window before it will send more parts. */
+                    uint64_t read_data_requested =
+                        auto_ranged_get->synced_data.num_parts_requested * meta_request->part_size;
+                    if (read_data_requested >= meta_request->synced_data.read_window_running_total) {
+
+                        /* Avoid spamming users with this DEBUG message */
+                        if (auto_ranged_get->synced_data.read_window_warning_issued == 0) {
+                            auto_ranged_get->synced_data.read_window_warning_issued = 1;
+
+                            AWS_LOGF_DEBUG(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p: Download paused because read window is zero. "
+                                "You must increment to window to continue.",
+                                (void *)meta_request);
+                        }
+
+                        goto has_work_remaining;
+                    }
+
+                    auto_ranged_get->synced_data.read_window_warning_issued = 0;
+                }
+
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,

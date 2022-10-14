@@ -81,7 +81,8 @@ rm -rf awscliv2.zip
 
 pip3 install numpy
 
-INSTANCE_ID=`curl http://169.254.169.254/latest/meta-data/instance-id`
+TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id`
 aws ec2 monitor-instances --instance-ids $INSTANCE_ID
 
 sudo sysctl kernel.perf_event_paranoid=0

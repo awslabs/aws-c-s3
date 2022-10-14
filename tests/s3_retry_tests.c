@@ -50,7 +50,7 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
     patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_exceed_retries;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     /* Don't specify EXPECT SUCCESS flag for aws_s3_tester_send_get_object_meta_request to expect a failure. */
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
@@ -258,7 +258,7 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
     patched_client_vtable->meta_request_factory = s_s3_meta_request_factory_sign_request;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     struct aws_s3_tester_meta_request_options options = {
         .allocator = allocator,
@@ -440,7 +440,7 @@ static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allo
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_finished_request;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
-    AWS_ZERO_STRUCT(meta_request_test_results);
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     struct aws_s3_tester_meta_request_options options = {
         .allocator = allocator,

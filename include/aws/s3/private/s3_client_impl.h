@@ -260,6 +260,13 @@ struct aws_s3_client {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
 
+    /* Whether read backpressure (aka flow-control window) is being applied. */
+    const bool enable_read_backpressure;
+
+    /* The starting size of each meta request's flow-control window, in bytes.
+     * Ignored unless `enable_read_backpressure` is true. */
+    const size_t initial_read_window;
+
     struct {
         /* Number of overall requests currently being processed by the client. */
         struct aws_atomic_var num_requests_in_flight;
@@ -277,16 +284,18 @@ struct aws_s3_client {
     struct {
         struct aws_mutex lock;
 
-        /* Hash table of endpoints that are in-use by the client.*/
+        /* Hash table of endpoints that are in-use by the client.
+         * Key: aws_string of endpoint hostname. Value: aws_s3_endpoint */
         struct aws_hash_table endpoints;
 
         /* How many requests failed to be prepared. */
         uint32_t num_failed_prepare_requests;
 
-        /* Meta requests that need added in the work event loop. */
+        /* Meta requests that need added in the work event loop.
+         * List contains aws_s3_meta_request_work */
         struct aws_linked_list pending_meta_request_work;
 
-        /* Requests that are prepared and ready to be put in the threaded_data request queue. */
+        /* aws_s3_request that are prepared and ready to be put in the threaded_data request queue. */
         struct aws_linked_list prepared_requests;
 
         /* Task for processing requests from meta requests on connections. */
@@ -318,10 +327,10 @@ struct aws_s3_client {
     } synced_data;
 
     struct {
-        /* Queue of prepared requests that are waiting to be assigned to connections. */
+        /* Queue of prepared aws_s3_request that are waiting to be assigned to connections. */
         struct aws_linked_list request_queue;
 
-        /* Client list of on going meta requests. */
+        /* Client list of ongoing aws_s3_meta_requests. */
         struct aws_linked_list meta_requests;
 
         /* Number of requests in the request_queue linked_list. */

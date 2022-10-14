@@ -241,6 +241,7 @@ int aws_s3_meta_request_init_base(
         aws_s3_client_acquire(client);
         meta_request->client = client;
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        meta_request->synced_data.read_window_running_total = client->initial_read_window;
     }
 
     meta_request->synced_data.next_streaming_part = 1;
@@ -265,6 +266,37 @@ int aws_s3_meta_request_init_base(
     }
 
     return AWS_OP_SUCCESS;
+}
+
+void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, uint64_t bytes) {
+    AWS_PRECONDITION(meta_request);
+
+    if (bytes == 0) {
+        return;
+    }
+
+    if (!meta_request->client->enable_read_backpressure) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Ignoring call to increment read window. This client has not enabled read backpressure.",
+            (void *)meta_request);
+        return;
+    }
+
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Incrementing read window by %" PRIu64, (void *)meta_request, bytes);
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    /* Response will never approach UINT64_MAX, so do a saturating sum instead of worrying about overflow */
+    meta_request->synced_data.read_window_running_total =
+        aws_add_u64_saturating(bytes, meta_request->synced_data.read_window_running_total);
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    /* Schedule the work task, to continue processing the meta-request */
+    aws_s3_client_schedule_process_work(meta_request->client);
 }
 
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
@@ -618,7 +650,7 @@ static void s_s3_meta_request_sign_request(
     void *user_data) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
-    AWS_PRECONDITION(meta_request->vtable->send_request_finish);
+    AWS_PRECONDITION(meta_request->vtable->sign_request);
 
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
@@ -1276,7 +1308,7 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
         if (aws_s3_meta_request_has_finish_result(meta_request)) {
             ++num_failed;
         } else {
-            if (error_code == AWS_ERROR_SUCCESS && meta_request->body_callback &&
+            if (body_buffer_byte_cursor.len > 0 && error_code == AWS_ERROR_SUCCESS && meta_request->body_callback &&
                 meta_request->body_callback(
                     meta_request, &body_buffer_byte_cursor, request->part_range_start, meta_request->user_data)) {
                 error_code = aws_last_error_or_unknown();
