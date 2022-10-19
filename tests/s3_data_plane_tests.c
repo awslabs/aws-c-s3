@@ -4921,7 +4921,7 @@ static int s_test_s3_put_pause_resume_helper(
     aws_mutex_init(&test_data->mutex);
     test_data->execution_completed = false;
 
-    struct aws_flexible_checksum_config checksum_config = {
+    struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = checksum_algorithm,
         .location = checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
     };

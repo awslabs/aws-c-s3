@@ -190,7 +190,7 @@ struct aws_s3_meta_request {
 
     const bool should_compute_content_md5;
 
-    struct aws_flexible_checksum_config checksum_config;
+    struct aws_s3_checksum_config checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a mutlipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;

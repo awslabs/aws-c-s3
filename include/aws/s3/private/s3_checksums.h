@@ -6,8 +6,8 @@
  */
 #include "aws/s3/s3_client.h"
 
-/* TODO: consider moving the flexible checksum feature to sdkutils. */
-/* TODO: consistence between naming, aws_s3_checksum* vs aws_checksum* -> aws_flexible_checksum* ?. */
+/* TODO: consider moving the aws_checksum_stream to aws-c-checksum, and the rest about checksum headers and trailer to
+ * aws-c-sdkutil. */
 
 struct aws_s3_checksum;
 
