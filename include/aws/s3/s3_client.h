@@ -222,8 +222,7 @@ struct aws_s3_client_config {
     struct aws_retry_strategy *retry_strategy;
 
     /**
-     * Not recommended. MD5 is expensive.
-     *
+     * TODO: move MD5 config to checksum config.
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
      * For single-part upload, keep the content-md5 in the initial request unchanged. */
@@ -291,7 +290,7 @@ struct aws_s3_client_config {
     size_t initial_read_window;
 };
 
-struct aws_flexible_checksum_config {
+struct aws_s3_checksum_config {
 
     /**
      * The location of client added checksum header.
@@ -339,7 +338,7 @@ struct aws_s3_meta_request_options {
      * Optional.
      * if set, the flexible checksum will be performed by client based on the config.
      */
-    const struct aws_flexible_checksum_config *checksum_config;
+    const struct aws_s3_checksum_config *checksum_config;
 
     /* User data for all callbacks. */
     void *user_data;

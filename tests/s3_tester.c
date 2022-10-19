@@ -1193,7 +1193,7 @@ int aws_s3_tester_send_meta_request_with_options(
         aws_s3_client_acquire(client);
     }
 
-    struct aws_flexible_checksum_config checksum_config = {
+    struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = options->checksum_algorithm,
         .validate_response_checksum = options->validate_get_response_checksum,
         .location = options->checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
