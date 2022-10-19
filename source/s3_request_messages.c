@@ -328,7 +328,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    const struct aws_s3_checksum_config *checksum_config,
+    const struct aws_s3_checksum_config_storage *checksum_config,
     struct aws_byte_buf *encoded_checksum_output) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
@@ -755,7 +755,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
-    const struct aws_s3_checksum_config *checksum_config,
+    const struct aws_s3_checksum_config_storage *checksum_config,
     struct aws_byte_buf *out_checksum) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);

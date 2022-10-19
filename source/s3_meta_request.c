@@ -151,9 +151,6 @@ static void s_meta_request_get_response_finish_checksum_callback(
         if (!aws_byte_buf_eq(&encoded_response_body_sum, &meta_request->meta_request_level_response_header_checksum)) {
             mut_meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
         }
-    } else {
-        mut_meta_request_result->did_validate = false;
-        mut_meta_request_result->validation_algorithm = AWS_SCA_NONE;
     }
     if (meta_request->finish_user_callback_after_checksum) {
         meta_request->finish_user_callback_after_checksum(meta_request, meta_request_result, user_data);
@@ -200,9 +197,7 @@ int aws_s3_meta_request_init_base(
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
-    if (options->checksum_config) {
-        meta_request->checksum_config = *options->checksum_config;
-    }
+    aws_s3_checksum_config_storage_init(&meta_request->checksum_config, options->checksum_config);
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
@@ -863,6 +858,7 @@ static bool s_header_value_from_list(
 
 static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
+    struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
     size_t headers_count) {
     for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
@@ -899,28 +895,29 @@ static void s_get_response_part_finish_checksum_helper(struct aws_s3_connection 
     struct aws_byte_buf encoded_response_body_sum;
     AWS_ZERO_STRUCT(response_body_sum);
     AWS_ZERO_STRUCT(encoded_response_body_sum);
-    if (error_code == AWS_OP_SUCCESS && connection->request->request_level_running_response_sum) {
+
+    struct aws_s3_request *request = connection->request;
+    if (error_code == AWS_OP_SUCCESS && request->request_level_running_response_sum) {
         size_t encoded_checksum_len = 0;
-        connection->request->did_validate = true;
-        aws_base64_compute_encoded_len(
-            connection->request->request_level_running_response_sum->digest_size, &encoded_checksum_len);
+        request->did_validate = true;
+        aws_base64_compute_encoded_len(request->request_level_running_response_sum->digest_size, &encoded_checksum_len);
         aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
         aws_byte_buf_init(
-            &response_body_sum,
-            aws_default_allocator(),
-            connection->request->request_level_running_response_sum->digest_size);
-        aws_checksum_finalize(connection->request->request_level_running_response_sum, &response_body_sum, 0);
+            &response_body_sum, aws_default_allocator(), request->request_level_running_response_sum->digest_size);
+        aws_checksum_finalize(request->request_level_running_response_sum, &response_body_sum, 0);
         struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
         aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
-        connection->request->checksum_match =
-            aws_byte_buf_eq(&encoded_response_body_sum, &connection->request->request_level_response_header_checksum);
+        request->checksum_match =
+            aws_byte_buf_eq(&encoded_response_body_sum, &request->request_level_response_header_checksum);
+
+        request->validation_algorithm = request->request_level_running_response_sum->algorithm;
         aws_byte_buf_clean_up(&response_body_sum);
         aws_byte_buf_clean_up(&encoded_response_body_sum);
-        aws_checksum_destroy(connection->request->request_level_running_response_sum);
-        aws_byte_buf_clean_up(&connection->request->request_level_response_header_checksum);
-        connection->request->request_level_running_response_sum = NULL;
+        aws_checksum_destroy(request->request_level_running_response_sum);
+        aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
+        request->request_level_running_response_sum = NULL;
     } else {
-        connection->request->did_validate = false;
+        request->did_validate = false;
     }
 }
 
@@ -962,11 +959,12 @@ static int s_s3_meta_request_incoming_headers(
     bool successful_response =
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
 
-    if (successful_response && connection->request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
-        s_get_part_response_headers_checksum_helper(connection, headers, headers_count);
+    if (successful_response && meta_request->checksum_config.validate_response_checksum &&
+        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
+        s_get_part_response_headers_checksum_helper(connection, meta_request, headers, headers_count);
     }
 
-    /* Only record headers if an error has taken place, or if the reqest_desc has asked for them. */
+    /* Only record headers if an error has taken place, or if the request_desc has asked for them. */
     bool should_record_headers = !successful_response || request->record_response_headers;
 
     if (should_record_headers) {
@@ -1013,8 +1011,8 @@ static int s_s3_meta_request_incoming_body(
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
     }
 
-    if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-        s_get_part_response_body_checksum_helper(connection->request->request_level_running_response_sum, data);
+    if (meta_request->checksum_config.validate_response_checksum) {
+        s_get_part_response_body_checksum_helper(request->request_level_running_response_sum, data);
     }
 
     if (request->send_data.response_body.capacity == 0) {
@@ -1048,7 +1046,7 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
-    if (connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+    if (connection->request->meta_request->checksum_config.validate_response_checksum) {
         s_get_response_part_finish_checksum_helper(connection, error_code);
     }
     s_s3_meta_request_send_request_finish(connection, stream, error_code);

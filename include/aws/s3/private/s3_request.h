@@ -63,6 +63,8 @@ struct aws_s3_request {
 
     /* running checksum of the respone to an individual get part http request */
     struct aws_s3_checksum *request_level_running_response_sum;
+    /* The algorithm used to validate the checksum */
+    uint32_t validation_algorithm;
 
     /* Get request only, was there a checksum to validate */
     bool did_validate;

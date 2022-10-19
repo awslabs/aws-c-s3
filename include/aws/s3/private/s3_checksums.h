@@ -26,6 +26,18 @@ struct aws_s3_checksum {
     bool good;
 };
 
+struct aws_s3_checksum_config_storage {
+    enum aws_s3_checksum_location location;
+    enum aws_s3_checksum_algorithm checksum_algorithm;
+    bool validate_response_checksum;
+    struct {
+        bool crc32c;
+        bool crc32;
+        bool sha1;
+        bool sha256;
+    } response_checksum_algorithms;
+};
+
 /**
  * a stream that takes in a stream, computes a running checksum as it is read, and outputs the checksum when the stream
  * is destroyed.
@@ -128,4 +140,10 @@ int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_
  */
 AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
-#endif
+
+AWS_S3_API
+void aws_s3_checksum_config_storage_init(
+    struct aws_s3_checksum_config_storage *config_storage,
+    const struct aws_s3_checksum_config *config);
+
+#endif /* AWS_S3_CHECKSUMS_H */

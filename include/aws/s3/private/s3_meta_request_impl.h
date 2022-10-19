@@ -14,6 +14,7 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/request_response.h>
 
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_request.h"
 
@@ -190,7 +191,8 @@ struct aws_s3_meta_request {
 
     const bool should_compute_content_md5;
 
-    struct aws_s3_checksum_config checksum_config;
+    /* deep copy of the checksum config. */
+    struct aws_s3_checksum_config_storage checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a mutlipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
