@@ -73,13 +73,15 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
 }
 
 static int s_meta_request_get_response_headers_checksum_callback(
-    /* TODO take in a priority list of checksum algorithms, and use this list to determine which checksum algorithm to
-       validate */
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
     for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
+        if (!aws_s3_meta_request_check_response_checksum_algorithm(meta_request, i)) {
+            /* If user doesn't select this algorithm, skip */
+            continue;
+        }
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         if (aws_http_headers_has(headers, *algorithm_header_name)) {
             struct aws_byte_cursor header_sum;
@@ -864,6 +866,10 @@ static void s_get_part_response_headers_checksum_helper(
     const struct aws_http_header *headers,
     size_t headers_count) {
     for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
+        if (!aws_s3_meta_request_check_response_checksum_algorithm(meta_request, i)) {
+            /* If user doesn't select this algorithm, skip */
+            continue;
+        }
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         struct aws_byte_cursor header_sum;
         if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {
@@ -956,8 +962,7 @@ static int s_s3_meta_request_incoming_headers(
     bool successful_response =
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
 
-    if (successful_response && connection->request->meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
-        connection->request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
+    if (successful_response && connection->request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
         s_get_part_response_headers_checksum_helper(connection, headers, headers_count);
     }
 
@@ -1519,4 +1524,23 @@ void aws_s3_meta_request_result_clean_up(
     }
 
     AWS_ZERO_STRUCT(*result);
+}
+
+bool aws_s3_meta_request_check_response_checksum_algorithm(
+    struct aws_s3_meta_request *meta_request,
+    enum aws_s3_checksum_algorithm algorithm) {
+    AWS_PRECONDITION(meta_request);
+
+    switch (algorithm) {
+        case AWS_SCA_CRC32C:
+            return meta_request->checksum_config.response_checksum_algorithms.crc32c;
+        case AWS_SCA_CRC32:
+            return meta_request->checksum_config.response_checksum_algorithms.crc32;
+        case AWS_SCA_SHA1:
+            return meta_request->checksum_config.response_checksum_algorithms.sha1;
+        case AWS_SCA_SHA256:
+            return meta_request->checksum_config.response_checksum_algorithms.sha256;
+        default:
+            return false;
+    }
 }

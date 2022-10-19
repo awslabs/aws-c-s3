@@ -319,6 +319,25 @@ struct aws_flexible_checksum_config {
      * checksum, and checksum found in the response header do not match.
      */
     bool validate_response_checksum;
+
+    /**
+     * Optional. Ignored when validate_response_checksum is not set.
+     *
+     * If validate_response_checksum was set, and all the algorithms are not selected, all the algorithms will be
+     * selected as default behavior.
+     *
+     * The list of algorithms for user to pick up when validate the checksum. Set all the supported algorithms to be
+     * true and client will pick up the algorithm with the priority based on performance, and the algorithm sent by
+     * server. The priority based on performance is [CRC32C, CRC32, SHA1, SHA256].
+     *
+     * If the response checksum was validated by client, the result will indicate which algorithm was picked.
+     */
+    struct {
+        bool crc32c;
+        bool crc32;
+        bool sha1;
+        bool sha256;
+    } response_checksum_algorithms;
 };
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */

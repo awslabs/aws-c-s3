@@ -334,6 +334,11 @@ void aws_s3_meta_request_result_clean_up(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_result *result);
 
+AWS_S3_API
+bool aws_s3_meta_request_check_response_checksum_algorithm(
+    struct aws_s3_meta_request *meta_request,
+    enum aws_s3_checksum_algorithm algorithm);
+
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_META_REQUEST_IMPL_H */
