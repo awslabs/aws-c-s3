@@ -90,18 +90,8 @@ static void s_s3_request_destroy(void *user_data) {
         return;
     }
 
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-
-    if (meta_request != NULL) {
-        struct aws_s3_client *client = meta_request->client;
-
-        if (client != NULL) {
-            aws_s3_client_notify_request_destroyed(client, request);
-        }
-    }
-
     aws_s3_request_clean_up_send_data(request);
     aws_byte_buf_clean_up(&request->request_body);
+    aws_s3_meta_request_release(request->meta_request);
     aws_mem_release(request->allocator, request);
-    aws_s3_meta_request_release(meta_request);
 }
