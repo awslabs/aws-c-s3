@@ -60,6 +60,8 @@ struct aws_input_stream *aws_checksum_stream_new(
     struct aws_byte_buf *checksum_output);
 
 /**
+ * TODO: properly support chunked encoding.
+ *
  * A stream that takes in a stream, encodes it to aws_chunked. Computes a running checksum as it is read and add the
  * checksum as trailer at the end of the stream. All of the added bytes will be counted to the length of the stream.
  * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the

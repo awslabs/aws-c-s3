@@ -2640,7 +2640,7 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .validate_checksum_algorithm = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
         .validate_get_response_checksum = true,
         .get_options =
             {
@@ -2701,7 +2701,7 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
         .validate_get_response_checksum = true,
-        .validate_checksum_algorithm = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
         .get_options =
             {
                 .object_path = object_path,
@@ -2718,6 +2718,8 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
     return 0;
 }
 
+/* Test the multipart uploaded object was downloaded with same part size, which will download the object matches all the
+ * parts and validate the parts checksum. */
 AWS_TEST_CASE(test_s3_round_trip_mpu_multipart_get_fc, s_test_s3_round_trip_mpu_multipart_get_fc)
 static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -2731,7 +2733,6 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* should we generate a unique path each time? */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt");
 
     struct aws_s3_tester_meta_request_options put_options = {
@@ -2756,7 +2757,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .validate_checksum_algorithm = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
         .validate_get_response_checksum = true,
         .get_options =
             {
@@ -2769,6 +2770,81 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc,
+    s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc)
+static int s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** GET FILE ***/
+
+    struct aws_array_list response_checksum_list;
+    /* Check for all algorithm but the CRC32 */
+    ASSERT_SUCCESS(
+        aws_array_list_init_dynamic(&response_checksum_list, allocator, 4, sizeof(enum aws_s3_checksum_algorithm)));
+    enum aws_s3_checksum_algorithm alg = AWS_SCA_CRC32C;
+    ASSERT_SUCCESS(aws_array_list_push_back(&response_checksum_list, &alg));
+    alg = AWS_SCA_SHA1;
+    ASSERT_SUCCESS(aws_array_list_push_back(&response_checksum_list, &alg));
+    alg = AWS_SCA_SHA256;
+    ASSERT_SUCCESS(aws_array_list_push_back(&response_checksum_list, &alg));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .validate_checksum_algorithms = &response_checksum_list,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .finish_callback = s_s3_test_no_validate_checksum,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    /* Push all the algorithms to the list for validation, now we should have the checksum validated. */
+    alg = AWS_SCA_CRC32;
+    ASSERT_SUCCESS(aws_array_list_push_back(&response_checksum_list, &alg));
+    get_options.finish_callback = s_s3_test_validate_checksum;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    aws_array_list_clean_up(&response_checksum_list);
 
     return 0;
 }
@@ -2811,7 +2887,7 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .validate_checksum_algorithm = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
         .validate_get_response_checksum = true,
         .get_options =
             {
