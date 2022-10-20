@@ -2586,8 +2586,10 @@ void s_s3_test_validate_checksum(
     const struct aws_s3_meta_request_result *result,
     void *user_data) {
     (void)meta_request;
-    (void)user_data;
+    struct aws_s3_meta_request_test_results *meta_request_test_results =
+        (struct aws_s3_meta_request_test_results *)user_data;
     AWS_FATAL_ASSERT(result->did_validate);
+    AWS_FATAL_ASSERT(result->validation_algorithm == meta_request_test_results->algorithm);
     AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
 }
 void s_s3_test_no_validate_checksum(
@@ -2761,7 +2763,6 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
                 .object_path = object_path,
             },
         .finish_callback = s_s3_test_validate_checksum,
-        .headers_callback = s_s3_validate_headers_checksum_set,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
