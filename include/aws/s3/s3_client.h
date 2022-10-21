@@ -320,10 +320,11 @@ struct aws_s3_checksum_config {
     bool validate_response_checksum;
 
     /**
-     * Optional array of enum aws_s3_checksum_algorithm.
+     * Optional array of `enum aws_s3_checksum_algorithm`.
      *
      * Ignored when validate_response_checksum is not set.
      * If not set all the algorithms will be selected as default behavior.
+     * Owned by the caller.
      *
      * The list of algorithms for user to pick up when validate the checksum. Client will pick up the algorithm from the
      * list with the priority based on performance, and the algorithm sent by server. The priority based on performance

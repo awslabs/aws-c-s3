@@ -269,9 +269,7 @@ int aws_checksum_compute(
     }
 }
 
-void aws_s3_checksum_config_storage_init(
-    struct aws_s3_checksum_config_storage *config_storage,
-    const struct aws_s3_checksum_config *config) {
+void checksum_config_init(struct checksum_config *config_storage, const struct aws_s3_checksum_config *config) {
     AWS_ZERO_STRUCT(*config_storage);
     if (!config) {
         return;

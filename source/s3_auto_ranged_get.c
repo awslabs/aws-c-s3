@@ -639,6 +639,7 @@ update_synced_data:
 
                 if (!request_failed) {
 
+                    /* Record the number of parts that checksum has been validated */
                     if (request->did_validate) {
                         if (auto_ranged_get->validation_algorithm == AWS_SCA_NONE) {
                             auto_ranged_get->validation_algorithm = request->validation_algorithm;

@@ -17,7 +17,7 @@ struct aws_byte_buf;
 struct aws_byte_cursor;
 struct aws_string;
 struct aws_array_list;
-struct aws_s3_checksum_config_storage;
+struct checksum_config;
 
 AWS_EXTERN_C_BEGIN
 
@@ -52,7 +52,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
-    const struct aws_s3_checksum_config_storage *checksum_config,
+    const struct checksum_config *checksum_config,
     struct aws_byte_buf *out_checksum);
 
 /* Return true if checksum headers has been set. */
@@ -93,7 +93,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    const struct aws_s3_checksum_config_storage *checksum_config,
+    const struct checksum_config *checksum_config,
     struct aws_byte_buf *encoded_checksum_output);
 
 /* Create an HTTP request for an S3 UploadPartCopy request, using the original request as a basis.

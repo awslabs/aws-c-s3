@@ -11,6 +11,8 @@
 #include <aws/common/ref_count.h>
 #include <aws/s3/s3.h>
 
+#include <aws/s3/private/s3_checksums.h>
+
 struct aws_http_message;
 struct aws_signable;
 struct aws_s3_meta_request;
@@ -64,7 +66,7 @@ struct aws_s3_request {
     /* running checksum of the respone to an individual get part http request */
     struct aws_s3_checksum *request_level_running_response_sum;
     /* The algorithm used to validate the checksum */
-    uint32_t validation_algorithm;
+    enum aws_s3_checksum_algorithm validation_algorithm;
 
     /* Get request only, was there a checksum to validate */
     bool did_validate;

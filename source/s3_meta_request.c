@@ -78,7 +78,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
     int response_status,
     void *user_data) {
     for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
-        if (!aws_s3_meta_request_check_response_checksum_algorithm(meta_request, i)) {
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
             /* If user doesn't select this algorithm, skip */
             continue;
         }
@@ -197,7 +197,7 @@ int aws_s3_meta_request_init_base(
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
-    aws_s3_checksum_config_storage_init(&meta_request->checksum_config, options->checksum_config);
+    checksum_config_init(&meta_request->checksum_config, options->checksum_config);
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
@@ -862,7 +862,7 @@ static void s_get_part_response_headers_checksum_helper(
     const struct aws_http_header *headers,
     size_t headers_count) {
     for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
-        if (!aws_s3_meta_request_check_response_checksum_algorithm(meta_request, i)) {
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
             /* If user doesn't select this algorithm, skip */
             continue;
         }
@@ -1524,7 +1524,7 @@ void aws_s3_meta_request_result_clean_up(
     AWS_ZERO_STRUCT(*result);
 }
 
-bool aws_s3_meta_request_check_response_checksum_algorithm(
+bool aws_s3_meta_request_checksum_config_has_algorithm(
     struct aws_s3_meta_request *meta_request,
     enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(meta_request);
