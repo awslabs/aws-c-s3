@@ -1521,6 +1521,10 @@ static int s_test_s3_get_object_backpressure_helper(
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
 
+    /* Regression test:
+     * Ensure that it's safe to call increment-window even after the meta-request has finished */
+    aws_s3_meta_request_increment_read_window(meta_request, 1024);
+
     aws_s3_meta_request_release(meta_request);
     meta_request = NULL;
 

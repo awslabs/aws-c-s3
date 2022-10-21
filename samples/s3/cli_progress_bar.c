@@ -45,8 +45,7 @@ struct progress_listener_group *progress_listener_group_new(struct aws_allocator
     aws_mutex_init(&group->mutex);
     group->render_sink = stdout;
     aws_array_list_init_dynamic(&group->listeners, allocator, 16, sizeof(struct progress_listener *));
-    struct aws_thread_options options;
-    AWS_ZERO_STRUCT(options);
+    struct aws_thread_options options = *aws_default_thread_options();
 
     group->scheduler = aws_thread_scheduler_new(allocator, &options);
     return group;
