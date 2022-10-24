@@ -144,6 +144,6 @@ AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
 
 AWS_S3_API
-void checksum_config_init(struct checksum_config *config_storage, const struct aws_s3_checksum_config *config);
+void checksum_config_init(struct checksum_config *config, const struct aws_s3_checksum_config *config);
 
 #endif /* AWS_S3_CHECKSUMS_H */

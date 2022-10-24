@@ -269,14 +269,14 @@ int aws_checksum_compute(
     }
 }
 
-void checksum_config_init(struct checksum_config *config_storage, const struct aws_s3_checksum_config *config) {
-    AWS_ZERO_STRUCT(*config_storage);
+void checksum_config_init(struct checksum_config *config, const struct aws_s3_checksum_config *config) {
+    AWS_ZERO_STRUCT(*config);
     if (!config) {
         return;
     }
-    config_storage->checksum_algorithm = config->checksum_algorithm;
-    config_storage->location = config->location;
-    config_storage->validate_response_checksum = config->validate_response_checksum;
+    config->checksum_algorithm = config->checksum_algorithm;
+    config->location = config->location;
+    config->validate_response_checksum = config->validate_response_checksum;
 
     if (config->validate_checksum_algorithms) {
         const size_t count = aws_array_list_length(config->validate_checksum_algorithms);
@@ -285,26 +285,26 @@ void checksum_config_init(struct checksum_config *config_storage, const struct a
             aws_array_list_get_at(config->validate_checksum_algorithms, &algorithm, i);
             switch (algorithm) {
                 case AWS_SCA_CRC32C:
-                    config_storage->response_checksum_algorithms.crc32c = true;
+                    config->response_checksum_algorithms.crc32c = true;
                     break;
                 case AWS_SCA_CRC32:
-                    config_storage->response_checksum_algorithms.crc32 = true;
+                    config->response_checksum_algorithms.crc32 = true;
                     break;
                 case AWS_SCA_SHA1:
-                    config_storage->response_checksum_algorithms.sha1 = true;
+                    config->response_checksum_algorithms.sha1 = true;
                     break;
                 case AWS_SCA_SHA256:
-                    config_storage->response_checksum_algorithms.sha256 = true;
+                    config->response_checksum_algorithms.sha256 = true;
                     break;
                 default:
                     break;
             }
         }
 
-    } else if (config_storage->validate_response_checksum) {
-        config_storage->response_checksum_algorithms.crc32 = true;
-        config_storage->response_checksum_algorithms.crc32c = true;
-        config_storage->response_checksum_algorithms.sha1 = true;
-        config_storage->response_checksum_algorithms.sha256 = true;
+    } else if (config->validate_response_checksum) {
+        config->response_checksum_algorithms.crc32 = true;
+        config->response_checksum_algorithms.crc32c = true;
+        config->response_checksum_algorithms.sha1 = true;
+        config->response_checksum_algorithms.sha256 = true;
     }
 }
