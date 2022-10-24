@@ -1407,7 +1407,7 @@ static int s_apply_backpressure_until_meta_request_finish(
      * If the magic number is too high the test will be slow,
      * if it's too low the test will fail on slow networks */
     const uint64_t wait_duration_with_nothing_happening =
-        aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+        aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
 
     uint64_t accumulated_window_increments = window_initial_size;
     uint64_t accumulated_data_size = 0;
@@ -1520,6 +1520,10 @@ static int s_test_s3_get_object_backpressure_helper(
     aws_s3_tester_unlock_synced_data(&tester);
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+
+    /* Regression test:
+     * Ensure that it's safe to call increment-window even after the meta-request has finished */
+    aws_s3_meta_request_increment_read_window(meta_request, 1024);
 
     aws_s3_meta_request_release(meta_request);
     meta_request = NULL;
