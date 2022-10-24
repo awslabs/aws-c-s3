@@ -271,7 +271,7 @@ int aws_checksum_compute(
 
 void checksum_config_init(struct checksum_config *internal_config, const struct aws_s3_checksum_config *config) {
     AWS_ZERO_STRUCT(*internal_config);
-    if (!internal_config) {
+    if (!config) {
         return;
     }
     internal_config->checksum_algorithm = config->checksum_algorithm;
