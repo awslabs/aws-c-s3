@@ -72,20 +72,6 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-static bool s_is_get_request(const struct aws_s3_meta_request_options *options) {
-    if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-        return true;
-    }
-    if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-        struct aws_byte_cursor method;
-        int err = aws_http_message_get_request_method(options->message, &method);
-        AWS_ASSERT(err == AWS_OP_SUCCESS);
-        (void)err;
-        return aws_byte_cursor_eq(&method, &aws_http_method_get);
-    }
-    return false;
-}
-
 static int s_meta_request_get_response_headers_checksum_callback(
     /* TODO take in a priority list of checksum algorithms, and use this list to determine which checksum algorithm to
        validate */
@@ -93,7 +79,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
     const struct aws_http_headers *headers,
     int response_status,
     void *user_data) {
-    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
+    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         if (aws_http_headers_has(headers, *algorithm_header_name)) {
             struct aws_byte_cursor header_sum;
@@ -101,6 +87,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
             size_t encoded_len = 0;
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
             if (header_sum.len == encoded_len - 1) {
+                /* encoded_len includes the nullptr length. -1 is the expected length. */
                 aws_byte_buf_init_copy_from_cursor(
                     &meta_request->meta_request_level_response_header_checksum, aws_default_allocator(), header_sum);
                 meta_request->meta_request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
@@ -124,6 +111,7 @@ static int s_meta_request_get_response_body_checksum_callback(
     if (meta_request->meta_request_level_running_response_sum) {
         aws_checksum_update(meta_request->meta_request_level_running_response_sum, body);
     }
+
     if (meta_request->body_user_callback_after_checksum) {
         return meta_request->body_user_callback_after_checksum(meta_request, body, range_start, user_data);
     } else {
@@ -179,8 +167,6 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
-    const enum aws_s3_checksum_algorithm checksum_algorithm,
-    bool validate_get_response_checksum,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -212,9 +198,9 @@ int aws_s3_meta_request_init_base(
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
-    *((enum aws_s3_checksum_algorithm *)&meta_request->checksum_algorithm) = checksum_algorithm;
-    *((bool *)&meta_request->validate_get_response_checksum) = validate_get_response_checksum;
-
+    if (options->checksum_config) {
+        meta_request->checksum_config = *options->checksum_config;
+    }
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
@@ -251,7 +237,8 @@ int aws_s3_meta_request_init_base(
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
 
-    if (s_is_get_request(options)) {
+    if (meta_request->checksum_config.validate_response_checksum) {
+        /* TODO: the validate for auto range get should happen for each response received. */
         meta_request->headers_user_callback_after_checksum = options->headers_callback;
         meta_request->body_user_callback_after_checksum = options->body_callback;
         meta_request->finish_user_callback_after_checksum = options->finish_callback;
@@ -655,15 +642,6 @@ static void s_s3_meta_request_sign_request(
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
 
-static bool s_is_put_request(const struct aws_s3_meta_request *meta_request) {
-    struct aws_byte_cursor method;
-    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
-        !aws_http_message_get_request_method(meta_request->initial_request_message, &method)) {
-        return aws_byte_cursor_eq(&method, &aws_http_method_put);
-    }
-    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
-}
-
 /* Handles signing a message for the caller. */
 void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
@@ -717,9 +695,9 @@ void aws_s3_meta_request_sign_request_default(
         return;
     }
 
-    /* if a checksum algorithm is set for a put request the request will be chunked and we need to change the signed
-     * body value to match this type of request*/
-    if (meta_request->checksum_algorithm != AWS_SCA_NONE && s_is_put_request(meta_request) &&
+    /* If the checksum is configured to be added to the trailer, the payload will be aws-chunked encoded. The payload
+     * will need to be streaming signed/unsigned. */
+    if (meta_request->checksum_config.location == AWS_SCL_TRAILER &&
         aws_byte_cursor_eq(&signing_config.signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
         signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
     }
@@ -885,7 +863,7 @@ static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     const struct aws_http_header *headers,
     size_t headers_count) {
-    for (int i = AWS_SCA_INIT; i < AWS_SCA_COUNT; i++) {
+    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         struct aws_byte_cursor header_sum;
         if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {

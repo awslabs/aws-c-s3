@@ -190,9 +190,7 @@ struct aws_s3_meta_request {
 
     const bool should_compute_content_md5;
 
-    const enum aws_s3_checksum_algorithm checksum_algorithm;
-
-    bool validate_get_response_checksum;
+    struct aws_s3_checksum_config checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a mutlipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
@@ -210,8 +208,6 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
-    const enum aws_s3_checksum_algorithm checksum_algorithm,
-    bool validate_get_response_checksum,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,

@@ -158,7 +158,13 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
-    AWS_SCA_COUNT,
+    AWS_SCA_END = AWS_SCA_SHA256,
+};
+
+enum aws_s3_checksum_location {
+    AWS_SCL_NONE = 0,
+    AWS_SCL_HEADER,
+    AWS_SCL_TRAILER,
 };
 
 /* Keepalive properties are TCP only.
@@ -216,6 +222,7 @@ struct aws_s3_client_config {
     struct aws_retry_strategy *retry_strategy;
 
     /**
+     * TODO: move MD5 config to checksum config.
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
      * For single-part upload, keep the content-md5 in the initial request unchanged. */
@@ -283,44 +290,55 @@ struct aws_s3_client_config {
     size_t initial_read_window;
 };
 
+struct aws_s3_checksum_config {
+
+    /**
+     * The location of client added checksum header.
+     *
+     * If AWS_SCL_NONE. No request payload checksum will be add and calculated.
+     *
+     * If AWS_SCL_HEADER, the checksum will be calculated by client and added related header to the request sent.
+     *
+     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The checksum will be calculate while reading the
+     * payload by client. Related header will be added to the trailer part of the encoded payload. Note the payload of
+     * the original request cannot be aws-chunked encoded already. Otherwise, error will be raised.
+     */
+    enum aws_s3_checksum_location location;
+
+    /**
+     * The checksum algorithm used.
+     * Must be set if location is not AWS_SCL_NONE. Must be AWS_SCA_NONE if location is AWS_SCL_NONE.
+     */
+    enum aws_s3_checksum_algorithm checksum_algorithm;
+
+    /**
+     * Enable checksum mode header will be attached to get requests, this will tell s3 to send back checksums headers if
+     * they exist. Calculate the corresponding checksum on the response bodies. The meta request will finish with a did
+     * validate field and set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
+     * checksum, and checksum found in the response header do not match.
+     */
+    bool validate_response_checksum;
+};
+
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
 struct aws_s3_meta_request_options {
+    /* TODO: The meta request options cannot control the request to be split or not. Should consider to add one */
 
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 
     /* Signing options to be used for each request created for this meta request.  If NULL, options in the client will
      * be used. If not NULL, these options will override the client options. */
-    struct aws_signing_config_aws *signing_config;
+    const struct aws_signing_config_aws *signing_config;
 
     /* Initial HTTP message that defines what operation we are doing. */
     struct aws_http_message *message;
 
     /**
-     * checksum algorithm will cause single part put requests to append a trailing checksum of the body corresponding to
-     * the specified algorithm. Multipart uploads will have a checksum uploaded corresponding to each individual part,
-     * and the body of the complete multipart upload request will contain a list of the checksums from erach part.
-     * Get requests will be unaffected by this setting. Copy object requests will have a header specifying to s3 to
-     * calculate a new checksum with the corresponding algorithm.
-     * Note: If set, it will disable compute_content_md5
+     * Optional.
+     * if set, the flexible checksum will be performed by client based on the config.
      */
-    /* TODO add functionality for copy object */
-    enum aws_s3_checksum_algorithm checksum_algorithm;
-
-    /**
-     * Enable checksumode header will be attached to get requests, this will tell s3 to send back checksums headers if
-     * they exist.
-     *
-     * - If the object to get was uploaded as a single part upload with checksums, s3 will provide a checksum of the
-     * entire object. The checksum of the entire body received will be calculated and compared to the checksum provided
-     * by s3.
-     * - If a checksum of a part object is received, the client will
-     * calculate the corresponding checksum on the response bodies. The metarequest will finish with a did
-     * validate field and set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
-     * checksum, and checksum found in the response header do not match.
-     */
-    /* TODO add a validation list, empty validation list is equivalent to false */
-    bool validate_get_response_checksum;
+    const struct aws_s3_checksum_config *checksum_config;
 
     /* User data for all callbacks. */
     void *user_data;
@@ -397,7 +415,13 @@ struct aws_s3_meta_request_result {
     /* Only set for GET request.
      * Was the server side checksum compared against a calculated checksum of the response body. This may be false
      * even if validate_get_response_checksum was set because the object was uploaded without a checksum, or was
-     * uploaded as a multipart object. */
+     * uploaded as a multipart object.
+     *
+     * If the object to get is multipart object, the part checksum MAY be validated if the part size to get matches the
+     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will failed with
+     * checksum mismatch. However, even if the parts checksum were validated, this will NOT be set to true, as the
+     * checksum for the whole meta request was NOT validated.
+     **/
     bool did_validate;
 
     /* algorithm used to validate checksum */
