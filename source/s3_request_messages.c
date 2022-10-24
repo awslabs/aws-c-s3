@@ -90,6 +90,36 @@ const struct aws_byte_cursor g_s3_complete_multipart_upload_excluded_headers[] =
 const size_t g_s3_complete_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers);
 
+/* The server-side encryption (SSE) is needed only when the object was created using a checksum algorithm for complete
+ * multipart upload.  */
+const struct aws_byte_cursor g_s3_complete_multipart_upload_with_checksum_excluded_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Disposition"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Language"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Expires"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-full-control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-write-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-storage-class"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-website-redirect-location"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
+};
+
 const struct aws_byte_cursor g_s3_list_parts_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
@@ -122,6 +152,37 @@ const struct aws_byte_cursor g_s3_list_parts_excluded_headers[] = {
 };
 
 const size_t g_s3_list_parts_excluded_headers_count = AWS_ARRAY_SIZE(g_s3_list_parts_excluded_headers);
+
+const struct aws_byte_cursor g_s3_list_parts_with_checksum_excluded_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Cache-Control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Disposition"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Language"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Expires"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-full-control"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-read-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-grant-write-acp"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-storage-class"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-website-redirect-location"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
+};
+
+const size_t g_s3_list_parts_with_checksum_excluded_headers_count =
+    AWS_ARRAY_SIZE(g_s3_list_parts_with_checksum_excluded_headers);
 
 const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl"),
@@ -267,7 +328,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    const enum aws_s3_checksum_algorithm checksum_algorithm,
+    const struct aws_s3_checksum_config *checksum_config,
     struct aws_byte_buf *encoded_checksum_output) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
@@ -290,13 +351,16 @@ struct aws_http_message *aws_s3_upload_part_message_new(
 
     if (buffer != NULL) {
 
-        if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_algorithm, encoded_checksum_output) ==
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_config, encoded_checksum_output) ==
             NULL) {
             goto error_clean_up;
         }
-        if (checksum_algorithm == AWS_SCA_NONE && should_compute_content_md5) {
-            if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
-                goto error_clean_up;
+        if (should_compute_content_md5) {
+            if (!checksum_config || checksum_config->location == AWS_SCL_NONE) {
+                /* MD5 will be skiped if flexible checksum used */
+                if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
+                    goto error_clean_up;
+                }
             }
         }
     } else {
@@ -346,8 +410,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     if (buffer != NULL) {
         /* part copy does not have a ChecksumAlgorithm member, it will use the same algorithm as the create
          * multipart upload request specifies */
-        if (aws_s3_message_util_assign_body(allocator, buffer, message, AWS_SCA_NONE, NULL /* out_checksum */) ==
-            NULL) {
+        if (aws_s3_message_util_assign_body(
+                allocator, buffer, message, NULL /* checksum_config */, NULL /* out_checksum */) == NULL) {
             goto error_clean_up;
         }
 
@@ -524,12 +588,24 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
     const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
 
-    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-        allocator,
-        base_message,
-        g_s3_complete_multipart_upload_excluded_headers,
-        AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+    struct aws_http_message *message = NULL;
+    if (algorithm == AWS_SCA_NONE) {
+        /* We don't need to worry about the pre-calculated checksum from user as for multipart upload, only way to
+         * calculate checksum is from client. */
+        message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+            allocator,
+            base_message,
+            g_s3_complete_multipart_upload_excluded_headers,
+            AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
+            true /*exclude_x_amz_meta*/);
+    } else {
+        message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+            allocator,
+            base_message,
+            g_s3_complete_multipart_upload_with_checksum_excluded_headers,
+            AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_with_checksum_excluded_headers),
+            true /*exclude_x_amz_meta*/);
+    }
 
     struct aws_http_headers *headers = NULL;
 
@@ -625,7 +701,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        aws_s3_message_util_assign_body(allocator, body_buffer, message, AWS_SCA_NONE, NULL /* out_checksum */);
+        aws_s3_message_util_assign_body(
+            allocator, body_buffer, message, NULL /* checksum_config */, NULL /* out_checksum */);
     }
 
     return message;
@@ -678,7 +755,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
-    enum aws_s3_checksum_algorithm algorithm,
+    const struct aws_s3_checksum_config *checksum_config,
     struct aws_byte_buf *out_checksum) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
@@ -697,34 +774,43 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         goto error_clean_up;
     }
 
-    if (algorithm) {
-        /* set Content-Encoding header */
-        if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
-            goto error_clean_up;
+    if (checksum_config) {
+        if (checksum_config->location == AWS_SCL_TRAILER) {
+            /* aws-chunked encode the payload and add related headers */
+
+            /* set Content-Encoding header. TODO: the aws-chunked should be appended to the existing content encoding.
+             */
+            if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
+                goto error_clean_up;
+            }
+            /* set x-amz-trailer header */
+            if (aws_http_headers_set(
+                    headers,
+                    g_trailer_header_name,
+                    *aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm))) {
+                goto error_clean_up;
+            }
+            /* set x-amz-decoded-content-length header */
+            char decoded_content_length_buffer[64] = "";
+            snprintf(
+                decoded_content_length_buffer,
+                sizeof(decoded_content_length_buffer),
+                "%" PRIu64,
+                (uint64_t)buffer_byte_cursor.len);
+            struct aws_byte_cursor decode_content_length_cursor =
+                aws_byte_cursor_from_array(decoded_content_length_buffer, strlen(decoded_content_length_buffer));
+            if (aws_http_headers_set(headers, g_decoded_content_length_header_name, decode_content_length_cursor)) {
+                goto error_clean_up;
+            }
+            /* set input stream to chunk stream */
+            struct aws_input_stream *chunk_stream =
+                aws_chunk_stream_new(allocator, input_stream, checksum_config->checksum_algorithm, out_checksum);
+            if (!chunk_stream) {
+                goto error_clean_up;
+            }
+            aws_input_stream_release(input_stream);
+            input_stream = chunk_stream;
         }
-        /* set x-amz-trailer header */
-        if (aws_http_headers_set(headers, g_trailer_header_name, *aws_get_http_header_name_from_algorithm(algorithm))) {
-            goto error_clean_up;
-        }
-        /* set x-amz-decoded-content-length header */
-        char decoded_content_length_buffer[64] = "";
-        snprintf(
-            decoded_content_length_buffer,
-            sizeof(decoded_content_length_buffer),
-            "%" PRIu64,
-            (uint64_t)buffer_byte_cursor.len);
-        struct aws_byte_cursor decode_content_length_cursor =
-            aws_byte_cursor_from_array(decoded_content_length_buffer, strlen(decoded_content_length_buffer));
-        if (aws_http_headers_set(headers, g_decoded_content_length_header_name, decode_content_length_cursor)) {
-            goto error_clean_up;
-        }
-        /* set input stream to chunk stream */
-        struct aws_input_stream *chunk_stream = aws_chunk_stream_new(allocator, input_stream, algorithm, out_checksum);
-        if (!chunk_stream) {
-            goto error_clean_up;
-        }
-        aws_input_stream_release(input_stream);
-        input_stream = chunk_stream;
     }
     int64_t stream_length = 0;
     if (aws_input_stream_get_length(input_stream, &stream_length)) {
@@ -748,6 +834,17 @@ error_clean_up:
     AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
     aws_input_stream_release(input_stream);
     return NULL;
+}
+
+bool aws_s3_message_util_check_checksum_header(struct aws_http_message *message) {
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
+        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
+        if (aws_http_headers_has(headers, *algorithm_header_name)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Add a content-md5 header. */

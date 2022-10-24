@@ -80,8 +80,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             client,
             part_size,
             false,
-            AWS_SCA_NONE,
-            options->validate_get_response_checksum,
             options,
             auto_ranged_get,
             &s_s3_auto_ranged_get_vtable,
@@ -159,13 +157,16 @@ static bool s_s3_auto_ranged_get_update(
             if (!auto_ranged_get->synced_data.object_range_known) {
 
                 /* If there exists a range header or we require validation of the response checksum, we currently always
-                 * do a head request first. S3 will only return the checksum of the entire object if a head While the
-                 * range header value could be parsed client-side, doing so presents a number of complications. For
-                 * example, the given range could be an unsatisfiable range, and might not even specify a complete
-                 * range. To keep things simple, we are currently relying on the service to handle turning the Range
-                 * header into a Content-Range response header.*/
+                 * do a head request first.
+                 * S3 returns the checksum of the entire object from the HEAD response
+                 * TODO: remove the head for checksum. Revamp the validation
+                 *
+                 * For the range header value could be parsed client-side, doing so presents a number of
+                 * complications. For example, the given range could be an unsatisfiable range, and might not even
+                 * specify a complete range. To keep things simple, we are currently relying on the service to handle
+                 * turning the Range header into a Content-Range response header.*/
                 bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0 ||
-                                            meta_request->validate_get_response_checksum;
+                                            meta_request->checksum_config.validate_response_checksum;
 
                 if (head_object_required) {
                     /* If the head object request hasn't been sent yet, then send it now. */
@@ -372,7 +373,7 @@ static int s_s3_auto_ranged_get_prepare_request(
             request->request_tag);
         goto message_alloc_failed;
     }
-    if (meta_request->validate_get_response_checksum) {
+    if (meta_request->checksum_config.validate_response_checksum) {
         aws_http_headers_set(aws_http_message_get_headers(message), g_request_validation_mode, g_enabled);
     }
 
