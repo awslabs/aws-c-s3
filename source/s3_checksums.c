@@ -269,14 +269,14 @@ int aws_checksum_compute(
     }
 }
 
-void checksum_config_init(struct checksum_config *config, const struct aws_s3_checksum_config *config) {
-    AWS_ZERO_STRUCT(*config);
-    if (!config) {
+void checksum_config_init(struct checksum_config *internal_config, const struct aws_s3_checksum_config *config) {
+    AWS_ZERO_STRUCT(*internal_config);
+    if (!internal_config) {
         return;
     }
-    config->checksum_algorithm = config->checksum_algorithm;
-    config->location = config->location;
-    config->validate_response_checksum = config->validate_response_checksum;
+    internal_config->checksum_algorithm = config->checksum_algorithm;
+    internal_config->location = config->location;
+    internal_config->validate_response_checksum = config->validate_response_checksum;
 
     if (config->validate_checksum_algorithms) {
         const size_t count = aws_array_list_length(config->validate_checksum_algorithms);
@@ -285,16 +285,16 @@ void checksum_config_init(struct checksum_config *config, const struct aws_s3_ch
             aws_array_list_get_at(config->validate_checksum_algorithms, &algorithm, i);
             switch (algorithm) {
                 case AWS_SCA_CRC32C:
-                    config->response_checksum_algorithms.crc32c = true;
+                    internal_config->response_checksum_algorithms.crc32c = true;
                     break;
                 case AWS_SCA_CRC32:
-                    config->response_checksum_algorithms.crc32 = true;
+                    internal_config->response_checksum_algorithms.crc32 = true;
                     break;
                 case AWS_SCA_SHA1:
-                    config->response_checksum_algorithms.sha1 = true;
+                    internal_config->response_checksum_algorithms.sha1 = true;
                     break;
                 case AWS_SCA_SHA256:
-                    config->response_checksum_algorithms.sha256 = true;
+                    internal_config->response_checksum_algorithms.sha256 = true;
                     break;
                 default:
                     break;
@@ -302,9 +302,9 @@ void checksum_config_init(struct checksum_config *config, const struct aws_s3_ch
         }
 
     } else if (config->validate_response_checksum) {
-        config->response_checksum_algorithms.crc32 = true;
-        config->response_checksum_algorithms.crc32c = true;
-        config->response_checksum_algorithms.sha1 = true;
-        config->response_checksum_algorithms.sha256 = true;
+        internal_config->response_checksum_algorithms.crc32 = true;
+        internal_config->response_checksum_algorithms.crc32c = true;
+        internal_config->response_checksum_algorithms.sha1 = true;
+        internal_config->response_checksum_algorithms.sha256 = true;
     }
 }
