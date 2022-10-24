@@ -1407,7 +1407,7 @@ static int s_apply_backpressure_until_meta_request_finish(
      * If the magic number is too high the test will be slow,
      * if it's too low the test will fail on slow networks */
     const uint64_t wait_duration_with_nothing_happening =
-        aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+        aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
 
     uint64_t accumulated_window_increments = window_initial_size;
     uint64_t accumulated_data_size = 0;
