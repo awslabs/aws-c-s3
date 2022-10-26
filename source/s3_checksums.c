@@ -268,3 +268,43 @@ int aws_checksum_compute(
             return AWS_OP_ERR;
     }
 }
+
+void checksum_config_init(struct checksum_config *internal_config, const struct aws_s3_checksum_config *config) {
+    AWS_ZERO_STRUCT(*internal_config);
+    if (!config) {
+        return;
+    }
+    internal_config->checksum_algorithm = config->checksum_algorithm;
+    internal_config->location = config->location;
+    internal_config->validate_response_checksum = config->validate_response_checksum;
+
+    if (config->validate_checksum_algorithms) {
+        const size_t count = aws_array_list_length(config->validate_checksum_algorithms);
+        for (size_t i = 0; i < count; ++i) {
+            enum aws_s3_checksum_algorithm algorithm;
+            aws_array_list_get_at(config->validate_checksum_algorithms, &algorithm, i);
+            switch (algorithm) {
+                case AWS_SCA_CRC32C:
+                    internal_config->response_checksum_algorithms.crc32c = true;
+                    break;
+                case AWS_SCA_CRC32:
+                    internal_config->response_checksum_algorithms.crc32 = true;
+                    break;
+                case AWS_SCA_SHA1:
+                    internal_config->response_checksum_algorithms.sha1 = true;
+                    break;
+                case AWS_SCA_SHA256:
+                    internal_config->response_checksum_algorithms.sha256 = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+    } else if (config->validate_response_checksum) {
+        internal_config->response_checksum_algorithms.crc32 = true;
+        internal_config->response_checksum_algorithms.crc32c = true;
+        internal_config->response_checksum_algorithms.sha1 = true;
+        internal_config->response_checksum_algorithms.sha256 = true;
+    }
+}

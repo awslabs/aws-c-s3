@@ -318,6 +318,21 @@ struct aws_s3_checksum_config {
      * checksum, and checksum found in the response header do not match.
      */
     bool validate_response_checksum;
+
+    /**
+     * Optional array of `enum aws_s3_checksum_algorithm`.
+     *
+     * Ignored when validate_response_checksum is not set.
+     * If not set all the algorithms will be selected as default behavior.
+     * Owned by the caller.
+     *
+     * The list of algorithms for user to pick up when validate the checksum. Client will pick up the algorithm from the
+     * list with the priority based on performance, and the algorithm sent by server. The priority based on performance
+     * is [CRC32C, CRC32, SHA1, SHA256].
+     *
+     * If the response checksum was validated by client, the result will indicate which algorithm was picked.
+     */
+    struct aws_array_list *validate_checksum_algorithms;
 };
 
 /* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
