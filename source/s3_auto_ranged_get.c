@@ -159,7 +159,6 @@ static bool s_s3_auto_ranged_get_update(
                 /* If there exists a range header or we require validation of the response checksum, we currently always
                  * do a head request first.
                  * S3 returns the checksum of the entire object from the HEAD response
-                 * TODO: remove the head for checksum. Revamp the validation
                  *
                  * For the range header value could be parsed client-side, doing so presents a number of
                  * complications. For example, the given range could be an unsatisfiable range, and might not even
@@ -319,6 +318,13 @@ static bool s_s3_auto_ranged_get_update(
 
         if (!work_remaining) {
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
+            if (auto_ranged_get->synced_data.num_parts_checksum_validated ==
+                auto_ranged_get->synced_data.num_parts_requested) {
+                /* If we have validated the checksum for every parts, we set the meta request level checksum validation
+                 * result.*/
+                meta_request->synced_data.finish_result.did_validate = true;
+                meta_request->synced_data.finish_result.validation_algorithm = auto_ranged_get->validation_algorithm;
+            }
         }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -632,6 +638,16 @@ update_synced_data:
                 ++auto_ranged_get->synced_data.num_parts_completed;
 
                 if (!request_failed) {
+
+                    /* Record the number of parts that checksum has been validated */
+                    if (request->did_validate) {
+                        if (auto_ranged_get->validation_algorithm == AWS_SCA_NONE) {
+                            auto_ranged_get->validation_algorithm = request->validation_algorithm;
+                        }
+                        /* They should be the same. */
+                        AWS_ASSERT(auto_ranged_get->validation_algorithm == request->validation_algorithm);
+                        ++auto_ranged_get->synced_data.num_parts_checksum_validated;
+                    }
                     ++auto_ranged_get->synced_data.num_parts_successful;
 
                     aws_s3_meta_request_stream_response_body_synced(meta_request, request);
@@ -656,6 +672,12 @@ update_synced_data:
 
         if (error_code != AWS_ERROR_SUCCESS) {
             aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+            if (error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH) {
+                /* It's a mismatch of checksum, tell user that we validated the checksum and the algorithm we validated
+                 */
+                meta_request->synced_data.finish_result.did_validate = true;
+                meta_request->synced_data.finish_result.validation_algorithm = request->validation_algorithm;
+            }
         }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);

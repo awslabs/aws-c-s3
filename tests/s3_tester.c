@@ -1197,6 +1197,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .checksum_algorithm = options->checksum_algorithm,
         .validate_response_checksum = options->validate_get_response_checksum,
         .location = options->checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
+        .validate_checksum_algorithms = options->validate_checksum_algorithms,
     };
 
     struct aws_s3_meta_request_options meta_request_options = {
@@ -1368,7 +1369,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
 
-    out_results->algorithm = options->validate_checksum_algorithm;
+    out_results->algorithm = options->expected_validate_checksum_alg;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
