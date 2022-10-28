@@ -60,6 +60,11 @@ const struct aws_byte_cursor g_user_agent_header_name = AWS_BYTE_CUR_INIT_FROM_S
 const struct aws_byte_cursor g_user_agent_header_product_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRTS3NativeClient");
 
+const struct aws_byte_cursor g_error_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Error");
+const struct aws_byte_cursor g_code_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Code");
+
+const struct aws_byte_cursor g_s3_internal_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalError");
+
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
 
@@ -77,9 +82,11 @@ void copy_http_headers(const struct aws_http_headers *src, struct aws_http_heade
     }
 }
 
-struct top_level_xml_tag_value_user_data {
+struct top_level_xml_tag_value_with_root_value_user_data {
     struct aws_allocator *allocator;
     const struct aws_byte_cursor *tag_name;
+    const struct aws_byte_cursor *expected_root_name;
+    bool *root_name_mismatch;
     struct aws_string *result;
 };
 
@@ -95,7 +102,7 @@ static bool s_top_level_xml_tag_value_child_xml_node(
         return false;
     }
 
-    struct top_level_xml_tag_value_user_data *xml_user_data = user_data;
+    struct top_level_xml_tag_value_with_root_value_user_data *xml_user_data = user_data;
 
     /* If the name of the node is what we are looking for, store the body of the node in our result, and stop
      * traversing. */
@@ -117,15 +124,30 @@ static bool s_top_level_xml_tag_value_root_xml_node(
     struct aws_xml_parser *parser,
     struct aws_xml_node *node,
     void *user_data) {
+    struct top_level_xml_tag_value_with_root_value_user_data *xml_user_data = user_data;
+    if (xml_user_data->expected_root_name) {
+        /* If we can't get the name of the node, stop traversing. */
+        struct aws_byte_cursor node_name;
+        if (aws_xml_node_get_name(node, &node_name)) {
+            return false;
+        }
+        if (!aws_byte_cursor_eq(&node_name, xml_user_data->expected_root_name)) {
+            /* Not match the expected root name, stop parsing. */
+            *xml_user_data->root_name_mismatch = true;
+            return false;
+        }
+    }
 
     /* Traverse the root node, and then return false to stop. */
     aws_xml_node_traverse(parser, node, s_top_level_xml_tag_value_child_xml_node, user_data);
     return false;
 }
 
-struct aws_string *get_top_level_xml_tag_value(
+struct aws_string *get_top_level_xml_tag_value_with_root_name(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
+    const struct aws_byte_cursor *expected_root_name,
+    bool *out_root_name_mismatch,
     struct aws_byte_cursor *xml_body) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(tag_name);
@@ -133,10 +155,13 @@ struct aws_string *get_top_level_xml_tag_value(
 
     struct aws_xml_parser_options parser_options = {.doc = *xml_body};
     struct aws_xml_parser *parser = aws_xml_parser_new(allocator, &parser_options);
+    bool root_name_mismatch = false;
 
-    struct top_level_xml_tag_value_user_data xml_user_data = {
+    struct top_level_xml_tag_value_with_root_value_user_data xml_user_data = {
         allocator,
         tag_name,
+        expected_root_name,
+        &root_name_mismatch,
         NULL,
     };
 
@@ -145,12 +170,22 @@ struct aws_string *get_top_level_xml_tag_value(
         xml_user_data.result = NULL;
         goto clean_up;
     }
+    if (out_root_name_mismatch) {
+        *out_root_name_mismatch = root_name_mismatch;
+    }
 
 clean_up:
 
     aws_xml_parser_destroy(parser);
 
     return xml_user_data.result;
+}
+
+struct aws_string *get_top_level_xml_tag_value(
+    struct aws_allocator *allocator,
+    const struct aws_byte_cursor *tag_name,
+    struct aws_byte_cursor *xml_body) {
+    return get_top_level_xml_tag_value_with_root_name(allocator, tag_name, NULL, NULL, xml_body);
 }
 
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
@@ -509,4 +544,11 @@ void aws_s3_get_part_range(
     if (*out_part_range_end > object_range_end) {
         *out_part_range_end = object_range_end;
     }
+}
+
+int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string) {
+    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_error_code)) {
+        return AWS_ERROR_S3_INTERNAL_ERROR;
+    }
+    return AWS_ERROR_UNKNOWN;
 }

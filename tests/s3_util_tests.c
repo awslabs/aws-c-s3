@@ -349,3 +349,49 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
 
     return 0;
 }
+
+AWS_TEST_CASE(test_s3_get_top_level_xml_tag_value_with_root_name, s_test_s3_get_top_level_xml_tag_value_with_root_name)
+static int s_test_s3_get_top_level_xml_tag_value_with_root_name(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_byte_cursor example_error_body = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<Error>\n"
+        "<Code>AccessDenied</Code>\n"
+        "<Message>Access Denied</Message>\n"
+        "<RequestId>656c76696e6727732072657175657374</RequestId>\n"
+        "<HostId>Uuag1LuByRx9e6j5Onimru9pO4ZVKnJ2Qz7/C1NPcfTWAtRPfTaOFg==</HostId>\n"
+        "</Error>");
+
+    struct aws_byte_cursor example_success_body = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<CompleteMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n"
+        "<Location>http://Example-Bucket.s3.<Region>.amazonaws.com/Example-Object</Location>\n"
+        "<Bucket>Example-Bucket</Bucket>\n"
+        "<Key>Example-Object</Key>\n"
+        "<ETag>\"3858f62230ac3c915f300c664312c11f-9\"</ETag>\n"
+        "</CompleteMultipartUploadResult>");
+
+    bool root_name_mismatch = false;
+    struct aws_string *error_code = get_top_level_xml_tag_value_with_root_name(
+        allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &example_error_body);
+
+    ASSERT_NOT_NULL(error_code);
+    ASSERT_FALSE(root_name_mismatch);
+    ASSERT_TRUE(aws_string_eq_c_str(error_code, "AccessDenied"));
+    aws_string_destroy(error_code);
+
+    error_code = get_top_level_xml_tag_value_with_root_name(
+        allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &example_success_body);
+    ASSERT_NULL(error_code);
+    ASSERT_TRUE(root_name_mismatch);
+
+    struct aws_string *etag = get_top_level_xml_tag_value(allocator, &g_etag_header_name, &example_success_body);
+
+    ASSERT_NOT_NULL(etag);
+    ASSERT_TRUE(aws_string_eq_c_str(etag, "\"3858f62230ac3c915f300c664312c11f-9\""));
+    aws_string_destroy(etag);
+
+    return AWS_OP_SUCCESS;
+}
