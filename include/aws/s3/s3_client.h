@@ -37,25 +37,18 @@ enum aws_s3_meta_request_type {
     /**
      * The Default meta request type sends any request to S3 as-is (with no transformation). For example,
      * it can be used to pass a CreateBucket request.
-     *
-     * The asynced error will NOT be handled for default type, as the body will not be parsed. User can handle it from
-     * their end.
      */
     AWS_S3_META_REQUEST_TYPE_DEFAULT,
 
     /**
      * The GetObject request will be split into a series of ranged GetObject requests that are
      * executed in parallel to improve throughput, when possible.
-     *
-     * TODO: what API invoked from GET? Can any one failed with Asynced error?
      */
     AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
 
     /**
      * The PutObject request will be split into MultiPart uploads that are executed in parallel
      * to improve throughput, when possible.
-     *
-     * TODO: what API invoked from PUT? Can any one failed with Asynced error besides of complete multipart upload?
      */
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
 
@@ -64,8 +57,6 @@ enum aws_s3_meta_request_type {
      * using multiple S3 UploadPartCopy requests in parallel, or bypasses
      * a CopyObject request to S3 if the object size is not large enough for
      * a multipart upload.
-     *
-     * TODO: what API invoked from COPY? Can any one failed with Asynced error?
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 

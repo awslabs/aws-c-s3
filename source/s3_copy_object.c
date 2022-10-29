@@ -568,21 +568,18 @@ static void s_s3_copy_object_request_send_request_finish(
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_s3_client *client = meta_request->client;
-    AWS_PRECONDITION(client);
     /* Request tag is different from different type of meta requests */
     switch (request->request_tag) {
 
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
             /* For complete multipart upload, the server may return async error. */
             aws_s3_meta_request_send_request_finish_handle_async_error(connection, stream, error_code);
+            break;
         }
 
         default:
             aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
+            break;
     }
 }
 
