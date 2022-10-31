@@ -373,13 +373,9 @@ static int s_test_s3_get_top_level_xml_tag_value_with_root_name(struct aws_alloc
         "<ETag>\"3858f62230ac3c915f300c664312c11f-9\"</ETag>\n"
         "</CompleteMultipartUploadResult>");
 
-    struct aws_byte_cursor error_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Error");
-    struct aws_byte_cursor code_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Code");
-    struct aws_byte_cursor etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
-
     bool root_name_mismatch = false;
     struct aws_string *error_code = get_top_level_xml_tag_value_with_root_name(
-        allocator, &code_body_xml_name, &error_body_xml_name, &root_name_mismatch, &example_error_body);
+        allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &example_error_body);
 
     ASSERT_NOT_NULL(error_code);
     ASSERT_FALSE(root_name_mismatch);
@@ -387,11 +383,11 @@ static int s_test_s3_get_top_level_xml_tag_value_with_root_name(struct aws_alloc
     aws_string_destroy(error_code);
 
     error_code = get_top_level_xml_tag_value_with_root_name(
-        allocator, &code_body_xml_name, &error_body_xml_name, &root_name_mismatch, &example_success_body);
+        allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &example_success_body);
     ASSERT_NULL(error_code);
     ASSERT_TRUE(root_name_mismatch);
 
-    struct aws_string *etag = get_top_level_xml_tag_value(allocator, &etag_header_name, &example_success_body);
+    struct aws_string *etag = get_top_level_xml_tag_value(allocator, &g_etag_header_name, &example_success_body);
 
     ASSERT_NOT_NULL(etag);
     ASSERT_TRUE(aws_string_eq_c_str(etag, "\"3858f62230ac3c915f300c664312c11f-9\""));

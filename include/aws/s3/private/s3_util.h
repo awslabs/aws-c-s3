@@ -181,12 +181,14 @@ AWS_S3_API
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest);
 
 /* Get a top-level (exists directly under the root tag) tag value. */
+AWS_S3_API
 struct aws_string *get_top_level_xml_tag_value(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
     struct aws_byte_cursor *xml_body);
 
 /* Get a top-level (exists directly under the root tag) tag value with expected root name. */
+AWS_S3_API
 struct aws_string *get_top_level_xml_tag_value_with_root_name(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
