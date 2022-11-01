@@ -158,13 +158,10 @@ extern const struct aws_byte_cursor g_head_method;
 AWS_S3_API
 extern const struct aws_byte_cursor g_delete_method;
 
-AWS_S3_API
 extern const struct aws_byte_cursor g_error_body_xml_name;
 
-AWS_S3_API
 extern const struct aws_byte_cursor g_code_body_xml_name;
 
-AWS_S3_API
 extern const struct aws_byte_cursor g_s3_internal_error_code;
 
 AWS_S3_API
@@ -182,14 +179,14 @@ void copy_http_headers(const struct aws_http_headers *src, struct aws_http_heade
 
 /* Get a top-level (exists directly under the root tag) tag value. */
 AWS_S3_API
-struct aws_string *get_top_level_xml_tag_value(
+struct aws_string *aws_xml_get_top_level_tag(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
     struct aws_byte_cursor *xml_body);
 
 /* Get a top-level (exists directly under the root tag) tag value with expected root name. */
 AWS_S3_API
-struct aws_string *get_top_level_xml_tag_value_with_root_name(
+struct aws_string *aws_xml_get_top_level_tag_with_root_name(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
     const struct aws_byte_cursor *expected_root_name,

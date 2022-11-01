@@ -143,7 +143,7 @@ static bool s_top_level_xml_tag_value_root_xml_node(
     return false;
 }
 
-struct aws_string *get_top_level_xml_tag_value_with_root_name(
+struct aws_string *aws_xml_get_top_level_tag_with_root_name(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
     const struct aws_byte_cursor *expected_root_name,
@@ -181,11 +181,11 @@ clean_up:
     return xml_user_data.result;
 }
 
-struct aws_string *get_top_level_xml_tag_value(
+struct aws_string *aws_xml_get_top_level_tag(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
     struct aws_byte_cursor *xml_body) {
-    return get_top_level_xml_tag_value_with_root_name(allocator, tag_name, NULL, NULL, xml_body);
+    return aws_xml_get_top_level_tag_with_root_name(allocator, tag_name, NULL, NULL, xml_body);
 }
 
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(

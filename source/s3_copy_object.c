@@ -537,7 +537,7 @@ static struct aws_string *s_etag_new_from_upload_part_copy_response(
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(response_body);
 
     struct aws_string *etag_within_xml_quotes =
-        get_top_level_xml_tag_value(allocator, &g_etag_header_name, &response_body_cursor);
+        aws_xml_get_top_level_tag(allocator, &g_etag_header_name, &response_body_cursor);
 
     struct aws_byte_buf etag_within_quotes_byte_buf;
     AWS_ZERO_STRUCT(etag_within_quotes_byte_buf);
@@ -681,7 +681,7 @@ static void s_s3_copy_object_request_finished(
 
                 /* Find the upload id for this multipart upload. */
                 struct aws_string *upload_id =
-                    get_top_level_xml_tag_value(meta_request->allocator, &s_upload_id, &buffer_byte_cursor);
+                    aws_xml_get_top_level_tag(meta_request->allocator, &s_upload_id, &buffer_byte_cursor);
 
                 if (upload_id == NULL) {
                     AWS_LOGF_ERROR(
@@ -771,7 +771,7 @@ static void s_s3_copy_object_request_finished(
 
                 /* Grab the ETag for the entire object, and set it as a header. */
                 struct aws_string *etag_header_value =
-                    get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
+                    aws_xml_get_top_level_tag(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
 
                 if (etag_header_value != NULL) {
                     struct aws_byte_buf etag_header_value_byte_buf;
