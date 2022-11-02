@@ -604,7 +604,6 @@ static void s_s3_auto_ranged_get_request_finished(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p Etag received for the meta request. value is: " PRInSTR "",
                 (void *)meta_request,
-                (void *)request,
                 AWS_BYTE_CURSOR_PRI(etag_header_value));
             auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
         }
