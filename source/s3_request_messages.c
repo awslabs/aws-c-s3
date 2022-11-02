@@ -220,7 +220,7 @@ static const struct aws_byte_cursor s_x_amz_meta_prefix = AWS_BYTE_CUR_INIT_FROM
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
-static int s_s3_message_util_add_content_range_header(
+static int s_s3_message_util_add_range_header(
     uint64_t part_range_start,
     uint64_t part_range_end,
     struct aws_http_message *out_message);
@@ -242,7 +242,7 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
         return NULL;
     }
 
-    if (s_s3_message_util_add_content_range_header(range_start, range_end, message)) {
+    if (s_s3_message_util_add_range_header(range_start, range_end, message)) {
         goto error_clean_up;
     }
 
@@ -995,8 +995,8 @@ int aws_s3_message_util_copy_headers(
     return AWS_OP_SUCCESS;
 }
 
-/* Add a content-range header.*/
-static int s_s3_message_util_add_content_range_header(
+/* Add a range header.*/
+static int s_s3_message_util_add_range_header(
     uint64_t part_range_start,
     uint64_t part_range_end,
     struct aws_http_message *out_message) {
