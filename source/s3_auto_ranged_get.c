@@ -584,7 +584,7 @@ static void s_s3_auto_ranged_get_request_finished(
             goto update_synced_data;
         }
 
-        if (!auto_ranged_get->initial_message_has_if_match_header) {
+        if (!request_failed && !auto_ranged_get->initial_message_has_if_match_header) {
             AWS_ASSERT(auto_ranged_get->etag == NULL);
             struct aws_byte_cursor etag_header_value;
 
