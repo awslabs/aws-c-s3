@@ -45,6 +45,9 @@ struct aws_s3_auto_ranged_get {
     } synced_data;
 
     uint32_t initial_message_has_range_header : 1;
+    uint32_t initial_message_has_if_match_header : 1;
+
+    struct aws_string *etag;
 };
 
 /* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */
