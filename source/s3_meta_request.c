@@ -1070,11 +1070,37 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(connection, stream, error_code);
 }
 
-void aws_s3_meta_request_send_request_finish_default(
+static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+    struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+    bool root_name_mismatch = false;
+    struct aws_string *error_code_string = aws_xml_get_top_level_tag_with_root_name(
+        request->allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &response_body_cursor);
+    if (error_code_string == NULL) {
+        if (root_name_mismatch) {
+            /* The xml body is not Error, we can safely think the request succeed. */
+            aws_reset_error();
+            return AWS_ERROR_SUCCESS;
+        } else {
+            return aws_last_error();
+        }
+    } else {
+        /* Check the error code. Map the S3 error code to CRT error code. */
+        int error_code = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
+        if (error_code != AWS_ERROR_S3_INTERNAL_ERROR) {
+            /* All error besides of internal error from async error are not recoverable from retry for now. */
+            error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+        }
+        aws_string_destroy(error_code_string);
+        return error_code;
+    }
+}
+
+static void s_s3_meta_request_send_request_finish_helper(
     struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
-    int error_code) {
-    AWS_PRECONDITION(connection);
+    int error_code,
+    bool handle_async_error) {
 
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
@@ -1086,12 +1112,14 @@ void aws_s3_meta_request_send_request_finish_default(
     AWS_PRECONDITION(client);
 
     int response_status = request->send_data.response_status;
-
     /* If our error code is currently success, then we have some other calls to make that could still indicate a
      * failure. */
     if (error_code == AWS_ERROR_SUCCESS) {
-        /* Check if the response code indicates an error occurred. */
-        error_code = s_s3_meta_request_error_code_from_response_status(response_status);
+        if (handle_async_error && response_status == AWS_HTTP_STATUS_CODE_200_OK) {
+            error_code = s_s3_meta_request_error_code_from_response_body(request);
+        } else {
+            error_code = s_s3_meta_request_error_code_from_response_status(response_status);
+        }
 
         if (error_code != AWS_ERROR_SUCCESS) {
             aws_raise_error(error_code);
@@ -1133,7 +1161,8 @@ void aws_s3_meta_request_send_request_finish_default(
 
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
-        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || meta_request_finishing) {
+        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
+            error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
             AWS_LOGF_ERROR(
@@ -1168,6 +1197,20 @@ void aws_s3_meta_request_send_request_finish_default(
     }
 
     aws_s3_client_notify_connection_finished(client, connection, error_code, finish_code);
+}
+
+void aws_s3_meta_request_send_request_finish_default(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+    s_s3_meta_request_send_request_finish_helper(connection, stream, error_code, false /*async error*/);
+}
+
+void aws_s3_meta_request_send_request_finish_handle_async_error(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+    s_s3_meta_request_send_request_finish_helper(connection, stream, error_code, true /*async error*/);
 }
 
 void aws_s3_meta_request_finished_request(

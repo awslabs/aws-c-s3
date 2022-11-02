@@ -429,7 +429,7 @@ static bool s_check_empty_file_download_error(struct aws_s3_request *failed_requ
                 /* XML response */
                 struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&failed_body);
                 struct aws_string *size =
-                    get_top_level_xml_tag_value(failed_request->allocator, &g_object_size_value, &body_cursor);
+                    aws_xml_get_top_level_tag(failed_request->allocator, &g_object_size_value, &body_cursor);
                 bool check_size = aws_string_eq_c_str(size, "0");
                 aws_string_destroy(size);
                 if (check_size) {
