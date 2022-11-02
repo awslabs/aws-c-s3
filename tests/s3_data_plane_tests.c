@@ -1367,10 +1367,7 @@ static int s_test_s3_get_object_sse_kms(struct aws_allocator *allocator, void *c
 
     /* Keep TLS enabled for SSE related download, or it will fail. */
     return s_test_s3_get_object_helper(
-        allocator,
-        AWS_S3_TLS_ENABLED,
-        AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS,
-        aws_byte_cursor_from_c_str("/get_object_test_kms_10MB.txt"));
+        allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS, g_pre_existing_object_kms_10MB);
 }
 
 AWS_TEST_CASE(test_s3_get_object_sse_aes256, s_test_s3_get_object_sse_aes256)
