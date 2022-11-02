@@ -387,6 +387,12 @@ static int s_s3_auto_ranged_get_prepare_request(
     }
     if (!auto_ranged_get->initial_message_has_if_match_header && auto_ranged_get->etag) {
         /* Add the if_match to the request */
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Added the If-Match header to request %p for part %d",
+            (void *)meta_request,
+            (void *)request,
+            request->part_number);
         aws_http_headers_set(
             aws_http_message_get_headers(message),
             g_if_match_header_name,
@@ -593,6 +599,13 @@ static void s_s3_auto_ranged_get_request_finished(
                 error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
             }
+
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Etag received for the meta request. value is: " PRInSTR "",
+                (void *)meta_request,
+                (void *)request,
+                AWS_BYTE_CURSOR_PRI(etag_header_value));
             auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
         }
 
@@ -693,6 +706,12 @@ update_synced_data:
         }
 
         if (error_code != AWS_ERROR_SUCCESS) {
+            if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS &&
+                request->send_data.response_status == AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED &&
+                !auto_ranged_get->initial_message_has_if_match_header) {
+                /* Use more clear error code as we added the if-match header under the hood. */
+                error_code = AWS_ERROR_S3_OBJECT_MODIFIED;
+            }
             aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             if (error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH) {
                 /* It's a mismatch of checksum, tell user that we validated the checksum and the algorithm we validated
