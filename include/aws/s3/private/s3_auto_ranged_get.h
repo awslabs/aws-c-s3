@@ -17,6 +17,7 @@ enum aws_s3_auto_ranged_get_request_type {
 struct aws_s3_auto_ranged_get {
     struct aws_s3_meta_request base;
 
+    enum aws_s3_checksum_algorithm validation_algorithm;
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
         /* The starting byte of the data that we will be retrieved from the object.*/
@@ -33,6 +34,7 @@ struct aws_s3_auto_ranged_get {
         uint32_t num_parts_completed;
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
+        uint32_t num_parts_checksum_validated;
 
         uint32_t object_range_known : 1;
         uint32_t head_object_sent : 1;
@@ -43,6 +45,9 @@ struct aws_s3_auto_ranged_get {
     } synced_data;
 
     uint32_t initial_message_has_range_header : 1;
+    uint32_t initial_message_has_if_match_header : 1;
+
+    struct aws_string *etag;
 };
 
 /* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */

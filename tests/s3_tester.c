@@ -39,6 +39,12 @@ const struct aws_byte_cursor g_test_public_bucket_name =
 const struct aws_byte_cursor g_s3_path_get_object_test_1MB =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
+const struct aws_byte_cursor g_s3_sse_c_alg_header =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm");
+const struct aws_byte_cursor g_s3_sse_c_key_header =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key");
+const struct aws_byte_cursor g_s3_sse_c_key_md5_header =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-md5");
 
 /* TODO populate these at the beginning of running tests with names that are unique to the test run. */
 const struct aws_byte_cursor g_pre_existing_object_1MB =
@@ -801,8 +807,6 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         NULL,
         0,
         false,
-        AWS_SCA_NONE,
-        false,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
@@ -1045,6 +1049,26 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
         }
     }
 
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_C_AES256) {
+        struct aws_http_header sse_c_alg_header = {
+            .name = g_s3_sse_c_alg_header,
+            .value = aws_byte_cursor_from_c_str("AES256"),
+        };
+        struct aws_http_header sse_c_key_header = {
+            .name = g_s3_sse_c_key_header,
+            .value = aws_byte_cursor_from_c_str("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDE="),
+        };
+        struct aws_http_header sse_c_key_md5_header = {
+            .name = g_s3_sse_c_key_md5_header,
+            .value = aws_byte_cursor_from_c_str("5inxltxhJQnqmmHfVSQjoA=="),
+        };
+        if (aws_http_message_add_header(message, sse_c_alg_header) ||
+            aws_http_message_add_header(message, sse_c_key_header) ||
+            aws_http_message_add_header(message, sse_c_key_md5_header)) {
+            goto error_clean_up_message;
+        }
+    }
+
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL) {
         if (aws_http_message_add_header(message, acl_public_read_header)) {
             goto error_clean_up_message;
@@ -1169,11 +1193,17 @@ int aws_s3_tester_send_meta_request_with_options(
         aws_s3_client_acquire(client);
     }
 
+    struct aws_s3_checksum_config checksum_config = {
+        .checksum_algorithm = options->checksum_algorithm,
+        .validate_response_checksum = options->validate_get_response_checksum,
+        .location = options->checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
+        .validate_checksum_algorithms = options->validate_checksum_algorithms,
+    };
+
     struct aws_s3_meta_request_options meta_request_options = {
         .type = options->meta_request_type,
         .message = options->message,
-        .checksum_algorithm = options->checksum_algorithm,
-        .validate_get_response_checksum = options->validate_get_response_checksum,
+        .checksum_config = &checksum_config,
     };
 
     if (options->signing_config) {
@@ -1220,6 +1250,8 @@ int aws_s3_tester_send_meta_request_with_options(
             meta_request_options.type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT)) {
+
+            meta_request_options.checksum_config = &checksum_config;
 
             uint32_t object_size_mb = options->put_options.object_size_mb;
             size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
@@ -1269,6 +1301,13 @@ int aws_s3_tester_send_meta_request_with_options(
                             object_path_sprintf_buffer,
                             sizeof(object_path_sprintf_buffer),
                             "/put_object_test_aes256_%uMB.txt",
+                            object_size_mb);
+                        break;
+                    case AWS_S3_TESTER_SSE_C_AES256:
+                        snprintf(
+                            object_path_sprintf_buffer,
+                            sizeof(object_path_sprintf_buffer),
+                            "/put_object_test_c_aes256_%uMB.txt",
                             object_size_mb);
                         break;
 
@@ -1330,7 +1369,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
 
-    out_results->algorithm = options->checksum_algorithm;
+    out_results->algorithm = options->expected_validate_checksum_alg;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
@@ -1532,6 +1571,12 @@ int aws_s3_tester_validate_get_object_results(
         ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "AES256"));
     }
 
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_C_AES256) {
+        ASSERT_SUCCESS(
+            aws_http_headers_get(meta_request_test_results->response_headers, g_s3_sse_c_alg_header, &sse_byte_cursor));
+        ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "AES256"));
+    }
+
     struct aws_string *content_length_str = aws_string_new_from_cursor(tester->allocator, &content_length_cursor);
 
     char *content_length_str_end = NULL;
@@ -1574,14 +1619,18 @@ int aws_s3_tester_send_put_object_meta_request(
     char object_path_buffer[128] = "";
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS) {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_kms_%uMB.txt", file_size_mb);
-    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS) {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_aes256_%uMB.txt", file_size_mb);
+        snprintf(object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_kms_%uMB.txt", file_size_mb);
+    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256) {
+        snprintf(
+            object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_aes256_%uMB.txt", file_size_mb);
     } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL) {
         snprintf(
-            object_path_buffer, sizeof(object_path_buffer), "/get_object_test_acl_public_read_%uMB.txt", file_size_mb);
+            object_path_buffer,
+            sizeof(object_path_buffer),
+            "/upload/put_object_test_acl_public_read_%uMB.txt",
+            file_size_mb);
     } else {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_%uMB.txt", file_size_mb);
+        snprintf(object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_%uMB.txt", file_size_mb);
     }
     struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
 
@@ -1666,6 +1715,12 @@ int aws_s3_tester_validate_put_object_results(
         ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "AES256"));
     }
     ASSERT_TRUE(etag_byte_cursor.len > 0);
+
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_C_AES256) {
+        ASSERT_SUCCESS(
+            aws_http_headers_get(meta_request_test_results->response_headers, g_s3_sse_c_alg_header, &sse_byte_cursor));
+        ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "AES256"));
+    }
 
     struct aws_byte_cursor quote_entity = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&quot;");
 

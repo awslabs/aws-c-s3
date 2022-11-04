@@ -40,12 +40,14 @@ enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL = 0x00000020,
     AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 = 0x00000040,
     AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5 = 0x00000080,
+    AWS_S3_TESTER_SEND_META_REQUEST_SSE_C_AES256 = 0x00000100,
 };
 
 enum aws_s3_tester_sse_type {
-    AWS_S3_TESTER_SSE_NONE,
-    AWS_S3_TESTER_SSE_KMS,
-    AWS_S3_TESTER_SSE_AES256,
+    AWS_S3_TESTER_SSE_NONE = 0,
+    AWS_S3_TESTER_SSE_KMS = 0x00000008,
+    AWS_S3_TESTER_SSE_AES256 = 0x00000010,
+    AWS_S3_TESTER_SSE_C_AES256 = 0x00000100,
 };
 
 enum aws_s3_client_tls_usage {
@@ -142,6 +144,8 @@ struct aws_s3_tester_meta_request_options {
 
     bool validate_get_response_checksum;
     enum aws_s3_checksum_algorithm checksum_algorithm;
+    struct aws_array_list *validate_checksum_algorithms;
+    enum aws_s3_checksum_algorithm expected_validate_checksum_alg;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;

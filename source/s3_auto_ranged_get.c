@@ -80,8 +80,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             client,
             part_size,
             false,
-            AWS_SCA_NONE,
-            options->validate_get_response_checksum,
             options,
             auto_ranged_get,
             &s_s3_auto_ranged_get_vtable,
@@ -98,6 +96,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     AWS_ASSERT(headers != NULL);
 
     auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
+    auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
@@ -117,6 +116,7 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     AWS_PRECONDITION(meta_request->impl);
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    aws_string_destroy(auto_ranged_get->etag);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
@@ -159,13 +159,15 @@ static bool s_s3_auto_ranged_get_update(
             if (!auto_ranged_get->synced_data.object_range_known) {
 
                 /* If there exists a range header or we require validation of the response checksum, we currently always
-                 * do a head request first. S3 will only return the checksum of the entire object if a head While the
-                 * range header value could be parsed client-side, doing so presents a number of complications. For
-                 * example, the given range could be an unsatisfiable range, and might not even specify a complete
-                 * range. To keep things simple, we are currently relying on the service to handle turning the Range
-                 * header into a Content-Range response header.*/
+                 * do a head request first.
+                 * S3 returns the checksum of the entire object from the HEAD response
+                 *
+                 * For the range header value could be parsed client-side, doing so presents a number of
+                 * complications. For example, the given range could be an unsatisfiable range, and might not even
+                 * specify a complete range. To keep things simple, we are currently relying on the service to handle
+                 * turning the Range header into a Content-Range response header.*/
                 bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0 ||
-                                            meta_request->validate_get_response_checksum;
+                                            meta_request->checksum_config.validate_response_checksum;
 
                 if (head_object_required) {
                     /* If the head object request hasn't been sent yet, then send it now. */
@@ -318,6 +320,13 @@ static bool s_s3_auto_ranged_get_update(
 
         if (!work_remaining) {
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
+            if (auto_ranged_get->synced_data.num_parts_checksum_validated ==
+                auto_ranged_get->synced_data.num_parts_requested) {
+                /* If we have validated the checksum for every parts, we set the meta request level checksum validation
+                 * result.*/
+                meta_request->synced_data.finish_result.did_validate = true;
+                meta_request->synced_data.finish_result.validation_algorithm = auto_ranged_get->validation_algorithm;
+            }
         }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -343,6 +352,7 @@ static int s_s3_auto_ranged_get_prepare_request(
 
     /* Generate a new ranged get request based on the original message. */
     struct aws_http_message *message = NULL;
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
 
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
@@ -372,8 +382,21 @@ static int s_s3_auto_ranged_get_prepare_request(
             request->request_tag);
         goto message_alloc_failed;
     }
-    if (meta_request->validate_get_response_checksum) {
+    if (meta_request->checksum_config.validate_response_checksum) {
         aws_http_headers_set(aws_http_message_get_headers(message), g_request_validation_mode, g_enabled);
+    }
+    if (!auto_ranged_get->initial_message_has_if_match_header && auto_ranged_get->etag) {
+        /* Add the if_match to the request */
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Added the If-Match header to request %p for part %d",
+            (void *)meta_request,
+            (void *)request,
+            request->part_number);
+        aws_http_headers_set(
+            aws_http_message_get_headers(message),
+            g_if_match_header_name,
+            aws_byte_cursor_from_string(auto_ranged_get->etag));
     }
 
     aws_s3_request_setup_send_data(request, message);
@@ -406,7 +429,7 @@ static bool s_check_empty_file_download_error(struct aws_s3_request *failed_requ
                 /* XML response */
                 struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&failed_body);
                 struct aws_string *size =
-                    get_top_level_xml_tag_value(failed_request->allocator, &g_object_size_value, &body_cursor);
+                    aws_xml_get_top_level_tag(failed_request->allocator, &g_object_size_value, &body_cursor);
                 bool check_size = aws_string_eq_c_str(size, "0");
                 aws_string_destroy(size);
                 if (check_size) {
@@ -567,6 +590,24 @@ static void s_s3_auto_ranged_get_request_finished(
             goto update_synced_data;
         }
 
+        if (!request_failed && !auto_ranged_get->initial_message_has_if_match_header) {
+            AWS_ASSERT(auto_ranged_get->etag == NULL);
+            struct aws_byte_cursor etag_header_value;
+
+            if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value)) {
+                aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
+                error_code = AWS_ERROR_S3_MISSING_ETAG;
+                goto update_synced_data;
+            }
+
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Etag received for the meta request. value is: " PRInSTR "",
+                (void *)meta_request,
+                AWS_BYTE_CURSOR_PRI(etag_header_value));
+            auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
+        }
+
         /* If we were able to discover the object-range/content length successfully, then any error code that was passed
          * into this function is being handled and does not indicate an overall failure.*/
         error_code = AWS_ERROR_SUCCESS;
@@ -631,6 +672,16 @@ update_synced_data:
                 ++auto_ranged_get->synced_data.num_parts_completed;
 
                 if (!request_failed) {
+
+                    /* Record the number of parts that checksum has been validated */
+                    if (request->did_validate) {
+                        if (auto_ranged_get->validation_algorithm == AWS_SCA_NONE) {
+                            auto_ranged_get->validation_algorithm = request->validation_algorithm;
+                        }
+                        /* They should be the same. */
+                        AWS_ASSERT(auto_ranged_get->validation_algorithm == request->validation_algorithm);
+                        ++auto_ranged_get->synced_data.num_parts_checksum_validated;
+                    }
                     ++auto_ranged_get->synced_data.num_parts_successful;
 
                     aws_s3_meta_request_stream_response_body_synced(meta_request, request);
@@ -654,7 +705,19 @@ update_synced_data:
         }
 
         if (error_code != AWS_ERROR_SUCCESS) {
+            if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS &&
+                request->send_data.response_status == AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED &&
+                !auto_ranged_get->initial_message_has_if_match_header) {
+                /* Use more clear error code as we added the if-match header under the hood. */
+                error_code = AWS_ERROR_S3_OBJECT_MODIFIED;
+            }
             aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+            if (error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH) {
+                /* It's a mismatch of checksum, tell user that we validated the checksum and the algorithm we validated
+                 */
+                meta_request->synced_data.finish_result.did_validate = true;
+                meta_request->synced_data.finish_result.validation_algorithm = request->validation_algorithm;
+            }
         }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);

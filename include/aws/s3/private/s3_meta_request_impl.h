@@ -14,6 +14,7 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/request_response.h>
 
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_request.h"
 
@@ -190,9 +191,8 @@ struct aws_s3_meta_request {
 
     const bool should_compute_content_md5;
 
-    const enum aws_s3_checksum_algorithm checksum_algorithm;
-
-    bool validate_get_response_checksum;
+    /* deep copy of the checksum config. */
+    struct checksum_config checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a mutlipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
@@ -210,8 +210,6 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
-    const enum aws_s3_checksum_algorithm checksum_algorithm,
-    bool validate_get_response_checksum,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -266,10 +264,16 @@ void aws_s3_meta_request_sign_request_default(
     aws_signing_complete_fn *on_signing_complete,
     void *user_data);
 
-/* Default implementation for when a request finishes a particular send. Will be invoked for each send of the request.
- */
+/* Default implementation for when a request finishes a particular send. */
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code);
+
+/* Implementation for when a request finishes a particular send to handle possible async error from S3. */
+AWS_S3_API
+void aws_s3_meta_request_send_request_finish_handle_async_error(
     struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code);
@@ -337,6 +341,11 @@ AWS_S3_API
 void aws_s3_meta_request_result_clean_up(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_result *result);
+
+AWS_S3_API
+bool aws_s3_meta_request_checksum_config_has_algorithm(
+    struct aws_s3_meta_request *meta_request,
+    enum aws_s3_checksum_algorithm algorithm);
 
 AWS_EXTERN_C_END
 
