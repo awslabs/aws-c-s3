@@ -231,6 +231,7 @@ int aws_s3_meta_request_init_base(
 
     meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
+    meta_request->init_callback = options->init_callback;
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
 

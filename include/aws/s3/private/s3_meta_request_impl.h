@@ -126,6 +126,7 @@ struct aws_s3_meta_request {
     void *user_data;
 
     /* Customer specified callbacks. */
+    aws_s3_meta_request_init_callback_fn *init_callback;
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
@@ -183,9 +184,6 @@ struct aws_s3_meta_request {
         /* Linked list node for the meta requests linked list in the client. */
         /* Note: this needs to be first for using AWS_CONTAINER_OF with the nested structure. */
         struct aws_linked_list_node node;
-
-        /* True if this meta request is currently in the client's list. */
-        bool scheduled;
 
     } client_process_work_threaded_data;
 

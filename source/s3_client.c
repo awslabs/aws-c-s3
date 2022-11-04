@@ -635,8 +635,8 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
     return request;
 }
 
-/* Public facing make-meta-request function. */
-struct aws_s3_meta_request *aws_s3_client_make_meta_request(
+/* Common implementation for aws_s3_client_start_meta_request() and the deprecated aws_s3_client_make_meta_request()  */
+static struct aws_s3_meta_request *s_s3_client_create_meta_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
 
@@ -836,6 +836,61 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
     }
 
+    return meta_request;
+}
+
+/* Public facing meta-request creation function. */
+int aws_s3_client_start_meta_request(struct aws_s3_client *client, const struct aws_s3_meta_request_options *options) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+
+    if (options->init_callback == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT, "id=%p Cannot create meta s3 request; init callback must be set", (void *)client);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    struct aws_s3_meta_request *meta_request = s_s3_client_create_meta_request(client, options);
+    if (!meta_request) {
+        return AWS_OP_ERR;
+    }
+
+    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Started meta request %p", (void *)client, (void *)meta_request);
+
+    /* Note: the meta request's refcount is now 2. The client has 1 hold on it,
+     * and 1 hold is reserved for the user until we hand off ownership in the init callback. */
+    return AWS_OP_SUCCESS;
+}
+
+/* Deprecated public facing meta-request creation function*/
+struct aws_s3_meta_request *aws_s3_client_make_meta_request(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(options);
+
+    AWS_LOGF_WARN(
+        AWS_LS_S3_CLIENT,
+        "id=%p Using deprecated function 'make_meta_request()', use 'start_meta_request()' instead",
+        (void *)client);
+
+    if (options->init_callback != NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request;"
+            " init callback cannot be used with 'make_meta_request()' function, use 'start_meta_request()' instead",
+            (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    struct aws_s3_meta_request *meta_request = s_s3_client_create_meta_request(client, options);
+    if (!meta_request) {
+        return NULL;
+    }
+
+    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
     return meta_request;
 }
 
@@ -1067,7 +1122,6 @@ static void s_s3_client_remove_meta_request_threaded(
     (void)client;
 
     aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
-    meta_request->client_process_work_threaded_data.scheduled = false;
     aws_s3_meta_request_release(meta_request);
 }
 
@@ -1144,7 +1198,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* END CRITICAL SECTION */
 
     /*******************/
-    /* Step 2: Push meta requests into the thread local list if they haven't already been scheduled. */
+    /* Step 2: Push new meta requests into the thread local list, and invoke the init callback. */
     /*******************/
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT, "id=%p s_s3_client_process_work_default - Processing any new meta requests.", (void *)client);
@@ -1159,14 +1213,33 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
         struct aws_s3_meta_request *meta_request = meta_request_work->meta_request;
 
-        if (!meta_request->client_process_work_threaded_data.scheduled) {
-            aws_linked_list_push_back(
-                &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
+        aws_linked_list_push_back(
+            &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
 
-            meta_request->client_process_work_threaded_data.scheduled = true;
-        } else {
-            aws_s3_meta_request_release(meta_request);
-            meta_request = NULL;
+        /* Invoke the init callback, delivering the meta request pointer to the user for the first time.
+         * Note that we are handing ownership of 1 reference count to the user here.
+         * Even if the user reports an error they're still responsible for releasing the reference eventually.
+         * (the init callback is not set if the pointer was already delivered to the user via
+         * the deprecated make_meta_request() function) */
+        if (meta_request->init_callback) {
+            AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Invoking init callback.", (void *)meta_request);
+
+            if (meta_request->init_callback(meta_request, AWS_ERROR_SUCCESS) != AWS_OP_SUCCESS) {
+
+                int error_code = aws_last_error_or_unknown();
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Init callback reported error %d (%s). Canceling the meta request...",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_name(error_code));
+
+                /* BEGIN CRITICAL SECTION */
+                aws_s3_meta_request_lock_synced_data(meta_request);
+                aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+                aws_s3_meta_request_unlock_synced_data(meta_request);
+                /* END CRITICAL SECTION */
+            }
         }
 
         aws_mem_release(client->allocator, meta_request_work);

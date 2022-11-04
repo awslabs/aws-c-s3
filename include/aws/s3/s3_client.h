@@ -64,6 +64,27 @@ enum aws_s3_meta_request_type {
 };
 
 /**
+ * This is the first callback invoked after a successful call to aws_s3_client_start_meta_request().
+ * This callback is always invoked asynchronously.
+ *
+ * If error_code is zero, the meta_request was created successfully.
+ * meta_request is a valid pointer that you now own. You must eventually
+ * call aws_s3_meta_request_release() when you are completely done with the
+ * pointer, so that it can be cleaned up. Even if return AWS_OP_ERR from this
+ * function to cancel the meta request, you still own this pointer and must
+ * release it properly to prevent memory leaks.
+ *
+ * If error_code is non-zero, the meta request failed to be created.
+ * meta_request is NULL and no further callbacks will fire.
+ *
+ * Return AWS_OP_SUCCESS to continue processing the request.
+ * Return AWS_OP_ERR to indicate failure and cancel the request.
+ */
+typedef int (aws_s3_meta_request_init_callback_fn)(
+    struct aws_s3_meta_request *meta_request,
+    int error_code);
+
+/**
  * Invoked to provide response headers received during execution of the meta request, both for
  * success and error HTTP status codes.
  *
@@ -359,6 +380,13 @@ struct aws_s3_meta_request_options {
     void *user_data;
 
     /**
+     * The first callback invoked after a successful call to aws_s3_client_start_meta_request().
+     * This callback is always invoked asynchronously.
+     * See `aws_s3_meta_request_init_callback_fn`.
+     */
+     aws_s3_meta_request_init_callback_fn *init_callback;
+
+    /**
      * Optional.
      * Invoked to provide response headers received during execution of the meta request.
      * See `aws_s3_meta_request_headers_callback_fn`.
@@ -459,6 +487,34 @@ void aws_s3_client_acquire(struct aws_s3_client *client);
 AWS_S3_API
 void aws_s3_client_release(struct aws_s3_client *client);
 
+/**
+ * Start a meta request.
+ *
+ * @param client The S3 Client.
+ * @param options Options for the new meta request.
+ *
+ * @return If successful, AWS_OP_SUCCESS is returned and the new meta request
+ * pointer will be delivered via the init callback. The init callback will be
+ * invoked asynchronously, possibly on another thread before this function
+ * has even returned.
+ * See `aws_s3_meta_request_init_callback_fn`.
+ *
+ * If unsuccessful, AWS_OP_ERR is returned and no callbacks will be invoked.
+ */
+AWS_S3_API
+int aws_s3_client_start_meta_request(
+        struct aws_s3_client *client,
+        const struct aws_s3_meta_request_options *options);
+
+/**
+ * @Deprecated - Use aws_s3_client_start_meta_request() instead.
+ *
+ * Deprecating this function because it leads to race conditions in user code.
+ * (happens if user stores the pointer returned by this function
+ * then accesses the stored pointer from callbacks. The callbacks can fire
+ * on another thread before this function has returned,
+ * so the stored pointer doesn't exist yet, and kaboom)
+ */
 AWS_S3_API
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
