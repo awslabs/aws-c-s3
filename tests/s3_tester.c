@@ -1619,14 +1619,18 @@ int aws_s3_tester_send_put_object_meta_request(
     char object_path_buffer[128] = "";
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS) {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_kms_%uMB.txt", file_size_mb);
+        snprintf(object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_kms_%uMB.txt", file_size_mb);
     } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256) {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_aes256_%uMB.txt", file_size_mb);
+        snprintf(
+            object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_aes256_%uMB.txt", file_size_mb);
     } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL) {
         snprintf(
-            object_path_buffer, sizeof(object_path_buffer), "/get_object_test_acl_public_read_%uMB.txt", file_size_mb);
+            object_path_buffer,
+            sizeof(object_path_buffer),
+            "/upload/put_object_test_acl_public_read_%uMB.txt",
+            file_size_mb);
     } else {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_%uMB.txt", file_size_mb);
+        snprintf(object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_%uMB.txt", file_size_mb);
     }
     struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
 

@@ -143,6 +143,8 @@ extern const struct aws_byte_cursor g_s3_service_name;
 AWS_S3_API
 extern const struct aws_byte_cursor g_range_header_name;
 
+extern const struct aws_byte_cursor g_if_match_header_name;
+
 AWS_S3_API
 extern const struct aws_byte_cursor g_content_range_header_name;
 
@@ -158,6 +160,12 @@ extern const struct aws_byte_cursor g_head_method;
 AWS_S3_API
 extern const struct aws_byte_cursor g_delete_method;
 
+extern const struct aws_byte_cursor g_error_body_xml_name;
+
+extern const struct aws_byte_cursor g_code_body_xml_name;
+
+extern const struct aws_byte_cursor g_s3_internal_error_code;
+
 AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
 
@@ -172,9 +180,19 @@ AWS_S3_API
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest);
 
 /* Get a top-level (exists directly under the root tag) tag value. */
-struct aws_string *get_top_level_xml_tag_value(
+AWS_S3_API
+struct aws_string *aws_xml_get_top_level_tag(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *tag_name,
+    struct aws_byte_cursor *xml_body);
+
+/* Get a top-level (exists directly under the root tag) tag value with expected root name. */
+AWS_S3_API
+struct aws_string *aws_xml_get_top_level_tag_with_root_name(
+    struct aws_allocator *allocator,
+    const struct aws_byte_cursor *tag_name,
+    const struct aws_byte_cursor *expected_root_name,
+    bool *out_root_name_mismatch,
     struct aws_byte_cursor *xml_body);
 
 /* replace &quot; with escaped /" */
@@ -227,6 +245,10 @@ void aws_s3_get_part_range(
     uint32_t part_number,
     uint64_t *out_part_range_start,
     uint64_t *out_part_range_end);
+
+/* Match the S3 error code to CRT error code, return AWS_ERROR_UNKNOWN when not matched */
+AWS_S3_API
+int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string);
 
 AWS_EXTERN_C_END
 

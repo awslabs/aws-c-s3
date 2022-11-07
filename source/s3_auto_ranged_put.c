@@ -38,6 +38,11 @@ static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static void s_s3_auto_ranged_put_send_request_finish(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code);
+
 static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, struct aws_string **resume_token);
 
 static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
@@ -224,7 +229,7 @@ static int s_load_persistable_state(
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
-    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
+    .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
@@ -869,6 +874,31 @@ message_create_failed:
     return AWS_OP_ERR;
 }
 
+/* Invoked before retry */
+static void s_s3_auto_ranged_put_send_request_finish(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+
+    struct aws_s3_request *request = connection->request;
+    AWS_PRECONDITION(request);
+
+    /* Request tag is different from different type of meta requests */
+    switch (request->request_tag) {
+
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
+            /* For complete multipart upload, the server may return async error. */
+            aws_s3_meta_request_send_request_finish_handle_async_error(connection, stream, error_code);
+            break;
+        }
+
+        default:
+            aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
+            break;
+    }
+}
+
+/* Invoked when no-retry will happen */
 static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -959,7 +989,7 @@ static void s_s3_auto_ranged_put_request_finished(
 
                 /* Find the upload id for this multipart upload. */
                 struct aws_string *upload_id =
-                    get_top_level_xml_tag_value(meta_request->allocator, &s_upload_id, &buffer_byte_cursor);
+                    aws_xml_get_top_level_tag(meta_request->allocator, &s_upload_id, &buffer_byte_cursor);
 
                 if (upload_id == NULL) {
                     AWS_LOGF_ERROR(
@@ -1094,7 +1124,7 @@ static void s_s3_auto_ranged_put_request_finished(
 
                 /* Grab the ETag for the entire object, and set it as a header. */
                 struct aws_string *etag_header_value =
-                    get_top_level_xml_tag_value(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
+                    aws_xml_get_top_level_tag(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
 
                 if (etag_header_value != NULL) {
                     struct aws_byte_buf etag_header_value_byte_buf;
