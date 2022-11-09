@@ -348,8 +348,6 @@ void aws_s3_client_notify_connection_finished(
     int error_code,
     enum aws_s3_connection_finish_code finish_code);
 
-void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request);
-
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
