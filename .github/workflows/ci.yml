@@ -142,7 +142,7 @@ jobs:
 
 
   mock-s3-linux:
-      runs-on: ubuntu-20.04 # latest
+      runs-on: ubuntu-18.04 # latest
       steps:
       - name: Checkout
         uses: actions/checkout@v3
