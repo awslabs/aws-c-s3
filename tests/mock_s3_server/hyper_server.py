@@ -266,7 +266,12 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False):
 
 
 async def send_mock_s3_response(wrapper, request_type, path):
-    response_file = os.path.join(base_dir, request_type.name, f"{path}.json")
+    response_file = os.path.join(
+        base_dir, request_type.name, f"{path[1:]}.json")
+    if os.path.exists(response_file) == False:
+        wrapper.info(response_file, "not exist, using the default response")
+        response_file = os.path.join(
+            base_dir, request_type.name, f"default.json")
     await send_response_from_json(wrapper, response_file)
 
 
@@ -293,9 +298,9 @@ async def maybe_send_error_response(wrapper, exc):
 
 
 async def handle_mock_s3_request(wrapper, request):
+    parsed_path, parsed_query = parse_request_path(
+        request.target.decode("ascii"))
     if request.method == b"POST":
-        parsed_path, parsed_query = parse_request_path(
-            request.target.decode("ascii"))
         if parsed_path.query == "uploads":
             # POST /{Key+}?uploads HTTP/1.1 -- Create MPU
             request_type = S3Opts.CreateMultipartUpload
