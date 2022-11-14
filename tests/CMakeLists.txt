@@ -219,6 +219,7 @@ file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 # # Tests against local mock server
 # if (ENABLE_MOCK_SERVER_TESTS)
 add_net_test_case(multipart_upload_mock_server)
+add_net_test_case(async_error_from_complete_multipart_mock_server)
 # endif()
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)

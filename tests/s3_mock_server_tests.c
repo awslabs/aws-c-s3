@@ -54,3 +54,46 @@ TEST_CASE(multipart_upload_mock_server) {
 
     return 0;
 }
+
+/* Test that the remote max concurrent streams setting hit */
+TEST_CASE(async_error_from_complete_multipart_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* Checkout the ./mock_s3_server/CompleteMultipartUpload/async_error.json for the response details */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/async_error");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+
+    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_INTERNAL_ERROR);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}

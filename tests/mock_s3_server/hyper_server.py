@@ -22,6 +22,7 @@ class S3Opts(Enum):
     CreateMultipartUpload = 1
     CompleteMultipartUpload = 2
     UploadPart = 3
+    AbortMultipartUpload = 4
 
 
 base_dir = os.path.dirname(os.path.realpath(__file__))
@@ -310,8 +311,10 @@ async def handle_mock_s3_request(wrapper, request):
 
     elif request.method == b"PUT":
         request_type = S3Opts.UploadPart
-
+    elif request.method == b"DELETE":
+        request_type = S3Opts.AbortMultipartUpload
     else:
+        # TODO: support more type.
         request_type = S3Opts.CreateMultipartUpload
 
     while True:
