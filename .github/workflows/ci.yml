@@ -141,7 +141,7 @@ jobs:
   #       ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON downstream
 
 
-  # mock-s3-linux:
+  mock-s3-linux:
       runs-on: ubuntu-20.04 # latest
       steps:
       - name: Checkout
