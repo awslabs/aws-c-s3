@@ -56,7 +56,7 @@ TEST_CASE(multipart_upload_mock_server) {
 }
 
 /* Test that the remote max concurrent streams setting hit */
-TEST_CASE(async_error_from_complete_multipart_mock_server) {
+TEST_CASE(async_internal_error_from_complete_multipart_mock_server) {
     (void)ctx;
 
     struct aws_s3_tester tester;
