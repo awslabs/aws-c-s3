@@ -142,6 +142,9 @@ struct aws_s3_tester_meta_request_options {
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
 
+    /* Optional, when enabled, the test will run against local server instead. */
+    bool mock_server;
+
     bool validate_get_response_checksum;
     enum aws_s3_checksum_algorithm checksum_algorithm;
     struct aws_array_list *validate_checksum_algorithms;
@@ -389,6 +392,8 @@ struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     enum aws_s3_test_stream_value stream_value);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
+
+extern const struct aws_byte_cursor g_mock_server_uri;
 
 extern const struct aws_byte_cursor g_test_body_content_type;
 extern const struct aws_byte_cursor g_test_s3_region;

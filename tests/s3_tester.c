@@ -11,6 +11,7 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/system_info.h>
+#include <aws/common/uri.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -25,6 +26,8 @@
 #if _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif
+
+const struct aws_byte_cursor g_mock_server_uri = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("http://localhost:8080/");
 
 const struct aws_byte_cursor g_test_mrap_endpoint =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("moujmk3izc19y.mrap.accesspoint.s3-global.amazonaws.com");
@@ -1179,6 +1182,8 @@ int aws_s3_tester_send_meta_request_with_options(
 
     struct aws_s3_client *client = options->client;
 
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
     if (client == NULL) {
 
         if (options->client_options != NULL) {
@@ -1206,6 +1211,10 @@ int aws_s3_tester_send_meta_request_with_options(
         .checksum_config = &checksum_config,
     };
 
+    if (options->mock_server) {
+        meta_request_options.endpoint = &mock_server;
+    }
+
     if (options->signing_config) {
         meta_request_options.signing_config = options->signing_config;
     }
@@ -1227,6 +1236,10 @@ int aws_s3_tester_send_meta_request_with_options(
             host_name = aws_string_new_from_cursor(allocator, &g_test_mrap_endpoint);
         } else {
             host_name = aws_s3_tester_build_endpoint_string(allocator, bucket_name, &g_test_s3_region);
+        }
+        if (options->mock_server) {
+            struct aws_byte_cursor *host_cursor = aws_uri_host_name(&mock_server);
+            host_name = aws_string_new_from_cursor(allocator, host_cursor);
         }
         if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
@@ -1433,6 +1446,7 @@ int aws_s3_tester_send_meta_request_with_options(
     if (clean_up_local_tester) {
         aws_s3_tester_clean_up(&local_tester);
     }
+    aws_uri_clean_up(&mock_server);
 
     return AWS_OP_SUCCESS;
 }
