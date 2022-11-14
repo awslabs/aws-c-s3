@@ -40,13 +40,11 @@ TEST_CASE(multipart_upload_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_s3_tester_client_options client_options = {
         .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
     };
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
-
-    struct aws_uri mock_server;
-    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
 
