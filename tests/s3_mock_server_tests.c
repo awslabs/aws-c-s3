@@ -3,24 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_checksums.h"
-#include "aws/s3/private/s3_client_impl.h"
-#include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
-#include <aws/common/byte_buf.h>
-#include <aws/common/clock.h>
-#include <aws/common/common.h>
-#include <aws/common/environment.h>
-#include <aws/common/ref_count.h>
-#include <aws/http/request_response.h>
-#include <aws/http/status_code.h>
-#include <aws/io/channel_bootstrap.h>
-#include <aws/io/event_loop.h>
-#include <aws/io/host_resolver.h>
-#include <aws/io/stream.h>
-#include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
