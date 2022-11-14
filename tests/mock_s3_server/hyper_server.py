@@ -265,8 +265,8 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False):
         await wrapper.send(h11.EndOfMessage())
 
 
-async def send_mock_s3_response(wrapper, request_type):
-    response_file = os.path.join(base_dir, request_type.name, "default.json")
+async def send_mock_s3_response(wrapper, request_type, path):
+    response_file = os.path.join(base_dir, request_type.name, f"{path}.json")
     await send_response_from_json(wrapper, response_file)
 
 
@@ -316,7 +316,7 @@ async def handle_mock_s3_request(wrapper, request):
         assert type(event) is h11.Data
 
     await send_mock_s3_response(
-        wrapper, request_type
+        wrapper, request_type, parsed_path.path
     )
 
 
