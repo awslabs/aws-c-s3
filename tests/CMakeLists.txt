@@ -216,7 +216,7 @@ add_test_case(test_s3_list_bucket_init_mem_safety)
 add_test_case(test_s3_list_bucket_init_mem_safety_optional_copies)
 add_net_test_case(test_s3_list_bucket_valid)
 
-# Tests against local server
+# Tests against local mock server
 if (ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(multipart_upload_mock_server)
 endif()

@@ -1232,14 +1232,13 @@ int aws_s3_tester_send_meta_request_with_options(
         }
 
         struct aws_string *host_name = NULL;
-        if (options->mrap_test) {
+        if (options->mock_server) {
+            const struct aws_byte_cursor *host_cursor = aws_uri_host_name(&mock_server);
+            host_name = aws_string_new_from_cursor(allocator, host_cursor);
+        } else if (options->mrap_test) {
             host_name = aws_string_new_from_cursor(allocator, &g_test_mrap_endpoint);
         } else {
             host_name = aws_s3_tester_build_endpoint_string(allocator, bucket_name, &g_test_s3_region);
-        }
-        if (options->mock_server) {
-            struct aws_byte_cursor *host_cursor = aws_uri_host_name(&mock_server);
-            host_name = aws_string_new_from_cursor(allocator, host_cursor);
         }
         if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&

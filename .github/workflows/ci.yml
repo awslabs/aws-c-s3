@@ -139,3 +139,50 @@ jobs:
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
         chmod a+x builder
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON downstream
+
+
+mock-s3-linux:
+    runs-on: ubuntu-20.04 # latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Configure local host
+      run: |
+        python3 -m pip install h11 trio
+        cd ./tests/mock_s3_server/
+        python3 hyper_server.py &
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-ENABLE_MOCK_SERVER_TESTS=ON
+
+  mock-s3-mac:
+    runs-on: macos-11 # latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Configure local host
+      run: |
+        python3 -m pip install h11 trio
+        cd ./tests/mock_s3_server/
+        python3 hyper_server.py &
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-ENABLE_MOCK_SERVER_TESTS=ON
+
+
+  mock-s3-win:
+    runs-on: windows-2022 # latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Configure local host
+      run: |
+        python3 -m pip install h11 trio
+        cd ./tests/mock_s3_server/
+        python3 hyper_server.py &
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-ENABLE_MOCK_SERVER_TESTS=ON
