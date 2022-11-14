@@ -154,7 +154,7 @@ jobs:
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
-          python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-ENABLE_MOCK_SERVER_TESTS=ON
+          python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
 
   mock-s3-mac:
     runs-on: macos-11 # latest
@@ -169,7 +169,7 @@ jobs:
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
-        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-ENABLE_MOCK_SERVER_TESTS=ON
+        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
 
 
   mock-s3-win:
@@ -185,7 +185,7 @@ jobs:
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
-        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-ENABLE_MOCK_SERVER_TESTS=ON
+        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
 
   # Test downstream repos.
