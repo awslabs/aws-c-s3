@@ -3210,7 +3210,7 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_byte_cursor test_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("test_key");
 
-    AWS_STATIC_STRING_FROM_LITERAL(invalid_host_name, "invalid_host_name");
+    AWS_STATIC_STRING_FROM_LITERAL(invalid_host_name, "invalid_host_name_totally_absolutely");
 
     /* Construct a message that points to an invalid host name. Key can be anything. */
     struct aws_http_message *message =
