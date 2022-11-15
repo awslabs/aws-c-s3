@@ -150,7 +150,7 @@ jobs:
         run: |
           python3 -m pip install h11 trio
           cd ./tests/mock_s3_server/
-          python3 hyper_server.py &
+          python3 mock_s3_server.py &
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
@@ -165,7 +165,7 @@ jobs:
       run: |
         python3 -m pip install h11 trio
         cd ./tests/mock_s3_server/
-        python3 hyper_server.py &
+        python3 mock_s3_server.py &
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
@@ -183,7 +183,7 @@ jobs:
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
         cd ./tests/mock_s3_server/
-        Start-Process -NoNewWindow python .\hyper_server.py
+        Start-Process -NoNewWindow python .\mock_s3_server.py
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
         python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
 
