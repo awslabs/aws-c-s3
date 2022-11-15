@@ -62,7 +62,7 @@ jobs:
           ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --compiler=${{ matrix.compiler }} --cmake-extra=-DASSERT_LOCK_HELD=ON
 
   clang-sanitizers:
-    runs-on: ubuntu-22.04 # latest
+    runs-on: ubuntu-20.04 # latest
     strategy:
       matrix:
         sanitizers: [",thread", ",address,undefined"]
@@ -142,7 +142,7 @@ jobs:
 
 
   mock-s3-linux:
-      runs-on: ubuntu-22.04 # for some I DON'T KNOW reason, the mock server not working for 20.04
+      runs-on: ubuntu-18.04 # for some I DON'T KNOW reason, the mock server not working for 20.04
       steps:
       - name: Checkout
         uses: actions/checkout@v3
