@@ -1,0 +1,14 @@
+{
+    "status": 200,
+    "headers": {"Connection": "close"},
+    "body": [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "",
+        "<Error>",
+         "<Code>AccessDenied</Code>",
+         "<Message>Access denied.</Message>",
+         "<RequestId>656c76696e6727732072657175657374</RequestId>",
+         "<HostId>Uuag1LuByRx9e6j5Onimru9pO4ZVKnJ2Qz7/C1NPcfTWAtRPfTaOFg==</HostId>",
+        "</Error>"
+    ]
+  }

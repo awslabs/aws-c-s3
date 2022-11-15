@@ -317,7 +317,9 @@ void aws_s3_meta_request_set_fail_synced(
 
     meta_request->synced_data.finish_result_set = true;
 
-    if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS && failed_request != NULL) {
+    if ((error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
+         error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR) &&
+        failed_request != NULL) {
         aws_s3_meta_request_result_setup(
             meta_request,
             &meta_request->synced_data.finish_result,
