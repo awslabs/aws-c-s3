@@ -142,19 +142,20 @@ jobs:
 
 
   mock-s3-linux:
-      runs-on: ubuntu-22.04 # for some I DON'T KNOW reason, the mock server not working for 20.04
+      runs-on: ubuntu-18.04 # for some I DON'T KNOW reason, the mock server not working for 20.04
       steps:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Configure local host
         run: |
+          python3 -m pip install pip
           python3 -m pip install h11 trio
           cd ./tests/mock_s3_server/
           python3 mock_s3_server.py &
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
-          aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
-          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
+          python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+          python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
 
   mock-s3-mac:
     runs-on: macos-11 # latest
