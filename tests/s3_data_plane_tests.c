@@ -3226,7 +3226,9 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME);
+    ASSERT_TRUE(
+        meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME ||
+        meta_request_test_results.finished_error_code == AWS_IO_DNS_QUERY_FAILED);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
