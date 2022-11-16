@@ -1087,7 +1087,7 @@ static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request
     } else {
         /* Check the error code. Map the S3 error code to CRT error code. */
         int error_code = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
-        if (error_code != AWS_ERROR_S3_INTERNAL_ERROR) {
+        if (error_code == AWS_ERROR_UNKNOWN) {
             /* All error besides of internal error from async error are not recoverable from retry for now. */
             error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
         }
