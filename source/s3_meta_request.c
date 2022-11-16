@@ -1081,7 +1081,7 @@ static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request
     struct aws_string *error_code_string = aws_xml_get_top_level_tag_with_root_name(
         request->allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &response_body_cursor);
     if (error_code_string == NULL) {
-        if (root_name_mismatch) {
+        if (root_name_mismatch || aws_last_error() == AWS_ERROR_MALFORMED_INPUT_STRING) {
             /* The xml body is not Error, we can safely think the request succeed. */
             aws_reset_error();
             return AWS_ERROR_SUCCESS;

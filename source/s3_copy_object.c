@@ -37,14 +37,9 @@ static void s_s3_copy_object_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static void s_s3_copy_object_request_send_request_finish(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code);
-
 static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .update = s_s3_copy_object_update,
-    .send_request_finish = s_s3_copy_object_request_send_request_finish,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_handle_async_error,
     .prepare_request = s_s3_copy_object_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
@@ -557,30 +552,6 @@ static struct aws_string *s_etag_new_from_upload_part_copy_response(
     aws_string_destroy(etag_within_xml_quotes);
 
     return etag;
-}
-
-/* Invoked before retry */
-static void s_s3_copy_object_request_send_request_finish(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code) {
-
-    struct aws_s3_request *request = connection->request;
-    AWS_PRECONDITION(request);
-
-    /* Request tag is different from different type of meta requests */
-    switch (request->request_tag) {
-
-        case AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
-            /* For complete multipart upload, the server may return async error. */
-            aws_s3_meta_request_send_request_finish_handle_async_error(connection, stream, error_code);
-            break;
-        }
-
-        default:
-            aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
-            break;
-    }
 }
 
 static void s_s3_copy_object_request_finished(
