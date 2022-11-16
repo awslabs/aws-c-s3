@@ -1072,6 +1072,10 @@ static void s_s3_meta_request_send_request_finish(
 
 static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
+    if (request->send_data.response_body.len == 0) {
+        /* Empty body is success */
+        return AWS_ERROR_SUCCESS;
+    }
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
     bool root_name_mismatch = false;
     struct aws_string *error_code_string = aws_xml_get_top_level_tag_with_root_name(
