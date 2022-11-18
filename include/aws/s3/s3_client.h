@@ -502,6 +502,10 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  * Resume token will be set to null in case of failures.
  * Note: similar to cancel pause does not cancel requests already in flight and
  * and parts might complete after pause is requested.
+ * Note: pausing meta request before it starts will succeed with NULL token
+ * returned and will pause request. (resuming with null token is equivalent to
+ * starting operation from scratch)
+ * Note: pausing meta request after it completes will fail with AWS_ERROR_S3_PAUSE_FAILED_REQUEST_COMPLETE
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
  * @param resume_token resume token
  * @return error code.
