@@ -1898,13 +1898,14 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(st
 
 struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_upload(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor upload_id,
-    size_t part_size,
-    size_t total_num_parts) {
+    const struct aws_s3_upload_resume_token_options *options) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(options);
+
     struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(allocator);
-    token->multipart_upload_id = aws_string_new_from_cursor(allocator, &upload_id);
-    token->part_size = part_size;
-    token->total_num_parts = total_num_parts;
+    token->multipart_upload_id = aws_string_new_from_cursor(allocator, &options->upload_id);
+    token->part_size = options->part_size;
+    token->total_num_parts = options->total_num_parts;
     token->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
     return token;
 }
