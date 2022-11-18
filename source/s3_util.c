@@ -65,6 +65,9 @@ const struct aws_byte_cursor g_error_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRI
 const struct aws_byte_cursor g_code_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Code");
 
 const struct aws_byte_cursor g_s3_internal_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalError");
+const struct aws_byte_cursor g_s3_slow_down_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SlowDown");
+/* The special error code as Asynchronous Error Codes */
+const struct aws_byte_cursor g_s3_internal_errors_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalErrors");
 
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
@@ -548,7 +551,11 @@ void aws_s3_get_part_range(
 }
 
 int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string) {
-    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_error_code)) {
+    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_slow_down_error_code)) {
+        return AWS_ERROR_S3_SLOW_DOWN;
+    }
+    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_error_code) ||
+        aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_errors_code)) {
         return AWS_ERROR_S3_INTERNAL_ERROR;
     }
     return AWS_ERROR_UNKNOWN;

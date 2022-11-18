@@ -1071,12 +1071,16 @@ static void s_s3_meta_request_send_request_finish(
 
 static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
+    if (request->send_data.response_body.len == 0) {
+        /* Empty body is success */
+        return AWS_ERROR_SUCCESS;
+    }
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
     bool root_name_mismatch = false;
     struct aws_string *error_code_string = aws_xml_get_top_level_tag_with_root_name(
         request->allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &response_body_cursor);
     if (error_code_string == NULL) {
-        if (root_name_mismatch) {
+        if (root_name_mismatch || aws_last_error() == AWS_ERROR_MALFORMED_INPUT_STRING) {
             /* The xml body is not Error, we can safely think the request succeed. */
             aws_reset_error();
             return AWS_ERROR_SUCCESS;
@@ -1086,7 +1090,7 @@ static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request
     } else {
         /* Check the error code. Map the S3 error code to CRT error code. */
         int error_code = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
-        if (error_code != AWS_ERROR_S3_INTERNAL_ERROR) {
+        if (error_code == AWS_ERROR_UNKNOWN) {
             /* All error besides of internal error from async error are not recoverable from retry for now. */
             error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
         }
