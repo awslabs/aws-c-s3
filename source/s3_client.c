@@ -832,8 +832,6 @@ static struct aws_s3_meta_request *s_s3_client_create_meta_request(
 
         aws_s3_meta_request_release(meta_request);
         meta_request = NULL;
-    } else {
-        AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
     }
 
     return meta_request;
@@ -846,7 +844,7 @@ int aws_s3_client_start_meta_request(struct aws_s3_client *client, const struct 
 
     if (options->init_callback == NULL) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT, "id=%p Cannot create meta s3 request; init callback must be set", (void *)client);
+            AWS_LS_S3_CLIENT, "id=%p Cannot create meta s3 request; init callback must be set.", (void *)client);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
@@ -872,14 +870,14 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     AWS_LOGF_WARN(
         AWS_LS_S3_CLIENT,
-        "id=%p Using deprecated function 'make_meta_request()', use 'start_meta_request()' instead",
+        "id=%p Using deprecated function 'make_meta_request()', use 'start_meta_request()' instead.",
         (void *)client);
 
     if (options->init_callback != NULL) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request;"
-            " init callback cannot be used with 'make_meta_request()' function, use 'start_meta_request()' instead",
+            " init callback cannot be used with 'make_meta_request()' function, use 'start_meta_request()' instead.",
             (void *)client);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
@@ -1224,7 +1222,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         if (meta_request->init_callback) {
             AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Invoking init callback.", (void *)meta_request);
 
-            if (meta_request->init_callback(meta_request, AWS_ERROR_SUCCESS) != AWS_OP_SUCCESS) {
+            if (meta_request->init_callback(meta_request, meta_request->user_data)) {
 
                 int error_code = aws_last_error_or_unknown();
                 AWS_LOGF_ERROR(

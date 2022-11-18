@@ -67,22 +67,17 @@ enum aws_s3_meta_request_type {
  * This is the first callback invoked after a successful call to aws_s3_client_start_meta_request().
  * This callback is always invoked asynchronously.
  *
- * If error_code is zero, the meta_request was created successfully.
- * meta_request is a valid pointer that you now own. You must eventually
- * call aws_s3_meta_request_release() when you are completely done with the
- * pointer, so that it can be cleaned up. Even if return AWS_OP_ERR from this
- * function to cancel the meta request, you still own this pointer and must
- * release it properly to prevent memory leaks.
- *
- * If error_code is non-zero, the meta request failed to be created.
- * meta_request is NULL and no further callbacks will fire.
+ * meta_request is a valid pointer that you now own.
+ * You must eventually call aws_s3_meta_request_release() when you are
+ * completely done with the pointer, so that it can be cleaned up.
+ * Even if you return AWS_OP_ERR from this function to cancel the meta
+ * request, you still own this pointer and must release it properly to
+ * prevent memory leaks. This pointer is never NULL.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
  * Return AWS_OP_ERR to indicate failure and cancel the request.
  */
-typedef int (aws_s3_meta_request_init_callback_fn)(
-    struct aws_s3_meta_request *meta_request,
-    int error_code);
+typedef int(aws_s3_meta_request_init_callback_fn)(struct aws_s3_meta_request *meta_request, void *user_data);
 
 /**
  * Invoked to provide response headers received during execution of the meta request, both for
@@ -384,7 +379,7 @@ struct aws_s3_meta_request_options {
      * This callback is always invoked asynchronously.
      * See `aws_s3_meta_request_init_callback_fn`.
      */
-     aws_s3_meta_request_init_callback_fn *init_callback;
+    aws_s3_meta_request_init_callback_fn *init_callback;
 
     /**
      * Optional.
@@ -502,9 +497,7 @@ void aws_s3_client_release(struct aws_s3_client *client);
  * If unsuccessful, AWS_OP_ERR is returned and no callbacks will be invoked.
  */
 AWS_S3_API
-int aws_s3_client_start_meta_request(
-        struct aws_s3_client *client,
-        const struct aws_s3_meta_request_options *options);
+int aws_s3_client_start_meta_request(struct aws_s3_client *client, const struct aws_s3_meta_request_options *options);
 
 /**
  * @Deprecated - Use aws_s3_client_start_meta_request() instead.

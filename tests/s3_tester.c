@@ -68,6 +68,23 @@ struct aws_byte_buf aws_tls_handler_protocol(struct aws_channel_handler *handler
 }
 #endif
 
+static int s_s3_test_meta_request_init_callback(struct aws_s3_meta_request *meta_request, void *user_data) {
+
+    struct aws_s3_meta_request_test_results *meta_request_test_results =
+        (struct aws_s3_meta_request_test_results *)user_data;
+
+    /* init callback fires exactly once */
+    AWS_FATAL_ASSERT(meta_request_test_results->meta_request == NULL);
+
+    aws_s3_tester_lock_synced_data(meta_request_test_results->tester);
+    meta_request_test_results->meta_request = meta_request;
+    aws_s3_tester_unlock_synced_data(meta_request_test_results->tester);
+
+    aws_condition_variable_notify_all(&meta_request_test_results->tester->signal);
+
+    return AWS_OP_SUCCESS;
+}
+
 static int s_s3_test_meta_request_header_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
@@ -175,6 +192,9 @@ static void s_s3_test_meta_request_finish(
 static void s_s3_test_meta_request_shutdown(void *user_data) {
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     struct aws_s3_tester *tester = meta_request_test_results->tester;
+
+    AWS_FATAL_ASSERT(!meta_request_test_results->shutdown_happened);
+    meta_request_test_results->shutdown_happened = true;
 
     aws_s3_tester_notify_meta_request_shutdown(tester);
 }
@@ -320,6 +340,9 @@ int aws_s3_tester_bind_meta_request(
     ++tester->synced_data.desired_meta_request_shutdown_count;
     aws_s3_tester_unlock_synced_data(tester);
 
+    ASSERT_TRUE(options->init_callback == NULL);
+    options->init_callback = s_s3_test_meta_request_init_callback;
+
     ASSERT_TRUE(options->headers_callback == NULL);
     options->headers_callback = s_s3_test_meta_request_header_callback;
 
@@ -357,6 +380,49 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
     aws_http_headers_release(test_meta_request->response_headers);
 
     AWS_ZERO_STRUCT(*test_meta_request);
+}
+
+static bool s_s3_meta_request_test_results_has_init_happened(void *user_data) {
+    const struct aws_s3_meta_request_test_results *test_meta_request = user_data;
+    return test_meta_request->meta_request != NULL;
+}
+
+struct aws_s3_meta_request *aws_s3_meta_request_test_results_wait_for_init(
+    struct aws_s3_meta_request_test_results *test_meta_request) {
+
+    struct aws_s3_tester *tester = test_meta_request->tester;
+
+    aws_s3_tester_lock_synced_data(tester);
+    aws_condition_variable_wait_pred(
+        &tester->signal,
+        &tester->synced_data.lock,
+        s_s3_meta_request_test_results_has_init_happened,
+        test_meta_request);
+    aws_s3_tester_unlock_synced_data(tester);
+
+    return test_meta_request->meta_request;
+}
+
+static bool s_s3_meta_request_test_results_has_shutdown_happened(void *user_data) {
+    const struct aws_s3_meta_request_test_results *test_meta_request = user_data;
+    return test_meta_request->shutdown_happened;
+}
+
+void aws_s3_meta_request_test_results_wait_for_shutdown(struct aws_s3_meta_request_test_results *test_meta_request) {
+    AWS_FATAL_ASSERT(test_meta_request->meta_request != NULL);
+
+    /* release hold on meta_request */
+    aws_s3_meta_request_release(test_meta_request->meta_request);
+    test_meta_request->meta_request = NULL; /* TODO: aws_s3_meta_request_release() should return NULL */
+
+    /* wait for shutdown callback */
+    aws_s3_tester_lock_synced_data(test_meta_request->tester);
+    aws_condition_variable_wait_pred(
+        &test_meta_request->tester->signal,
+        &test_meta_request->tester->synced_data.lock,
+        s_s3_meta_request_test_results_has_shutdown_happened,
+        test_meta_request);
+    aws_s3_tester_unlock_synced_data(test_meta_request->tester);
 }
 
 void aws_s3_tester_notify_meta_request_finished(
@@ -1446,9 +1512,9 @@ int aws_s3_tester_send_meta_request(
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, options, test_results));
 
-    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, options);
+    ASSERT_SUCCESS(aws_s3_client_start_meta_request(client, options));
 
-    ASSERT_TRUE(meta_request != NULL);
+    struct aws_s3_meta_request *meta_request = aws_s3_meta_request_test_results_wait_for_init(test_results);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
         /* take a random sleep from 0-1 ms. */
@@ -1476,11 +1542,7 @@ int aws_s3_tester_send_meta_request(
 
     test_results->part_size = meta_request->part_size;
 
-    aws_s3_meta_request_release(meta_request);
-
-    if ((flags & AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN) == 0) {
-        aws_s3_tester_wait_for_meta_request_shutdown(tester);
-    }
+    aws_s3_meta_request_test_results_wait_for_shutdown(test_results);
 
     return AWS_OP_SUCCESS;
 }

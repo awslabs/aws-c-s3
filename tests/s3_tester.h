@@ -32,7 +32,6 @@ enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
 
 enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS = 0x00000001,
-    AWS_S3_TESTER_SEND_META_REQUEST_DONT_WAIT_FOR_SHUTDOWN = 0x00000002,
     AWS_S3_TESTER_SEND_META_REQUEST_CANCEL = 0x00000004,
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS = 0x00000008,
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256 = 0x00000010,
@@ -194,6 +193,10 @@ struct aws_s3_meta_request_test_results {
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
 
+    /* This is set from the init_callback.
+     * The shutdown_callback cannot fire until the meta_request is released */
+    struct aws_s3_meta_request *meta_request;
+
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
     size_t part_size;
@@ -207,6 +210,8 @@ struct aws_s3_meta_request_test_results {
     int finished_response_status;
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
+
+    bool shutdown_happened;
 };
 
 struct aws_s3_client_config;
@@ -227,6 +232,13 @@ void aws_s3_meta_request_test_results_init(
     struct aws_allocator *allocator);
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request);
+
+/* Wait for the meta_request pointer to be delivered via the init callback. */
+struct aws_s3_meta_request *aws_s3_meta_request_test_results_wait_for_init(
+    struct aws_s3_meta_request_test_results *test_meta_request);
+
+/* Release the meta_request pointer and wait for its shutdown_callback to fire */
+void aws_s3_meta_request_test_results_wait_for_shutdown(struct aws_s3_meta_request_test_results *test_meta_request);
 
 /* Wait for the correct number of aws_s3_tester_notify_meta_request_finished to be called */
 void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester);
