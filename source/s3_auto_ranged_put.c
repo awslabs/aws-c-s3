@@ -8,7 +8,6 @@
 #include "aws/s3/private/s3_list_parts.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
-#include <aws/common/json.h>
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
 
@@ -43,7 +42,8 @@ static void s_s3_auto_ranged_put_send_request_finish(
     struct aws_http_stream *stream,
     int error_code);
 
-static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request,
+static int s_s3_auto_ranged_put_pause(
+    struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **resume_token);
 
 static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
@@ -82,9 +82,9 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
     return true;
 }
 
-static int s_parse_resume_info_from_token(
+static int s_set_resume_info_from_token(
     struct aws_allocator *allocator,
-    const struct aws_byte_cursor *resume_token,
+    const struct aws_s3_meta_request_resume_token *resume_token,
     struct aws_string **upload_id_out,
     size_t *part_size_out,
     uint32_t *total_num_parts_out) {
@@ -93,68 +93,38 @@ static int s_parse_resume_info_from_token(
         return AWS_OP_SUCCESS;
     }
 
-    struct aws_json_value *root = aws_json_value_new_from_string(allocator, *resume_token);
-
-    struct aws_json_value *type_node = aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("type"));
-
-    struct aws_json_value *multipart_upload_id_node =
-        aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("multipart_upload_id"));
-
-    struct aws_json_value *part_size_node =
-        aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("part_size"));
-
-    struct aws_json_value *total_num_parts_node =
-        aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("total_num_parts"));
-
-    double part_size_value = 0.0;
-    double total_num_parts_value = 0.0;
-    struct aws_byte_cursor multipart_upload_id_value;
-    struct aws_byte_cursor type_value;
-
-    if (!multipart_upload_id_node || !part_size_node || !total_num_parts_node || !type_node ||
-        aws_json_value_get_number(part_size_node, &part_size_value) ||
-        aws_json_value_get_number(total_num_parts_node, &total_num_parts_value) ||
-        aws_json_value_get_string(multipart_upload_id_node, &multipart_upload_id_value) ||
-        aws_json_value_get_string(type_node, &type_value)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not load persisted state. Invalid token.");
-        goto invalid_argument_cleanup;
-    }
-
-    if (!aws_byte_cursor_eq_c_str(&type_value, "AWS_S3_META_REQUEST_TYPE_PUT_OBJECT")) {
+    if (resume_token->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
         AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not load persisted state. Invalid token type.");
         goto invalid_argument_cleanup;
     }
 
-    if ((size_t)part_size_value < g_s3_min_upload_part_size) {
+    if (resume_token->part_size < g_s3_min_upload_part_size) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "Could not create resume auto-ranged-put meta request; part size of %" PRIu64
             " specified in the token is below minimum threshold for multi-part.",
-            (uint64_t)part_size_value);
+            (uint64_t)resume_token->part_size);
 
         goto invalid_argument_cleanup;
     }
 
-    if ((uint32_t)total_num_parts_value > g_s3_max_num_upload_parts) {
+    if ((uint32_t)resume_token->total_num_parts > g_s3_max_num_upload_parts) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "Could not create resume auto-ranged-put meta request; total number of parts %" PRIu32
             " specified in the token is too large for platform.",
-            (uint32_t)total_num_parts_value);
+            (uint32_t)resume_token->total_num_parts);
 
         goto invalid_argument_cleanup;
     }
 
-    *upload_id_out = aws_string_new_from_cursor(allocator, &multipart_upload_id_value);
-    *part_size_out = (size_t)part_size_value;
-    *total_num_parts_out = (uint32_t)total_num_parts_value;
-
-    aws_json_value_destroy(root);
+    *upload_id_out = aws_string_clone_or_reuse(allocator, resume_token->multipart_upload_id);
+    *part_size_out = resume_token->part_size;
+    *total_num_parts_out = (uint32_t)resume_token->total_num_parts;
 
     return AWS_OP_SUCCESS;
 
 invalid_argument_cleanup:
-    aws_json_value_destroy(root);
     return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
 }
 
@@ -260,8 +230,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
     struct aws_string *multipart_upload_id = NULL;
-    if (s_parse_resume_info_from_token(
-            allocator, options->resume_token, &multipart_upload_id, &part_size, &num_parts)) {
+    if (s_set_resume_info_from_token(allocator, options->resume_token, &multipart_upload_id, &part_size, &num_parts)) {
         goto error_clean_up;
     }
 
@@ -1185,7 +1154,8 @@ static void s_s3_auto_ranged_put_request_finished(
     }
 }
 
-static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request,
+static int s_s3_auto_ranged_put_pause(
+    struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {
 
     int return_status = AWS_OP_SUCCESS;
@@ -1201,20 +1171,21 @@ static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request,
      *   - in the middle of upload - return success, create token and cancel
      *     upload
      *   - after upload - return already completed error, token is NULL and
-     *     nothing to cancel 
-    */
+     *     nothing to cancel
+     */
 
     if (!auto_ranged_put->synced_data.complete_multipart_upload_sent) {
 
         if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
-            
-                *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
 
-                (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
-                (*out_resume_token)->multipart_upload_id = aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
-                (*out_resume_token)->part_size = meta_request->part_size;
-                (*out_resume_token)->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
-                (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
+            *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
+
+            (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+            (*out_resume_token)->multipart_upload_id =
+                aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
+            (*out_resume_token)->part_size = meta_request->part_size;
+            (*out_resume_token)->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
+            (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
         }
 
         /**

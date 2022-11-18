@@ -404,7 +404,7 @@ struct aws_s3_meta_request_options {
      * Note: If PutObject request specifies a checksum algorithm, client will calculate checksums while skipping parts
      * from the buffer and compare them them to previously uploaded part checksums.
      */
-    const struct aws_byte_cursor *resume_token;
+    const struct aws_s3_meta_request_resume_token *resume_token;
 };
 
 /* Result details of a meta request.
@@ -504,15 +504,19 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  * and parts might complete after pause is requested.
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
  * @param resume_token resume token
- * @return error code. 
+ * @return error code.
  */
 AWS_S3_API
-int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request,
+int aws_s3_meta_request_pause(
+    struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token);
 
 AWS_S3_API
-struct aws_string *aws_string_new_from_s3_resume_token(struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_resume_token *resume_token);
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_upload(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor upload_id,
+    size_t part_size,
+    size_t total_num_parts);
 
 AWS_S3_API
 struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_acquire(
@@ -523,6 +527,10 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_releas
     struct aws_s3_meta_request_resume_token *resume_token);
 
 AWS_S3_API
+enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
+    struct aws_s3_meta_request_resume_token *resume_token);
+
+AWS_S3_API
 size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 AWS_S3_API
@@ -530,6 +538,10 @@ size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_reque
 
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token);
+
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
+    struct aws_s3_meta_request_resume_token *resume_token);
 
 AWS_S3_API
 void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);

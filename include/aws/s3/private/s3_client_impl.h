@@ -347,7 +347,7 @@ struct aws_s3_meta_request_resume_token {
     struct aws_ref_count ref_count;
 
     enum aws_s3_meta_request_type type;
-    
+
     /* Note: since pause currently only supports upload, this structure only has
         upload specific fields. Extending it to support other types is left as
         exercise for future. */
