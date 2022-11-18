@@ -515,6 +515,11 @@ int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token);
 
+/*
+* Options to construct upload resume token.
+* Note: fields correspond to getters on the token below and it up to the caller
+* to persist those in whichever way they choose.
+*/
 struct aws_s3_upload_resume_token_options {
     struct aws_byte_cursor upload_id;
     size_t part_size;

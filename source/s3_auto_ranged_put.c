@@ -1194,8 +1194,8 @@ static int s_s3_auto_ranged_put_pause(
          */
         aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
     } else {
-        AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "Cannot pause request since its already complete");
-        return_status = aws_raise_error(AWS_ERROR_S3_PAUSE_FAILED_REQUEST_COMPLETE);
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Cannot pause request since its already complete");
+        return_status = aws_raise_error(AWS_ERROR_S3_PAUSE_FAILED_REQUEST_COMPLETED);
     }
 
     /* unlock */
