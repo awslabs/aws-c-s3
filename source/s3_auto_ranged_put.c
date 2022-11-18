@@ -43,7 +43,8 @@ static void s_s3_auto_ranged_put_send_request_finish(
     struct aws_http_stream *stream,
     int error_code);
 
-static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, struct aws_string **resume_token);
+static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token **resume_token);
 
 static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
@@ -99,19 +100,19 @@ static int s_parse_resume_info_from_token(
     struct aws_json_value *multipart_upload_id_node =
         aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("multipart_upload_id"));
 
-    struct aws_json_value *partition_size_node =
-        aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("partition_size"));
+    struct aws_json_value *part_size_node =
+        aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("part_size"));
 
     struct aws_json_value *total_num_parts_node =
         aws_json_value_get_from_object(root, aws_byte_cursor_from_c_str("total_num_parts"));
 
-    double partition_size_value = 0.0;
+    double part_size_value = 0.0;
     double total_num_parts_value = 0.0;
     struct aws_byte_cursor multipart_upload_id_value;
     struct aws_byte_cursor type_value;
 
-    if (!multipart_upload_id_node || !partition_size_node || !total_num_parts_node || !type_node ||
-        aws_json_value_get_number(partition_size_node, &partition_size_value) ||
+    if (!multipart_upload_id_node || !part_size_node || !total_num_parts_node || !type_node ||
+        aws_json_value_get_number(part_size_node, &part_size_value) ||
         aws_json_value_get_number(total_num_parts_node, &total_num_parts_value) ||
         aws_json_value_get_string(multipart_upload_id_node, &multipart_upload_id_value) ||
         aws_json_value_get_string(type_node, &type_value)) {
@@ -124,12 +125,12 @@ static int s_parse_resume_info_from_token(
         goto invalid_argument_cleanup;
     }
 
-    if ((size_t)partition_size_value < g_s3_min_upload_part_size) {
+    if ((size_t)part_size_value < g_s3_min_upload_part_size) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "Could not create resume auto-ranged-put meta request; part size of %" PRIu64
             " specified in the token is below minimum threshold for multi-part.",
-            (uint64_t)partition_size_value);
+            (uint64_t)part_size_value);
 
         goto invalid_argument_cleanup;
     }
@@ -145,7 +146,7 @@ static int s_parse_resume_info_from_token(
     }
 
     *upload_id_out = aws_string_new_from_cursor(allocator, &multipart_upload_id_value);
-    *part_size_out = (size_t)partition_size_value;
+    *part_size_out = (size_t)part_size_value;
     *total_num_parts_out = (uint32_t)total_num_parts_value;
 
     aws_json_value_destroy(root);
@@ -783,7 +784,7 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             if (request->num_times_prepared == 0) {
 
-                /* Corner case of last part being previosly uploaded during resume.
+                /* Corner case of last part being previously uploaded during resume.
                  * Read it from input stream and potentially verify checksum */
                 if (s_skip_parts_from_stream(
                         meta_request,
@@ -1184,72 +1185,50 @@ static void s_s3_auto_ranged_put_request_finished(
     }
 }
 
-static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request, struct aws_string **out_resume_token) {
+static int s_s3_auto_ranged_put_pause(struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token **out_resume_token) {
+
+    int return_status = AWS_OP_SUCCESS;
+    *out_resume_token = NULL;
 
     /* lock */
     aws_s3_meta_request_lock_synced_data(meta_request);
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    /* only generate token if multipart upload was completed, since there is nothing to resume otherwise*/
-    int token_generated_error = AWS_OP_SUCCESS;
-    *out_resume_token = NULL;
-    if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
-        struct aws_json_value *root = aws_json_value_new_object(meta_request->allocator);
+    /* upload can be in one of several states:
+     *   - not started, i.e. we didn't even call crete mpu yet - return success,
+     *     token is NULL and cancel the upload
+     *   - in the middle of upload - return success, create token and cancel
+     *     upload
+     *   - after upload - return already completed error, token is NULL and
+     *     nothing to cancel 
+    */
 
-        /**
-         * generate pause token for put.
-         * current format is json with the following structure
-         * {
-         *      type: String
-         *      multipart_upload_id: String
-         *      partition_size: number
-         *      total_num_parts: number
-         * }
-         */
+    if (!auto_ranged_put->synced_data.complete_multipart_upload_sent) {
 
-        aws_json_value_add_to_object(
-            root,
-            aws_byte_cursor_from_c_str("type"),
-            aws_json_value_new_string(
-                meta_request->allocator, aws_byte_cursor_from_c_str("AWS_S3_META_REQUEST_TYPE_PUT_OBJECT")));
+        if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
+            
+                *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
 
-        aws_json_value_add_to_object(
-            root,
-            aws_byte_cursor_from_c_str("multipart_upload_id"),
-            aws_json_value_new_string(
-                meta_request->allocator, aws_byte_cursor_from_string(auto_ranged_put->upload_id)));
-
-        aws_json_value_add_to_object(
-            root,
-            aws_byte_cursor_from_c_str("partition_size"),
-            aws_json_value_new_number(meta_request->allocator, (double)meta_request->part_size));
-
-        aws_json_value_add_to_object(
-            root,
-            aws_byte_cursor_from_c_str("total_num_parts"),
-            aws_json_value_new_number(meta_request->allocator, (double)auto_ranged_put->synced_data.total_num_parts));
-
-        struct aws_byte_buf result_string_buf;
-        aws_byte_buf_init(&result_string_buf, meta_request->allocator, 0);
-
-        token_generated_error = aws_byte_buf_append_json_string(root, &result_string_buf);
-
-        if (!token_generated_error) {
-            *out_resume_token = aws_string_new_from_buf(meta_request->allocator, &result_string_buf);
+                (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+                (*out_resume_token)->multipart_upload_id = aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
+                (*out_resume_token)->part_size = meta_request->part_size;
+                (*out_resume_token)->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
+                (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
         }
 
-        aws_byte_buf_clean_up(&result_string_buf);
-        aws_json_value_destroy(root);
+        /**
+         * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
+         * This allows the client to resume the upload later, setting the persistable state in the meta request options.
+         */
+        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+    } else {
+        AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "Cannot pause request since its already complete");
+        return_status = aws_raise_error(AWS_ERROR_S3_PAUSE_FAILED_REQUEST_COMPLETE);
     }
-
-    /**
-     * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
-     * This allows the client to resume the upload later, setting the persistable state in the meta request options.
-     */
-    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
 
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    return token_generated_error;
+    return return_status;
 }

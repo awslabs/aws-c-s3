@@ -4913,8 +4913,10 @@ static void s_pause_meta_request_progress(
             return;
         }
 
-        struct aws_string *persistable_state = NULL;
-        int pause_result = aws_s3_meta_request_pause(meta_request, &persistable_state);
+        struct aws_s3_meta_request_resume_token *resume_token = NULL;
+        int pause_result = aws_s3_meta_request_pause(meta_request, &resume_token);
+        struct aws_string *persistable_state = aws_string_new_from_s3_resume_token(meta_request->allocator, resume_token);
+        aws_s3_meta_request_resume_token_release(resume_token);
         aws_atomic_store_int(&test_data->pause_result, pause_result);
         aws_atomic_store_ptr(&test_data->persistable_state_ptr, persistable_state);
     }

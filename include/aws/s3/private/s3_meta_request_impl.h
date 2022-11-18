@@ -88,7 +88,7 @@ struct aws_s3_meta_request_vtable {
     void (*destroy)(struct aws_s3_meta_request *);
 
     /* Pause the given request */
-    int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_string **resume_token);
+    int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 };
 
 /**
@@ -194,7 +194,7 @@ struct aws_s3_meta_request {
     /* deep copy of the checksum config. */
     struct checksum_config checksum_config;
 
-    /* checksum found in either a default get request, or in the initial head request of a mutlipart get */
+    /* checksum found in either a default get request, or in the initial head request of a multipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
 
     /* running checksum of all of the parts of a default get, or ranged get meta request*/
@@ -323,7 +323,7 @@ bool aws_s3_meta_request_has_finish_result_synced(struct aws_s3_meta_request *me
 AWS_S3_API
 void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request);
 
-/* Default implementation of the meta request finish functino. */
+/* Default implementation of the meta request finish function. */
 AWS_S3_API
 void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request);
 

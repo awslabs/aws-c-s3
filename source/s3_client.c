@@ -19,6 +19,7 @@
 #include <aws/common/environment.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
+#include <aws/common/json.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
 #include <aws/http/proxy.h>
@@ -505,7 +506,7 @@ static void s_s3_client_start_destroy(void *user_data) {
 
         client->synced_data.active = false;
 
-        /* Prevent the client from cleaning up inbetween the mutex unlock/re-lock below.*/
+        /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
 
         aws_s3_client_unlock_synced_data(client);
@@ -1873,4 +1874,117 @@ static void s_s3_client_prepare_request_callback_retry_request(
     } else {
         aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
     }
+}
+
+static void s_resume_token_ref_count_zero_callback(void *arg) {
+    struct aws_s3_meta_request_resume_token *token = arg;
+
+    if (token->multipart_upload_id) {
+        aws_string_destroy(token->multipart_upload_id);
+    }
+
+    aws_mem_release(token->allocator, token);
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(struct aws_allocator *allocator) {
+    struct aws_s3_meta_request_resume_token *token = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_resume_token));
+
+    token->allocator = allocator;
+    aws_ref_count_init(&token->ref_count, token, s_resume_token_ref_count_zero_callback);
+
+    return token;
+}
+
+struct aws_string *aws_string_new_from_s3_resume_token(struct aws_allocator *allocator,
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+
+    if (resume_token == NULL) {
+        return NULL;
+    }
+
+    struct aws_string *result = NULL;
+    struct aws_json_value *root = aws_json_value_new_object(allocator);
+
+    struct aws_byte_buf buf;
+    if (aws_byte_buf_init(&buf, allocator, 10)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to create pause token serialization buffer");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto on_done;
+    }
+
+    /**
+     * generate pause token for put.
+     * current format is json with the following structure
+     * {
+     *      type: String
+     *      multipart_upload_id: String
+     *      part_size: number
+     *      total_num_parts: number
+     *      
+     * }
+     */
+
+    if (aws_json_value_add_to_object(root,
+            aws_byte_cursor_from_c_str("type"),
+            aws_json_value_new_number(allocator, resume_token->type)) || 
+        aws_json_value_add_to_object(root,
+            aws_byte_cursor_from_c_str("multipart_upload_id"),
+            aws_json_value_new_string(allocator,
+                aws_byte_cursor_from_string(resume_token->multipart_upload_id))) ||
+        aws_json_value_add_to_object(root,
+            aws_byte_cursor_from_c_str("part_size"),
+            aws_json_value_new_number(allocator, resume_token->part_size)) ||
+        aws_json_value_add_to_object(root,
+            aws_byte_cursor_from_c_str("total_num_parts"),
+            aws_json_value_new_number(allocator, resume_token->total_num_parts)) || 
+        aws_json_value_add_to_object(root,
+            aws_byte_cursor_from_c_str("num_parts_completed"),
+            aws_json_value_new_number(allocator, resume_token->num_parts_completed))) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to serialize resume token.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto on_done;
+    }
+    
+    if (aws_byte_buf_append_json_string(root, &buf)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to write pause token to buffer");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto on_done;
+    }
+
+    result = aws_string_new_from_buf(allocator, &buf);
+    
+on_done:
+    aws_json_value_destroy(root);
+    aws_byte_buf_clean_up(&buf);
+    
+    return result;
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_acquire(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_PRECONDITION(resume_token);
+    if (resume_token) {
+        aws_ref_count_acquire(&resume_token->ref_count);
+    }
+    return resume_token;
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_release(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    if (resume_token) {
+        aws_ref_count_release(&resume_token->ref_count);
+    }
+    return NULL;
+}
+
+size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
+    return resume_token ? resume_token->part_size : 0;
+}
+
+size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token) {
+    return resume_token ? resume_token->total_num_parts : 0;
+}
+
+size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token) {
+    return resume_token ? resume_token->num_parts_completed : 0;
 }
