@@ -29,7 +29,7 @@ static void s_s3_meta_request_default_request_finished(
 
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .update = s_s3_meta_request_default_update,
-    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_handle_async_error,
     .prepare_request = s_s3_meta_request_default_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
