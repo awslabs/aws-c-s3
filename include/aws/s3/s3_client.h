@@ -523,7 +523,7 @@ struct aws_s3_upload_resume_token_options {
 
 /**
  * Create upload resume token from persisted data.
- * Note: Data required for resume token varies per operation. 
+ * Note: Data required for resume token varies per operation.
  */
 AWS_S3_API
 struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_upload(
@@ -531,53 +531,53 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_up
     const struct aws_s3_upload_resume_token_options *options);
 
 /*
-* Increment resume token ref count.
-*/
+ * Increment resume token ref count.
+ */
 AWS_S3_API
 struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_acquire(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
-* Decrement resume token ref count.
-*/
+ * Decrement resume token ref count.
+ */
 AWS_S3_API
 struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_release(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
-* Type of resume token.
-* Returns AWS_S3_META_REQUEST_TYPE_DEFAULT for invalid tokens.
-*/
+ * Type of resume token.
+ * Returns AWS_S3_META_REQUEST_TYPE_DEFAULT for invalid tokens.
+ */
 AWS_S3_API
 enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
-* Part size associated with operation.
-* Returns 0 for invalid tokens.
-*/
+ * Part size associated with operation.
+ * Returns 0 for invalid tokens.
+ */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
-* Total num parts associated with operation.
-* Returns 0 for invalid tokens.
-*/
+ * Total num parts associated with operation.
+ * Returns 0 for invalid tokens.
+ */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
-* Num parts completed.
-* Returns 0 for invalid tokens.
-*/
+ * Num parts completed.
+ * Returns 0 for invalid tokens.
+ */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
-* Upload id associated with operation.
-* Only valid for tokens returned from upload operation. For all other operations
-* this will return empty.
-*/
+ * Upload id associated with operation.
+ * Only valid for tokens returned from upload operation. For all other operations
+ * this will return empty.
+ */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token);
