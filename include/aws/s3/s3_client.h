@@ -468,6 +468,7 @@ struct aws_s3_client *aws_s3_client_acquire(struct aws_s3_client *client);
  * It's OK to pass in NULL (nothing happens).
  * Always returns NULL.
  */
+AWS_S3_API
 struct aws_s3_client *aws_s3_client_release(struct aws_s3_client *client);
 
 AWS_S3_API
