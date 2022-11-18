@@ -1439,6 +1439,25 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     }
 }
 
+static void s_s3_client_meta_request_finished_request(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(request);
+
+    if (request->tracked_by_client) {
+        /* BEGIN CRITICAL SECTION */
+        aws_s3_client_lock_synced_data(client);
+        aws_atomic_fetch_sub(&client->stats.num_requests_in_flight, 1);
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+        /* END CRITICAL SECTION */
+    }
+    aws_s3_meta_request_finished_request(meta_request, request, error_code);
+}
+
 static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -1451,7 +1470,7 @@ static void s_s3_client_prepare_callback_queue_request(
     AWS_PRECONDITION(client);
 
     if (error_code != AWS_ERROR_SUCCESS) {
-        aws_s3_meta_request_finished_request(meta_request, request, error_code);
+        s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
 
         aws_s3_request_release(request);
         request = NULL;
@@ -1490,7 +1509,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         /* Unless the request is marked "always send", if this meta request has a finish result, then finish the request
          * now and release it. */
         if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
-            aws_s3_meta_request_finished_request(request->meta_request, request, AWS_ERROR_S3_CANCELED);
+            s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
 
             aws_s3_request_release(request);
             request = NULL;
@@ -1805,7 +1824,7 @@ reset_connection:
 
     aws_atomic_fetch_sub(&client->stats.num_requests_network_io[meta_request->type], 1);
 
-    aws_s3_meta_request_finished_request(meta_request, request, error_code);
+    s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
 
     if (connection->http_connection != NULL) {
         AWS_ASSERT(endpoint->http_connection_manager);
@@ -1924,20 +1943,5 @@ static void s_s3_client_prepare_request_callback_retry_request(
             client->retry_strategy, AWS_ERROR_SUCCESS, connection->retry_token, connection);
     } else {
         aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
-    }
-}
-
-/* Called by aws_s3_request when it has finished being destroyed */
-void aws_s3_client_notify_request_destroyed(struct aws_s3_client *client, struct aws_s3_request *request) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(request);
-
-    if (request->tracked_by_client) {
-        /* BEGIN CRITICAL SECTION */
-        aws_s3_client_lock_synced_data(client);
-        aws_atomic_fetch_sub(&client->stats.num_requests_in_flight, 1);
-        s_s3_client_schedule_process_work_synced(client);
-        aws_s3_client_unlock_synced_data(client);
-        /* END CRITICAL SECTION */
     }
 }
