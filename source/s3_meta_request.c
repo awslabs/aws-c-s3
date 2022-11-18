@@ -482,7 +482,7 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
     struct aws_s3_meta_request *meta_request = payload->request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(meta_request->client);
     struct aws_s3_client *client = aws_s3_client_acquire(meta_request->client);
 
     struct aws_allocator *allocator = client->allocator;
