@@ -831,7 +831,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             aws_last_error(),
             aws_error_str(aws_last_error()));
 
-            meta_request = aws_s3_meta_request_release(meta_request);
+        meta_request = aws_s3_meta_request_release(meta_request);
     } else {
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
     }
