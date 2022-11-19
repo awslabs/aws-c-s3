@@ -583,7 +583,7 @@ static int s_test_s3_client_queue_requests(struct aws_allocator *allocator, void
         aws_s3_request_new(mock_meta_request, 0, 0, 0),
     };
 
-    const uint32_t num_requests = sizeof(requests) / sizeof(struct aws_s3_request *);
+    const uint32_t num_requests = AWS_ARRAY_SIZE(requests);
 
     struct aws_linked_list request_list;
     aws_linked_list_init(&request_list);
@@ -1275,10 +1275,9 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
 
     struct aws_s3_meta_request *meta_requests[4];
     struct aws_s3_meta_request_test_results meta_request_test_results[4];
-    size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
+    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_requests);
 
-    ASSERT_TRUE(
-        num_meta_requests == (sizeof(meta_request_test_results) / sizeof(struct aws_s3_meta_request_test_results)));
+    ASSERT_TRUE(num_meta_requests == AWS_ARRAY_SIZE(meta_request_test_results));
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -1684,10 +1683,9 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     struct aws_http_message *messages[2];
     struct aws_input_stream *input_streams[2];
     struct aws_byte_buf input_stream_buffers[2];
-    size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
+    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_requests);
 
-    ASSERT_TRUE(
-        num_meta_requests == (sizeof(meta_request_test_results) / sizeof(struct aws_s3_meta_request_test_results)));
+    ASSERT_TRUE(num_meta_requests == AWS_ARRAY_SIZE(meta_request_test_results));
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -4090,8 +4088,8 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    const size_t num_object_names = sizeof(object_names) / sizeof(object_names[0]);
-    const size_t num_ranges = sizeof(ranges) / sizeof(ranges[0]);
+    const size_t num_object_names = AWS_ARRAY_SIZE(object_names);
+    const size_t num_ranges = AWS_ARRAY_SIZE(ranges);
 
     for (size_t object_name_index = 0; object_name_index < num_object_names; ++object_name_index) {
         for (size_t range_index = 0; range_index < num_ranges; ++range_index) {
@@ -4172,7 +4170,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
                 bool ignore_header = false;
 
-                for (size_t j = 0; j < sizeof(headers_to_ignore) / sizeof(headers_to_ignore[0]); ++j) {
+                for (size_t j = 0; j < AWS_ARRAY_SIZE(headers_to_ignore); ++j) {
                     if (aws_byte_cursor_eq_ignore_case(&headers_to_ignore[j], &verify_header.name)) {
                         ignore_header = true;
                         break;
@@ -4194,7 +4192,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 struct aws_byte_cursor header_value;
                 ASSERT_SUCCESS(aws_http_headers_get(range_get_headers, verify_header.name, &header_value));
 
-                for (size_t j = 0; j < sizeof(headers_that_should_match) / sizeof(headers_that_should_match[0]); ++j) {
+                for (size_t j = 0; j < AWS_ARRAY_SIZE(headers_that_should_match); ++j) {
                     if (!aws_byte_cursor_eq_ignore_case(&headers_that_should_match[j], &verify_header.name)) {
                         continue;
                     }
