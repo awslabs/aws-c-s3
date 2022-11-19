@@ -1273,12 +1273,8 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
 
     const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
 
-    struct aws_s3_meta_request *meta_requests[4];
     struct aws_s3_meta_request_test_results meta_request_test_results[4];
-    size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
-
-    ASSERT_TRUE(
-        num_meta_requests == (sizeof(meta_request_test_results) / sizeof(struct aws_s3_meta_request_test_results)));
+    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_request_test_results);
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -1311,9 +1307,7 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
         /* Trigger accelerating of our Get Object request. */
-        meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
-
-        ASSERT_TRUE(meta_requests[i] != NULL);
+        ASSERT_SUCCESS(aws_s3_client_start_meta_request(client, &options));
 
         aws_http_message_release(message);
     }
@@ -1326,7 +1320,7 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     aws_s3_tester_unlock_synced_data(&tester);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
-        meta_requests[i] = aws_s3_meta_request_release(meta_requests[i]);
+        aws_s3_tester_release_meta_request(&meta_request_test_results[i]);
     }
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
@@ -1405,7 +1399,7 @@ static int s_apply_backpressure_until_meta_request_finish(
     while (true) {
         /* Check if meta-request is done (don't exit yet, we want to check some numbers first...) */
         aws_s3_tester_lock_synced_data(tester);
-        bool done = tester->synced_data.meta_requests_finished != 0;
+        bool done = tester->synced_data.meta_requests_finished;
         aws_s3_tester_unlock_synced_data(tester);
 
         /* Check how much data we've received */
@@ -1679,15 +1673,11 @@ AWS_TEST_CASE(test_s3_put_object_multiple, s_test_s3_put_object_multiple)
 static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_meta_request *meta_requests[2];
     struct aws_s3_meta_request_test_results meta_request_test_results[2];
     struct aws_http_message *messages[2];
     struct aws_input_stream *input_streams[2];
     struct aws_byte_buf input_stream_buffers[2];
-    size_t num_meta_requests = sizeof(meta_requests) / sizeof(struct aws_s3_meta_request *);
-
-    ASSERT_TRUE(
-        num_meta_requests == (sizeof(meta_request_test_results) / sizeof(struct aws_s3_meta_request_test_results)));
+    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_request_test_results);
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -1728,9 +1718,7 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
         /* Trigger accelerating of our Put Object request. */
-        meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
-
-        ASSERT_TRUE(meta_requests[i] != NULL);
+        ASSERT_SUCCESS(aws_s3_client_start_meta_request(client, &options));
     }
 
     /* Wait for the request to finish. */
@@ -1741,7 +1729,7 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     aws_s3_tester_unlock_synced_data(&tester);
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
-        meta_requests[i] = aws_s3_meta_request_release(meta_requests[i]);
+        aws_s3_tester_release_meta_request(&meta_request_test_results[i]);
     }
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
@@ -4381,7 +4369,7 @@ static void s_copy_object_meta_request_finish(
     test_data->response_status_code = meta_request_result->response_status;
     test_data->execution_completed = true;
     aws_mutex_unlock(&test_data->mutex);
-    aws_condition_variable_notify_one(&test_data->c_var);
+    aws_condition_variable_notify_all(&test_data->c_var);
 }
 
 static int s_copy_object_meta_request_headers_callback(
@@ -4849,7 +4837,7 @@ static void s_put_pause_resume_meta_request_finish(
     test_data->response_status_code = meta_request_result->response_status;
     test_data->execution_completed = true;
     aws_mutex_unlock(&test_data->mutex);
-    aws_condition_variable_notify_one(&test_data->c_var);
+    aws_condition_variable_notify_all(&test_data->c_var);
 }
 
 static bool s_put_pause_resume_test_completion_predicate(void *arg) {

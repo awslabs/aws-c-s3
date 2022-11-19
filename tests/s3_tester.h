@@ -94,6 +94,9 @@ struct aws_s3_tester {
     struct {
         struct aws_mutex lock;
 
+        size_t desired_meta_request_init_count;
+        size_t meta_request_init_count;
+
         size_t desired_meta_request_finish_count;
         size_t meta_request_finish_count;
 
@@ -108,9 +111,10 @@ struct aws_s3_tester {
 
         int finish_error_code;
 
-        uint32_t meta_requests_finished : 1;
-        uint32_t meta_requests_shutdown : 1;
-        uint32_t client_shutdown : 1;
+        bool meta_requests_initialized;
+        bool meta_requests_finished;
+        bool meta_requests_shutdown;
+        bool client_shutdown;
     } synced_data;
 };
 
@@ -118,7 +122,6 @@ struct aws_s3_tester_client_options {
     enum aws_s3_client_tls_usage tls_usage;
     size_t part_size;
     size_t max_part_size;
-    uint32_t setup_region : 1;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -178,7 +181,7 @@ struct aws_s3_tester_meta_request_options {
     enum aws_s3_tester_sse_type sse_type;
     enum aws_s3_tester_validate_type validate_type;
 
-    uint32_t mrap_test : 1;
+    bool mrap_test;
 };
 
 /* TODO Rename to something more generic such as "aws_s3_meta_request_test_data" */
@@ -208,8 +211,6 @@ struct aws_s3_meta_request_test_results {
     int finished_response_status;
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
-
-    bool shutdown_happened;
 };
 
 struct aws_s3_client_config;
@@ -231,19 +232,21 @@ void aws_s3_meta_request_test_results_init(
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request);
 
-/* Wait for init_callback to fire.
- * Once this returns, the results.meta_request pointer is set */
-void aws_s3_meta_request_test_results_wait_for_init(struct aws_s3_meta_request_test_results *test_meta_request);
-
-/* Release the meta_request and wait for its shutdown_callback to fire.
- * Once this returns, the results.meta_request pointer is NULL*/
-void aws_s3_meta_request_test_results_wait_for_shutdown(struct aws_s3_meta_request_test_results *test_meta_request);
+/* Wait for the correct number of aws_s3_tester_notify_meta_request_initialized to be called.
+ * Once this returns, the aws_s3_meta_request_test_results.meta_request pointers are all set */
+void aws_s3_tester_wait_for_meta_request_init(struct aws_s3_tester *tester);
 
 /* Wait for the correct number of aws_s3_tester_notify_meta_request_finished to be called */
 void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester);
 
+/* Release the meta-request so that it can be shut down */
+void aws_s3_tester_release_meta_request(struct aws_s3_meta_request_test_results *test_meta_request);
+
 /* Wait forthe correct number of aws_s3_tester_notify_meta_request_shutdown to be called. */
 void aws_s3_tester_wait_for_meta_request_shutdown(struct aws_s3_tester *tester);
+
+/* Notify the tester that a meta request has initialized. */
+void aws_s3_tester_notify_meta_request_initialized(struct aws_s3_tester *tester);
 
 /* Notify the tester that a meta request has finished. */
 void aws_s3_tester_notify_meta_request_finished(

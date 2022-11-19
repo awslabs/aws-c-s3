@@ -120,7 +120,7 @@ static void s_on_list_bucket_page_finished_fn(struct aws_s3_paginator *paginator
         aws_mutex_lock(&test_data->mutex);
         test_data->done = true;
         aws_mutex_unlock(&test_data->mutex);
-        aws_condition_variable_notify_one(&test_data->c_var);
+        aws_condition_variable_notify_all(&test_data->c_var);
     }
 }
 
