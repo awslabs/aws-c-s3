@@ -178,8 +178,6 @@ struct aws_s3_tester_meta_request_options {
     enum aws_s3_tester_sse_type sse_type;
     enum aws_s3_tester_validate_type validate_type;
 
-    uint32_t dont_wait_for_shutdown : 1;
-
     uint32_t mrap_test : 1;
 };
 
@@ -233,11 +231,12 @@ void aws_s3_meta_request_test_results_init(
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request);
 
-/* Wait for the meta_request pointer to be delivered via the init callback. */
-struct aws_s3_meta_request *aws_s3_meta_request_test_results_wait_for_init(
-    struct aws_s3_meta_request_test_results *test_meta_request);
+/* Wait for init_callback to fire.
+ * Once this returns, the results.meta_request pointer is set */
+void aws_s3_meta_request_test_results_wait_for_init(struct aws_s3_meta_request_test_results *test_meta_request);
 
-/* Release the meta_request pointer and wait for its shutdown_callback to fire */
+/* Release the meta_request and wait for its shutdown_callback to fire.
+ * Once this returns, the results.meta_request pointer is NULL*/
 void aws_s3_meta_request_test_results_wait_for_shutdown(struct aws_s3_meta_request_test_results *test_meta_request);
 
 /* Wait for the correct number of aws_s3_tester_notify_meta_request_finished to be called */
