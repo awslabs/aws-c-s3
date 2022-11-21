@@ -58,7 +58,7 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
         },
     };
 
-    for (size_t i = 0; i < (sizeof(test_cases) / sizeof(struct replace_quote_entities_test_case)); ++i) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
         struct replace_quote_entities_test_case *test_case = &test_cases[i];
 
         struct aws_byte_buf result_byte_buf;
@@ -116,7 +116,7 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
         },
     };
 
-    for (size_t i = 0; i < (sizeof(test_cases) / sizeof(struct strip_quotes_test_case)); ++i) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
         struct strip_quotes_test_case *test_case = &test_cases[i];
 
         struct aws_byte_buf result_byte_buf;
