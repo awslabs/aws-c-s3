@@ -634,8 +634,7 @@ static void s_s3_copy_object_request_finished(
 
             if (error_code == AWS_ERROR_SUCCESS) {
                 needed_response_headers = aws_http_headers_new(meta_request->allocator);
-                const size_t copy_header_count =
-                    sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
+                const size_t copy_header_count = AWS_ARRAY_SIZE(s_create_multipart_upload_copy_headers);
 
                 /* Copy any headers now that we'll need for the final, transformed headers later. */
                 for (size_t header_index = 0; header_index < copy_header_count; ++header_index) {
