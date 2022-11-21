@@ -1374,7 +1374,6 @@ static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void
  */
 static int s_apply_backpressure_until_meta_request_finish(
     struct aws_s3_tester *tester,
-    struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_test_results *test_results,
     size_t part_size,
     size_t window_initial_size,
@@ -1437,7 +1436,7 @@ static int s_apply_backpressure_until_meta_request_finish(
 
             /* Open the window a bit (this resets the "something happened" timer */
             accumulated_window_increments += window_increment_size;
-            aws_s3_meta_request_increment_read_window(meta_request, window_increment_size);
+            aws_s3_meta_request_increment_read_window(test_results->meta_request, window_increment_size);
 
             last_time_something_happened = current_time;
         }
@@ -1489,13 +1488,14 @@ static int s_test_s3_get_object_backpressure_helper(
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
 
-    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+    ASSERT_SUCCESS(aws_s3_client_start_meta_request(client, &options));
 
-    ASSERT_TRUE(meta_request != NULL);
+    /* wait for meta_request pointer to become available */
+    aws_s3_tester_wait_for_meta_request_initialized(&tester);
 
     /* Increment read window bit by bit until all data is downloaded */
     ASSERT_SUCCESS(s_apply_backpressure_until_meta_request_finish(
-        &tester, meta_request, &meta_request_test_results, part_size, window_initial_size, window_increment_size));
+        &tester, &meta_request_test_results, part_size, window_initial_size, window_increment_size));
 
     aws_s3_tester_lock_synced_data(&tester);
 
@@ -1507,9 +1507,9 @@ static int s_test_s3_get_object_backpressure_helper(
 
     /* Regression test:
      * Ensure that it's safe to call increment-window even after the meta-request has finished */
-    aws_s3_meta_request_increment_read_window(meta_request, 1024);
+    aws_s3_meta_request_increment_read_window(meta_request_test_results.meta_request, 1024);
 
-    meta_request = aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_release_meta_request(&meta_request_test_results);
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
@@ -2970,9 +2970,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
 
-    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
-
-    ASSERT_TRUE(meta_request != NULL);
+    ASSERT_SUCCESS(aws_s3_client_start_meta_request(client, &options));
 
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(&tester);
@@ -2985,7 +2983,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
 
-    meta_request = aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_release_meta_request(&meta_request_test_results);
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
@@ -3042,9 +3040,7 @@ static int s_test_s3_error_missing_file(struct aws_allocator *allocator, void *c
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
 
-    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
-
-    ASSERT_TRUE(meta_request != NULL);
+    ASSERT_SUCCESS(aws_s3_client_start_meta_request(client, &options));
 
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(&tester);
@@ -3058,7 +3054,7 @@ static int s_test_s3_error_missing_file(struct aws_allocator *allocator, void *c
 
     ASSERT_TRUE(meta_request_test_results.error_response_headers != NULL);
 
-    meta_request = aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_release_meta_request(&meta_request_test_results);
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);

@@ -234,7 +234,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
 
 /* Wait for the correct number of aws_s3_tester_notify_meta_request_initialized to be called.
  * Once this returns, the aws_s3_meta_request_test_results.meta_request pointers are all set */
-void aws_s3_tester_wait_for_meta_request_init(struct aws_s3_tester *tester);
+void aws_s3_tester_wait_for_meta_request_initialized(struct aws_s3_tester *tester);
 
 /* Wait for the correct number of aws_s3_tester_notify_meta_request_finished to be called */
 void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester);

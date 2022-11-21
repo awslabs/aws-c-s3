@@ -411,7 +411,7 @@ static bool s_s3_tester_have_meta_requests_initialized(void *user_data) {
     return tester->synced_data.meta_requests_initialized;
 }
 
-void aws_s3_tester_wait_for_meta_request_init(struct aws_s3_tester *tester) {
+void aws_s3_tester_wait_for_meta_request_initialized(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
 
     aws_s3_tester_lock_synced_data(tester);
@@ -1505,7 +1505,7 @@ int aws_s3_tester_send_meta_request(
 
     ASSERT_SUCCESS(aws_s3_client_start_meta_request(client, options));
 
-    aws_s3_tester_wait_for_meta_request_init(tester);
+    aws_s3_tester_wait_for_meta_request_initialized(tester);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
         /* take a random sleep from 0-1 ms. */
