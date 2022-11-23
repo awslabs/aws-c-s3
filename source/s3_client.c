@@ -476,18 +476,19 @@ lock_init_fail:
     return NULL;
 }
 
-void aws_s3_client_acquire(struct aws_s3_client *client) {
+struct aws_s3_client *aws_s3_client_acquire(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
     aws_ref_count_acquire(&client->ref_count);
+    return client;
 }
 
-void aws_s3_client_release(struct aws_s3_client *client) {
-    if (client == NULL) {
-        return;
+struct aws_s3_client *aws_s3_client_release(struct aws_s3_client *client) {
+    if (client != NULL) {
+        aws_ref_count_release(&client->ref_count);
     }
 
-    aws_ref_count_release(&client->ref_count);
+    return NULL;
 }
 
 static void s_s3_client_start_destroy(void *user_data) {
@@ -830,8 +831,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             aws_last_error(),
             aws_error_str(aws_last_error()));
 
-        aws_s3_meta_request_release(meta_request);
-        meta_request = NULL;
+        meta_request = aws_s3_meta_request_release(meta_request);
     } else {
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
     }
@@ -1165,8 +1165,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
             meta_request->client_process_work_threaded_data.scheduled = true;
         } else {
-            aws_s3_meta_request_release(meta_request);
-            meta_request = NULL;
+            meta_request = aws_s3_meta_request_release(meta_request);
         }
 
         aws_mem_release(client->allocator, meta_request_work);
