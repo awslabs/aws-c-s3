@@ -496,7 +496,7 @@ uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uin
 
     /* If the range has room for a second part, calculate the additional amount of parts. */
     if (second_part_start <= object_range_end) {
-        uint64_t aligned_range_remainder = object_range_end - second_part_start;
+        uint64_t aligned_range_remainder = object_range_end + 1 - second_part_start;
         num_parts += (uint32_t)(aligned_range_remainder / (uint64_t)part_size);
 
         if ((aligned_range_remainder % part_size) > 0) {
