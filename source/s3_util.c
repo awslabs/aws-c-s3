@@ -65,6 +65,9 @@ const struct aws_byte_cursor g_error_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRI
 const struct aws_byte_cursor g_code_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Code");
 
 const struct aws_byte_cursor g_s3_internal_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalError");
+const struct aws_byte_cursor g_s3_slow_down_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SlowDown");
+/* The special error code as Asynchronous Error Codes */
+const struct aws_byte_cursor g_s3_internal_errors_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalErrors");
 
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
@@ -493,7 +496,7 @@ uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uin
 
     /* If the range has room for a second part, calculate the additional amount of parts. */
     if (second_part_start <= object_range_end) {
-        uint64_t aligned_range_remainder = object_range_end - second_part_start;
+        uint64_t aligned_range_remainder = object_range_end + 1 - second_part_start;
         num_parts += (uint32_t)(aligned_range_remainder / (uint64_t)part_size);
 
         if ((aligned_range_remainder % part_size) > 0) {
@@ -548,7 +551,11 @@ void aws_s3_get_part_range(
 }
 
 int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string) {
-    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_error_code)) {
+    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_slow_down_error_code)) {
+        return AWS_ERROR_S3_SLOW_DOWN;
+    }
+    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_error_code) ||
+        aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_errors_code)) {
         return AWS_ERROR_S3_INTERNAL_ERROR;
     }
     return AWS_ERROR_UNKNOWN;

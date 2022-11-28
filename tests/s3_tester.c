@@ -1425,8 +1425,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     if (meta_request != NULL) {
         out_results->part_size = meta_request->part_size;
-        aws_s3_meta_request_release(meta_request);
-        meta_request = NULL;
+        meta_request = aws_s3_meta_request_release(meta_request);
 
         if (!options->dont_wait_for_shutdown) {
             aws_s3_tester_wait_for_meta_request_shutdown(tester);
