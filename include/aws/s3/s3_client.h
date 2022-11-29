@@ -565,7 +565,6 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_releas
 
 /*
  * Type of resume token.
- * Returns AWS_S3_META_REQUEST_TYPE_DEFAULT for invalid tokens.
  */
 AWS_S3_API
 enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
@@ -573,21 +572,18 @@ enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
 
 /*
  * Part size associated with operation.
- * Returns 0 for invalid tokens.
  */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
  * Total num parts associated with operation.
- * Returns 0 for invalid tokens.
  */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
  * Num parts completed.
- * Returns 0 for invalid tokens.
  */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token);

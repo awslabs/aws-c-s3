@@ -175,7 +175,7 @@ static int s_try_init_resume_state_from_persisted_data(
     auto_ranged_put->synced_data.num_parts_completed = 0;
     auto_ranged_put->synced_data.create_multipart_upload_sent = true;
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
-    auto_ranged_put->upload_id = resume_token->multipart_upload_id;
+    auto_ranged_put->upload_id = aws_string_clone_or_reuse(allocator, resume_token->multipart_upload_id);
 
     struct aws_s3_list_parts_params list_parts_params = {
         .key = request_path,
@@ -1176,12 +1176,18 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {
 
-    int return_status = AWS_OP_SUCCESS;
     *out_resume_token = NULL;
 
     /* lock */
     aws_s3_meta_request_lock_synced_data(meta_request);
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Pausing request with %d out of %d parts have completed.",
+        (void *)meta_request,
+        auto_ranged_put->synced_data.num_parts_completed,
+        auto_ranged_put->synced_data.total_num_parts);
 
     /* upload can be in one of several states:
      * - not started, i.e. we didn't even call crete mpu yet - return success,
@@ -1212,5 +1218,5 @@ static int s_s3_auto_ranged_put_pause(
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
-    return return_status;
+    return AWS_OP_SUCCESS;
 }

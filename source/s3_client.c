@@ -1879,9 +1879,7 @@ static void s_s3_client_prepare_request_callback_retry_request(
 static void s_resume_token_ref_count_zero_callback(void *arg) {
     struct aws_s3_meta_request_resume_token *token = arg;
 
-    if (token->multipart_upload_id) {
-        aws_string_destroy(token->multipart_upload_id);
-    }
+    aws_string_destroy(token->multipart_upload_id);
 
     aws_mem_release(token->allocator, token);
 }
@@ -1929,24 +1927,29 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_releas
 
 enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
     struct aws_s3_meta_request_resume_token *resume_token) {
-    return resume_token == NULL ? AWS_S3_META_REQUEST_TYPE_DEFAULT : resume_token->type;
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->type;
 }
 
 size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
-    return resume_token ? resume_token->part_size : 0;
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->part_size;
 }
 
 size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token) {
-    return resume_token ? resume_token->total_num_parts : 0;
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->total_num_parts;
 }
 
 size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token) {
-    return resume_token ? resume_token->num_parts_completed : 0;
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->num_parts_completed;
 }
 
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token) {
-    if (resume_token != NULL && resume_token->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
         resume_token->multipart_upload_id != NULL) {
         return aws_byte_cursor_from_string(resume_token->multipart_upload_id);
     }
