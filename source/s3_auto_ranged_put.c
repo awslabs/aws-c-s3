@@ -943,9 +943,9 @@ static void s_s3_auto_ranged_put_request_finished(
                             (void *)meta_request);
 
                         aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
+                    } else {
+                        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
                     }
-
-                    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
                 }
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
