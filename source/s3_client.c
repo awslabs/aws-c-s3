@@ -1949,8 +1949,7 @@ size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_r
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
-    if (resume_token->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
-        resume_token->multipart_upload_id != NULL) {
+    if (resume_token->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && resume_token->multipart_upload_id != NULL) {
         return aws_byte_cursor_from_string(resume_token->multipart_upload_id);
     }
 
