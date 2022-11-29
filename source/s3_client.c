@@ -1906,6 +1906,7 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_up
     token->multipart_upload_id = aws_string_new_from_cursor(allocator, &options->upload_id);
     token->part_size = options->part_size;
     token->total_num_parts = options->total_num_parts;
+    token->num_parts_completed = options->num_parts_completed;
     token->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
     return token;
 }

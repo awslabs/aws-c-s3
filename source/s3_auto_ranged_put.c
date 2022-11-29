@@ -82,12 +82,14 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
     return true;
 }
 
-static int s_set_resume_info_from_token(
-    struct aws_allocator *allocator,
+/* 
+* Validates token and updates part variables. Noop if token is null.
+*/
+static int s_try_update_part_info_from_resume_token(
+    uint64_t content_length,
     const struct aws_s3_meta_request_resume_token *resume_token,
-    struct aws_string **upload_id_out,
-    size_t *part_size_out,
-    uint32_t *total_num_parts_out) {
+    size_t *out_part_size,
+    uint32_t *out_total_num_parts) {
 
     if (!resume_token) {
         return AWS_OP_SUCCESS;
@@ -95,6 +97,11 @@ static int s_set_resume_info_from_token(
 
     if (resume_token->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
         AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not load persisted state. Invalid token type.");
+        goto invalid_argument_cleanup;
+    }
+
+    if (resume_token->multipart_upload_id == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Could not load persisted state. Multipart upload id missing.");
         goto invalid_argument_cleanup;
     }
 
@@ -118,9 +125,24 @@ static int s_set_resume_info_from_token(
         goto invalid_argument_cleanup;
     }
 
-    *upload_id_out = aws_string_clone_or_reuse(allocator, resume_token->multipart_upload_id);
-    *part_size_out = resume_token->part_size;
-    *total_num_parts_out = (uint32_t)resume_token->total_num_parts;
+    uint32_t num_parts = (uint32_t)(content_length / resume_token->part_size);
+
+    if ((content_length % resume_token->part_size) > 0) {
+        ++num_parts;
+    }
+
+    if (resume_token->total_num_parts != num_parts) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create auto-ranged-put meta request; persisted number of parts %" PRIu32
+            " does not match expected number of parts based on length of the body.",
+            (uint32_t)resume_token->total_num_parts);
+
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    *out_part_size = resume_token->part_size;
+    *out_total_num_parts = (uint32_t)resume_token->total_num_parts;
 
     return AWS_OP_SUCCESS;
 
@@ -129,30 +151,18 @@ invalid_argument_cleanup:
 }
 
 /**
- * Loads the persistable state used to resume an upload that was previously paused.
+ * Initializes state necessary to resume upload. Noop if token is null.
  */
-static int s_load_persistable_state(
+static int s_try_init_resume_state_from_persisted_data(
     struct aws_allocator *allocator,
     struct aws_s3_auto_ranged_put *auto_ranged_put,
-    uint64_t content_length,
-    struct aws_string *upload_id,
-    size_t part_size,
-    uint32_t total_num_parts) {
+    const struct aws_s3_meta_request_resume_token *resume_token) {
 
-    uint32_t num_parts = (uint32_t)(content_length / part_size);
-
-    if ((content_length % part_size) > 0) {
-        ++num_parts;
-    }
-
-    if (total_num_parts != num_parts) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "Could not create auto-ranged-put meta request; persisted number of parts %" PRIu32
-            " does not match expected number of parts based on length of the body.",
-            total_num_parts);
-
-        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    if (resume_token == NULL) {
+        auto_ranged_put->synced_data.list_parts_operation = NULL;
+        auto_ranged_put->synced_data.list_parts_sent = true;
+        auto_ranged_put->synced_data.list_parts_completed = true;
+        return AWS_OP_SUCCESS;
     }
 
     struct aws_byte_cursor request_path;
@@ -165,7 +175,7 @@ static int s_load_persistable_state(
     auto_ranged_put->synced_data.num_parts_completed = 0;
     auto_ranged_put->synced_data.create_multipart_upload_sent = true;
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
-    auto_ranged_put->upload_id = upload_id;
+    auto_ranged_put->upload_id = resume_token->multipart_upload_id;
 
     struct aws_s3_list_parts_params list_parts_params = {
         .key = request_path,
@@ -229,8 +239,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_s3_auto_ranged_put *auto_ranged_put =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
-    struct aws_string *multipart_upload_id = NULL;
-    if (s_set_resume_info_from_token(allocator, options->resume_token, &multipart_upload_id, &part_size, &num_parts)) {
+    if (s_try_update_part_info_from_resume_token(content_length, options->resume_token, &part_size, &num_parts)) {
         goto error_clean_up;
     }
 
@@ -250,19 +259,15 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->content_length = content_length;
     auto_ranged_put->synced_data.total_num_parts = num_parts;
     auto_ranged_put->upload_id = NULL;
+    auto_ranged_put->resume_token = options->resume_token;
+
+    aws_s3_meta_request_resume_token_acquire(auto_ranged_put->resume_token);
 
     auto_ranged_put->threaded_update_data.next_part_number = 1;
     auto_ranged_put->prepare_data.num_parts_read_from_stream = 0;
 
-    if (options->resume_token) {
-        if (s_load_persistable_state(
-                allocator, auto_ranged_put, content_length, multipart_upload_id, part_size, num_parts)) {
-            goto error_clean_up;
-        }
-    } else {
-        auto_ranged_put->synced_data.list_parts_operation = NULL;
-        auto_ranged_put->synced_data.list_parts_sent = true;
-        auto_ranged_put->synced_data.list_parts_completed = true;
+    if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
+        goto error_clean_up;
     }
 
     struct aws_string **etag_c_array = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
@@ -276,7 +281,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     return &auto_ranged_put->base;
 
 error_clean_up:
-    aws_string_destroy(multipart_upload_id);
     aws_mem_release(allocator, auto_ranged_put);
 
     return NULL;
@@ -291,6 +295,8 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     aws_string_destroy(auto_ranged_put->upload_id);
     auto_ranged_put->upload_id = NULL;
+
+    auto_ranged_put->resume_token = aws_s3_meta_request_resume_token_release(auto_ranged_put->resume_token);
 
     aws_s3_paginated_operation_release(auto_ranged_put->synced_data.list_parts_operation);
 
@@ -924,9 +930,20 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
 
                 auto_ranged_put->synced_data.list_parts_completed = !has_more_results;
-                auto_ranged_put->synced_data.create_multipart_upload_error_code = error_code;
+                auto_ranged_put->synced_data.list_parts_error_code = error_code;
 
                 if (error_code != AWS_ERROR_SUCCESS) {
+                    if (request->send_data.response_status == AWS_HTTP_STATUS_CODE_404_NOT_FOUND && 
+                        auto_ranged_put->resume_token->num_parts_completed == auto_ranged_put->resume_token->total_num_parts) {
+                        AWS_LOGF_DEBUG(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Resuming PutObject ended early, since there is nothing to resume"
+                            "(request finished prior to being paused?)",
+                            (void *)meta_request);
+
+                        aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
+                    }
+
                     aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
                 }
 
@@ -1166,37 +1183,30 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     /* upload can be in one of several states:
-     *   - not started, i.e. we didn't even call crete mpu yet - return success,
-     *     token is NULL and cancel the upload
-     *   - in the middle of upload - return success, create token and cancel
+     * - not started, i.e. we didn't even call crete mpu yet - return success,
+     *   token is NULL and cancel the upload
+     * - in the middle of upload - return success, create token and cancel
      *     upload
-     *   - after upload - return already completed error, token is NULL and
-     *     nothing to cancel
+     * - complete MPU started - return success, generate token and try to cancel
+     *   complete MPU
      */
+    if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
 
-    if (!auto_ranged_put->synced_data.complete_multipart_upload_sent) {
+        *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
 
-        if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
-
-            *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
-
-            (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
-            (*out_resume_token)->multipart_upload_id =
-                aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
-            (*out_resume_token)->part_size = meta_request->part_size;
-            (*out_resume_token)->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
-            (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
-        }
-
-        /**
-         * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
-         * This allows the client to resume the upload later, setting the persistable state in the meta request options.
-         */
-        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
-    } else {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Cannot pause request since its already complete");
-        return_status = aws_raise_error(AWS_ERROR_S3_PAUSE_FAILED_REQUEST_COMPLETED);
+        (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+        (*out_resume_token)->multipart_upload_id =
+            aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
+        (*out_resume_token)->part_size = meta_request->part_size;
+        (*out_resume_token)->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
+        (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
     }
+
+    /**
+     * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
+     * This allows the client to resume the upload later, setting the persistable state in the meta request options.
+     */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
 
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);

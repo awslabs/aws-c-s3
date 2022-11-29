@@ -404,7 +404,7 @@ struct aws_s3_meta_request_options {
      * Note: If PutObject request specifies a checksum algorithm, client will calculate checksums while skipping parts
      * from the buffer and compare them them to previously uploaded part checksums.
      */
-    const struct aws_s3_meta_request_resume_token *resume_token;
+    struct aws_s3_meta_request_resume_token *resume_token;
 };
 
 /* Result details of a meta request.
@@ -495,17 +495,22 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  * Note: pause is currently only supported on upload requests.
  * In order to pause an ongoing upload, call aws_s3_meta_request_pause() that
  * will return resume token. Token can be used to query the state of operation
- * at the pausing time. Use aws_byte_buf_init_from_s3_resume_token to serialize token.
- * To resume an upload that was paused, supply the serialized resume token in the meta
+ * at the pausing time.
+ * To resume an upload that was paused, supply resume token in the meta
  * request options structure member aws_s3_meta_request_options.resume_token.
  * The upload can be resumed either from the same client or a different one.
- * Resume token will be set to null in case of failures.
+ * Corner cases for resume upload are as follows:
+ * - upload is not MPU - fail with pause not supported error
+ * - pausing before MPU is created - NULL resume token returned. NULL resume
+ *   token is equivalent to restarting upload
+ * - pausing in the middle of part transfer - return resume token. scheduling of
+ *   new part uploads stops.
+ * - pausing after completeMPU started - return resume token. if s3 cannot find
+ *   find associated MPU id when resuming with that token and num of parts
+ *   uploaded equals to total num parts, then operation is no op. Otherwise
+ *   operation fails.
  * Note: similar to cancel pause does not cancel requests already in flight and
  * and parts might complete after pause is requested.
- * Note: pausing meta request before it starts will succeed with NULL token
- * returned and will pause request. (resuming with null token is equivalent to
- * starting operation from scratch)
- * Note: pausing meta request after it completes will fail with AWS_ERROR_S3_PAUSE_FAILED_REQUEST_COMPLETE
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
  * @param resume_token resume token
  * @return error code.
@@ -524,6 +529,15 @@ struct aws_s3_upload_resume_token_options {
     struct aws_byte_cursor upload_id;
     size_t part_size;
     size_t total_num_parts;
+
+    /*
+    * Note: during resume num_parts_uploaded is used for sanity checking against
+    * uploads on s3 side. 
+    * In cases where upload id does not exist (already resumed using this token
+    * or pause called after upload completes, etc...) and num_parts_uploaded
+    * equals to total num parts, resume will become a noop.
+    */
+    size_t num_parts_completed;
 };
 
 /**
