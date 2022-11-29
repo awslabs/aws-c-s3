@@ -531,12 +531,12 @@ struct aws_s3_upload_resume_token_options {
     size_t total_num_parts;
 
     /*
-    * Note: during resume num_parts_uploaded is used for sanity checking against
-    * uploads on s3 side. 
-    * In cases where upload id does not exist (already resumed using this token
-    * or pause called after upload completes, etc...) and num_parts_uploaded
-    * equals to total num parts, resume will become a noop.
-    */
+     * Note: during resume num_parts_uploaded is used for sanity checking against
+     * uploads on s3 side.
+     * In cases where upload id does not exist (already resumed using this token
+     * or pause called after upload completes, etc...) and num_parts_uploaded
+     * equals to total num parts, resume will become a noop.
+     */
     size_t num_parts_completed;
 };
 

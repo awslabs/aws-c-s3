@@ -82,9 +82,9 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
     return true;
 }
 
-/* 
-* Validates token and updates part variables. Noop if token is null.
-*/
+/*
+ * Validates token and updates part variables. Noop if token is null.
+ */
 static int s_try_update_part_info_from_resume_token(
     uint64_t content_length,
     const struct aws_s3_meta_request_resume_token *resume_token,
@@ -933,8 +933,9 @@ static void s_s3_auto_ranged_put_request_finished(
                 auto_ranged_put->synced_data.list_parts_error_code = error_code;
 
                 if (error_code != AWS_ERROR_SUCCESS) {
-                    if (request->send_data.response_status == AWS_HTTP_STATUS_CODE_404_NOT_FOUND && 
-                        auto_ranged_put->resume_token->num_parts_completed == auto_ranged_put->resume_token->total_num_parts) {
+                    if (request->send_data.response_status == AWS_HTTP_STATUS_CODE_404_NOT_FOUND &&
+                        auto_ranged_put->resume_token->num_parts_completed ==
+                            auto_ranged_put->resume_token->total_num_parts) {
                         AWS_LOGF_DEBUG(
                             AWS_LS_S3_META_REQUEST,
                             "id=%p: Resuming PutObject ended early, since there is nothing to resume"

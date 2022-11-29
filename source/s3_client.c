@@ -1913,7 +1913,6 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_up
 
 struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_acquire(
     struct aws_s3_meta_request_resume_token *resume_token) {
-    AWS_PRECONDITION(resume_token);
     if (resume_token) {
         aws_ref_count_acquire(&resume_token->ref_count);
     }
