@@ -362,6 +362,9 @@ struct aws_s3_meta_request_options {
     /**
      * Optional.
      * Invoked to provide response headers received during execution of the meta request.
+     * Note: this callback will not be fired for cases when resuming an
+     * operation that was already completed (ex. pausing put object after it
+     * uploaded all data and then resuming it)
      * See `aws_s3_meta_request_headers_callback_fn`.
      */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
@@ -507,8 +510,10 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  *   new part uploads stops.
  * - pausing after completeMPU started - return resume token. if s3 cannot find
  *   find associated MPU id when resuming with that token and num of parts
- *   uploaded equals to total num parts, then operation is no op. Otherwise
+ *   uploaded equals to total num parts, then operation is a no op. Otherwise
  *   operation fails.
+ * Note: for no op case the call will succeed and finish/shutdown request callbacks will
+ *   fire, but on headers callback will not fire. 
  * Note: similar to cancel pause does not cancel requests already in flight and
  * and parts might complete after pause is requested.
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused

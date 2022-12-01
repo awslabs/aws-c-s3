@@ -25,6 +25,7 @@ struct aws_s3_auto_ranged_put {
     /* Initialized either during creation in resume flow or as result of create multipart upload during normal flow. */
     struct aws_string *upload_id;
 
+    /* Resume token used to resume the operation */
     struct aws_s3_meta_request_resume_token *resume_token;
 
     uint64_t content_length;
