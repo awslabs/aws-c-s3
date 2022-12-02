@@ -187,7 +187,7 @@ static int s_try_init_resume_state_from_persisted_data(
     auto_ranged_put->synced_data.list_parts_operation = aws_s3_list_parts_operation_new(allocator, &list_parts_params);
 
     struct aws_http_headers *needed_response_headers = aws_http_headers_new(allocator);
-    const size_t copy_header_count = sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
+    const size_t copy_header_count = AWS_ARRAY_SIZE(s_create_multipart_upload_copy_headers);
     struct aws_http_headers *initial_headers =
         aws_http_message_get_headers(auto_ranged_put->base.initial_request_message);
 
@@ -959,8 +959,7 @@ static void s_s3_auto_ranged_put_request_finished(
 
             if (error_code == AWS_ERROR_SUCCESS) {
                 needed_response_headers = aws_http_headers_new(meta_request->allocator);
-                const size_t copy_header_count =
-                    sizeof(s_create_multipart_upload_copy_headers) / sizeof(struct aws_byte_cursor);
+                const size_t copy_header_count = AWS_ARRAY_SIZE(s_create_multipart_upload_copy_headers);
 
                 /* Copy any headers now that we'll need for the final, transformed headers later. */
                 for (size_t header_index = 0; header_index < copy_header_count; ++header_index) {

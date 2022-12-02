@@ -18,8 +18,7 @@ struct aws_s3_request *aws_s3_request_new(
     aws_ref_count_init(&request->ref_count, request, (aws_simple_completion_callback *)s_s3_request_destroy);
 
     request->allocator = meta_request->allocator;
-    request->meta_request = meta_request;
-    aws_s3_meta_request_acquire(meta_request);
+    request->meta_request = aws_s3_meta_request_acquire(meta_request);
 
     request->request_tag = request_tag;
     request->part_number = part_number;

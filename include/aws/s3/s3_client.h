@@ -457,11 +457,23 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config);
 
+/**
+ * Add a reference, keeping this object alive.
+ * The reference must be released when you are done with it, or it's memory will never be cleaned up.
+ * You must not pass in NULL.
+ * Always returns the same pointer that was passed in.
+ */
 AWS_S3_API
-void aws_s3_client_acquire(struct aws_s3_client *client);
+struct aws_s3_client *aws_s3_client_acquire(struct aws_s3_client *client);
 
+/**
+ * Release a reference.
+ * When the reference count drops to 0, this object will be cleaned up.
+ * It's OK to pass in NULL (nothing happens).
+ * Always returns NULL.
+ */
 AWS_S3_API
-void aws_s3_client_release(struct aws_s3_client *client);
+struct aws_s3_client *aws_s3_client_release(struct aws_s3_client *client);
 
 AWS_S3_API
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
@@ -602,11 +614,23 @@ AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token);
 
+/**
+ * Add a reference, keeping this object alive.
+ * The reference must be released when you are done with it, or it's memory will never be cleaned up.
+ * You must not pass in NULL.
+ * Always returns the same pointer that was passed in.
+ */
 AWS_S3_API
-void aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);
+struct aws_s3_meta_request *aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request);
 
+/**
+ * Release a reference.
+ * When the reference count drops to 0, this object will be cleaned up.
+ * It's OK to pass in NULL (nothing happens).
+ * Always returns NULL.
+ */
 AWS_S3_API
-void aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request);
+struct aws_s3_meta_request *aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API
 void aws_s3_init_default_signing_config(

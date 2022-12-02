@@ -198,8 +198,7 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
 
     aws_s3_tester_wait_for_counters(&tester);
 
-    aws_s3_client_release(client);
-    client = NULL;
+    client = aws_s3_client_release(client);
 
     aws_s3_tester_clean_up(&tester);
 
