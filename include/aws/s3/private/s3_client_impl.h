@@ -354,6 +354,10 @@ struct aws_s3_meta_request_resume_token {
     struct aws_string *multipart_upload_id;
     size_t part_size;
     size_t total_num_parts;
+
+    /* Note: this field is used only when s3 tells us that upload id no longer
+    exists, and if this indicates that all parts have already been uploaded,
+    request is completed instead of failing it.*/
     size_t num_parts_completed;
 };
 

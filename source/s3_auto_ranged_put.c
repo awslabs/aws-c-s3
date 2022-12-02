@@ -134,9 +134,9 @@ static int s_try_update_part_info_from_resume_token(
     if (resume_token->total_num_parts != num_parts) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create auto-ranged-put meta request; persisted number of parts %" PRIu32
+            "Could not create auto-ranged-put meta request; persisted number of parts %zu"
             " does not match expected number of parts based on length of the body.",
-            (uint32_t)resume_token->total_num_parts);
+            resume_token->total_num_parts);
 
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
@@ -1184,7 +1184,7 @@ static int s_s3_auto_ranged_put_pause(
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: Pausing request with %d out of %d parts have completed.",
+        "id=%p: Pausing request with %u out of %u parts have completed.",
         (void *)meta_request,
         auto_ranged_put->synced_data.num_parts_completed,
         auto_ranged_put->synced_data.total_num_parts);

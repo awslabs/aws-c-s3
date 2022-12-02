@@ -503,7 +503,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  * request options structure member aws_s3_meta_request_options.resume_token.
  * The upload can be resumed either from the same client or a different one.
  * Corner cases for resume upload are as follows:
- * - upload is not MPU - fail with pause not supported error
+ * - upload is not MPU - fail with AWS_ERROR_UNSUPPORTED_OPERATION
  * - pausing before MPU is created - NULL resume token returned. NULL resume
  *   token is equivalent to restarting upload
  * - pausing in the middle of part transfer - return resume token. scheduling of
@@ -518,7 +518,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  * and parts might complete after pause is requested.
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
  * @param resume_token resume token
- * @return error code.
+ * @return either AWS_OP_ERR or AWS_OP_SUCCESS
  */
 AWS_S3_API
 int aws_s3_meta_request_pause(
