@@ -28,7 +28,8 @@ class MockServerSetup(Builder.Action):
             python_execute = "python3"
 
         # install dependency for mock server
-        print(self.env.shell.exec(python_execute, '-m', 'install', 'h11', 'trio'))
+        print(self.env.shell.exec(python_execute,
+              '-m', 'pip', 'install', 'h11', 'trio'))
         base_dir = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
         os.chdir(dir)
