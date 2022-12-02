@@ -22,6 +22,7 @@ struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
 struct aws_s3_meta_request_result;
+struct aws_s3_meta_request_resume_token;
 struct aws_uri;
 struct aws_string;
 
@@ -361,6 +362,9 @@ struct aws_s3_meta_request_options {
     /**
      * Optional.
      * Invoked to provide response headers received during execution of the meta request.
+     * Note: this callback will not be fired for cases when resuming an
+     * operation that was already completed (ex. pausing put object after it
+     * uploaded all data and then resuming it)
      * See `aws_s3_meta_request_headers_callback_fn`.
      */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
@@ -398,12 +402,12 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
-     * For meta requests that support pause/resume (e.g. PutObject), the resume token returned by
+     * For meta requests that support pause/resume (e.g. PutObject), serialized resume token returned by
      * aws_s3_meta_request_pause() can be provided here.
      * Note: If PutObject request specifies a checksum algorithm, client will calculate checksums while skipping parts
      * from the buffer and compare them them to previously uploaded part checksums.
      */
-    const struct aws_byte_cursor *resume_token;
+    struct aws_s3_meta_request_resume_token *resume_token;
 };
 
 /* Result details of a meta request.
@@ -503,19 +507,112 @@ AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
 
 /**
- * In order to pause an ongoing upload, call aws_s3_meta_request_pause(). It will return a resume token that can be
- * persisted and used to resume the upload. To resume an upload that was paused, supply the resume token in the meta
- * request options structure member aws_s3_meta_request_options.persistable_state.
+ * Note: pause is currently only supported on upload requests.
+ * In order to pause an ongoing upload, call aws_s3_meta_request_pause() that
+ * will return resume token. Token can be used to query the state of operation
+ * at the pausing time.
+ * To resume an upload that was paused, supply resume token in the meta
+ * request options structure member aws_s3_meta_request_options.resume_token.
  * The upload can be resumed either from the same client or a different one.
- * Resume token is opaque with format varying based on operation.
- * Clients should not parse the token. For format details refer to pause method comments for a given operation.
- * Resume token will be set to null in case of failures.
+ * Corner cases for resume upload are as follows:
+ * - upload is not MPU - fail with AWS_ERROR_UNSUPPORTED_OPERATION
+ * - pausing before MPU is created - NULL resume token returned. NULL resume
+ *   token is equivalent to restarting upload
+ * - pausing in the middle of part transfer - return resume token. scheduling of
+ *   new part uploads stops.
+ * - pausing after completeMPU started - return resume token. if s3 cannot find
+ *   find associated MPU id when resuming with that token and num of parts
+ *   uploaded equals to total num parts, then operation is a no op. Otherwise
+ *   operation fails.
+ * Note: for no op case the call will succeed and finish/shutdown request callbacks will
+ *   fire, but on headers callback will not fire.
+ * Note: similar to cancel pause does not cancel requests already in flight and
+ * and parts might complete after pause is requested.
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
- * @param resume_token outputs the json string with the state that can be used to resume the operation.
- * @return
+ * @param resume_token resume token
+ * @return either AWS_OP_ERR or AWS_OP_SUCCESS
  */
 AWS_S3_API
-int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_string **out_resume_token);
+int aws_s3_meta_request_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token **out_resume_token);
+
+/*
+ * Options to construct upload resume token.
+ * Note: fields correspond to getters on the token below and it up to the caller
+ * to persist those in whichever way they choose.
+ */
+struct aws_s3_upload_resume_token_options {
+    struct aws_byte_cursor upload_id;
+    size_t part_size;
+    size_t total_num_parts;
+
+    /*
+     * Note: during resume num_parts_uploaded is used for sanity checking against
+     * uploads on s3 side.
+     * In cases where upload id does not exist (already resumed using this token
+     * or pause called after upload completes, etc...) and num_parts_uploaded
+     * equals to total num parts, resume will become a noop.
+     */
+    size_t num_parts_completed;
+};
+
+/**
+ * Create upload resume token from persisted data.
+ * Note: Data required for resume token varies per operation.
+ */
+AWS_S3_API
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_upload(
+    struct aws_allocator *allocator,
+    const struct aws_s3_upload_resume_token_options *options);
+
+/*
+ * Increment resume token ref count.
+ */
+AWS_S3_API
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_acquire(
+    struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Decrement resume token ref count.
+ */
+AWS_S3_API
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_release(
+    struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Type of resume token.
+ */
+AWS_S3_API
+enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
+    struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Part size associated with operation.
+ */
+AWS_S3_API
+size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Total num parts associated with operation.
+ */
+AWS_S3_API
+size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Num parts completed.
+ */
+AWS_S3_API
+size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Upload id associated with operation.
+ * Only valid for tokens returned from upload operation. For all other operations
+ * this will return empty.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
+    struct aws_s3_meta_request_resume_token *resume_token);
 
 /**
  * Add a reference, keeping this object alive.

@@ -221,7 +221,7 @@ int aws_s3_parse_content_range_response_header(
     uint64_t *out_range_end,
     uint64_t *out_object_size);
 
-/* Given response headers, parses the content-length from a content-length respone header.*/
+/* Given response headers, parses the content-length from a content-length response header.*/
 AWS_S3_API
 int aws_s3_parse_content_length_response_header(
     struct aws_allocator *allocator,

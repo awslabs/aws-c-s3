@@ -291,7 +291,9 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     /* END CRITICAL SECTION */
 }
 
-int aws_s3_meta_request_pause(struct aws_s3_meta_request *meta_request, struct aws_string **out_resume_token) {
+int aws_s3_meta_request_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token **out_resume_token) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
 
