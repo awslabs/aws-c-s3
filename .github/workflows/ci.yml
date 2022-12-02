@@ -140,6 +140,52 @@ jobs:
         chmod a+x builder
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
 
+  mock-s3-linux:
+      runs-on: ubuntu-22.04 # for some I DON'T KNOW reason, the mock server not working for 20.04
+      steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Configure local host
+        run: |
+          python3 -m pip install h11 trio
+          cd ./tests/mock_s3_server/
+          python3 mock_s3_server.py &
+      - name: Build ${{ env.PACKAGE_NAME }}
+        run: |
+          python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+          python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
+
+  mock-s3-mac:
+    runs-on: macos-11 # latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Configure local host
+      run: |
+        python3 -m pip install h11 trio
+        cd ./tests/mock_s3_server/
+        python3 mock_s3_server.py &
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
+
+
+  mock-s3-win:
+    runs-on: windows-2022 # latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Configure local host
+      run: |
+        python3 -m pip install h11 trio
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        cd ./tests/mock_s3_server/
+        Start-Process -NoNewWindow python .\mock_s3_server.py
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder.pyz')"
+        python3 builder.pyz build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DENABLE_MOCK_SERVER_TESTS=ON
+
   # Test downstream repos.
   # This should not be required because we can run into a chicken and egg problem if there is a change that needs some fix in a downstream repo.
   downstream:
