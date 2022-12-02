@@ -513,7 +513,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
  *   uploaded equals to total num parts, then operation is a no op. Otherwise
  *   operation fails.
  * Note: for no op case the call will succeed and finish/shutdown request callbacks will
- *   fire, but on headers callback will not fire. 
+ *   fire, but on headers callback will not fire.
  * Note: similar to cancel pause does not cancel requests already in flight and
  * and parts might complete after pause is requested.
  * @param meta_request pointer to the aws_s3_meta_request of the upload to be paused
