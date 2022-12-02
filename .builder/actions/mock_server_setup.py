@@ -17,11 +17,6 @@ class MockServerSetup(Builder.Action):
 
     def run(self, env):
         self.env = env
-
-        # set cmake flag so mock server tests are enabled
-        env.project.config['cmake_args'].append(
-            '-DENABLE_MOCK_SERVER_TESTS=ON')
-
         if os.name == 'nt':
             python_execute = "python"
         else:
@@ -31,8 +26,13 @@ class MockServerSetup(Builder.Action):
         result = self.env.shell.exec(python_execute,
                                      '-m', 'install', 'h11', 'trio')
         if result.returncode != 0:
-            print(result.output)
-            exit()
+            print("Mock server failed to setup, skip the mock server tests.")
+            return
+
+        # set cmake flag so mock server tests are enabled
+        env.project.config['cmake_args'].append(
+            '-DENABLE_MOCK_SERVER_TESTS=ON')
+
         base_dir = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
         os.chdir(dir)
