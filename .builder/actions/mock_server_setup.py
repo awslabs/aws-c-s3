@@ -5,7 +5,9 @@ Setup local mock server for tests
 import Builder
 
 import os
+import sys
 import subprocess
+import atexit
 
 
 class MockServerSetup(Builder.Action):
@@ -17,17 +19,14 @@ class MockServerSetup(Builder.Action):
 
     def run(self, env):
         self.env = env
-        if os.name == 'nt':
-            python_execute = "python"
-        else:
-            python_execute = "python3"
 
         # install dependency for mock server
-        result = self.env.shell.exec(python_execute,
+        result = self.env.shell.exec('{python}',
                                      '-m', 'install', 'h11', 'trio')
         if result.returncode != 0:
-            print("Mock server failed to setup, skip the mock server tests.")
-            return
+            print(
+                "Mock server failed to setup, skip the mock server tests.", file=sys.stderr)
+            exit(-1)
 
         # set cmake flag so mock server tests are enabled
         env.project.config['cmake_args'].append(
@@ -37,4 +36,9 @@ class MockServerSetup(Builder.Action):
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
         os.chdir(dir)
 
-        subprocess.Popen([python_execute, "mock_s3_server.py"])
+        p = subprocess.Popen(['{python}', "mock_s3_server.py"])
+
+        @atexit.register
+        def close_mock_server():
+            print("close mock server #################################")
+            p.terminate()
