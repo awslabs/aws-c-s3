@@ -25,6 +25,9 @@ struct aws_s3_auto_ranged_put {
     /* Initialized either during creation in resume flow or as result of create multipart upload during normal flow. */
     struct aws_string *upload_id;
 
+    /* Resume token used to resume the operation */
+    struct aws_s3_meta_request_resume_token *resume_token;
+
     uint64_t content_length;
 
     /* Only meant for use in the update function, which is never called concurrently. */
@@ -32,7 +35,7 @@ struct aws_s3_auto_ranged_put {
         /*
          * Next part number to send.
          * Note: this follows s3 part number convention and counting starts with 1.
-         * Throughout codebase 0 based part numbers are usually reffered to as part index.
+         * Throughout codebase 0 based part numbers are usually referred to as part index.
          */
         uint32_t next_part_number;
     } threaded_update_data;
@@ -42,7 +45,7 @@ struct aws_s3_auto_ranged_put {
      */
     struct {
         /* How many parts have been read from input steam.
-         * Since reads are always sequential, this is esentially the number of how many parts were read from start of
+         * Since reads are always sequential, this is essentially the number of how many parts were read from start of
          * stream.
          */
         uint32_t num_parts_read_from_stream;

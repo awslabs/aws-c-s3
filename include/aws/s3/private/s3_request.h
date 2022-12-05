@@ -63,7 +63,7 @@ struct aws_s3_request {
     /* checksum found in the header of an individual get part http request */
     struct aws_byte_buf request_level_response_header_checksum;
 
-    /* running checksum of the respone to an individual get part http request */
+    /* running checksum of the response to an individual get part http request */
     struct aws_s3_checksum *request_level_running_response_sum;
     /* The algorithm used to validate the checksum */
     enum aws_s3_checksum_algorithm validation_algorithm;

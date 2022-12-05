@@ -27,7 +27,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_all_heade
     struct aws_allocator *allocator,
     struct aws_http_message *message);
 
-/* Copy mesage (but not the body) and exclude specific headers.
+/* Copy message (but not the body) and exclude specific headers.
  * exclude_x_amz_meta controls whether S3 user metadata headers (prefixed with "x-amz-meta) are excluded.*/
 AWS_S3_API
 struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_headers(
