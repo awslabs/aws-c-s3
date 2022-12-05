@@ -645,7 +645,8 @@ static int s_skip_parts_from_stream(
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "Failed to resume upload. Checksum for previously uploaded part does not match "
-                    "new part.");
+                    "new part. part num %zu old checksum: " PRInSTR " new checksum: " PRInSTR, part_index
+                    AWS_BYTE_CURSOR_PRI(checksum), AWS_BYTE_CURSOR_PRI(auto_ranged_put->checksums_list[part_index]));
                 aws_byte_buf_clean_up(&temp_body_buf);
                 aws_byte_buf_clean_up(&checksum);
                 return aws_raise_error(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH);
