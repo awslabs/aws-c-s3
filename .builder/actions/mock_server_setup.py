@@ -21,8 +21,8 @@ class MockServerSetup(Builder.Action):
         self.env = env
 
         # install dependency for mock server
-        result = self.env.shell.exec('{python}',
-                                     '-m', 'install', 'h11', 'trio')
+        result = self.env.shell.exec(KEYS['python'],
+                                     '-m', 'pip', 'install', 'h11', 'trio')
         if result.returncode != 0:
             print(
                 "Mock server failed to setup, skip the mock server tests.", file=sys.stderr)
@@ -36,7 +36,7 @@ class MockServerSetup(Builder.Action):
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
         os.chdir(dir)
 
-        p = subprocess.Popen(['{python}', "mock_s3_server.py"])
+        p = subprocess.Popen([KEYS['python'], "mock_s3_server.py"])
 
         @atexit.register
         def close_mock_server():
