@@ -17,7 +17,6 @@
 #define DEFINE_HEADER(NAME, VALUE)                                                                                     \
     { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
 
-/* Test that the remote max concurrent streams setting hit */
 TEST_CASE(multipart_upload_mock_server) {
     (void)ctx;
 
