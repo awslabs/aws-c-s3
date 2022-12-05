@@ -19,9 +19,9 @@ class MockServerSetup(Builder.Action):
 
     def run(self, env):
         self.env = env
-
+        python_path = env.config['variables'].get('python')
         # install dependency for mock server
-        result = self.env.shell.exec(env.config["python"],
+        result = self.env.shell.exec(python_path,
                                      '-m', 'pip', 'install', 'h11', 'trio')
         if result.returncode != 0:
             print(
@@ -36,7 +36,7 @@ class MockServerSetup(Builder.Action):
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
         os.chdir(dir)
 
-        p = subprocess.Popen([env.config["python"], "mock_s3_server.py"])
+        p = subprocess.Popen([python_path, "mock_s3_server.py"])
 
         @atexit.register
         def close_mock_server():
