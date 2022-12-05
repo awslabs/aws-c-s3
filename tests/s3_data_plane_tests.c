@@ -86,8 +86,10 @@ static int s_test_s3_client_proxy_ev_settings_override(struct aws_allocator *all
     struct aws_tls_connection_options tls_conn_options;
     AWS_ZERO_STRUCT(tls_conn_options);
 
-    struct proxy_env_var_settings proxy_ev_settings = {.env_var_type = AWS_HPEV_ENABLE,
-                                                       .tls_options = &tls_conn_options};
+    struct proxy_env_var_settings proxy_ev_settings = {
+        .env_var_type = AWS_HPEV_ENABLE,
+        .tls_options = &tls_conn_options,
+    };
 
     struct aws_s3_client_config client_config = {.proxy_ev_settings = &proxy_ev_settings};
 
@@ -4883,10 +4885,10 @@ static void s_pause_meta_request_progress(
             return;
         }
 
-        struct aws_string *persistable_state = NULL;
-        int pause_result = aws_s3_meta_request_pause(meta_request, &persistable_state);
+        struct aws_s3_meta_request_resume_token *resume_token = NULL;
+        int pause_result = aws_s3_meta_request_pause(meta_request, &resume_token);
         aws_atomic_store_int(&test_data->pause_result, pause_result);
-        aws_atomic_store_ptr(&test_data->persistable_state_ptr, persistable_state);
+        aws_atomic_store_ptr(&test_data->persistable_state_ptr, resume_token);
     }
 }
 
@@ -4935,7 +4937,7 @@ static int s_test_s3_put_pause_resume_helper(
     struct put_object_pause_resume_test_data *test_data,
     struct aws_byte_cursor destination_key,
     struct aws_input_stream *upload_body_stream,
-    struct aws_string *resume_state,
+    struct aws_s3_meta_request_resume_token *resume_state,
     enum aws_s3_checksum_algorithm checksum_algorithm,
     int expected_error_code,
     int expected_response_status) {
@@ -4988,10 +4990,8 @@ static int s_test_s3_put_pause_resume_helper(
         .checksum_config = &checksum_config,
     };
 
-    struct aws_byte_cursor resume_state_cur;
     if (resume_state) {
-        resume_state_cur = aws_byte_cursor_from_string(resume_state);
-        meta_request_options.resume_token = &resume_state_cur;
+        meta_request_options.resume_token = resume_state;
     }
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
@@ -5084,7 +5084,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     /* new stream used to resume upload. it begins at the offset specified in the persistable state */
     struct aws_input_stream *resume_upload_stream =
         aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
-    struct aws_string *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
+    struct aws_s3_meta_request_resume_token *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 
     size_t bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
 
@@ -5110,7 +5110,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
     /* bytes uploaded is smaller since we are skipping uploaded parts */
     ASSERT_TRUE(bytes_uploaded < s_pause_resume_object_length_128MB);
 
-    aws_string_destroy(persistable_state);
+    aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 
@@ -5165,7 +5165,7 @@ static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *alloc
     /* new stream used to resume upload. it begins at the offset specified in the persistable state */
     struct aws_input_stream *resume_upload_stream =
         aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
-    struct aws_string *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
+    struct aws_s3_meta_request_resume_token *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 
     AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Persistable state %p", persistable_state);
 
@@ -5193,7 +5193,7 @@ static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *alloc
     /* bytes uploaded is smaller since we are skipping uploaded parts */
     ASSERT_INT_EQUALS(bytes_uploaded, 0);
 
-    aws_string_destroy(persistable_state);
+    aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 
@@ -5249,7 +5249,7 @@ static int s_test_s3_put_pause_resume_invalid_checksum(struct aws_allocator *all
     struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new_with_value_type(
         allocator, s_pause_resume_object_length_128MB, TEST_STREAM_VALUE_2);
 
-    struct aws_string *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
+    struct aws_s3_meta_request_resume_token *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 
     size_t bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
 
@@ -5275,7 +5275,7 @@ static int s_test_s3_put_pause_resume_invalid_checksum(struct aws_allocator *all
     /* bytes uploaded is smaller since we are skipping uploaded parts */
     ASSERT_TRUE(bytes_uploaded < s_pause_resume_object_length_128MB);
 
-    aws_string_destroy(persistable_state);
+    aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 

@@ -17,6 +17,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
 #include <aws/common/environment.h>
+#include <aws/common/json.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/http/connection.h>
@@ -506,7 +507,7 @@ static void s_s3_client_start_destroy(void *user_data) {
 
         client->synced_data.active = false;
 
-        /* Prevent the client from cleaning up inbetween the mutex unlock/re-lock below.*/
+        /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
 
         aws_s3_client_unlock_synced_data(client);
@@ -1872,4 +1873,84 @@ static void s_s3_client_prepare_request_callback_retry_request(
     } else {
         aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
     }
+}
+
+static void s_resume_token_ref_count_zero_callback(void *arg) {
+    struct aws_s3_meta_request_resume_token *token = arg;
+
+    aws_string_destroy(token->multipart_upload_id);
+
+    aws_mem_release(token->allocator, token);
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(struct aws_allocator *allocator) {
+    struct aws_s3_meta_request_resume_token *token =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_resume_token));
+
+    token->allocator = allocator;
+    aws_ref_count_init(&token->ref_count, token, s_resume_token_ref_count_zero_callback);
+
+    return token;
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_upload(
+    struct aws_allocator *allocator,
+    const struct aws_s3_upload_resume_token_options *options) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(options);
+
+    struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(allocator);
+    token->multipart_upload_id = aws_string_new_from_cursor(allocator, &options->upload_id);
+    token->part_size = options->part_size;
+    token->total_num_parts = options->total_num_parts;
+    token->num_parts_completed = options->num_parts_completed;
+    token->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+    return token;
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_acquire(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    if (resume_token) {
+        aws_ref_count_acquire(&resume_token->ref_count);
+    }
+    return resume_token;
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_release(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    if (resume_token) {
+        aws_ref_count_release(&resume_token->ref_count);
+    }
+    return NULL;
+}
+
+enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->type;
+}
+
+size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->part_size;
+}
+
+size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->total_num_parts;
+}
+
+size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->num_parts_completed;
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && resume_token->multipart_upload_id != NULL) {
+        return aws_byte_cursor_from_string(resume_token->multipart_upload_id);
+    }
+
+    return aws_byte_cursor_from_c_str("");
 }
