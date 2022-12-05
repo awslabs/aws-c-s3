@@ -51,7 +51,7 @@ TEST_CASE(multipart_upload_mock_server) {
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
-    return 0;
+    return AWS_OP_SUCCESS;
 }
 
 TEST_CASE(async_internal_error_from_complete_multipart_mock_server) {
@@ -96,7 +96,7 @@ TEST_CASE(async_internal_error_from_complete_multipart_mock_server) {
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
-    return 0;
+    return AWS_OP_SUCCESS;
 }
 
 TEST_CASE(async_access_denied_from_complete_multipart_mock_server) {
@@ -142,5 +142,5 @@ TEST_CASE(async_access_denied_from_complete_multipart_mock_server) {
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
-    return 0;
+    return AWS_OP_SUCCESS;
 }
