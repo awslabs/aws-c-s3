@@ -166,10 +166,8 @@ jobs:
       # we only want to cover the part related to this repo, `gcov_include` was not working for me, this is hack around it
       - name: clean up unwanted files
         run: |
-          cd aws-c-s3/build
-          rm -rf !(aws-c-s3)
+          cd aws-c-s3/build/
+          ctest -T coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
-        with:
-          gcov: true
