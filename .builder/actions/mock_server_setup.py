@@ -28,7 +28,7 @@ class MockServerSetup(Builder.Action):
         if result.returncode != 0 or import_result.returncode != 0:
             print(
                 "Mock server failed to setup, skip the mock server tests.", file=sys.stderr)
-            return
+            exit(-1)
 
         # set cmake flag so mock server tests are enabled
         env.project.config['cmake_args'].append(
