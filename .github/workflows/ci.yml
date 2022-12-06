@@ -173,4 +173,4 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           gcov: true
-          directory: aws-c-s3/source/
+          gcov_include: source/*
