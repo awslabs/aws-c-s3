@@ -641,7 +641,14 @@ static int s_skip_parts_from_stream(
                 return aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
             }
 
-            if (!aws_byte_buf_eq(&checksum, &auto_ranged_put->checksums_list[part_index])) {
+            struct aws_byte_buf compute_encoded_checksum_output;
+            size_t encoded_len = 0;
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(meta_request->checksum_config.checksum_algorithm), &encoded_len);
+            aws_byte_buf_init(&compute_encoded_checksum_output, meta_request->allocator, encoded_len);
+            struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&checksum);
+            aws_base64_encode(&checksum_result_cursor, &compute_encoded_checksum_output);
+
+            if (!aws_byte_buf_eq(&compute_encoded_checksum_output, &auto_ranged_put->checksums_list[part_index])) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "Failed to resume upload. Checksum for previously uploaded part does not match "
