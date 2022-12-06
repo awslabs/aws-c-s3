@@ -163,8 +163,13 @@ jobs:
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
           chmod a+x builder
           ./builder build -p ${{ env.PACKAGE_NAME }} --compiler=gcc-9 --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage"
+      - name: clean up unwanted files
+        run: |
+          rm -r -f aws-c-s3/build
+          rm -r -f aws-c-s3/samples
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
           gcov: true
-          gcov_ignore: aws-c-s3/build/
+          gcov_include: s3_meta_request.c
