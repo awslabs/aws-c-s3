@@ -163,9 +163,10 @@ jobs:
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
           chmod a+x builder
           ./builder build -p ${{ env.PACKAGE_NAME }} --compiler=gcc-9 --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage"
+      # we only want to cover the part related to this repo, `gcov_include` was not working for me, this is hack around it
       - name: clean up unwanted files
         run: |
-          rm -r -f aws-c-s3/build
+          rm -r -f aws-c-s3/build/install
           rm -r -f aws-c-s3/samples
 
       - name: Upload coverage to Codecov
