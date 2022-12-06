@@ -231,6 +231,7 @@ int aws_s3_meta_request_init_base(
 
     meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
+    meta_request->continue_callback = options->continue_callback;
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
 
@@ -364,10 +365,12 @@ bool aws_s3_meta_request_has_finish_result_synced(struct aws_s3_meta_request *me
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     if (!meta_request->synced_data.finish_result_set) {
-        return false;
+        if (meta_request->continue_callback && !meta_request->continue_callback(meta_request->user_data)) {
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
+        }
     }
 
-    return true;
+    return meta_request->synced_data.finish_result_set;
 }
 
 struct aws_s3_meta_request *aws_s3_meta_request_acquire(struct aws_s3_meta_request *meta_request) {
