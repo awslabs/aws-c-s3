@@ -19,7 +19,10 @@ class MockServerSetup(Builder.Action):
 
     def run(self, env):
         self.env = env
-        python_path = env.config['variables'].get('python')
+        if os.name == 'nt':
+            python_path = "python"
+        else:
+            python_path = "python3"
         # install dependency for mock server
         result = self.env.shell.exec(python_path,
                                      '-m', 'pip', 'install', 'h11', 'trio')
