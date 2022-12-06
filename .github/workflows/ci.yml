@@ -154,6 +154,8 @@ jobs:
   codecov-linux:
     runs-on: ubuntu-20.04
     steps:
+      - name: Checkout Sources
+        uses: actions/checkout@v3
       - name: Build ${{ env.PACKAGE_NAME }} + consumers
         run: |
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
@@ -162,9 +164,11 @@ jobs:
       # Get test coverage report from CMAKE coverage
       - name: Ctest Coverage
         run: |
-          cd aws-c-s3/build/aws-c-s3
+          cd build/aws-c-s3
           ls
           ctest -T coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
+        with:
+          files: *.c.gcov,!*test*.c.gcov
