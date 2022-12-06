@@ -5069,7 +5069,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         destination_key,
         initial_upload_stream,
         NULL,
-        AWS_SCA_NONE,
+        AWS_SCA_CRC32,
         AWS_ERROR_S3_PAUSED,
         0));
     if (tester.bound_to_client) {
@@ -5099,7 +5099,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         destination_key,
         resume_upload_stream,
         persistable_state,
-        AWS_SCA_NONE,
+        AWS_SCA_CRC32,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK));
 
