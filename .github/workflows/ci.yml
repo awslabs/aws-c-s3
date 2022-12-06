@@ -36,11 +36,7 @@ jobs:
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
         aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
-        ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ matrix.image }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage"
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        gcov: true
+        ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ matrix.image }} build -p ${{ env.PACKAGE_NAME }}
 
   linux-compiler-compat:
     runs-on: ubuntu-20.04 # latest
@@ -142,7 +138,7 @@ jobs:
       run: |
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
         chmod a+x builder
-        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage"
+        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
 
   # Test downstream repos.
   # This should not be required because we can run into a chicken and egg problem if there is a change that needs some fix in a downstream repo.
@@ -163,10 +159,11 @@ jobs:
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
           chmod a+x builder
           ./builder build -p ${{ env.PACKAGE_NAME }} --compiler=gcc-9 --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage"
-      # we only want to cover the part related to this repo, `gcov_include` was not working for me, this is hack around it
-      - name: clean up unwanted files
+      # Get test coverage report from CMAKE coverage
+      - name: Ctest Coverage
         run: |
-          cd aws-c-s3/build/
+          cd aws-c-s3/build/aws-c-s3
+          ls
           ctest -T coverage
 
       - name: Upload coverage to Codecov
