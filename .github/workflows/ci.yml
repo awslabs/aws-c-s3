@@ -167,4 +167,4 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           gcov: true
-          gcov_include: aws-c-s3/source/s3_meta_request.c
+          gcov_ignore: aws-c-s3/build/
