@@ -173,4 +173,4 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           gcov: true
-          gcov_include: /home/runner/work/aws-c-s3/aws-c-s3/#home#runner#work#aws-c-s3#aws-c-s3#aws-c-s3#source#*
+          gcov_include: aws-c-s3/#home#runner#work#aws-c-s3#aws-c-s3#aws-c-s3#source#*
