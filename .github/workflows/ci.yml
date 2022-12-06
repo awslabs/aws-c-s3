@@ -167,4 +167,4 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           gcov: true
-          gcov_args: "--source-prefix aws-c-s3/source/"
+          gcov_include: "aws-c-s3/source/"
