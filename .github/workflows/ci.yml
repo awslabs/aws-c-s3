@@ -167,10 +167,14 @@ jobs:
       - name: clean up unwanted files
         run: |
           rm -r -f aws-c-s3/build/install
+          rm -r -f aws-c-s3/build/deps
+          rm -r -f aws-c-s3/build/aws-c-auth
+          rm -r -f aws-c-s3/build/aws-c-cal
+          rm -r -f aws-c-s3/build/aws-c-common
+          rm -r -f aws-c-s3/build/aws-lc
           rm -r -f aws-c-s3/samples
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
           gcov: true
-          directory: build/aws-c-s3
