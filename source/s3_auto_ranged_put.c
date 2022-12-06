@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_list_parts.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
 
