@@ -173,4 +173,4 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           gcov: true
-          directory: source/
+          directory: build/aws-c-s3
