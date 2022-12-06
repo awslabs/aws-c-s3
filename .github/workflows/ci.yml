@@ -165,7 +165,6 @@ jobs:
       - name: Ctest Coverage
         run: |
           cd build/aws-c-s3
-          ls
           ctest -T coverage
 
       - name: Upload coverage to Codecov

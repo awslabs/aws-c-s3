@@ -1,3 +1,5 @@
+# https://docs.codecov.com/docs/common-recipe-list
+
 comment:                  # this is a top-level key
   layout: "reach, diff, flags, files"
   behavior: default
