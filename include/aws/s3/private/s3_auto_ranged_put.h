@@ -58,9 +58,8 @@ struct aws_s3_auto_ranged_put {
      * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
      * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
      * request which will only be invoked after all other parts/threads have completed.
-     * Note: checksums are base64 encoded
      */
-    struct aws_byte_buf *checksums_list;
+    struct aws_byte_buf *encoded_checksum_list;
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {

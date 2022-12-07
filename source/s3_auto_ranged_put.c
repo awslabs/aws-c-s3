@@ -75,7 +75,9 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
 
     if (checksum_cur) {
         aws_byte_buf_init_copy_from_cursor(
-            &auto_ranged_put->checksums_list[info->part_number - 1], auto_ranged_put->base.allocator, *checksum_cur);
+            &auto_ranged_put->encoded_checksum_list[info->part_number - 1],
+            auto_ranged_put->base.allocator,
+            *checksum_cur);
     }
 
     aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, info->part_number - 1);
@@ -274,7 +276,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_string **etag_c_array = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
     aws_array_list_init_static(
         &auto_ranged_put->synced_data.etag_list, etag_c_array, num_parts, sizeof(struct aws_string *));
-    auto_ranged_put->checksums_list = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf), num_parts);
+    auto_ranged_put->encoded_checksum_list = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf), num_parts);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
@@ -312,10 +314,10 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     /* probably just better to store num parts in the meta-request */
     for (size_t checksum_index = 0; checksum_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
          ++checksum_index) {
-        aws_byte_buf_clean_up(&auto_ranged_put->checksums_list[checksum_index]);
+        aws_byte_buf_clean_up(&auto_ranged_put->encoded_checksum_list[checksum_index]);
     }
     aws_mem_release(meta_request->allocator, auto_ranged_put->synced_data.etag_list.data);
-    aws_mem_release(meta_request->allocator, auto_ranged_put->checksums_list);
+    aws_mem_release(meta_request->allocator, auto_ranged_put->encoded_checksum_list);
     aws_array_list_clean_up(&auto_ranged_put->synced_data.etag_list);
     aws_http_headers_release(auto_ranged_put->synced_data.needed_response_headers);
     aws_mem_release(meta_request->allocator, auto_ranged_put);
@@ -689,11 +691,12 @@ static int s_skip_parts_from_stream(
         }
 
         // compare skipped checksum to previously uploaded checksum
-        if (auto_ranged_put->checksums_list[part_index].len > 0 && s_verify_part_matches_checksum(
-                                                                       meta_request->allocator,
-                                                                       temp_body_buf,
-                                                                       meta_request->checksum_config.checksum_algorithm,
-                                                                       auto_ranged_put->checksums_list[part_index])) {
+        if (auto_ranged_put->encoded_checksum_list[part_index].len > 0 &&
+            s_verify_part_matches_checksum(
+                meta_request->allocator,
+                temp_body_buf,
+                meta_request->checksum_config.checksum_algorithm,
+                auto_ranged_put->encoded_checksum_list[part_index])) {
             return_status = AWS_OP_ERR;
             goto on_done;
         }
@@ -799,7 +802,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 auto_ranged_put->upload_id,
                 meta_request->should_compute_content_md5,
                 &meta_request->checksum_config,
-                &auto_ranged_put->checksums_list[request->part_number - 1]);
+                &auto_ranged_put->encoded_checksum_list[request->part_number - 1]);
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
@@ -838,7 +841,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     &request->request_body,
                     auto_ranged_put->upload_id,
                     &auto_ranged_put->synced_data.etag_list,
-                    auto_ranged_put->checksums_list,
+                    auto_ranged_put->encoded_checksum_list,
                     meta_request->checksum_config.checksum_algorithm);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
