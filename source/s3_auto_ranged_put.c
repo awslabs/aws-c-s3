@@ -568,10 +568,11 @@ static size_t s_compute_request_body_size(struct aws_s3_meta_request *meta_reque
     return request_body_size;
 }
 
-static int s_verify_part_matches_checksum(struct aws_allocator *allocator, 
-                                            struct aws_byte_buf part_body, 
-                                            enum aws_s3_checksum_algorithm algorithm, 
-                                            struct aws_byte_buf part_checksum) {
+static int s_verify_part_matches_checksum(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf part_body,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf part_checksum) {
     AWS_PRECONDITION(allocator);
 
     if (algorithm == AWS_SCA_NONE) {
@@ -590,19 +591,22 @@ static int s_verify_part_matches_checksum(struct aws_allocator *allocator,
 
     size_t encoded_len = 0;
     if (aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to determine length of encoded checksum.");
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to determine length of encoded checksum.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
         goto on_done;
     }
 
     if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum, 0)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum for the skipped part.");
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum for the skipped part.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
         goto on_done;
     }
 
     if (aws_byte_buf_init(&encoded_checksum, allocator, encoded_len)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to allocate buffer for encoded checksum.");
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to allocate buffer for encoded checksum.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
         goto on_done;
     }
@@ -616,11 +620,10 @@ static int s_verify_part_matches_checksum(struct aws_allocator *allocator,
 
     if (!aws_byte_buf_eq(&encoded_checksum, &part_checksum)) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "Failed to resume upload. Checksum for previously uploaded part does not match");
+            AWS_LS_S3_META_REQUEST, "Failed to resume upload. Checksum for previously uploaded part does not match");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH);
-        goto on_done; 
-    } 
+        goto on_done;
+    }
 
 on_done:
     aws_byte_buf_clean_up(&checksum);
@@ -686,9 +689,11 @@ static int s_skip_parts_from_stream(
         }
 
         // compare skipped checksum to previously uploaded checksum
-        if (auto_ranged_put->checksums_list[part_index].len > 0 && 
-            s_verify_part_matches_checksum(meta_request->allocator, temp_body_buf,
-            meta_request->checksum_config.checksum_algorithm, auto_ranged_put->checksums_list[part_index])) {
+        if (auto_ranged_put->checksums_list[part_index].len > 0 && s_verify_part_matches_checksum(
+                                                                       meta_request->allocator,
+                                                                       temp_body_buf,
+                                                                       meta_request->checksum_config.checksum_algorithm,
+                                                                       auto_ranged_put->checksums_list[part_index])) {
             return_status = AWS_OP_ERR;
             goto on_done;
         }
