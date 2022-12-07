@@ -5035,8 +5035,8 @@ static int s_test_s3_put_pause_resume_helper(
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_pause_resume, s_test_s3_put_pause_resume)
-static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_pause_resume_happy_path, s_test_s3_put_pause_resume_happy_path)
+static int s_test_s3_put_pause_resume_happy_path(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -5072,6 +5072,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         AWS_SCA_CRC32,
         AWS_ERROR_S3_PAUSED,
         0));
+
     if (tester.bound_to_client) {
         aws_s3_tester_wait_for_client_shutdown(&tester);
         tester.bound_to_client = false;

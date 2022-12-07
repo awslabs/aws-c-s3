@@ -642,6 +642,7 @@ static int s_skip_parts_from_stream(
                 return aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
             }
 
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Here. blah");
             struct aws_byte_buf compute_encoded_checksum_output;
             size_t encoded_len = 0;
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(meta_request->checksum_config.checksum_algorithm), &encoded_len);
@@ -657,8 +658,12 @@ static int s_skip_parts_from_stream(
                     AWS_BYTE_BUF_PRI(checksum), AWS_BYTE_BUF_PRI(auto_ranged_put->checksums_list[part_index]));
                 aws_byte_buf_clean_up(&temp_body_buf);
                 aws_byte_buf_clean_up(&checksum);
+                aws_byte_buf_clean_up(&compute_encoded_checksum_output);
                 return aws_raise_error(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH);
             }
+
+            aws_byte_buf_clean_up(&checksum);
+            aws_byte_buf_clean_up(&compute_encoded_checksum_output);
         }
     }
 
