@@ -157,12 +157,12 @@ jobs:
       - name: Checkout Sources
         uses: actions/checkout@v3
       # CMAKE_C_FLAGS for GCC to enable code coverage information.
-      # CTEST_COVERAGE_EXTRA_FLAGS="-p" to include path information in the report file name
+      # COVERAGE_EXTRA_FLAGS="-p" to include path information in the report file name
       - name: Build ${{ env.PACKAGE_NAME }} + consumers
         run: |
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
           chmod a+x builder
-          ./builder build -p ${{ env.PACKAGE_NAME }} --compiler=gcc-9 --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage" --cmake-extra=-DCTEST_COVERAGE_EXTRA_FLAGS="-p"
+          ./builder build -p ${{ env.PACKAGE_NAME }} --compiler=gcc-9 --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage" --cmake-extra=-DCOVERAGE_EXTRA_FLAGS="-p"
       # Get test coverage report from CMAKE coverage
       - name: Ctest Coverage
         run: |
