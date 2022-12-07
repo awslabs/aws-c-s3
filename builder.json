@@ -16,5 +16,6 @@
     ],
     "test_steps": [
         "test"
-    ]
+    ],
+    "pre_build_steps": ["mock-server-setup"]
 }
