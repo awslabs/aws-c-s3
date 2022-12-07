@@ -40,27 +40,31 @@ struct aws_s3_auto_ranged_put {
         uint32_t next_part_number;
     } threaded_update_data;
 
-    /* Should only be used during prepare requests. Note: stream reads must be sequential,
+    /* 
+     * Should only be used during prepare requests. Note: stream reads must be sequential,
      * so prepare currently never runs concurrently with another prepare
      */
     struct {
-        /* How many parts have been read from input steam.
+        /* 
+         * How many parts have been read from input steam.
          * Since reads are always sequential, this is essentially the number of how many parts were read from start of
          * stream.
          */
         uint32_t num_parts_read_from_stream;
     } prepare_data;
 
-    /* very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
+    /* 
+     * Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
      * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
      * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
      * request which will only be invoked after all other parts/threads have completed.
+     * Note: checksums are base64 encoded
      */
     struct aws_byte_buf *checksums_list;
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
-        /* Array list of `struct aws_string *` */
+        /* Array list of `struct aws_string *`. */
         struct aws_array_list etag_list;
 
         struct aws_s3_paginated_operation *list_parts_operation;
