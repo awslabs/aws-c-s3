@@ -68,7 +68,7 @@ const uint32_t g_max_num_connections_per_vip = 10;
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
  * Default max part size is SIZE_MAX on 32bit systems, which is around 4GiB; and 5GiB on a 64bit system.
  *      The server limit is 5GiB, but object size limit is 5TiB for now. We should be good enough for all the cases.
- *      The max number of upload parts is 10000, which limits the object size to 39TiB on 32bit and 50TiB on 64bit.
+ *      The max number of upload parts is 10000, which limits the object size to 39TiB on 32bit and 49TiB on 64bit.
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
