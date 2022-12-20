@@ -407,11 +407,12 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     };
 
     struct aws_string *continuation_string = s_paginator_get_continuation_token(paginator);
-    struct aws_byte_cursor *continuation = NULL;
+    struct aws_byte_cursor continuation;
+    AWS_ZERO_ARRAY(& continuation);
     if (continuation_string) {
-        *continuation = aws_byte_cursor_from_string(continuation_string);
+        continuation = aws_byte_cursor_from_string(continuation_string);
     }
-    paginator->operation->next_http_message(continuation, paginator->operation->user_data, &paginated_request_message);
+    paginator->operation->next_http_message(& continuation, paginator->operation->user_data, &paginated_request_message);
     aws_string_destroy(continuation_string);
 
     aws_http_message_add_header(paginated_request_message, host_header);
