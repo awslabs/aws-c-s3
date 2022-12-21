@@ -459,7 +459,6 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
 
     re_code = AWS_OP_SUCCESS;
 done:
-    /* make_meta_request() above, ref counted the http request, so go ahead and release */
     aws_http_message_release(paginated_request_message);
     aws_string_destroy(continuation_string);
     aws_byte_buf_clean_up(&host_buf);
