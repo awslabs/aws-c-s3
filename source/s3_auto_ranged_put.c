@@ -400,7 +400,7 @@ static bool s_s3_auto_ranged_put_update(
                 // Something went really wrong. we still have parts to send, but have etags for all parts
                 AWS_FATAL_ASSERT(
                     auto_ranged_put->threaded_update_data.next_part_number <=
-                    auto_ranged_put->synced_data.total_num_parts)
+                    auto_ranged_put->synced_data.total_num_parts);
 
                 if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
                     uint32_t num_parts_in_flight =
@@ -1046,7 +1046,7 @@ static void s_s3_auto_ranged_put_request_finished(
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
 
-                AWS_ASSERT(auto_ranged_put->synced_data.needed_response_headers == NULL)
+                AWS_ASSERT(auto_ranged_put->synced_data.needed_response_headers == NULL);
                 auto_ranged_put->synced_data.needed_response_headers = needed_response_headers;
 
                 auto_ranged_put->synced_data.create_multipart_upload_completed = true;
