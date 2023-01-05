@@ -667,7 +667,7 @@ static void s_s3_copy_object_request_finished(
                 }
             }
 
-            AWS_ASSERT(copy_object->synced_data.needed_response_headers == NULL)
+            AWS_ASSERT(copy_object->synced_data.needed_response_headers == NULL);
             copy_object->synced_data.needed_response_headers = needed_response_headers;
 
             copy_object->synced_data.create_multipart_upload_completed = true;

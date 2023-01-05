@@ -387,35 +387,46 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     AWS_PRECONDITION(paginator);
     AWS_PRECONDITION(signing_config);
 
+    int re_code = AWS_OP_ERR;
+
     if (s_set_paginator_state_if_legal(paginator, OS_NOT_STARTED, OS_INITIATED)) {
-        return AWS_OP_ERR;
+        return re_code;
     }
 
     struct aws_http_message *paginated_request_message = NULL;
+    struct aws_string *continuation_string = NULL;
+    struct aws_byte_buf host_buf;
+    AWS_ZERO_STRUCT(host_buf);
 
     struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(paginator->bucket_name);
-    struct aws_byte_buf host_buf;
-    aws_byte_buf_init_copy_from_cursor(&host_buf, paginator->allocator, host_cur);
     struct aws_byte_cursor period_cur = aws_byte_cursor_from_c_str(".");
     struct aws_byte_cursor endpoint_val = aws_byte_cursor_from_string(paginator->endpoint);
-    aws_byte_buf_append_dynamic(&host_buf, &period_cur);
-    aws_byte_buf_append_dynamic(&host_buf, &endpoint_val);
+    if (aws_byte_buf_init_copy_from_cursor(&host_buf, paginator->allocator, host_cur) ||
+        aws_byte_buf_append_dynamic(&host_buf, &period_cur) || aws_byte_buf_append_dynamic(&host_buf, &endpoint_val)) {
+        goto done;
+    }
 
     struct aws_http_header host_header = {
         .name = aws_byte_cursor_from_c_str("host"),
         .value = aws_byte_cursor_from_buf(&host_buf),
     };
 
-    struct aws_string *continuation_string = s_paginator_get_continuation_token(paginator);
+    continuation_string = s_paginator_get_continuation_token(paginator);
+    struct aws_byte_cursor continuation_cursor;
+    AWS_ZERO_STRUCT(continuation_cursor);
     struct aws_byte_cursor *continuation = NULL;
     if (continuation_string) {
-        *continuation = aws_byte_cursor_from_string(continuation_string);
+        continuation_cursor = aws_byte_cursor_from_string(continuation_string);
+        continuation = &continuation_cursor;
     }
-    paginator->operation->next_http_message(continuation, paginator->operation->user_data, &paginated_request_message);
-    aws_string_destroy(continuation_string);
+    if (paginator->operation->next_http_message(
+            continuation, paginator->operation->user_data, &paginated_request_message)) {
+        goto done;
+    }
 
-    aws_http_message_add_header(paginated_request_message, host_header);
-    aws_byte_buf_clean_up(&host_buf);
+    if (aws_http_message_add_header(paginated_request_message, host_header)) {
+        goto done;
+    }
 
     struct aws_s3_meta_request_options request_options = {
         .user_data = paginator,
@@ -441,13 +452,15 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
     struct aws_s3_meta_request *new_request = aws_s3_client_make_meta_request(paginator->client, &request_options);
     aws_atomic_store_ptr(&paginator->current_request, new_request);
 
-    /* make_meta_request() above, ref counted the http request, so go ahead and release */
-    aws_http_message_release(paginated_request_message);
-
     if (new_request == NULL) {
         s_set_paginator_state_if_legal(paginator, OS_INITIATED, OS_ERROR);
-        return AWS_OP_ERR;
+        goto done;
     }
 
-    return AWS_OP_SUCCESS;
+    re_code = AWS_OP_SUCCESS;
+done:
+    aws_http_message_release(paginated_request_message);
+    aws_string_destroy(continuation_string);
+    aws_byte_buf_clean_up(&host_buf);
+    return re_code;
 }
