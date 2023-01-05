@@ -1016,7 +1016,7 @@ static int s_s3_message_util_add_range_header(
     AWS_ASSERT(headers != NULL);
 
     int erase_result = aws_http_headers_erase(headers, range_header.name);
-    AWS_ASSERT(erase_result == AWS_OP_SUCCESS || aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND)
+    AWS_ASSERT(erase_result == AWS_OP_SUCCESS || aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
     (void)erase_result;
 
     if (aws_http_message_add_header(out_message, range_header)) {
