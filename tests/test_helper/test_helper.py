@@ -70,8 +70,11 @@ def create_bucket_with_life_cycle():
                             'Prefix': 'upload/',
                         },
                         'Status': 'Enabled',
+                        'NoncurrentVersionExpiration': {
+                            'NoncurrentDays': 1,
+                        },
                         'AbortIncompleteMultipartUpload': {
-                            'DaysAfterInitiation': 1
+                            'DaysAfterInitiation': 1,
                         },
                     },
                 ],
