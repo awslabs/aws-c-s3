@@ -16,7 +16,7 @@ s3_control_client = boto3.client('s3control')
 BUCKET_NAME = 'aws-c-s3-test-bucket'
 # Create a public bucket with one object for testing public access
 PUBLIC_BUCKET_NAME = 'aws-c-s3-test-bucket-public'
-# Copy Object tests will fail if the region is not us-west-2. We should fix it, but it's not a priority.
+
 REGION = 'us-west-2'
 os.environ['AWS_DEFAULT_REGION'] = REGION
 
@@ -50,6 +50,7 @@ def put_pre_exist_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public_re
         args['ACL'] = 'public-read'
 
     s3_client.put_object(**args)
+    print(f"Object {keyname} uploaded", file=sys.stderr)
 
 
 def create_bucket_with_life_cycle():
@@ -80,6 +81,7 @@ def create_bucket_with_life_cycle():
                 ],
             },
         )
+        print(f"Bucket {BUCKET_NAME} created", file=sys.stderr)
         put_pre_exist_objects(
             10*MB, 'pre-existing-10MB-aes256-c', sse='aes256-c')
         put_pre_exist_objects(
@@ -100,6 +102,7 @@ def create_bucket_with_public_object():
     try:
         s3_client.create_bucket(Bucket=PUBLIC_BUCKET_NAME,
                                 CreateBucketConfiguration={'LocationConstraint': REGION})
+        print(f"Bucket {PUBLIC_BUCKET_NAME} created", file=sys.stderr)
         put_pre_exist_objects(
             1*MB, 'pre-existing-1MB', bucket=PUBLIC_BUCKET_NAME, public_read=True)
     except Exception as e:
@@ -112,8 +115,8 @@ def create_bucket_with_public_object():
 def cleanup(bucket_name):
     bucket = s3.Bucket(bucket_name)
     bucket.objects.all().delete()
-    response = s3_client.delete_bucket(Bucket=bucket_name)
-    print(response)
+    s3_client.delete_bucket(Bucket=bucket_name)
+    print(f"Bucket {bucket_name} deleted", file=sys.stderr)
 
 
 def initialize():
