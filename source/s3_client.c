@@ -998,7 +998,9 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return aws_s3_meta_request_auto_ranged_put_new(client->allocator, client, 0, content_length, 0, options);
         }
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {
-        return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
+        /* TODO: support copy object correctly. */
+        aws_raise_error(AWS_ERROR_UNIMPLEMENTED);
+        return NULL;
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
     } else {
