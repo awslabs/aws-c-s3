@@ -32,8 +32,16 @@ python3 test_helper.py -a CLEAN
 - Upload pre-exist files:
   - pre-existing-1MB with public read access.
 
-
 ### `CLEAN` action
 
 - Delete every objects in the `aws-c-s3-test-bucket` and `aws-c-s3-test-bucket-public`
 - Delete `aws-c-s3-test-bucket` and `aws-c-s3-test-bucket-public` buckets.
+
+## Notes
+
+The MRAP tests are not included in this script, and it's disabled by default. To run those tests, you will need to create a MRAP access point with the buckets have `pre-existing-1MB` in it. Then update `g_test_mrap_endpoint` to the uri of the MRAP endpoint and build with `-DENABLE_MRAP_TESTS=true`.
+
+## TODO
+
+- Automatic the mrap creation
+- Instead of hard-coded path, bucket and region, use the helper to set env-var and pick up from tests.
