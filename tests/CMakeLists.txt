@@ -206,6 +206,7 @@ add_net_test_case(verify_checksum_stream)
 add_net_test_case(verify_chunk_stream)
 
 # TODO: The copy tests are disabled because the copy are not fully supported, eg: only works with the us-west-2 region.
+# re-enable code coverage on s3_copy_object.c once this is fixed
 # add_net_test_case(test_s3_copy_small_object)
 # add_net_test_case(test_s3_copy_small_object_special_char)
 # add_net_test_case(test_s3_multipart_copy_large_object_special_char)
