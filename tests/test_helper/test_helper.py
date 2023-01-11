@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0.
 import argparse
 import boto3
+import botocore
 import sys
 import os
 
@@ -29,7 +30,7 @@ def create_bytes(size):
     return bytearray([1] * size)
 
 
-def put_pre_exist_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public_read=False):
+def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public_read=False):
     if size == 0:
         s3_client.put_object(Bucket=bucket, Key=keyname)
         return
@@ -50,7 +51,7 @@ def put_pre_exist_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public_re
         args['ACL'] = 'public-read'
 
     s3_client.put_object(**args)
-    print(f"Object {keyname} uploaded", file=sys.stderr)
+    print(f"Object {keyname} uploaded")
 
 
 def create_bucket_with_life_cycle():
@@ -63,7 +64,7 @@ def create_bucket_with_life_cycle():
             LifecycleConfiguration={
                 'Rules': [
                     {
-                        'ID': 'clean up non-pre-exist objects',
+                        'ID': 'clean up non-pre-existing objects',
                         'Expiration': {
                             'Days': 1,
                         },
@@ -82,20 +83,23 @@ def create_bucket_with_life_cycle():
             },
         )
         print(f"Bucket {BUCKET_NAME} created", file=sys.stderr)
-        put_pre_exist_objects(
+        put_pre_existing_objects(
             10*MB, 'pre-existing-10MB-aes256-c', sse='aes256-c')
-        put_pre_exist_objects(
+        put_pre_existing_objects(
             10*MB, 'pre-existing-10MB-aes256', sse='aes256')
-        put_pre_exist_objects(
+        put_pre_existing_objects(
             10*MB, 'pre-existing-10MB-kms', sse='kms')
-        put_pre_exist_objects(10*MB, 'pre-existing-10MB')
-        put_pre_exist_objects(1*MB, 'pre-existing-1MB')
-        put_pre_exist_objects(0, 'pre-existing-empty')
-    except Exception as e:
+        put_pre_existing_objects(10*MB, 'pre-existing-10MB')
+        put_pre_existing_objects(1*MB, 'pre-existing-1MB')
+        put_pre_existing_objects(0, 'pre-existing-empty')
+
+    except botocore.exceptions.ClientError as e:
         # The bucket already exists. That's fine.
-        print(
-            f"Bucket {BUCKET_NAME} not created, skip initializing. Exception: {e}", file=sys.stderr)
-        return
+        if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou' or e.response['Error']['Code'] == 'BucketAlreadyExists':
+            print(
+                f"Bucket {PUBLIC_BUCKET_NAME} not created, skip initializing.", file=sys.stderr)
+            return
+        raise e
 
 
 def create_bucket_with_public_object():
@@ -103,13 +107,15 @@ def create_bucket_with_public_object():
         s3_client.create_bucket(Bucket=PUBLIC_BUCKET_NAME,
                                 CreateBucketConfiguration={'LocationConstraint': REGION})
         print(f"Bucket {PUBLIC_BUCKET_NAME} created", file=sys.stderr)
-        put_pre_exist_objects(
+        put_pre_existing_objects(
             1*MB, 'pre-existing-1MB', bucket=PUBLIC_BUCKET_NAME, public_read=True)
-    except Exception as e:
+    except botocore.exceptions.ClientError as e:
         # The bucket already exists. That's fine.
-        print(
-            f"Bucket {PUBLIC_BUCKET_NAME} not created, skip initializing. Exception: {e}", file=sys.stderr)
-        return
+        if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou' or e.response['Error']['Code'] == 'BucketAlreadyExists':
+            print(
+                f"Bucket {PUBLIC_BUCKET_NAME} not created, skip initializing.", file=sys.stderr)
+            return
+        raise e
 
 
 def cleanup(bucket_name):
@@ -119,23 +125,18 @@ def cleanup(bucket_name):
     print(f"Bucket {bucket_name} deleted", file=sys.stderr)
 
 
-def initialize():
-    create_bucket_with_life_cycle()
-    create_bucket_with_public_object()
-
-
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    '-a',
-    '--action',
-    required=True,
-    help='INIT|CLEAN To initialize or clean up the test buckets')
+    'action',
+    choices=['init', 'clean'],
+    help='Initialize or clean up the test buckets')
 
 args = parser.parse_args()
 
-if args.action == 'INIT':
-    initialize()
+if args.action == 'init':
+    create_bucket_with_life_cycle()
+    create_bucket_with_public_object()
 
-if args.action == 'CLEAN':
+if args.action == 'clean':
     cleanup(BUCKET_NAME)
     cleanup(PUBLIC_BUCKET_NAME)
