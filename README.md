@@ -67,3 +67,7 @@ git clone git@github.com:awslabs/aws-c-s3.git
 cmake -S aws-c-s3 -B aws-c-s3/build -DCMAKE_INSTALL_PREFIX=<install-path> -DCMAKE_PREFIX_PATH=<install-path>
 cmake --build aws-c-s3/build --target install
 ```
+
+## Testing
+
+- To the tests, use the [test_helper](./tests/test_helper/) script.
