@@ -174,31 +174,31 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False, ge
     with open(response_json_path, 'r') as f:
         data = json.load(f)
 
-        status_code = data['status']
-        if generate_body:
-            # generate body with a specific size instead
-            body = "a" * generate_body_size
-        else:
-            body = "\n".join(data['body'])
-        wrapper.info("Sending", status_code,
-                     "response with", len(body), "bytes")
+    status_code = data['status']
+    if generate_body:
+        # generate body with a specific size instead
+        body = "a" * generate_body_size
+    else:
+        body = "\n".join(data['body'])
+    wrapper.info("Sending", status_code,
+                 "response with", len(body), "bytes")
 
-        headers = wrapper.basic_headers()
-        for header in data['headers'].items():
-            headers.append((header[0], header[1]))
+    headers = wrapper.basic_headers()
+    for header in data['headers'].items():
+        headers.append((header[0], header[1]))
 
-        if chunked:
-            headers.append(('Transfer-Encoding', "chunked"))
-            res = h11.Response(status_code=status_code, headers=headers)
-            await wrapper.send(res)
-            await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
-        else:
-            headers.append(("Content-Length", str(len(body))))
-            res = h11.Response(status_code=status_code, headers=headers)
-            await wrapper.send(res)
-            await wrapper.send(h11.Data(data=body.encode()))
+    if chunked:
+        headers.append(('Transfer-Encoding', "chunked"))
+        res = h11.Response(status_code=status_code, headers=headers)
+        await wrapper.send(res)
+        await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
+    else:
+        headers.append(("Content-Length", str(len(body))))
+        res = h11.Response(status_code=status_code, headers=headers)
+        await wrapper.send(res)
+        await wrapper.send(h11.Data(data=body.encode()))
 
-        await wrapper.send(h11.EndOfMessage())
+    await wrapper.send(h11.EndOfMessage())
 
 
 async def send_mock_s3_response(wrapper, request_type, path, generate_body=False, generate_body_size=0):
