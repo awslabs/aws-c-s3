@@ -319,8 +319,8 @@ void aws_s3_meta_request_set_fail_synced(
 
     meta_request->synced_data.finish_result_set = true;
 
-    if ((error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
-         error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR) &&
+    if ((error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
+         error_code == AWS_ERROR_S3_OBJECT_MODIFIED) &&
         failed_request != NULL) {
         aws_s3_meta_request_result_setup(
             meta_request,
@@ -413,19 +413,18 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
-    AWS_LOGF_DEBUG(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", (void *)meta_request);
 
     meta_request->vtable->destroy(meta_request);
     meta_request = NULL;
 
-    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Calling meta request shutdown callback.", (void *)meta_request);
-
     if (shutdown_callback != NULL) {
+        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Calling meta request shutdown callback.", (void *)meta_request);
         shutdown_callback(meta_request_user_data);
     }
 
-    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Meta request clean up finished.", (void *)meta_request);
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Meta request clean up finished.", (void *)meta_request);
 }
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
@@ -676,7 +675,7 @@ void aws_s3_meta_request_sign_request_default(
 
     request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
 
-    AWS_LOGF_DEBUG(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p Created signable %p for request %p with message %p",
         (void *)meta_request,
@@ -803,7 +802,7 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         goto error_finish;
     }
 
-    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
 
     if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
         aws_http_stream_release(stream);
@@ -944,13 +943,6 @@ static int s_s3_meta_request_incoming_headers(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Incoming headers for request %p on connection %p.",
-        (void *)meta_request,
-        (void *)request,
-        (void *)connection);
-
     if (aws_http_stream_get_incoming_response_status(stream, &request->send_data.response_status)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -1002,7 +994,7 @@ static int s_s3_meta_request_incoming_body(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
 
-    AWS_LOGF_DEBUG(
+    AWS_LOGF_TRACE(
         AWS_LS_S3_META_REQUEST,
         "id=%p Incoming body for request %p. Response status: %d. Data Size: %" PRIu64 ". connection: %p.",
         (void *)meta_request,

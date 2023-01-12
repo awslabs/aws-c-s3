@@ -1,0 +1,14 @@
+{
+  "status": 206,
+  "headers": {
+    "ETag": "b54357faf0632cce46e942fa68356b38",
+    "Date": "Thu, 12 Jan 2023 00:04:21 GMT",
+    "Last-Modified": "Tue, 10 Jan 2023 23:39:32 GMT",
+    "Accept-Ranges": "bytes",
+    "Content-Range": "bytes 0-65535/1048576",
+    "Content-Type": "binary/octet-stream"
+  },
+  "body": [
+    "<data-to-send>"
+  ]
+}
