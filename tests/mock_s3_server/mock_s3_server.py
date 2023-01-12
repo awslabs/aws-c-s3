@@ -16,6 +16,8 @@ import h11
 MAX_RECV = 2**16
 TIMEOUT = 10
 
+VERBOSE = False
+
 
 class S3Opts(Enum):
     CreateMultipartUpload = 1
@@ -99,7 +101,8 @@ class TrioHTTPWrapper:
 
     def info(self, *args):
         # Little debugging method
-        print("{}:".format(self._obj_id), *args)
+        if VERBOSE:
+            print("{}:".format(self._obj_id), *args)
 
 
 ################################################################
