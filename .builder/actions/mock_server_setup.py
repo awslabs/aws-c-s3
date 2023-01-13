@@ -33,9 +33,8 @@ class MockServerSetup(Builder.Action):
 
         base_dir = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
-        os.chdir(dir)
 
-        p = subprocess.Popen([python_path, "mock_s3_server.py"])
+        p = subprocess.Popen([python_path, "mock_s3_server.py"], cwd=dir)
 
         @atexit.register
         def close_mock_server():
