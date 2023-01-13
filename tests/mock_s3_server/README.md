@@ -15,6 +15,7 @@ Python 3.5+ required.
 - CompleteMultipartUpload
 - UploadPart
 - AbortMultipartUpload
+- GetObject
 
 ### Defined response
 
@@ -38,3 +39,9 @@ The server will read from ./{OperationName}/{Key}.json. The json file is formatt
 ```
 
 Where you can define the expected response status, header and response body. If the {Key}.json is not found from file system, it will load the `default.json`.
+
+### GetObject Response
+
+By default, the GetObject response will read from ./{OperationName}/{Key}.json for the status and headers. But the body will be generated to match the range in the request.
+
+To proper handle ranged GetObject, you will need to modify the mock server code. Check function `handle_get_object` for details.

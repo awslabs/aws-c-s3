@@ -1,9 +1,8 @@
 # A simple HTTP server implemented using h11 and Trio:
 #   http://trio.readthedocs.io/en/latest/index.html
 #
+#   S3 Mock server logic starts from handle_mock_s3_request
 
-import datetime
-import email.utils
 import json
 from itertools import count
 from urllib.parse import parse_qs, urlparse
@@ -17,60 +16,32 @@ import h11
 MAX_RECV = 2**16
 TIMEOUT = 10
 
+VERBOSE = False
+
 
 class S3Opts(Enum):
     CreateMultipartUpload = 1
     CompleteMultipartUpload = 2
     UploadPart = 3
     AbortMultipartUpload = 4
+    GetObject = 5
 
 
 base_dir = os.path.dirname(os.path.realpath(__file__))
 
-# We are using email.utils.format_datetime to generate the Date header.
-# It may sound weird, but it actually follows the RFC.
-# Please see: https://stackoverflow.com/a/59416334/14723771
-#
-# See also:
-# [1] https://www.rfc-editor.org/rfc/rfc9110#section-5.6.7
-# [2] https://www.rfc-editor.org/rfc/rfc7231#section-7.1.1.1
-# [3] https://www.rfc-editor.org/rfc/rfc5322#section-3.3
 
-
-def format_date_time(dt=None):
-    """Generate a RFC 7231 / RFC 9110 IMF-fixdate string"""
-    if dt is None:
-        dt = datetime.datetime.now(datetime.timezone.utc)
-    return email.utils.format_datetime(dt, usegmt=True)
-
-
-################################################################
-# I/O adapter: h11 <-> trio
-################################################################
-
-# The core of this could be factored out to be usable for trio-based clients
-# too, as well as servers. But as a simplified pedagogical example we don't
-# attempt this here.
 class TrioHTTPWrapper:
     _next_id = count()
 
     def __init__(self, stream):
         self.stream = stream
         self.conn = h11.Connection(h11.SERVER)
-        # Our Server: header
-        self.ident = " ".join(
-            ["h11-example-trio-server/{}".format(h11.__version__),
-             h11.PRODUCT_ID]
-        ).encode("ascii")
         # A unique id for this connection, to include in debugging output
         # (useful for understanding what's going on if there are multiple
         # simultaneous clients).
         self._obj_id = next(TrioHTTPWrapper._next_id)
 
     async def send(self, event):
-        # The code below doesn't send ConnectionClosed, so we don't bother
-        # handling it here either -- it would require that we do something
-        # appropriate when 'data' is None.
         assert type(event) is not h11.ConnectionClosed
         data = self.conn.send(event)
         try:
@@ -104,28 +75,11 @@ class TrioHTTPWrapper:
             return event
 
     async def shutdown_and_clean_up(self):
-        # When this method is called, it's because we definitely want to kill
-        # this connection, either as a clean shutdown or because of some kind
-        # of error or loss-of-sync bug, and we no longer care if that violates
-        # the protocol or not. So we ignore the state of self.conn, and just
-        # go ahead and do the shutdown on the socket directly. (If you're
-        # implementing a client you might prefer to send ConnectionClosed()
-        # and let it raise an exception if that violates the protocol.)
-        #
         try:
             await self.stream.send_eof()
         except trio.BrokenResourceError:
-            # They're already gone, nothing to do
             return
-        # Wait and read for a bit to give them a chance to see that we closed
-        # things, but eventually give up and just close the socket.
-        # XX FIXME: possibly we should set SO_LINGER to 0 here, so
-        # that in the case where the client has ignored our shutdown and
-        # declined to initiate the close themselves, we do a violent shutdown
-        # (RST) and avoid the TIME_WAIT?
-        # it looks like nginx never does this for keepalive timeouts, and only
-        # does it for regular timeouts (slow clients I guess?) if explicitly
-        # enabled ("Default: reset_timedout_connection off")
+
         with trio.move_on_after(TIMEOUT):
             try:
                 while True:
@@ -142,44 +96,19 @@ class TrioHTTPWrapper:
         # HTTP requires these headers in all responses (client would do
         # something different here)
         return [
-            ("Date", format_date_time().encode("ascii")),
-            ("Server", self.ident),
+            ("Server", "mock_s3_server"),
         ]
 
     def info(self, *args):
         # Little debugging method
-        print("{}:".format(self._obj_id), *args)
+        if VERBOSE:
+            print("{}:".format(self._obj_id), *args)
 
 
 ################################################################
 # Server main loop
 ################################################################
 
-# General theory:
-#
-# If everything goes well:
-# - we'll get a Request
-# - our response handler will read the request body and send a full response
-# - that will either leave us in MUST_CLOSE (if the client doesn't
-#   support keepalive) or DONE/DONE (if the client does).
-#
-# But then there are many, many different ways that things can go wrong
-# here. For example:
-# - we don't actually get a Request, but rather a ConnectionClosed
-# - exception is raised from somewhere (naughty client, broken
-#   response handler, whatever)
-#   - depending on what went wrong and where, we might or might not be
-#     able to send an error response, and the connection might or
-#     might not be salvagable after that
-# - response handler doesn't fully read the request or doesn't send a
-#   full response
-#
-# But these all have one thing in common: they involve us leaving the
-# nice easy path up above. So we can just proceed on the assumption
-# that the nice easy thing is what's happening, and whenever something
-# goes wrong do our best to get back onto that path, and h11 will keep
-# track of how successful we were and raise new errors if things don't work
-# out.
 async def http_serve(stream):
     wrapper = TrioHTTPWrapper(stream)
     wrapper.info("Got new connection")
@@ -239,46 +168,50 @@ async def send_simple_response(wrapper, status_code, content_type, body):
     await wrapper.send(h11.EndOfMessage())
 
 
-async def send_response_from_json(wrapper, response_json_path, chunked=False):
+async def send_response_from_json(wrapper, response_json_path, chunked=False, generate_body=False, generate_body_size=0):
+    wrapper.info("sending response from json file: ", response_json_path,
+                 ".\n generate_body: ", generate_body, "generate_body_size: ", generate_body_size)
     with open(response_json_path, 'r') as f:
         data = json.load(f)
 
-        status_code = data['status']
+    status_code = data['status']
+    if generate_body:
+        # generate body with a specific size instead
+        body = "a" * generate_body_size
+    else:
         body = "\n".join(data['body'])
-        wrapper.info("Sending", status_code,
-                     "response with", len(body), "bytes")
+    wrapper.info("Sending", status_code,
+                 "response with", len(body), "bytes")
 
-        headers = wrapper.basic_headers()
-        for header in data['headers'].items():
-            headers.append((header[0], header[1]))
+    headers = wrapper.basic_headers()
+    for header in data['headers'].items():
+        headers.append((header[0], header[1]))
 
-        if chunked:
-            headers.append(('Transfer-Encoding', "chunked"))
-            res = h11.Response(status_code=status_code, headers=headers)
-            await wrapper.send(res)
-            await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
-        else:
-            headers.append(("Content-Length", str(len(body))))
-            res = h11.Response(status_code=status_code, headers=headers)
-            await wrapper.send(res)
-            await wrapper.send(h11.Data(data=body.encode()))
+    if chunked:
+        headers.append(('Transfer-Encoding', "chunked"))
+        res = h11.Response(status_code=status_code, headers=headers)
+        await wrapper.send(res)
+        await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
+    else:
+        headers.append(("Content-Length", str(len(body))))
+        res = h11.Response(status_code=status_code, headers=headers)
+        await wrapper.send(res)
+        await wrapper.send(h11.Data(data=body.encode()))
 
-        await wrapper.send(h11.EndOfMessage())
+    await wrapper.send(h11.EndOfMessage())
 
 
-async def send_mock_s3_response(wrapper, request_type, path):
+async def send_mock_s3_response(wrapper, request_type, path, generate_body=False, generate_body_size=0):
     response_file = os.path.join(
         base_dir, request_type.name, f"{path[1:]}.json")
     if os.path.exists(response_file) == False:
         wrapper.info(response_file, "not exist, using the default response")
         response_file = os.path.join(
             base_dir, request_type.name, f"default.json")
-    await send_response_from_json(wrapper, response_file)
+    await send_response_from_json(wrapper, response_file, generate_body=generate_body, generate_body_size=generate_body_size)
 
 
 async def maybe_send_error_response(wrapper, exc):
-    # If we can't send an error, oh well, nothing to be done
-    wrapper.info("trying to send error response...")
     if wrapper.conn.our_state not in {h11.IDLE, h11.SEND_RESPONSE}:
         wrapper.info("...but I can't, because our state is",
                      wrapper.conn.our_state)
@@ -298,9 +231,53 @@ async def maybe_send_error_response(wrapper, exc):
         wrapper.info("error while sending error response:", exc)
 
 
+def get_request_header_value(request, header_name):
+    for header in request.headers:
+        if header[0].decode("utf-8").lower() == header_name.lower():
+            return header[1].decode("utf-8")
+    return None
+
+
+def handle_get_object_modified(start_range, end_range, request):
+    data_length = end_range - start_range
+
+    if start_range == 0:
+        return "/get_object_modified_first_part", data_length, True
+    else:
+        # Check the request header to make sure "If-Match" is set
+        etag = get_request_header_value(request, "if-match")
+        print(etag)
+        # fetch Etag from the first_part response file
+        response_file = os.path.join(
+            base_dir, S3Opts.GetObject.name, f"get_object_modified_first_part.json")
+        with open(response_file, 'r') as f:
+            data = json.load(f)
+            if data['headers']['ETag'] == etag:
+                return "/get_object_modified_success", data_length, False
+            return "/get_object_modified_failure", data_length, False
+
+
+def handle_get_object(request, parsed_path):
+
+    body_range = get_request_header_value(request, "range").split("=")[1]
+
+    start_range = int(body_range.split("-")[0])
+    end_range = int(body_range.split("-")[1])
+    data_length = end_range - start_range
+
+    if parsed_path.path == "/get_object_modified":
+        return handle_get_object_modified(start_range, end_range, request)
+
+    return parsed_path.path, data_length, True
+
+
 async def handle_mock_s3_request(wrapper, request):
     parsed_path, parsed_query = parse_request_path(
         request.target.decode("ascii"))
+    response_path = parsed_path.path
+    generate_body = False
+    generate_body_size = 0
+
     if request.method == b"POST":
         if parsed_path.query == "uploads":
             # POST /{Key+}?uploads HTTP/1.1 -- Create MPU
@@ -313,8 +290,14 @@ async def handle_mock_s3_request(wrapper, request):
         request_type = S3Opts.UploadPart
     elif request.method == b"DELETE":
         request_type = S3Opts.AbortMultipartUpload
+    elif request.method == b"GET":
+        # There are other GET requests, but we only support GetObject for now.
+        request_type = S3Opts.GetObject
+        response_path, generate_body_size, generate_body = handle_get_object(
+            request, parsed_path)
     else:
         # TODO: support more type.
+        wrapper.info("unsupported request:", request)
         request_type = S3Opts.CreateMultipartUpload
 
     while True:
@@ -324,8 +307,7 @@ async def handle_mock_s3_request(wrapper, request):
         assert type(event) is h11.Data
 
     await send_mock_s3_response(
-        wrapper, request_type, parsed_path.path
-    )
+        wrapper, request_type, response_path, generate_body=generate_body, generate_body_size=generate_body_size)
 
 
 async def serve(port):
