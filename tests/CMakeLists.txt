@@ -231,5 +231,8 @@ if (ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(get_object_modified_mock_server)
 endif()
 
+add_test_case(meta_request_auto_ranged_get_new_error_handling)
+add_test_case(meta_request_auto_ranged_put_new_error_handling)
+
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

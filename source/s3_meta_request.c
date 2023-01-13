@@ -192,11 +192,17 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
+    if (part_size == SIZE_MAX) {
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+
     if (aws_mutex_init(&meta_request->synced_data.lock)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not initialize mutex for meta request", (void *)meta_request);
         goto error;
     }
+
     if (aws_priority_queue_init_dynamic(
             &meta_request->synced_data.pending_body_streaming_requests,
             meta_request->allocator,
@@ -205,6 +211,7 @@ int aws_s3_meta_request_init_base(
             s_s3_request_priority_queue_pred)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not initialize priority queue for meta request", (void *)meta_request);
+        /* Priority queue */
         goto error;
     }
 
@@ -416,14 +423,14 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_s3_endpoint_release(meta_request->endpoint);
     meta_request->client = aws_s3_client_release(meta_request->client);
 
-    AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", (void *)meta_request);
-
-    meta_request->vtable->destroy(meta_request);
+    if (meta_request->vtable != NULL) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", (void *)meta_request);
+        meta_request->vtable->destroy(meta_request);
+    }
     meta_request = NULL;
 
     if (shutdown_callback != NULL) {

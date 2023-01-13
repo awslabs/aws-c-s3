@@ -303,17 +303,16 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     aws_s3_paginated_operation_release(auto_ranged_put->synced_data.list_parts_operation);
 
-    for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
-         ++etag_index) {
+    for (size_t etag_index = 0; etag_index < auto_ranged_put->synced_data.total_num_parts; ++etag_index) {
         struct aws_string *etag = NULL;
 
         aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
         aws_string_destroy(etag);
     }
+
     aws_string_destroy(auto_ranged_put->synced_data.list_parts_continuation_token);
-    /* probably just better to store num parts in the meta-request */
-    for (size_t checksum_index = 0; checksum_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
-         ++checksum_index) {
+
+    for (size_t checksum_index = 0; checksum_index < auto_ranged_put->synced_data.total_num_parts; ++checksum_index) {
         aws_byte_buf_clean_up(&auto_ranged_put->encoded_checksum_list[checksum_index]);
     }
     aws_mem_release(meta_request->allocator, auto_ranged_put->synced_data.etag_list.data);
