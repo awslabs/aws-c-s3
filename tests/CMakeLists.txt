@@ -228,6 +228,7 @@ if (ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(multipart_upload_mock_server)
     add_net_test_case(async_internal_error_from_complete_multipart_mock_server)
     add_net_test_case(async_access_denied_from_complete_multipart_mock_server)
+    add_net_test_case(get_object_modified_mock_server)
 endif()
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
