@@ -998,6 +998,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {
         /* TODO: support copy object correctly. */
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "CopyObject is not currently supported");
         aws_raise_error(AWS_ERROR_UNIMPLEMENTED);
         return NULL;
     } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
