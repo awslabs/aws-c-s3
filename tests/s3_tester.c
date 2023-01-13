@@ -35,12 +35,9 @@ const struct aws_byte_cursor g_test_mrap_endpoint =
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
 
-const struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-canary-bucket");
-
+const struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
 const struct aws_byte_cursor g_test_public_bucket_name =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-crt-test-stuff-us-west-2");
-const struct aws_byte_cursor g_s3_path_get_object_test_1MB =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
 const struct aws_byte_cursor g_s3_sse_c_alg_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm");
@@ -50,14 +47,17 @@ const struct aws_byte_cursor g_s3_sse_c_key_md5_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-md5");
 
 /* TODO populate these at the beginning of running tests with names that are unique to the test run. */
-const struct aws_byte_cursor g_pre_existing_object_1MB =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_1MB.txt");
+
+const struct aws_byte_cursor g_pre_existing_object_1MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-1MB");
+const struct aws_byte_cursor g_pre_existing_object_10MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-10MB");
 const struct aws_byte_cursor g_pre_existing_object_kms_10MB =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_kms_10MB.txt");
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-10MB-kms");
 const struct aws_byte_cursor g_pre_existing_object_aes256_10MB =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_aes256_10MB.txt");
-const struct aws_byte_cursor g_pre_existing_empty_object =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing_object_empty.txt");
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-10MB-aes256");
+const struct aws_byte_cursor g_pre_existing_empty_object = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-empty");
+
+const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/put-object-test");
+const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
 
 #ifdef BYO_CRYPTO
 /* Under BYO_CRYPTO, this function currently needs to be defined by the user. Defining a null implementation here so
@@ -1298,28 +1298,32 @@ int aws_s3_tester_send_meta_request_with_options(
                         snprintf(
                             object_path_sprintf_buffer,
                             sizeof(object_path_sprintf_buffer),
-                            "/put_object_test_%uMB.txt",
+                            "" PRInSTR "-%uMB.txt",
+                            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
                             object_size_mb);
                         break;
                     case AWS_S3_TESTER_SSE_KMS:
                         snprintf(
                             object_path_sprintf_buffer,
                             sizeof(object_path_sprintf_buffer),
-                            "/put_object_test_kms_%uMB.txt",
+                            "" PRInSTR "-kms-%uMB.txt",
+                            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
                             object_size_mb);
                         break;
                     case AWS_S3_TESTER_SSE_AES256:
                         snprintf(
                             object_path_sprintf_buffer,
                             sizeof(object_path_sprintf_buffer),
-                            "/put_object_test_aes256_%uMB.txt",
+                            "" PRInSTR "-aes256-%uMB.txt",
+                            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
                             object_size_mb);
                         break;
                     case AWS_S3_TESTER_SSE_C_AES256:
                         snprintf(
                             object_path_sprintf_buffer,
                             sizeof(object_path_sprintf_buffer),
-                            "/put_object_test_c_aes256_%uMB.txt",
+                            "" PRInSTR "-aes256-c-%uMB.txt",
+                            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
                             object_size_mb);
                         break;
 
@@ -1630,19 +1634,20 @@ int aws_s3_tester_send_put_object_meta_request(
 
     char object_path_buffer[128] = "";
 
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS) {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_kms_%uMB.txt", file_size_mb);
-    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256) {
-        snprintf(
-            object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_aes256_%uMB.txt", file_size_mb);
-    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL) {
+    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL) {
         snprintf(
             object_path_buffer,
             sizeof(object_path_buffer),
-            "/upload/put_object_test_acl_public_read_%uMB.txt",
+            "" PRInSTR "-acl-public-read-%uMB.txt",
+            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
             file_size_mb);
     } else {
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/upload/put_object_test_%uMB.txt", file_size_mb);
+        snprintf(
+            object_path_buffer,
+            sizeof(object_path_buffer),
+            "" PRInSTR "-%uMB.txt",
+            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
+            file_size_mb);
     }
     struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
 
@@ -1742,6 +1747,17 @@ int aws_s3_tester_validate_put_object_results(
                 strncmp((const char *)&etag_byte_cursor.ptr[i], (const char *)quote_entity.ptr, quote_entity.len) != 0);
         }
     }
+
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_tester_upload_file_path_init(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *out_path_buffer,
+    struct aws_byte_cursor file_path) {
+
+    ASSERT_SUCCESS(aws_byte_buf_init_copy_from_cursor(out_path_buffer, allocator, g_upload_folder));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(out_path_buffer, &file_path));
 
     return AWS_OP_SUCCESS;
 }
