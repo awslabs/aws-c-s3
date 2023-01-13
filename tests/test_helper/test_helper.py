@@ -54,7 +54,7 @@ def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public
     print(f"Object {keyname} uploaded")
 
 
-def create_bucket_with_life_cycle():
+def create_bucket_with_lifecycle():
     try:
         # Create the bucket. This returns an error if the bucket already exists.
         s3_client.create_bucket(
@@ -134,7 +134,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 if args.action == 'init':
-    create_bucket_with_life_cycle()
+    create_bucket_with_lifecycle()
     create_bucket_with_public_object()
 
 if args.action == 'clean':

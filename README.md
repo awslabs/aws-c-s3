@@ -70,4 +70,5 @@ cmake --build aws-c-s3/build --target install
 
 ## Testing
 
-- To the tests, use the [test_helper](./tests/test_helper/) script.
+The unit tests require an AWS account with S3 buckets set up in a particular way.
+Use the [test_helper script](./tests/test_helper/) to set this up.
