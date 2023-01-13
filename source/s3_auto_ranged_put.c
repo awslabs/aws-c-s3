@@ -242,10 +242,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_s3_auto_ranged_put *auto_ranged_put =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
-    if (s_try_update_part_info_from_resume_token(content_length, options->resume_token, &part_size, &num_parts)) {
-        goto error_clean_up;
-    }
-
     if (aws_s3_meta_request_init_base(
             allocator,
             client,
@@ -256,6 +252,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
             &auto_ranged_put->base)) {
+        aws_mem_release(allocator, auto_ranged_put);
+        return NULL;
+    }
+
+    if (s_try_update_part_info_from_resume_token(content_length, options->resume_token, &part_size, &num_parts)) {
         goto error_clean_up;
     }
 
@@ -284,8 +285,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     return &auto_ranged_put->base;
 
 error_clean_up:
-    aws_mem_release(allocator, auto_ranged_put);
-
+    aws_s3_meta_request_release(&auto_ranged_put->base);
     return NULL;
 }
 

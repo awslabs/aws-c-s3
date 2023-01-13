@@ -89,7 +89,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not initialize base type for Auto-Ranged-Get Meta Request.",
             (void *)auto_ranged_get);
-        goto error_clean_up;
+        aws_mem_release(allocator, auto_ranged_get);
+        return NULL;
     }
 
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
@@ -102,13 +103,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
     return &auto_ranged_get->base;
-
-error_clean_up:
-
-    aws_s3_meta_request_release(&auto_ranged_get->base);
-    auto_ranged_get = NULL;
-
-    return NULL;
 }
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request) {
