@@ -158,7 +158,7 @@ TEST_CASE(get_object_modified_mock_server) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* Check the README part for getobject mismatch */
+    /* Check the mock server READEME/GetObject Response for the response that will be received. */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_modified");
 
     struct aws_s3_tester_meta_request_options get_options = {
