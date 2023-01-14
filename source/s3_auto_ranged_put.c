@@ -239,6 +239,10 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     AWS_PRECONDITION(options->message);
     AWS_PRECONDITION(aws_http_message_get_body_stream(options->message));
 
+    if (s_try_update_part_info_from_resume_token(content_length, options->resume_token, &part_size, &num_parts)) {
+        return NULL;
+    }
+
     struct aws_s3_auto_ranged_put *auto_ranged_put =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
 
@@ -254,10 +258,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             &auto_ranged_put->base)) {
         aws_mem_release(allocator, auto_ranged_put);
         return NULL;
-    }
-
-    if (s_try_update_part_info_from_resume_token(content_length, options->resume_token, &part_size, &num_parts)) {
-        goto error_clean_up;
     }
 
     auto_ranged_put->content_length = content_length;

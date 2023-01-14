@@ -5,6 +5,7 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
+#include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
@@ -81,6 +82,12 @@ TEST_CASE(meta_request_auto_ranged_put_new_error_handling) {
     options.resume_token = token;
     meta_request =
         aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), MB_TO_BYTES(10), 2, &options);
+    ASSERT_NULL(meta_request);
+
+    /* Third: Fail from the s_try_init_resume_state_from_persisted_data */
+    meta_request =
+        aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), MB_TO_BYTES(10), 2, &options);
+
     ASSERT_NULL(meta_request);
 
     aws_input_stream_release(body_stream);
