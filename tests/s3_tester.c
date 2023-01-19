@@ -1233,7 +1233,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
         struct aws_string *host_name = NULL;
         if (options->mock_server) {
-            const struct aws_byte_cursor *host_cursor = aws_uri_host_name(&mock_server);
+            const struct aws_byte_cursor *host_cursor = aws_uri_authority(&mock_server);
             host_name = aws_string_new_from_cursor(allocator, host_cursor);
         } else if (options->mrap_test) {
             host_name = aws_string_new_from_cursor(allocator, &g_test_mrap_endpoint);
