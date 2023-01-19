@@ -637,9 +637,9 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
 }
 
 /*
-* There is currently some overlap between user provided Host header and endpoint
-* override. This function handles the corner cases for when either or both are provided.
-*/
+ * There is currently some overlap between user provided Host header and endpoint
+ * override. This function handles the corner cases for when either or both are provided.
+ */
 int s_apply_endpoint_override(
     const struct aws_s3_client *client,
     struct aws_http_headers *message_headers,
@@ -829,9 +829,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     {
         aws_s3_client_lock_synced_data(client);
 
-
-
-        struct aws_string *endpoint_host_name = NULL; 
+        struct aws_string *endpoint_host_name = NULL;
 
         if (options->endpoint != NULL) {
             endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(options->endpoint));
