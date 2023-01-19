@@ -636,19 +636,20 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
     return request;
 }
 
-int s_update_host_header_based_on_endpoint_override(const struct aws_s3_client *client,
-                                                    struct aws_http_headers *message_headers, 
-                                                    const struct aws_uri *endpoint) {
+int s_update_host_header_based_on_endpoint_override(
+    const struct aws_s3_client *client,
+    struct aws_http_headers *message_headers,
+    const struct aws_uri *endpoint) {
     AWS_PRECONDITION(message_headers);
 
-    const struct aws_byte_cursor *endpoint_authority = 
-        endpoint == NULL ? NULL : aws_uri_authority(endpoint);
+    const struct aws_byte_cursor *endpoint_authority = endpoint == NULL ? NULL : aws_uri_authority(endpoint);
 
     if (!aws_http_headers_has(message_headers, g_host_header_name)) {
         if (endpoint_authority == NULL) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; message provided in options does not have either 'Host' header set or endpoint override.",
+                "id=%p Cannot create meta s3 request; message provided in options does not have either 'Host' header "
+                "set or endpoint override.",
                 (void *)client);
             return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         }
@@ -665,21 +666,20 @@ int s_update_host_header_based_on_endpoint_override(const struct aws_s3_client *
     struct aws_byte_cursor host_value;
     if (aws_http_headers_get(message_headers, g_host_header_name, &host_value)) {
         AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
-                (void *)client);
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
+            (void *)client);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
-    if (endpoint_authority != NULL &&
-        !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
+    if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
         AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; host header value " PRInSTR 
-                " does not match endpoint override " PRInSTR,
-                (void *)client,
-                AWS_BYTE_CURSOR_PRI(host_value),
-                AWS_BYTE_CURSOR_PRI(*endpoint_authority));
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; host header value " PRInSTR
+            " does not match endpoint override " PRInSTR,
+            (void *)client,
+            AWS_BYTE_CURSOR_PRI(host_value),
+            AWS_BYTE_CURSOR_PRI(*endpoint_authority));
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
@@ -774,7 +774,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
     }
 
-    if(s_update_host_header_based_on_endpoint_override(client, message_headers, options->endpoint)) {
+    if (s_update_host_header_based_on_endpoint_override(client, message_headers, options->endpoint)) {
         return NULL;
     }
 
@@ -807,7 +807,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 AWS_BYTE_CURSOR_PRI(*scheme));
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
-        } 
+        }
 
         port = aws_uri_port(options->endpoint);
     }
@@ -824,14 +824,15 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
-        
-        struct aws_uri host_uri; 
+
+        struct aws_uri host_uri;
         if (aws_uri_init_parse(&host_uri, client->allocator, &host_header_value)) {
             error_occurred = true;
             goto unlock;
         }
 
-        struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
+        struct aws_string *endpoint_host_name =
+            aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
         aws_uri_clean_up(&host_uri);
 
         struct aws_s3_endpoint *endpoint = NULL;
