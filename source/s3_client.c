@@ -636,7 +636,11 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
     return request;
 }
 
-int s_update_host_header_based_on_endpoint_override(
+/*
+* There is currently some overlap between user provided Host header and endpoint
+* override. This function handles the corner cases for when either or both are provided.
+*/
+int s_apply_endpoint_override(
     const struct aws_s3_client *client,
     struct aws_http_headers *message_headers,
     const struct aws_uri *endpoint) {
@@ -774,7 +778,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
     }
 
-    if (s_update_host_header_based_on_endpoint_override(client, message_headers, options->endpoint)) {
+    if (s_apply_endpoint_override(client, message_headers, options->endpoint)) {
         return NULL;
     }
 
@@ -825,15 +829,22 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     {
         aws_s3_client_lock_synced_data(client);
 
-        struct aws_uri host_uri;
-        if (aws_uri_init_parse(&host_uri, client->allocator, &host_header_value)) {
-            error_occurred = true;
-            goto unlock;
-        }
 
-        struct aws_string *endpoint_host_name =
+
+        struct aws_string *endpoint_host_name = NULL; 
+
+        if (options->endpoint != NULL) {
+            endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(options->endpoint));
+        } else {
+            struct aws_uri host_uri;
+            if (aws_uri_init_parse(&host_uri, client->allocator, &host_header_value)) {
+                error_occurred = true;
+                goto unlock;
+            }
+
             aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
-        aws_uri_clean_up(&host_uri);
+            aws_uri_clean_up(&host_uri);
+        }
 
         struct aws_s3_endpoint *endpoint = NULL;
         struct aws_hash_element *endpoint_hash_element = NULL;

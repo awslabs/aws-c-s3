@@ -396,7 +396,7 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Endpoint override for request. Can be used to override scheme and port of
      * the endpoint.
-     * There is some overlap between Host header and Endpoint and cornet cases
+     * There is some overlap between Host header and Endpoint and corner cases
      * are handled as follows:
      * - Only Host header is set - Host is used to construct endpoint. https is
      *   default with corresponding port
