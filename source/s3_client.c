@@ -805,7 +805,13 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     {
         aws_s3_client_lock_synced_data(client);
 
-        struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, &host_header_value);
+        
+        struct aws_uri host_uri; 
+        aws_uri_init_parse(&host_uri, client->allocator, &host_header_value);
+
+        struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator,
+            aws_uri_host_name(&host_uri));
+        aws_uri_clean_up(&host_uri);
 
         struct aws_s3_endpoint *endpoint = NULL;
         struct aws_hash_element *endpoint_hash_element = NULL;
