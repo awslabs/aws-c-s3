@@ -639,9 +639,7 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
 int s_update_host_header_based_on_endpoint_override(const struct aws_s3_client *client,
                                                     struct aws_http_headers *message_headers, 
                                                     const struct aws_uri *endpoint) {
-    if (message_headers == NULL) {
-        return AWS_OP_SUCCESS;
-    }
+    AWS_PRECONDITION(message_headers);
 
     const struct aws_byte_cursor *endpoint_authority = 
         endpoint == NULL ? NULL : aws_uri_authority(endpoint);
@@ -650,12 +648,18 @@ int s_update_host_header_based_on_endpoint_override(const struct aws_s3_client *
         if (endpoint_authority == NULL) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
+                "id=%p Cannot create meta s3 request; message provided in options does not have either 'Host' header set or endpoint override.",
                 (void *)client);
             return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         }
 
-        return aws_http_headers_set(message_headers, g_host_header_name, *endpoint_authority);
+        if (aws_http_headers_set(message_headers, g_host_header_name, *endpoint_authority)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Cannot create meta s3 request; failed to set 'Host' header based on endpoint override.",
+                (void *)client);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
     }
 
     struct aws_byte_cursor host_value;
@@ -667,7 +671,8 @@ int s_update_host_header_based_on_endpoint_override(const struct aws_s3_client *
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
-    if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
+    if (endpoint_authority != NULL &&
+        !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
         AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
                 "id=%p Cannot create meta s3 request; host header value " PRInSTR 
@@ -788,7 +793,22 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
     if (options->endpoint != NULL) {
         struct aws_byte_cursor https_scheme = aws_byte_cursor_from_c_str("https");
-        is_https = aws_byte_cursor_eq_ignore_case(aws_uri_scheme(options->endpoint), &https_scheme);
+        struct aws_byte_cursor http_scheme = aws_byte_cursor_from_c_str("http");
+
+        const struct aws_byte_cursor *scheme = aws_uri_scheme(options->endpoint);
+
+        is_https = aws_byte_cursor_eq_ignore_case(scheme, &https_scheme);
+
+        if (!is_https && !aws_byte_cursor_eq_ignore_case(scheme, &http_scheme)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Cannot create meta s3 request; unexpected scheme '" PRInSTR "' in endpoint override.",
+                (void *)client,
+                AWS_BYTE_CURSOR_PRI(*scheme));
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        } 
+
         port = aws_uri_port(options->endpoint);
     }
 
@@ -804,13 +824,14 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
-
         
         struct aws_uri host_uri; 
-        aws_uri_init_parse(&host_uri, client->allocator, &host_header_value);
+        if (aws_uri_init_parse(&host_uri, client->allocator, &host_header_value)) {
+            error_occurred = true;
+            goto unlock;
+        }
 
-        struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator,
-            aws_uri_host_name(&host_uri));
+        struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
         aws_uri_clean_up(&host_uri);
 
         struct aws_s3_endpoint *endpoint = NULL;
@@ -819,6 +840,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         int was_created = 0;
         if (aws_hash_table_create(
                 &client->synced_data.endpoints, endpoint_host_name, &endpoint_hash_element, &was_created)) {
+            aws_string_destroy(endpoint_host_name);
             error_occurred = true;
             goto unlock;
         }
@@ -842,6 +864,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
             if (endpoint == NULL) {
                 aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
+                aws_string_destroy(endpoint_host_name);
                 error_occurred = true;
                 goto unlock;
             }
