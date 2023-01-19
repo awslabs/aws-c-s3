@@ -840,7 +840,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 goto unlock;
             }
 
-            aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
+            endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
             aws_uri_clean_up(&host_uri);
         }
 
