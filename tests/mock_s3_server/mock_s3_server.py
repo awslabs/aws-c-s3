@@ -267,6 +267,10 @@ def handle_get_object(request, parsed_path):
 
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)
+    elif parsed_path.path == "/get_object_invalid_response_missing_content_range":
+        return "/get_object_invalid_response_missing_content_range", data_length, False
+    elif parsed_path.path == "/get_object_invalid_response_missing_etags":
+        return "/get_object_invalid_response_missing_etags", data_length, False
 
     return parsed_path.path, data_length, True
 
