@@ -670,8 +670,11 @@ int s_update_host_header_based_on_endpoint_override(const struct aws_s3_client *
     if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
         AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; host header does not match endpoint override.",
-                (void *)client);
+                "id=%p Cannot create meta s3 request; host header value " PRInSTR 
+                " does not match endpoint override ." PRInSTR,
+                (void *)client,
+                AWS_BYTE_CURSOR_PRI(host_value),
+                AWS_BYTE_CURSOR_PRI(*endpoint_authority));
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
