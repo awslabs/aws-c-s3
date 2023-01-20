@@ -4308,7 +4308,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 }
 
                 if (ignore_header) {
-                    aws_http_headers_erase(range_get_headers, verify_header.name);
+                    ASSERT_SUCCESS(aws_http_headers_erase(range_get_headers, verify_header.name));
                     continue;
                 }
 
@@ -4338,13 +4338,27 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                     ASSERT_TRUE(aws_byte_cursor_eq(&verify_header.value, &header_value));
                 }
 
-                aws_http_headers_erase(range_get_headers, verify_header.name);
+                ASSERT_SUCCESS(aws_http_headers_erase(range_get_headers, verify_header.name));
             }
 
             for (size_t i = 0; i < aws_http_headers_count(range_get_headers); ++i) {
                 struct aws_http_header header;
 
                 ASSERT_SUCCESS(aws_http_headers_get_index(range_get_headers, i, &header));
+                bool ignore_header = false;
+
+                /* If the ignore header doesn't exist in the verify_range_get_headers, ignore it here. */
+                for (size_t j = 0; j < AWS_ARRAY_SIZE(headers_to_ignore); ++j) {
+                    if (aws_byte_cursor_eq_ignore_case(&headers_to_ignore[j], &header.name)) {
+                        ignore_header = true;
+                        break;
+                    }
+                }
+
+                if (ignore_header) {
+                    ASSERT_SUCCESS(aws_http_headers_erase(range_get_headers, header.name));
+                    continue;
+                }
 
                 AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Left over header: " PRInSTR, AWS_BYTE_CURSOR_PRI(header.name));
             }
