@@ -917,6 +917,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
 
     struct aws_byte_cursor request_method;
     if (aws_http_message_get_request_method(base_message, &request_method)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to get request method.");
         goto error_clean_up;
     }
 
@@ -926,6 +927,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
 
     struct aws_byte_cursor request_path;
     if (aws_http_message_get_request_path(base_message, &request_path)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to get request path.");
         goto error_clean_up;
     }
 

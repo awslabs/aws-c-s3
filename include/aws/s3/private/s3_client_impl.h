@@ -361,8 +361,6 @@ struct aws_s3_meta_request_resume_token {
     size_t num_parts_completed;
 };
 
-struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(struct aws_allocator *allocator);
-
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
     struct aws_s3_connection *connection,
@@ -370,6 +368,9 @@ void aws_s3_client_notify_connection_finished(
     enum aws_s3_connection_finish_code finish_code);
 
 AWS_EXTERN_C_BEGIN
+
+AWS_S3_API
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(struct aws_allocator *allocator);
 
 AWS_S3_API
 void aws_s3_set_dns_ttl(size_t ttl);

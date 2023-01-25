@@ -239,12 +239,12 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     AWS_PRECONDITION(options->message);
     AWS_PRECONDITION(aws_http_message_get_body_stream(options->message));
 
+    if (s_try_update_part_info_from_resume_token(content_length, options->resume_token, &part_size, &num_parts)) {
+        return NULL;
+    }
+
     struct aws_s3_auto_ranged_put *auto_ranged_put =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_put));
-
-    if (s_try_update_part_info_from_resume_token(content_length, options->resume_token, &part_size, &num_parts)) {
-        goto error_clean_up;
-    }
 
     if (aws_s3_meta_request_init_base(
             allocator,
@@ -256,7 +256,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
             &auto_ranged_put->base)) {
-        goto error_clean_up;
+        aws_mem_release(allocator, auto_ranged_put);
+        return NULL;
     }
 
     auto_ranged_put->content_length = content_length;
@@ -284,8 +285,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     return &auto_ranged_put->base;
 
 error_clean_up:
-    aws_mem_release(allocator, auto_ranged_put);
-
+    aws_s3_meta_request_release(&auto_ranged_put->base);
     return NULL;
 }
 
@@ -303,17 +303,16 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     aws_s3_paginated_operation_release(auto_ranged_put->synced_data.list_parts_operation);
 
-    for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
-         ++etag_index) {
+    for (size_t etag_index = 0; etag_index < auto_ranged_put->synced_data.total_num_parts; ++etag_index) {
         struct aws_string *etag = NULL;
 
         aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index);
         aws_string_destroy(etag);
     }
+
     aws_string_destroy(auto_ranged_put->synced_data.list_parts_continuation_token);
-    /* probably just better to store num parts in the meta-request */
-    for (size_t checksum_index = 0; checksum_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
-         ++checksum_index) {
+
+    for (size_t checksum_index = 0; checksum_index < auto_ranged_put->synced_data.total_num_parts; ++checksum_index) {
         aws_byte_buf_clean_up(&auto_ranged_put->encoded_checksum_list[checksum_index]);
     }
     aws_mem_release(meta_request->allocator, auto_ranged_put->synced_data.etag_list.data);

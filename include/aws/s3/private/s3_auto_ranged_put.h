@@ -94,8 +94,11 @@ struct aws_s3_auto_ranged_put {
     } synced_data;
 };
 
+AWS_EXTERN_C_BEGIN
+
 /* Creates a new auto-ranged put meta request.  This will do a multipart upload in parallel when appropriate. */
-struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
+
+AWS_S3_API struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
@@ -103,4 +106,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     uint32_t num_parts,
     const struct aws_s3_meta_request_options *options);
 
-#endif
+AWS_EXTERN_C_END
+
+#endif /* AWS_S3_AUTO_RANGED_PUT_H */

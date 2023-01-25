@@ -89,7 +89,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not initialize base type for Auto-Ranged-Get Meta Request.",
             (void *)auto_ranged_get);
-        goto error_clean_up;
+        aws_mem_release(allocator, auto_ranged_get);
+        return NULL;
     }
 
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
@@ -102,13 +103,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
     return &auto_ranged_get->base;
-
-error_clean_up:
-
-    aws_s3_meta_request_release(&auto_ranged_get->base);
-    auto_ranged_get = NULL;
-
-    return NULL;
 }
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request) {
@@ -359,7 +353,9 @@ static int s_s3_auto_ranged_get_prepare_request(
             /* A head object will be a copy of the original headers but with a HEAD request method. */
             message = aws_s3_message_util_copy_http_message_no_body_all_headers(
                 meta_request->allocator, meta_request->initial_request_message);
-            aws_http_message_set_request_method(message, g_head_method);
+            if (message) {
+                aws_http_message_set_request_method(message, g_head_method);
+            }
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
             message = aws_s3_ranged_get_object_message_new(

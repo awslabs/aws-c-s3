@@ -50,11 +50,15 @@ struct aws_s3_auto_ranged_get {
     struct aws_string *etag;
 };
 
+AWS_EXTERN_C_BEGIN
+
 /* Creates a new auto-ranged get meta request.  This will do multiple parallel ranged-gets when appropriate. */
-struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
+AWS_S3_API struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
     const struct aws_s3_meta_request_options *options);
 
-#endif
+AWS_EXTERN_C_END
+
+#endif /* AWS_S3_AUTO_RANGED_GET_H */
