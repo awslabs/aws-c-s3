@@ -394,9 +394,16 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
-     * The endpoint for the meta request to connect to. If not set, then tls settings from client will
-     * determine the port, and host header from `message` will determine the host for the connection.
-     * Note: must match the host header from `message`
+     * Endpoint override for request. Can be used to override scheme and port of
+     * the endpoint.
+     * There is some overlap between Host header and Endpoint and corner cases
+     * are handled as follows:
+     * - Only Host header is set - Host is used to construct endpoint. https is
+     *   default with corresponding port
+     * - Only endpoint is set - Host header is created from endpoint. Port and
+     *   Scheme from endpoint is used.
+     * - Both Host and Endpoint is set - Host header must match Authority of
+     *   Endpoint uri. Port and Scheme from endpoint is used.
      */
     struct aws_uri *endpoint;
 
