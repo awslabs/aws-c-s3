@@ -15,6 +15,7 @@
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
+#include <aws/common/trace_event.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/io/stream.h>
@@ -804,6 +805,12 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
 
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
 
+    struct aws_byte_cursor path;
+    aws_http_message_get_request_path(options.request, &path);
+    char tracebuf[256] = {0};
+    snprintf(tracebuf, sizeof(tracebuf), PRInSTR, AWS_BYTE_CURSOR_PRI(path));
+    AWS_TRACE_EVENT_INSTANT_STR("", "SendRequest", tracebuf);
+
     if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
         aws_http_stream_release(stream);
         stream = NULL;
@@ -1041,6 +1048,13 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
+
+    struct aws_byte_cursor path;
+    aws_http_message_get_request_path(connection->request->send_data.message, &path);
+    char tracebuf[256] = {0};
+    snprintf(tracebuf, sizeof(tracebuf), PRInSTR, AWS_BYTE_CURSOR_PRI(path));
+    AWS_TRACE_EVENT_INSTANT_STR("", "EndRequest", tracebuf);
+
     if (connection->request->meta_request->checksum_config.validate_response_checksum) {
         s_get_response_part_finish_checksum_helper(connection, error_code);
     }
