@@ -2675,13 +2675,19 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
 
-    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_default_fc.txt")));
-
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
-
     /* I know it's ugly, but I don't want to waste time to refact all those flexible checksum tests */
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
+        char object_path_sprintf_buffer[128] = "";
+        snprintf(
+            object_path_sprintf_buffer,
+            sizeof(object_path_sprintf_buffer),
+            "/prefix/round_trip/test_default_fc_%d.txt",
+            algorithm);
+
+        ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+            allocator, &path_buf, aws_byte_cursor_from_c_str(object_path_sprintf_buffer)));
+
+        struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
         /*** PUT FILE ***/
 
         struct aws_s3_tester_meta_request_options put_options = {
@@ -2717,9 +2723,9 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+        aws_byte_buf_clean_up(&path_buf);
     }
 
-    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
