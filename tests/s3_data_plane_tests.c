@@ -2680,7 +2680,7 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
-    /* I know it's ugly, but I don't want to waste time to refact all those flexible checksum tests. Judge me */
+    /* I know it's ugly, but I don't want to waste time to refact all those flexible checksum tests */
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
         /*** PUT FILE ***/
 
