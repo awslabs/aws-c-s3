@@ -168,7 +168,7 @@ async def send_simple_response(wrapper, status_code, content_type, body):
     await wrapper.send(h11.EndOfMessage())
 
 
-async def send_response_from_json(wrapper, response_json_path, chunked=False, generate_body=False, generate_body_size=0):
+async def send_response_from_json(wrapper, response_json_path, chunked=False, generate_body=False, generate_body_size=0, head_request=False):
     wrapper.info("sending response from json file: ", response_json_path,
                  ".\n generate_body: ", generate_body, "generate_body_size: ", generate_body_size)
     with open(response_json_path, 'r') as f:
@@ -196,12 +196,15 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False, ge
         headers.append(("Content-Length", str(len(body))))
         res = h11.Response(status_code=status_code, headers=headers)
         await wrapper.send(res)
+        if head_request:
+            await wrapper.send(h11.EndOfMessage())
+            return
         await wrapper.send(h11.Data(data=body.encode()))
 
     await wrapper.send(h11.EndOfMessage())
 
 
-async def send_mock_s3_response(wrapper, request_type, path, generate_body=False, generate_body_size=0):
+async def send_mock_s3_response(wrapper, request_type, path, generate_body=False, generate_body_size=0, head_request=False):
     response_file = os.path.join(
         base_dir, request_type.name, f"{path[1:]}.json")
     if os.path.exists(response_file) == False:
@@ -259,10 +262,17 @@ def handle_get_object_modified(start_range, end_range, request):
 
 def handle_get_object(request, parsed_path):
 
-    body_range = get_request_header_value(request, "range").split("=")[1]
+    body_range_value = get_request_header_value(request, "range")
 
-    start_range = int(body_range.split("-")[0])
-    end_range = int(body_range.split("-")[1])
+    if body_range_value:
+        body_range = body_range_value.split("=")[1]
+        start_range = int(body_range.split("-")[0])
+        end_range = int(body_range.split("-")[1])
+    else:
+        # default length is 65535
+        start_range = 0
+        end_range = 65535
+
     data_length = end_range - start_range
 
     if parsed_path.path == "/get_object_modified":
@@ -281,20 +291,20 @@ async def handle_mock_s3_request(wrapper, request):
     response_path = parsed_path.path
     generate_body = False
     generate_body_size = 0
+    method = request.method.decode("utf-8")
 
-    if request.method == b"POST":
+    if method == "POST":
         if parsed_path.query == "uploads":
             # POST /{Key+}?uploads HTTP/1.1 -- Create MPU
             request_type = S3Opts.CreateMultipartUpload
         else:
             # POST /Key+?uploadId=UploadId HTTP/1.1 -- Complete MPU
             request_type = S3Opts.CompleteMultipartUpload
-
-    elif request.method == b"PUT":
+    elif method == "PUT":
         request_type = S3Opts.UploadPart
-    elif request.method == b"DELETE":
+    elif method == "DELETE":
         request_type = S3Opts.AbortMultipartUpload
-    elif request.method == b"GET":
+    elif method == "GET" or method == "HEAD":
         # There are other GET requests, but we only support GetObject for now.
         request_type = S3Opts.GetObject
         response_path, generate_body_size, generate_body = handle_get_object(
@@ -311,7 +321,7 @@ async def handle_mock_s3_request(wrapper, request):
         assert type(event) is h11.Data
 
     await send_mock_s3_response(
-        wrapper, request_type, response_path, generate_body=generate_body, generate_body_size=generate_body_size)
+        wrapper, request_type, response_path, generate_body=generate_body, generate_body_size=generate_body_size, head_request=method == "HEAD")
 
 
 async def serve(port):
