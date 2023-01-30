@@ -220,7 +220,7 @@ static const struct aws_byte_cursor s_x_amz_meta_prefix = AWS_BYTE_CUR_INIT_FROM
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
-static int s_s3_message_util_add_range_header(
+static void s_s3_message_util_add_range_header(
     uint64_t part_range_start,
     uint64_t part_range_end,
     struct aws_http_message *out_message);
@@ -242,20 +242,9 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
         return NULL;
     }
 
-    if (s_s3_message_util_add_range_header(range_start, range_end, message)) {
-        goto error_clean_up;
-    }
+    s_s3_message_util_add_range_header(range_start, range_end, message);
 
     return message;
-
-error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
 }
 
 /* Creates a create-multipart-upload request from a given put objet request. */
@@ -476,6 +465,7 @@ struct aws_http_message *aws_s3_get_object_size_message_new(
     }
 
     char host_header_value[1024];
+    /* TODO: Fix the hard-coded host name. */
     snprintf(
         host_header_value,
         sizeof(host_header_value),
@@ -998,7 +988,7 @@ int aws_s3_message_util_copy_headers(
 }
 
 /* Add a range header.*/
-static int s_s3_message_util_add_range_header(
+static void s_s3_message_util_add_range_header(
     uint64_t part_range_start,
     uint64_t part_range_end,
     struct aws_http_message *out_message) {
@@ -1019,13 +1009,11 @@ static int s_s3_message_util_add_range_header(
 
     int erase_result = aws_http_headers_erase(headers, range_header.name);
     AWS_ASSERT(erase_result == AWS_OP_SUCCESS || aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
+
+    /* Only failed when the header has invalid name, which is impossible here. */
+    erase_result = aws_http_message_add_header(out_message, range_header);
+    AWS_ASSERT(erase_result == AWS_OP_SUCCESS);
     (void)erase_result;
-
-    if (aws_http_message_add_header(out_message, range_header)) {
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
 }
 
 /* Handle setting up the multipart request path for a message. */

@@ -230,6 +230,7 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(get_object_modified_mock_server)
     add_net_test_case(get_object_invalid_responses_mock_server)
     add_net_test_case(get_object_missmatch_checksum_responses_mock_server)
+    add_net_test_case(upload_part_invalid_response_mock_server)
 endif()
 
 add_net_test_case(meta_request_auto_ranged_get_new_error_handling)

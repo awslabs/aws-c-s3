@@ -201,7 +201,7 @@ static int s_try_init_resume_state_from_persisted_data(
         struct aws_byte_cursor header_value;
         AWS_ZERO_STRUCT(header_value);
 
-        if (!aws_http_headers_get(initial_headers, *header_name, &header_value)) {
+        if (aws_http_headers_get(initial_headers, *header_name, &header_value) == AWS_OP_SUCCESS) {
             aws_http_headers_set(needed_response_headers, *header_name, header_value);
         }
     }
@@ -270,14 +270,14 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->threaded_update_data.next_part_number = 1;
     auto_ranged_put->prepare_data.num_parts_read_from_stream = 0;
 
-    if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
-        goto error_clean_up;
-    }
-
     struct aws_string **etag_c_array = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
     aws_array_list_init_static(
         &auto_ranged_put->synced_data.etag_list, etag_c_array, num_parts, sizeof(struct aws_string *));
     auto_ranged_put->encoded_checksum_list = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf), num_parts);
+
+    if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
+        goto error_clean_up;
+    }
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
@@ -982,6 +982,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 auto_ranged_put->synced_data.list_parts_error_code = error_code;
 
                 if (error_code != AWS_ERROR_SUCCESS) {
+                    /* TODO: test this */
                     if (request->send_data.response_status == AWS_HTTP_STATUS_CODE_404_NOT_FOUND &&
                         auto_ranged_put->resume_token->num_parts_completed ==
                             auto_ranged_put->resume_token->total_num_parts) {
@@ -1016,7 +1017,8 @@ static void s_s3_auto_ranged_put_request_finished(
                     struct aws_byte_cursor header_value;
                     AWS_ZERO_STRUCT(header_value);
 
-                    if (!aws_http_headers_get(request->send_data.response_headers, *header_name, &header_value)) {
+                    if (aws_http_headers_get(request->send_data.response_headers, *header_name, &header_value) ==
+                        AWS_OP_SUCCESS) {
                         aws_http_headers_set(needed_response_headers, *header_name, header_value);
                     }
                 }
@@ -1074,14 +1076,15 @@ static void s_s3_auto_ranged_put_request_finished(
                 AWS_ASSERT(request->send_data.response_headers);
 
                 if (aws_http_headers_get(
-                        request->send_data.response_headers, g_etag_header_name, &etag_within_quotes)) {
+                        request->send_data.response_headers, g_etag_header_name, &etag_within_quotes) !=
+                    AWS_OP_SUCCESS) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p Could not find ETag header for request %p",
                         (void *)meta_request,
                         (void *)request);
 
-                    error_code = AWS_ERROR_S3_MISSING_UPLOAD_ID;
+                    error_code = AWS_ERROR_S3_MISSING_ETAG;
                 } else {
                     /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up
                      * later, so just get rid of the quotes now. */

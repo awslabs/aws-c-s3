@@ -5034,6 +5034,9 @@ static void s_pause_meta_request_progress(
 
         struct aws_s3_meta_request_resume_token *resume_token = NULL;
         int pause_result = aws_s3_meta_request_pause(meta_request, &resume_token);
+        struct aws_byte_cursor upload_id = aws_s3_meta_request_resume_token_upload_id(resume_token);
+        /* Make Sure we have upload ID */
+        AWS_FATAL_ASSERT(aws_byte_cursor_eq_c_str(&upload_id, "") == false);
         aws_atomic_store_int(&test_data->pause_result, pause_result);
         aws_atomic_store_ptr(&test_data->persistable_state_ptr, resume_token);
     }
