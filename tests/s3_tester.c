@@ -272,7 +272,6 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
 #endif
 
     aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
-
     return AWS_OP_SUCCESS;
 
 condition_variable_failed:
@@ -335,6 +334,8 @@ int aws_s3_tester_bind_meta_request(
     ASSERT_TRUE(options->shutdown_callback == NULL);
     options->shutdown_callback = s_s3_test_meta_request_shutdown;
 
+    options->progress_callback = meta_request_test_results->progress_callback;
+
     ASSERT_TRUE(options->user_data == NULL);
     options->user_data = meta_request_test_results;
 
@@ -348,6 +349,7 @@ void aws_s3_meta_request_test_results_init(
     (void)allocator;
     AWS_ZERO_STRUCT(*test_meta_request);
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
+    aws_atomic_init_int(&test_meta_request->total_bytes_uploaded, 0);
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -1209,6 +1211,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .type = options->meta_request_type,
         .message = options->message,
         .checksum_config = &checksum_config,
+        .resume_token = options->put_options.resume_token,
     };
 
     if (options->mock_server) {
