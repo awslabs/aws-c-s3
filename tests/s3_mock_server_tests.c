@@ -350,6 +350,7 @@ static void s_resume_meta_request_progress(
     const struct aws_s3_meta_request_progress *progress,
     void *user_data) {
 
+    (void)meta_request;
     AWS_ASSERT(meta_request);
     AWS_ASSERT(progress);
     AWS_ASSERT(user_data);
@@ -392,7 +393,7 @@ TEST_CASE(resume_first_part_not_completed_mock_server) {
         .validate_get_response_checksum = false,
         .put_options =
             {
-                .object_size_mb = num_parts * 8, /* Make sure we have exactly 4 parts */
+                .object_size_mb = (uint32_t)num_parts * 8, /* Make sure we have exactly 4 parts */
                 .object_path_override = object_path,
                 .resume_token = token,
             },
@@ -450,7 +451,7 @@ TEST_CASE(resume_mutli_page_list_parts_mock_server) {
         .validate_get_response_checksum = false,
         .put_options =
             {
-                .object_size_mb = num_parts * 8, /* Make sure we have exactly 4 parts */
+                .object_size_mb = (uint32_t)num_parts * 8, /* Make sure we have exactly 4 parts */
                 .object_path_override = object_path,
                 .resume_token = token,
             },
@@ -504,7 +505,7 @@ TEST_CASE(resume_list_parts_failed_mock_server) {
         .validate_get_response_checksum = false,
         .put_options =
             {
-                .object_size_mb = num_parts * 8, /* Make sure we have exactly 4 parts */
+                .object_size_mb = (uint32_t)num_parts * 8, /* Make sure we have exactly 4 parts */
                 .object_path_override = object_path,
                 .resume_token = token,
             },
@@ -558,7 +559,7 @@ TEST_CASE(resume_after_finished_mock_server) {
         .validate_get_response_checksum = false,
         .put_options =
             {
-                .object_size_mb = num_parts * 8, /* Make sure we have exactly 4 parts */
+                .object_size_mb = (uint32_t)num_parts * 8, /* Make sure we have exactly 4 parts */
                 .object_path_override = object_path,
                 .resume_token = token,
             },
