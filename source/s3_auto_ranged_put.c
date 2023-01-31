@@ -163,8 +163,8 @@ static int s_try_init_resume_state_from_persisted_data(
 
     if (resume_token == NULL) {
         auto_ranged_put->synced_data.list_parts_operation = NULL;
-        auto_ranged_put->synced_data.list_parts_sent = true;
-        auto_ranged_put->synced_data.list_parts_completed = true;
+        auto_ranged_put->synced_data.list_parts_state.completed = true;
+        auto_ranged_put->synced_data.list_parts_state.started = true;
         return AWS_OP_SUCCESS;
     }
 
@@ -340,20 +340,31 @@ static bool s_s3_auto_ranged_put_update(
 
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
             /* If resuming and list part has not be sent, do it now. */
-            if (!auto_ranged_put->synced_data.list_parts_sent) {
+            if (!auto_ranged_put->synced_data.list_parts_state.started) {
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
                     0,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
-                auto_ranged_put->synced_data.list_parts_sent = true;
+                auto_ranged_put->synced_data.list_parts_state.started = true;
 
                 goto has_work_remaining;
             }
 
-            /* waiting on list parts to finish. */
-            if (!auto_ranged_put->synced_data.list_parts_completed) {
+            if (auto_ranged_put->synced_data.list_parts_state.continues) {
+                /* If list parts need to continue, send another list parts request. */
+                AWS_ASSERT(auto_ranged_put->synced_data.list_parts_continuation_token != NULL);
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
+                    0,
+                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                goto has_work_remaining;
+            }
+
+            if (!auto_ranged_put->synced_data.list_parts_state.completed) {
+                /* waiting on list parts to finish. */
                 goto has_work_remaining;
             }
 
@@ -503,7 +514,8 @@ static bool s_s3_auto_ranged_put_update(
                     goto no_work_remaining;
                 }
                 if (auto_ranged_put->base.synced_data.finish_result.error_code == AWS_ERROR_SUCCESS) {
-                    /* Not sending abort when success */
+                    /* Not sending abort when success even if we haven't sent complete MPU, in case we resume after MPU
+                     * already completed. */
                     goto no_work_remaining;
                 }
 
@@ -990,9 +1002,15 @@ static void s_s3_auto_ranged_put_request_finished(
                     }
                 }
 
-                auto_ranged_put->synced_data.list_parts_completed = !has_more_results;
-                auto_ranged_put->synced_data.list_parts_sent =
-                    !has_more_results; /* Unset list_parts_send if there are more to send */
+                if (has_more_results) {
+                    /* If list parts has more result, make sure list parts continues */
+                    auto_ranged_put->synced_data.list_parts_state.continues = true;
+                    auto_ranged_put->synced_data.list_parts_state.completed = false;
+                } else {
+                    /* No more result, complete the list parts */
+                    auto_ranged_put->synced_data.list_parts_state.continues = false;
+                    auto_ranged_put->synced_data.list_parts_state.completed = true;
+                }
                 auto_ranged_put->synced_data.list_parts_error_code = error_code;
 
                 if (error_code != AWS_ERROR_SUCCESS) {
