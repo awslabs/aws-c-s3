@@ -2659,6 +2659,7 @@ void s_s3_test_no_validate_checksum(
     AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
 }
 
+/* TODO: maybe refactor the fc -> flexible checksum tests to be less copy/paste */
 AWS_TEST_CASE(test_s3_round_trip_default_get_fc, s_test_s3_round_trip_default_get_fc)
 static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -2675,7 +2676,6 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
 
-    /* I know it's ugly, but I don't want to waste time to refact all those flexible checksum tests */
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
         char object_path_sprintf_buffer[128] = "";
         snprintf(
@@ -2686,7 +2686,6 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
 
         ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
             allocator, &path_buf, aws_byte_cursor_from_c_str(object_path_sprintf_buffer)));
-
         struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
         /*** PUT FILE ***/
 
