@@ -726,6 +726,12 @@ static int s_s3_auto_ranged_put_prepare_request(
                 aws_s3_meta_request_lock_synced_data(meta_request);
 
                 if (auto_ranged_put->synced_data.list_parts_continuation_token) {
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p ListParts for Multi-part Upload, with ID:%s, continues with token:%s.",
+                        (void *)meta_request,
+                        aws_string_c_str(auto_ranged_put->upload_id),
+                        aws_string_c_str(auto_ranged_put->synced_data.list_parts_continuation_token));
                     struct aws_byte_cursor continuation_cur =
                         aws_byte_cursor_from_string(auto_ranged_put->synced_data.list_parts_continuation_token);
                     message_creation_result = aws_s3_construct_next_paginated_request_http_message(
@@ -947,7 +953,9 @@ static void s_s3_auto_ranged_put_request_finished(
                 if (error_code == AWS_ERROR_SUCCESS) {
 
                     struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                    /* Clear the token before */
                     aws_string_destroy(auto_ranged_put->synced_data.list_parts_continuation_token);
+                    auto_ranged_put->synced_data.list_parts_continuation_token = NULL;
                     if (aws_s3_paginated_operation_on_response(
                             auto_ranged_put->synced_data.list_parts_operation,
                             &body_cursor,
@@ -979,10 +987,11 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
 
                 auto_ranged_put->synced_data.list_parts_completed = !has_more_results;
+                auto_ranged_put->synced_data.list_parts_sent =
+                    !has_more_results; /* Unset list_parts_send if there are more to send */
                 auto_ranged_put->synced_data.list_parts_error_code = error_code;
 
                 if (error_code != AWS_ERROR_SUCCESS) {
-                    /* TODO: test this */
                     if (request->send_data.response_status == AWS_HTTP_STATUS_CODE_404_NOT_FOUND &&
                         auto_ranged_put->resume_token->num_parts_completed ==
                             auto_ranged_put->resume_token->total_num_parts) {

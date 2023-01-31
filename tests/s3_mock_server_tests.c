@@ -414,3 +414,61 @@ TEST_CASE(resume_first_part_not_completed_mock_server) {
 
     return AWS_OP_SUCCESS;
 }
+
+/* Fake a MPU with 4 parts and the 2nd and 3rd have already completed and resume works fine with two response of
+ * ListParts
+ */
+TEST_CASE(resume_mutli_page_list_parts_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    size_t num_parts = 4;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* ListParts from mock server will return NextPartNumberMarker */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/multiple_list_parts");
+    struct aws_s3_upload_resume_token_options token_options = {
+        .upload_id = aws_byte_cursor_from_c_str("upload_id"),
+        .part_size = client_options.part_size,
+        .total_num_parts = num_parts,
+    };
+    struct aws_s3_meta_request_resume_token *token =
+        aws_s3_meta_request_resume_token_new_upload(allocator, &token_options);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = num_parts * 8, /* Make sure we have exactly 4 parts */
+                .object_path_override = object_path,
+                .resume_token = token,
+            },
+        .mock_server = true,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    out_results.progress_callback = s_resume_meta_request_progress;
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    /* Make Sure we only uploaded 2 parts. */
+    size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
+    ASSERT_UINT_EQUALS(2 * MB_TO_BYTES(8), total_bytes_uploaded);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_meta_request_resume_token_release(token);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}

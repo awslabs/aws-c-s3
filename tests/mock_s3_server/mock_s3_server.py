@@ -286,6 +286,15 @@ def handle_get_object(request, parsed_path):
     return parsed_path.path, data_length, True
 
 
+def handle_list_parts(parsed_path):
+    if parsed_path.path == "/multiple_list_parts":
+        if parsed_path.query.find("part-number-marker") != -1:
+            return "/multiple_list_parts_2"
+        else:
+            return "/multiple_list_parts_1"
+    return parsed_path.path
+
+
 async def handle_mock_s3_request(wrapper, request):
     parsed_path, parsed_query = parse_request_path(
         request.target.decode("ascii"))
@@ -310,6 +319,7 @@ async def handle_mock_s3_request(wrapper, request):
         if parsed_path.query.find("uploadId") != -1:
             # GET /Key+?max-parts=MaxParts&part-number-marker=PartNumberMarker&uploadId=UploadId HTTP/1.1 -- List Parts
             request_type = S3Opts.ListParts
+            response_path = handle_list_parts(parsed_path)
         else:
             request_type = S3Opts.GetObject
             response_path, generate_body_size, generate_body = handle_get_object(
