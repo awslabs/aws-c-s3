@@ -2659,6 +2659,7 @@ void s_s3_test_no_validate_checksum(
     AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
 }
 
+/* TODO: maybe refactor the fc -> flexible checksum tests to be less copy/paste */
 AWS_TEST_CASE(test_s3_round_trip_default_get_fc, s_test_s3_round_trip_default_get_fc)
 static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -2666,7 +2667,7 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_s3_tester_client_options client_options = {
-        .part_size = 16 * 1024,
+        .part_size = MB_TO_BYTES(5),
     };
 
     struct aws_s3_client *client = NULL;
@@ -2675,50 +2676,56 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
 
-    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_default_fc.txt")));
+    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
+        char object_path_sprintf_buffer[128] = "";
+        snprintf(
+            object_path_sprintf_buffer,
+            sizeof(object_path_sprintf_buffer),
+            "/prefix/round_trip/test_default_fc_" PRInSTR ".txt",
+            AWS_BYTE_CURSOR_PRI(*aws_get_http_header_name_from_algorithm(algorithm)));
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+        ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+            allocator, &path_buf, aws_byte_cursor_from_c_str(object_path_sprintf_buffer)));
 
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
-        .validate_get_response_checksum = false,
-        .put_options =
-            {
-                .object_size_mb = 1,
-                .object_path_override = object_path,
-            },
-    };
+        struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+        /*** PUT FILE ***/
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+        struct aws_s3_tester_meta_request_options put_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .client = client,
+            .checksum_algorithm = algorithm,
+            .validate_get_response_checksum = false,
+            .put_options =
+                {
+                    .object_size_mb = 1,
+                    .object_path_override = object_path,
+                },
+        };
 
-    /*** GET FILE ***/
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
-    struct aws_s3_tester_meta_request_options get_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .client = client,
-        .expected_validate_checksum_alg = AWS_SCA_CRC32,
-        .validate_get_response_checksum = true,
-        .get_options =
-            {
-                .object_path = object_path,
-            },
-        .default_type_options =
-            {
-                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
-            },
-        .finish_callback = s_s3_test_validate_checksum,
-        .headers_callback = s_s3_validate_headers_checksum_set,
-    };
+        /*** GET FILE ***/
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+        struct aws_s3_tester_meta_request_options get_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .client = client,
+            .expected_validate_checksum_alg = algorithm,
+            .validate_get_response_checksum = true,
+            .get_options =
+                {
+                    .object_path = object_path,
+                },
+            .finish_callback = s_s3_test_validate_checksum,
+            .headers_callback = s_s3_validate_headers_checksum_set,
+        };
 
-    aws_byte_buf_clean_up(&path_buf);
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+        aws_byte_buf_clean_up(&path_buf);
+    }
+
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
