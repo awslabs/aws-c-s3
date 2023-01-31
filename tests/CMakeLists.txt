@@ -233,6 +233,8 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(upload_part_invalid_response_mock_server)
     add_net_test_case(resume_first_part_not_completed_mock_server)
     add_net_test_case(resume_mutli_page_list_parts_mock_server)
+    add_net_test_case(resume_list_parts_failed_mock_server)
+    add_net_test_case(resume_after_finished_mock_server)
 endif()
 
 add_net_test_case(meta_request_auto_ranged_get_new_error_handling)

@@ -59,6 +59,7 @@ enum aws_s3_client_tls_usage {
 enum aws_s3_tester_validate_type {
     AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
     AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
 };
 
 enum aws_s3_tester_default_type_mode {

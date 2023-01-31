@@ -502,6 +502,10 @@ static bool s_s3_auto_ranged_put_update(
                 if (auto_ranged_put->upload_id == NULL) {
                     goto no_work_remaining;
                 }
+                if (auto_ranged_put->base.synced_data.finish_result.error_code == AWS_ERROR_SUCCESS) {
+                    /* Not sending abort when success */
+                    goto no_work_remaining;
+                }
 
                 request = aws_s3_request_new(
                     meta_request,

@@ -1422,7 +1422,8 @@ int aws_s3_tester_send_meta_request_with_options(
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:
             ASSERT_FALSE(out_results->finished_error_code == AWS_ERROR_SUCCESS);
             break;
-
+        case AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE:
+            break;
         default:
             ASSERT_TRUE(false);
             break;
