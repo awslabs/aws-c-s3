@@ -20,6 +20,7 @@ add_test_case(test_s3_ranged_get_object_message_new)
 add_test_case(test_s3_set_multipart_request_path)
 add_test_case(test_s3_create_multipart_upload_message_new)
 add_test_case(test_s3_upload_part_message_new)
+add_test_case(test_s3_upload_part_message_fail)
 add_test_case(test_s3_complete_multipart_message_new)
 add_test_case(test_s3_abort_multipart_upload_message_new)
 
