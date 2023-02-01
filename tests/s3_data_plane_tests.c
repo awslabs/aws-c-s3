@@ -50,6 +50,31 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_client_create_error, s_test_s3_client_create_error)
+static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    struct aws_http_proxy_options proxy_options = {
+        .connection_type = AWS_HPCT_HTTP_LEGACY,
+        .host = aws_byte_cursor_from_c_str("localhost"),
+        .port = 8899,
+    };
+    client_config.proxy_options = &proxy_options;
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client == NULL);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_client_monitoring_options_override, s_test_s3_client_monitoring_options_override)
 static int s_test_s3_client_monitoring_options_override(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

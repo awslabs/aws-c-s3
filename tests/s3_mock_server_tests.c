@@ -615,6 +615,7 @@ TEST_CASE(multipart_upload_proxy_mock_server) {
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
     };
 
+    /* The request can fail if proxy is unavailable. */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     aws_s3_client_release(client);
