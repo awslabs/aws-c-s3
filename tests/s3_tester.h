@@ -121,6 +121,7 @@ struct aws_s3_tester_client_options {
     size_t part_size;
     size_t max_part_size;
     uint32_t setup_region : 1;
+    uint32_t use_proxy : 1;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */

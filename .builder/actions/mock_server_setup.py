@@ -22,7 +22,7 @@ class MockServerSetup(Builder.Action):
         python_path = sys.executable
         # install dependency for mock server
         self.env.shell.exec(python_path,
-                            '-m', 'pip', 'install', 'h11', 'trio', check=True)
+                            '-m', 'pip', 'install', 'h11', 'trio', 'proxy.py', check=True)
         # check the deps can be import correctly
         self.env.shell.exec(python_path,
                             '-c', 'import h11, trio', check=True)
@@ -35,6 +35,7 @@ class MockServerSetup(Builder.Action):
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
 
         p = subprocess.Popen([python_path, "mock_s3_server.py"], cwd=dir)
+        p = subprocess.Popen("proxy", cwd=dir)
 
         @atexit.register
         def close_mock_server():

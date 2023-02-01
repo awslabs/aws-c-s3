@@ -1114,6 +1114,14 @@ int aws_s3_tester_client_new(
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
     };
+    if (options->use_proxy) {
+        struct aws_http_proxy_options proxy_options = {
+            .connection_type = AWS_HPCT_HTTP_FORWARD,
+            .host = aws_byte_cursor_from_c_str("localhost"),
+            .port = 8899,
+        };
+        client_config.proxy_options = &proxy_options;
+    }
 
     struct aws_tls_connection_options tls_connection_options;
     AWS_ZERO_STRUCT(tls_connection_options);
