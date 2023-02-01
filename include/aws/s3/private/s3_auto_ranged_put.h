@@ -82,8 +82,14 @@ struct aws_s3_auto_ranged_put {
         int complete_multipart_upload_error_code;
         int abort_multipart_upload_error_code;
 
-        uint32_t list_parts_sent : 1;
-        uint32_t list_parts_completed : 1;
+        struct {
+            /* Mark a single ListParts request has started or not */
+            uint32_t started : 1;
+            /* Mark ListParts need to continue or not */
+            uint32_t continues : 1;
+            /* Mark ListParts has completed all the pages or not */
+            uint32_t completed : 1;
+        } list_parts_state;
         uint32_t create_multipart_upload_sent : 1;
         uint32_t create_multipart_upload_completed : 1;
         uint32_t complete_multipart_upload_sent : 1;

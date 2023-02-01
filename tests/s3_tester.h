@@ -59,6 +59,7 @@ enum aws_s3_client_tls_usage {
 enum aws_s3_tester_validate_type {
     AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
     AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
 };
 
 enum aws_s3_tester_default_type_mode {
@@ -177,6 +178,7 @@ struct aws_s3_tester_meta_request_options {
         bool invalid_input_stream;
         bool valid_md5;
         bool invalid_md5;
+        struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
     } put_options;
@@ -212,6 +214,9 @@ struct aws_s3_meta_request_test_results {
     int finished_response_status;
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
+
+    /* accumulator of amount of bytes uploaded */
+    struct aws_atomic_var total_bytes_uploaded;
 };
 
 struct aws_s3_client_config;

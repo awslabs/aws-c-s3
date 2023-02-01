@@ -2681,12 +2681,11 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
         snprintf(
             object_path_sprintf_buffer,
             sizeof(object_path_sprintf_buffer),
-            "/prefix/round_trip/test_default_fc_" PRInSTR ".txt",
-            AWS_BYTE_CURSOR_PRI(*aws_get_http_header_name_from_algorithm(algorithm)));
+            "/prefix/round_trip/test_default_fc_%d.txt",
+            algorithm);
 
         ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
             allocator, &path_buf, aws_byte_cursor_from_c_str(object_path_sprintf_buffer)));
-
         struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
         /*** PUT FILE ***/
 
@@ -5034,6 +5033,9 @@ static void s_pause_meta_request_progress(
 
         struct aws_s3_meta_request_resume_token *resume_token = NULL;
         int pause_result = aws_s3_meta_request_pause(meta_request, &resume_token);
+        struct aws_byte_cursor upload_id = aws_s3_meta_request_resume_token_upload_id(resume_token);
+        /* Make Sure we have upload ID */
+        AWS_FATAL_ASSERT(aws_byte_cursor_eq_c_str(&upload_id, "") == false);
         aws_atomic_store_int(&test_data->pause_result, pause_result);
         aws_atomic_store_ptr(&test_data->persistable_state_ptr, resume_token);
     }

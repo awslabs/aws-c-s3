@@ -163,8 +163,8 @@ static int s_try_init_resume_state_from_persisted_data(
 
     if (resume_token == NULL) {
         auto_ranged_put->synced_data.list_parts_operation = NULL;
-        auto_ranged_put->synced_data.list_parts_sent = true;
-        auto_ranged_put->synced_data.list_parts_completed = true;
+        auto_ranged_put->synced_data.list_parts_state.completed = true;
+        auto_ranged_put->synced_data.list_parts_state.started = true;
         return AWS_OP_SUCCESS;
     }
 
@@ -201,7 +201,7 @@ static int s_try_init_resume_state_from_persisted_data(
         struct aws_byte_cursor header_value;
         AWS_ZERO_STRUCT(header_value);
 
-        if (!aws_http_headers_get(initial_headers, *header_name, &header_value)) {
+        if (aws_http_headers_get(initial_headers, *header_name, &header_value) == AWS_OP_SUCCESS) {
             aws_http_headers_set(needed_response_headers, *header_name, header_value);
         }
     }
@@ -270,14 +270,14 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->threaded_update_data.next_part_number = 1;
     auto_ranged_put->prepare_data.num_parts_read_from_stream = 0;
 
-    if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
-        goto error_clean_up;
-    }
-
     struct aws_string **etag_c_array = aws_mem_calloc(allocator, sizeof(struct aws_string *), num_parts);
     aws_array_list_init_static(
         &auto_ranged_put->synced_data.etag_list, etag_c_array, num_parts, sizeof(struct aws_string *));
     auto_ranged_put->encoded_checksum_list = aws_mem_calloc(allocator, sizeof(struct aws_byte_buf), num_parts);
+
+    if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
+        goto error_clean_up;
+    }
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Put Meta Request.", (void *)&auto_ranged_put->base);
@@ -340,20 +340,32 @@ static bool s_s3_auto_ranged_put_update(
 
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
             /* If resuming and list part has not be sent, do it now. */
-            if (!auto_ranged_put->synced_data.list_parts_sent) {
+            if (!auto_ranged_put->synced_data.list_parts_state.started) {
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
                     0,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
-                auto_ranged_put->synced_data.list_parts_sent = true;
+                auto_ranged_put->synced_data.list_parts_state.started = true;
 
                 goto has_work_remaining;
             }
 
-            /* waiting on list parts to finish. */
-            if (!auto_ranged_put->synced_data.list_parts_completed) {
+            if (auto_ranged_put->synced_data.list_parts_state.continues) {
+                /* If list parts need to continue, send another list parts request. */
+                AWS_ASSERT(auto_ranged_put->synced_data.list_parts_continuation_token != NULL);
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
+                    0,
+                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                auto_ranged_put->synced_data.list_parts_state.continues = false;
+                goto has_work_remaining;
+            }
+
+            if (!auto_ranged_put->synced_data.list_parts_state.completed) {
+                /* waiting on list parts to finish. */
                 goto has_work_remaining;
             }
 
@@ -500,6 +512,11 @@ static bool s_s3_auto_ranged_put_update(
             /* If we made it here, and the abort-multipart-upload message hasn't been sent yet, then do so now. */
             if (!auto_ranged_put->synced_data.abort_multipart_upload_sent) {
                 if (auto_ranged_put->upload_id == NULL) {
+                    goto no_work_remaining;
+                }
+                if (auto_ranged_put->base.synced_data.finish_result.error_code == AWS_ERROR_SUCCESS) {
+                    /* Not sending abort when success even if we haven't sent complete MPU, in case we resume after MPU
+                     * already completed. */
                     goto no_work_remaining;
                 }
 
@@ -726,6 +743,12 @@ static int s_s3_auto_ranged_put_prepare_request(
                 aws_s3_meta_request_lock_synced_data(meta_request);
 
                 if (auto_ranged_put->synced_data.list_parts_continuation_token) {
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p ListParts for Multi-part Upload, with ID:%s, continues with token:%s.",
+                        (void *)meta_request,
+                        aws_string_c_str(auto_ranged_put->upload_id),
+                        aws_string_c_str(auto_ranged_put->synced_data.list_parts_continuation_token));
                     struct aws_byte_cursor continuation_cur =
                         aws_byte_cursor_from_string(auto_ranged_put->synced_data.list_parts_continuation_token);
                     message_creation_result = aws_s3_construct_next_paginated_request_http_message(
@@ -947,7 +970,9 @@ static void s_s3_auto_ranged_put_request_finished(
                 if (error_code == AWS_ERROR_SUCCESS) {
 
                     struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                    /* Clear the token before */
                     aws_string_destroy(auto_ranged_put->synced_data.list_parts_continuation_token);
+                    auto_ranged_put->synced_data.list_parts_continuation_token = NULL;
                     if (aws_s3_paginated_operation_on_response(
                             auto_ranged_put->synced_data.list_parts_operation,
                             &body_cursor,
@@ -978,7 +1003,15 @@ static void s_s3_auto_ranged_put_request_finished(
                     }
                 }
 
-                auto_ranged_put->synced_data.list_parts_completed = !has_more_results;
+                if (has_more_results) {
+                    /* If list parts has more result, make sure list parts continues */
+                    auto_ranged_put->synced_data.list_parts_state.continues = true;
+                    auto_ranged_put->synced_data.list_parts_state.completed = false;
+                } else {
+                    /* No more result, complete the list parts */
+                    auto_ranged_put->synced_data.list_parts_state.continues = false;
+                    auto_ranged_put->synced_data.list_parts_state.completed = true;
+                }
                 auto_ranged_put->synced_data.list_parts_error_code = error_code;
 
                 if (error_code != AWS_ERROR_SUCCESS) {
@@ -1016,7 +1049,8 @@ static void s_s3_auto_ranged_put_request_finished(
                     struct aws_byte_cursor header_value;
                     AWS_ZERO_STRUCT(header_value);
 
-                    if (!aws_http_headers_get(request->send_data.response_headers, *header_name, &header_value)) {
+                    if (aws_http_headers_get(request->send_data.response_headers, *header_name, &header_value) ==
+                        AWS_OP_SUCCESS) {
                         aws_http_headers_set(needed_response_headers, *header_name, header_value);
                     }
                 }
@@ -1074,14 +1108,15 @@ static void s_s3_auto_ranged_put_request_finished(
                 AWS_ASSERT(request->send_data.response_headers);
 
                 if (aws_http_headers_get(
-                        request->send_data.response_headers, g_etag_header_name, &etag_within_quotes)) {
+                        request->send_data.response_headers, g_etag_header_name, &etag_within_quotes) !=
+                    AWS_OP_SUCCESS) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p Could not find ETag header for request %p",
                         (void *)meta_request,
                         (void *)request);
 
-                    error_code = AWS_ERROR_S3_MISSING_UPLOAD_ID;
+                    error_code = AWS_ERROR_S3_MISSING_ETAG;
                 } else {
                     /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up
                      * later, so just get rid of the quotes now. */

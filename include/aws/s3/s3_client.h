@@ -550,11 +550,13 @@ int aws_s3_meta_request_pause(
  * to persist those in whichever way they choose.
  */
 struct aws_s3_upload_resume_token_options {
-    struct aws_byte_cursor upload_id;
-    size_t part_size;
-    size_t total_num_parts;
+    struct aws_byte_cursor upload_id; /* Required */
+    size_t part_size;                 /* Required */
+    size_t total_num_parts;           /* Required */
 
-    /*
+    /**
+     * Optional.
+     *
      * Note: during resume num_parts_uploaded is used for sanity checking against
      * uploads on s3 side.
      * In cases where upload id does not exist (already resumed using this token

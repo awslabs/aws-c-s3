@@ -11,6 +11,7 @@
 #include "s3_tester.h"
 
 #include <aws/io/stream.h>
+#include <aws/s3/s3_client.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
@@ -83,8 +84,21 @@ TEST_CASE(meta_request_auto_ranged_put_new_error_handling) {
     meta_request =
         aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), MB_TO_BYTES(10), 2, &options);
     ASSERT_NULL(meta_request);
+    aws_s3_meta_request_resume_token_release(token);
 
     /* Third: Fail from the s_try_init_resume_state_from_persisted_data */
+    struct aws_s3_upload_resume_token_options token_options = {
+        .upload_id = aws_byte_cursor_from_c_str("upload_id"),
+        .part_size = MB_TO_BYTES(8),
+        .total_num_parts = 2,
+        .num_parts_completed = 1,
+    };
+    token = aws_s3_meta_request_resume_token_new_upload(allocator, &token_options);
+    options.resume_token = token;
+    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_type(token), AWS_S3_META_REQUEST_TYPE_PUT_OBJECT);
+    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_part_size(token), token_options.part_size);
+    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_total_num_parts(token), token_options.total_num_parts);
+    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_num_parts_completed(token), token_options.num_parts_completed);
     meta_request =
         aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), MB_TO_BYTES(10), 2, &options);
 
