@@ -238,6 +238,7 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(resume_list_parts_failed_mock_server)
     add_net_test_case(resume_after_finished_mock_server)
     add_net_test_case(multipart_upload_proxy_mock_server)
+    add_net_test_case(endpoint_override_mock_server)
 endif()
 
 add_net_test_case(meta_request_auto_ranged_get_new_error_handling)

@@ -298,7 +298,7 @@ struct aws_http_message *aws_s3_test_get_object_request_new(
 
 struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
+    struct aws_byte_cursor *host,
     struct aws_byte_cursor content_type,
     struct aws_byte_cursor key,
     struct aws_input_stream *body_stream,

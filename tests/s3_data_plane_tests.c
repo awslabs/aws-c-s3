@@ -1738,13 +1738,9 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
         struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffers[i]);
         input_streams[i] = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
         struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
+        struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
         messages[i] = aws_s3_test_put_object_request_new(
-            allocator,
-            aws_byte_cursor_from_string(host_name),
-            test_object_path,
-            g_test_body_content_type,
-            input_streams[i],
-            0);
+            allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
         options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
@@ -2318,7 +2314,7 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
+        allocator, &host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     uint32_t part_number = 1;
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
@@ -2391,7 +2387,7 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
+        allocator, &host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {
         .name = g_content_md5_header_name,
@@ -2440,7 +2436,7 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
+        allocator, &host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {
         .name = g_content_md5_header_name,
