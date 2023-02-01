@@ -244,6 +244,7 @@ endif()
 add_net_test_case(meta_request_auto_ranged_get_new_error_handling)
 add_net_test_case(meta_request_auto_ranged_put_new_error_handling)
 add_net_test_case(bad_request_error_handling)
+add_net_test_case(bad_host_name_error_handling)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

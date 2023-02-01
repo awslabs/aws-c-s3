@@ -153,3 +153,39 @@ TEST_CASE(bad_request_error_handling) {
 
     return 0;
 }
+
+TEST_CASE(bad_host_name_error_handling) {
+    /* The original request without method and path. */
+    (void)ctx;
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+    ASSERT_SUCCESS(aws_http_message_set_request_method(message, aws_http_method_get));
+    ASSERT_SUCCESS(aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("/")));
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 5 * 1024 * 1024,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = aws_byte_cursor_from_c_str("invalid:/s3.us-east-1.amazonaws.com"),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(message, host_header));
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+    options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+    options.message = message;
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+    ASSERT_NULL(meta_request);
+
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
