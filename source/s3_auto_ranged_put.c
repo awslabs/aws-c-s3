@@ -360,6 +360,7 @@ static bool s_s3_auto_ranged_put_update(
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
                     0,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                auto_ranged_put->synced_data.list_parts_state.continues = false;
                 goto has_work_remaining;
             }
 
