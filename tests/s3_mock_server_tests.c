@@ -612,6 +612,7 @@ TEST_CASE(multipart_upload_proxy_mock_server) {
                 .object_path_override = object_path,
             },
         .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));

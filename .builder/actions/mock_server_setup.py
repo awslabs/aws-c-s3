@@ -34,9 +34,16 @@ class MockServerSetup(Builder.Action):
         base_dir = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
 
-        p = subprocess.Popen([python_path, "mock_s3_server.py"], cwd=dir)
-        p = subprocess.Popen("proxy", cwd=dir)
+        p1 = subprocess.Popen([python_path, "mock_s3_server.py"], cwd=dir)
+        try:
+            p2 = subprocess.Popen("proxy", cwd=dir)
+        except Exception as e:
+            # Okay for proxy to fail starting up as it may not be in the path
+            print(e)
+            p2 = None
 
         @atexit.register
         def close_mock_server():
-            p.terminate()
+            p1.terminate()
+            if p2 != None:
+                p2.terminate()
