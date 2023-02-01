@@ -266,7 +266,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         false /*exclude_x_amz_meta*/);
 
     if (message == NULL) {
-        goto error_clean_up;
+        return NULL;
     }
 
     if (aws_s3_message_util_set_multipart_request_path(allocator, NULL, 0, true, message)) {
@@ -299,12 +299,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     return message;
 
 error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
+    aws_http_message_release(message);
     return NULL;
 }
 
