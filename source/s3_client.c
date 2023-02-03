@@ -668,9 +668,7 @@ int s_apply_endpoint_override(
     }
 
     struct aws_byte_cursor host_value;
-    int error = aws_http_headers_get(message_headers, g_host_header_name, &host_value);
-    AWS_ASSERT(!error);
-    (void)error;
+    AWS_FATAL_ASSERT(aws_http_headers_get(message_headers, g_host_header_name, &host_value) == AWS_OP_SUCCESS);
 
     if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
         AWS_LOGF_ERROR(
