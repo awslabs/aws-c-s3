@@ -22,7 +22,7 @@ class MockServerSetup(Builder.Action):
         python_path = sys.executable
         # install dependency for mock server
         self.env.shell.exec(python_path,
-                            '-m', 'pip', 'install', 'h11', 'trio', check=True)
+                            '-m', 'pip', 'install', 'h11', 'trio', 'proxy.py', check=True)
         # check the deps can be import correctly
         self.env.shell.exec(python_path,
                             '-c', 'import h11, trio', check=True)
@@ -34,8 +34,16 @@ class MockServerSetup(Builder.Action):
         base_dir = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
 
-        p = subprocess.Popen([python_path, "mock_s3_server.py"], cwd=dir)
+        p1 = subprocess.Popen([python_path, "mock_s3_server.py"], cwd=dir)
+        try:
+            p2 = subprocess.Popen("proxy", cwd=dir)
+        except Exception as e:
+            # Okay for proxy to fail starting up as it may not be in the path
+            print(e)
+            p2 = None
 
         @atexit.register
         def close_mock_server():
-            p.terminate()
+            p1.terminate()
+            if p2 != None:
+                p2.terminate()

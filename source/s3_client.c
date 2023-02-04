@@ -668,13 +668,7 @@ int s_apply_endpoint_override(
     }
 
     struct aws_byte_cursor host_value;
-    if (aws_http_headers_get(message_headers, g_host_header_name, &host_value)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
-            (void *)client);
-        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-    }
+    AWS_FATAL_ASSERT(aws_http_headers_get(message_headers, g_host_header_name, &host_value) == AWS_OP_SUCCESS);
 
     if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
         AWS_LOGF_ERROR(

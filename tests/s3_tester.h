@@ -121,6 +121,7 @@ struct aws_s3_tester_client_options {
     size_t part_size;
     size_t max_part_size;
     uint32_t setup_region : 1;
+    uint32_t use_proxy : 1;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -297,7 +298,7 @@ struct aws_http_message *aws_s3_test_get_object_request_new(
 
 struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
+    struct aws_byte_cursor *host,
     struct aws_byte_cursor content_type,
     struct aws_byte_cursor key,
     struct aws_input_stream *body_stream,
