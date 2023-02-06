@@ -361,7 +361,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     if (client_config->proxy_options) {
         client->proxy_config = aws_http_proxy_config_new_from_proxy_options_with_tls_info(
-            allocator, client_config->proxy_options, client->tls_connection_options != NULL);
+            allocator, client_config->proxy_options, client_config->tls_mode == AWS_MR_TLS_ENABLED);
         if (client->proxy_config == NULL) {
             goto on_error;
         }
