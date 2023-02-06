@@ -58,8 +58,10 @@ static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config;
-    AWS_ZERO_STRUCT(client_config);
+    struct aws_s3_client_config client_config = {
+        .region = g_test_s3_region,
+        .client_bootstrap = tester.client_bootstrap,
+    };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_LEGACY,
         .host = aws_byte_cursor_from_c_str("localhost"),
