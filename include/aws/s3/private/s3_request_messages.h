@@ -40,7 +40,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
 /* Copy headers from one message to the other and exclude specific headers.
  * exclude_x_amz_meta controls whether S3 user metadata headers (prefixed with "x-amz-meta) are excluded.*/
 AWS_S3_API
-int aws_s3_message_util_copy_headers(
+void aws_s3_message_util_copy_headers(
     struct aws_http_message *source_message,
     struct aws_http_message *dest_message,
     const struct aws_byte_cursor *excluded_headers_arrays,

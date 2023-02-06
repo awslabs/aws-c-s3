@@ -54,7 +54,7 @@ static int s_test_s3_client_exceed_retries(struct aws_allocator *allocator, void
 
     /* Don't specify EXPECT SUCCESS flag for aws_s3_tester_send_get_object_meta_request to expect a failure. */
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, 0, &meta_request_test_results));
+        &tester, client, g_pre_existing_object_1MB, 0, &meta_request_test_results));
 
     ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_HTTP_UNKNOWN);
 
@@ -111,7 +111,7 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
     patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_first;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -194,7 +194,7 @@ static int s_test_s3_meta_request_fail_prepare_request(struct aws_allocator *all
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_prepare_request;
     patched_client_vtable->finish_destroy = s_s3_fail_prepare_finish_destroy;
 
-    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_s3_path_get_object_test_1MB, 0, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(&tester, client, g_pre_existing_object_1MB, 0, NULL));
 
     aws_s3_tester_wait_for_counters(&tester);
 
@@ -266,7 +266,7 @@ static int s_test_s3_meta_request_sign_request_fail(struct aws_allocator *alloca
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .get_options =
             {
-                .object_path = g_s3_path_get_object_test_1MB,
+                .object_path = g_pre_existing_object_1MB,
             },
     };
 
@@ -376,7 +376,7 @@ static int s_test_s3_meta_request_send_request_finish_fail(struct aws_allocator 
     patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_send_request_finish;
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);

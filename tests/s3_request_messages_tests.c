@@ -764,6 +764,39 @@ static int s_test_s3_upload_part_message_new(struct aws_allocator *allocator, vo
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_upload_part_message_fail, s_test_s3_upload_part_message_fail)
+static int s_test_s3_upload_part_message_fail(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+#define UPLOAD_ID "test_upload_id"
+#define PART_NUMBER 4
+
+    struct aws_http_message *original_message = aws_http_message_new_request(allocator);
+    ASSERT_NOT_NULL(original_message);
+
+    const size_t part_buffer_size = 42;
+    struct aws_byte_buf part_buffer;
+    AWS_ZERO_STRUCT(part_buffer);
+    s_fill_byte_buf(&part_buffer, allocator, part_buffer_size);
+
+    struct aws_string *upload_id = aws_string_new_from_c_str(allocator, UPLOAD_ID);
+
+    struct aws_http_message *upload_part_message = aws_s3_upload_part_message_new(
+        allocator, original_message, &part_buffer, PART_NUMBER, upload_id, false, NULL, NULL);
+    ASSERT_NULL(upload_part_message);
+
+    aws_string_destroy(upload_id);
+    aws_byte_buf_clean_up(&part_buffer);
+
+    aws_http_message_release(upload_part_message);
+    aws_http_message_release(original_message);
+
+#undef UPLOAD_ID
+#undef PART_NUMBER
+
+    return 0;
+}
+
 struct complete_multipart_upload_xml_test_data {
     struct aws_byte_cursor etag_value;
     struct aws_byte_cursor part_number_value;

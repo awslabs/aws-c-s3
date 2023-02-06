@@ -65,15 +65,14 @@ const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE
 const uint32_t g_max_num_connections_per_vip = 10;
 
 /**
- * Default part size is 8 MB to reach the best performance from the experiments we had.
- * Default max part size is SIZE_MAX at 32bit build, which is around 4GB, which is 5GB at 64bit build.
- *      The server limit is 5GB, but object size limit is 5TB for now. We should be good enough for all the case.
- *      For upload, the max number of parts is 10000, which will limits the object size to 40TB for 32bit and 50TB for
- *      64bit.
+ * Default part size is 8 MiB to reach the best performance from the experiments we had.
+ * Default max part size is SIZE_MAX on 32bit systems, which is around 4GiB; and 5GiB on a 64bit system.
+ *      The server limit is 5GiB, but object size limit is 5TiB for now. We should be good enough for all the cases.
+ *      The max number of upload parts is 10000, which limits the object size to 39TiB on 32bit and 49TiB on 64bit.
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const uint64_t s_default_max_part_size = SIZE_MAX < 5000000000000ULL ? SIZE_MAX : 5000000000000ULL;
+static const uint64_t s_default_max_part_size = SIZE_MAX < 5368709120ULL ? SIZE_MAX : 5368709120ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
@@ -637,6 +636,54 @@ struct aws_s3_request *aws_s3_client_dequeue_request_threaded(struct aws_s3_clie
     return request;
 }
 
+/*
+ * There is currently some overlap between user provided Host header and endpoint
+ * override. This function handles the corner cases for when either or both are provided.
+ */
+int s_apply_endpoint_override(
+    const struct aws_s3_client *client,
+    struct aws_http_headers *message_headers,
+    const struct aws_uri *endpoint) {
+    AWS_PRECONDITION(message_headers);
+
+    const struct aws_byte_cursor *endpoint_authority = endpoint == NULL ? NULL : aws_uri_authority(endpoint);
+
+    if (!aws_http_headers_has(message_headers, g_host_header_name)) {
+        if (endpoint_authority == NULL) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Cannot create meta s3 request; message provided in options does not have either 'Host' header "
+                "set or endpoint override.",
+                (void *)client);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+
+        if (aws_http_headers_set(message_headers, g_host_header_name, *endpoint_authority)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Cannot create meta s3 request; failed to set 'Host' header based on endpoint override.",
+                (void *)client);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+    }
+
+    struct aws_byte_cursor host_value;
+    AWS_FATAL_ASSERT(aws_http_headers_get(message_headers, g_host_header_name, &host_value) == AWS_OP_SUCCESS);
+
+    if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; host header value " PRInSTR
+            " does not match endpoint override " PRInSTR,
+            (void *)client,
+            AWS_BYTE_CURSOR_PRI(host_value),
+            AWS_BYTE_CURSOR_PRI(*endpoint_authority));
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Public facing make-meta-request function. */
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
@@ -649,8 +696,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_PRECONDITION(client->vtable->meta_request_factory);
     AWS_PRECONDITION(options);
 
-    if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT && options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
-        options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && options->type != AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {
+    if (options->type >= AWS_S3_META_REQUEST_TYPE_MAX) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request; invalid meta request type specified.",
@@ -725,34 +771,35 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
     }
 
-    struct aws_byte_cursor host_header_value;
-
-    if (aws_http_headers_get(message_headers, g_host_header_name, &host_header_value)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "id=%p Cannot create meta s3 request; message provided in options does not have a 'Host' header.",
-            (void *)client);
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    if (s_apply_endpoint_override(client, message_headers, options->endpoint)) {
         return NULL;
     }
+
+    struct aws_byte_cursor host_header_value;
+    /* The Host header must be set from s_apply_endpoint_override, if not errored out */
+    AWS_FATAL_ASSERT(aws_http_headers_get(message_headers, g_host_header_name, &host_header_value) == AWS_OP_SUCCESS);
 
     bool is_https = true;
     uint16_t port = 0;
 
     if (options->endpoint != NULL) {
-        const struct aws_byte_cursor *host_name_cursor = aws_uri_host_name(options->endpoint);
-        if (host_name_cursor->len) {
-            if (!aws_byte_cursor_eq(host_name_cursor, &host_header_value)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "id=%p Cannot create meta s3 request; 'Host' header does not match URI 'hostname'.",
-                    (void *)client);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-        }
         struct aws_byte_cursor https_scheme = aws_byte_cursor_from_c_str("https");
-        is_https = aws_byte_cursor_eq_ignore_case(aws_uri_scheme(options->endpoint), &https_scheme);
+        struct aws_byte_cursor http_scheme = aws_byte_cursor_from_c_str("http");
+
+        const struct aws_byte_cursor *scheme = aws_uri_scheme(options->endpoint);
+
+        is_https = aws_byte_cursor_eq_ignore_case(scheme, &https_scheme);
+
+        if (!is_https && !aws_byte_cursor_eq_ignore_case(scheme, &http_scheme)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Cannot create meta s3 request; unexpected scheme '" PRInSTR "' in endpoint override.",
+                (void *)client,
+                AWS_BYTE_CURSOR_PRI(*scheme));
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+
         port = aws_uri_port(options->endpoint);
     }
 
@@ -769,7 +816,20 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     {
         aws_s3_client_lock_synced_data(client);
 
-        struct aws_string *endpoint_host_name = aws_string_new_from_cursor(client->allocator, &host_header_value);
+        struct aws_string *endpoint_host_name = NULL;
+
+        if (options->endpoint != NULL) {
+            endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(options->endpoint));
+        } else {
+            struct aws_uri host_uri;
+            if (aws_uri_init_parse(&host_uri, client->allocator, &host_header_value)) {
+                error_occurred = true;
+                goto unlock;
+            }
+
+            endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
+            aws_uri_clean_up(&host_uri);
+        }
 
         struct aws_s3_endpoint *endpoint = NULL;
         struct aws_hash_element *endpoint_hash_element = NULL;
@@ -777,6 +837,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         int was_created = 0;
         if (aws_hash_table_create(
                 &client->synced_data.endpoints, endpoint_host_name, &endpoint_hash_element, &was_created)) {
+            aws_string_destroy(endpoint_host_name);
             error_occurred = true;
             goto unlock;
         }
@@ -800,6 +861,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
             if (endpoint == NULL) {
                 aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
+                aws_string_destroy(endpoint_host_name);
                 error_occurred = true;
                 goto unlock;
             }
@@ -879,130 +941,140 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     }
 
     /* Call the appropriate meta-request new function. */
-    if (options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-
-        /* If the initial request already has partNumber, the request is not splittable(?). Treat it as a Default
-         * request.
-         * TODO: Still need tests to verify that the request of a part is splittable or not */
-        if (aws_http_headers_has(initial_message_headers, aws_byte_cursor_from_c_str("partNumber"))) {
-            return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
-        }
-
-        return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
-    } else if (options->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
-
-        if (!content_length_header_found) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-
-        struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
-
-        if (input_stream == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST, "Could not create auto-ranged-put meta request; body stream is NULL.");
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-
-        if (options->resume_token == NULL) {
-
-            size_t client_part_size = client->part_size;
-            size_t client_max_part_size = client->max_part_size;
-
-            if (client_part_size < g_s3_min_upload_part_size) {
-                AWS_LOGF_WARN(
-                    AWS_LS_S3_META_REQUEST,
-                    "Client config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
-                    ". Using to the minimum part-size for upload.",
-                    (uint64_t)client_part_size,
-                    (uint64_t)g_s3_min_upload_part_size);
-
-                client_part_size = g_s3_min_upload_part_size;
+    switch (options->type) {
+        case AWS_S3_META_REQUEST_TYPE_GET_OBJECT: {
+            /* If the initial request already has partNumber, the request is not
+             * splittable(?). Treat it as a Default request.
+             * TODO: Still need tests to verify that the request of a part is
+             * splittable or not */
+            if (aws_http_headers_has(initial_message_headers, aws_byte_cursor_from_c_str("partNumber"))) {
+                return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
             }
 
-            if (client_max_part_size < g_s3_min_upload_part_size) {
-                AWS_LOGF_WARN(
-                    AWS_LS_S3_META_REQUEST,
-                    "Client config max part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
-                    ". Clamping to the minimum part-size for upload.",
-                    (uint64_t)client_max_part_size,
-                    (uint64_t)g_s3_min_upload_part_size);
+            return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
+        }
+        case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
 
-                client_max_part_size = g_s3_min_upload_part_size;
+            if (!content_length_header_found) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
             }
-            if (content_length <= client_part_size) {
-                return aws_s3_meta_request_default_new(
-                    client->allocator,
-                    client,
-                    content_length,
-                    client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
-                        !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
-                    options);
-            } else {
-                if (aws_s3_message_util_check_checksum_header(options->message)) {
-                    /* The checksum header has been set and the request will be splitted. We fail the request */
+
+            struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
+
+            if (input_stream == NULL) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST, "Could not create auto-ranged-put meta request; body stream is NULL.");
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+
+            if (options->resume_token == NULL) {
+
+                size_t client_part_size = client->part_size;
+                size_t client_max_part_size = client->max_part_size;
+
+                if (client_part_size < g_s3_min_upload_part_size) {
+                    AWS_LOGF_WARN(
+                        AWS_LS_S3_META_REQUEST,
+                        "Client config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
+                        ". Using to the minimum part-size for upload.",
+                        (uint64_t)client_part_size,
+                        (uint64_t)g_s3_min_upload_part_size);
+
+                    client_part_size = g_s3_min_upload_part_size;
+                }
+
+                if (client_max_part_size < g_s3_min_upload_part_size) {
+                    AWS_LOGF_WARN(
+                        AWS_LS_S3_META_REQUEST,
+                        "Client config max part size of %" PRIu64
+                        " is less than the minimum upload part size of %" PRIu64
+                        ". Clamping to the minimum part-size for upload.",
+                        (uint64_t)client_max_part_size,
+                        (uint64_t)g_s3_min_upload_part_size);
+
+                    client_max_part_size = g_s3_min_upload_part_size;
+                }
+                if (content_length <= client_part_size) {
+                    return aws_s3_meta_request_default_new(
+                        client->allocator,
+                        client,
+                        content_length,
+                        client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
+                            !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
+                        options);
+                } else {
+                    if (aws_s3_message_util_check_checksum_header(options->message)) {
+                        /* The checksum header has been set and the request will be splitted. We fail the request */
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "Could not create auto-ranged-put meta request; checksum headers has been set for "
+                            "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
+                            "single "
+                            "part upload.");
+                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                        return NULL;
+                    }
+                }
+
+                uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
+
+                if (part_size_uint64 > SIZE_MAX) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
-                        "Could not create auto-ranged-put meta request; checksum headers has been set for "
-                        "auto-ranged-put that will be split. Pre-calculated checksums are only supported for single "
-                        "part upload.");
+                        "Could not create auto-ranged-put meta request; required part size of %" PRIu64
+                        " bytes is too large for platform.",
+                        part_size_uint64);
+
                     aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                     return NULL;
                 }
+
+                size_t part_size = (size_t)part_size_uint64;
+
+                if (part_size > client_max_part_size) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
+                        ", but current maximum part size is %" PRIu64,
+                        (uint64_t)part_size,
+                        (uint64_t)client_max_part_size);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
+
+                if (part_size < client_part_size) {
+                    part_size = client_part_size;
+                }
+
+                uint32_t num_parts = (uint32_t)(content_length / part_size);
+
+                if ((content_length % part_size) > 0) {
+                    ++num_parts;
+                }
+
+                return aws_s3_meta_request_auto_ranged_put_new(
+                    client->allocator, client, part_size, content_length, num_parts, options);
+            } else {
+                /* dont pass part size and total num parts. constructor will pick it up from token */
+                return aws_s3_meta_request_auto_ranged_put_new(
+                    client->allocator, client, 0, content_length, 0, options);
             }
-
-            uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
-
-            if (part_size_uint64 > SIZE_MAX) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "Could not create auto-ranged-put meta request; required part size of %" PRIu64
-                    " bytes is too large for platform.",
-                    part_size_uint64);
-
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-
-            size_t part_size = (size_t)part_size_uint64;
-
-            if (part_size > client_max_part_size) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
-                    ", but current maximum part size is %" PRIu64,
-                    (uint64_t)part_size,
-                    (uint64_t)client_max_part_size);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-
-            if (part_size < client_part_size) {
-                part_size = client_part_size;
-            }
-
-            uint32_t num_parts = (uint32_t)(content_length / part_size);
-
-            if ((content_length % part_size) > 0) {
-                ++num_parts;
-            }
-
-            return aws_s3_meta_request_auto_ranged_put_new(
-                client->allocator, client, part_size, content_length, num_parts, options);
-        } else {
-            /* dont pass part size and total num parts. constructor will pick it up from token */
-            return aws_s3_meta_request_auto_ranged_put_new(client->allocator, client, 0, content_length, 0, options);
         }
-    } else if (options->type == AWS_S3_META_REQUEST_TYPE_COPY_OBJECT) {
-        return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
-    } else if (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
-        return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
-    } else {
-        AWS_FATAL_ASSERT(false);
+        case AWS_S3_META_REQUEST_TYPE_COPY_OBJECT: {
+            /* TODO: support copy object correctly. */
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "CopyObject is not currently supported");
+            aws_raise_error(AWS_ERROR_UNIMPLEMENTED);
+            return NULL;
+        }
+        case AWS_S3_META_REQUEST_TYPE_DEFAULT:
+            return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
+        default:
+            AWS_FATAL_ASSERT(false);
     }
 
     return NULL;
@@ -1661,7 +1733,7 @@ void aws_s3_client_notify_connection_finished(
         if (connection->retry_token == NULL) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
-                "id=%p Client could not schedule retry of request %p for meta request %p",
+                "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
                 (void *)client,
                 (void *)request,
                 (void *)meta_request);

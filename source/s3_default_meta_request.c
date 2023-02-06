@@ -88,7 +88,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not initialize base type for Default Meta Request.",
             (void *)meta_request_default);
-        goto error_clean_up;
+
+        aws_mem_release(allocator, meta_request_default);
+        return NULL;
     }
 
     meta_request_default->content_length = (size_t)content_length;
@@ -96,13 +98,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
 
     return &meta_request_default->base;
-
-error_clean_up:
-
-    aws_s3_meta_request_release(&meta_request_default->base);
-    meta_request_default = NULL;
-
-    return NULL;
 }
 
 static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_request) {

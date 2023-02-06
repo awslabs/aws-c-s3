@@ -220,7 +220,7 @@ static const struct aws_byte_cursor s_x_amz_meta_prefix = AWS_BYTE_CUR_INIT_FROM
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
-static int s_s3_message_util_add_range_header(
+static void s_s3_message_util_add_range_header(
     uint64_t part_range_start,
     uint64_t part_range_end,
     struct aws_http_message *out_message);
@@ -242,20 +242,9 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
         return NULL;
     }
 
-    if (s_s3_message_util_add_range_header(range_start, range_end, message)) {
-        goto error_clean_up;
-    }
+    s_s3_message_util_add_range_header(range_start, range_end, message);
 
     return message;
-
-error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
 }
 
 /* Creates a create-multipart-upload request from a given put objet request. */
@@ -277,7 +266,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         false /*exclude_x_amz_meta*/);
 
     if (message == NULL) {
-        goto error_clean_up;
+        return NULL;
     }
 
     if (aws_s3_message_util_set_multipart_request_path(allocator, NULL, 0, true, message)) {
@@ -310,12 +299,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     return message;
 
 error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
+    aws_http_message_release(message);
     return NULL;
 }
 
@@ -333,6 +317,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
+    AWS_PRECONDITION(buffer);
 
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
         allocator,
@@ -342,40 +327,30 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         true /*exclude_x_amz_meta*/);
 
     if (message == NULL) {
-        goto error_clean_up;
+        return NULL;
     }
 
     if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, false, message)) {
         goto error_clean_up;
     }
 
-    if (buffer != NULL) {
+    if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_config, encoded_checksum_output) == NULL) {
+        goto error_clean_up;
+    }
 
-        if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_config, encoded_checksum_output) ==
-            NULL) {
-            goto error_clean_up;
-        }
-        if (should_compute_content_md5) {
-            if (!checksum_config || checksum_config->location == AWS_SCL_NONE) {
-                /* MD5 will be skiped if flexible checksum used */
-                if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
-                    goto error_clean_up;
-                }
+    if (should_compute_content_md5) {
+        if (!checksum_config || checksum_config->location == AWS_SCL_NONE) {
+            /* MD5 will be skiped if flexible checksum used */
+            if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
+                goto error_clean_up;
             }
         }
-    } else {
-        goto error_clean_up;
     }
 
     return message;
 
 error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
+    aws_http_message_release(message);
     return NULL;
 }
 
@@ -476,6 +451,7 @@ struct aws_http_message *aws_s3_get_object_size_message_new(
     }
 
     char host_header_value[1024];
+    /* TODO: Fix the hard-coded host name. */
     snprintf(
         host_header_value,
         sizeof(host_header_value),
@@ -910,13 +886,11 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     AWS_PRECONDITION(base_message);
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
-
-    if (message == NULL) {
-        return NULL;
-    }
+    AWS_ASSERT(message);
 
     struct aws_byte_cursor request_method;
     if (aws_http_message_get_request_method(base_message, &request_method)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to get request method.");
         goto error_clean_up;
     }
 
@@ -926,6 +900,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
 
     struct aws_byte_cursor request_path;
     if (aws_http_message_get_request_path(base_message, &request_path)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to get request path.");
         goto error_clean_up;
     }
 
@@ -933,24 +908,17 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
         goto error_clean_up;
     }
 
-    if (aws_s3_message_util_copy_headers(
-            base_message, message, excluded_header_array, excluded_header_array_size, exclude_x_amz_meta)) {
-        goto error_clean_up;
-    }
+    aws_s3_message_util_copy_headers(
+        base_message, message, excluded_header_array, excluded_header_array_size, exclude_x_amz_meta);
 
     return message;
 
 error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
+    aws_http_message_release(message);
     return NULL;
 }
 
-int aws_s3_message_util_copy_headers(
+void aws_s3_message_util_copy_headers(
     struct aws_http_message *source_message,
     struct aws_http_message *dest_message,
     const struct aws_byte_cursor *excluded_header_array,
@@ -962,9 +930,7 @@ int aws_s3_message_util_copy_headers(
     for (size_t header_index = 0; header_index < num_headers; ++header_index) {
         struct aws_http_header header;
 
-        if (aws_http_message_get_header(source_message, &header, header_index)) {
-            return AWS_OP_ERR;
-        }
+        int error = aws_http_message_get_header(source_message, &header, header_index);
 
         if (excluded_header_array && excluded_header_array_size > 0) {
             bool exclude_header = false;
@@ -987,16 +953,14 @@ int aws_s3_message_util_copy_headers(
             }
         }
 
-        if (aws_http_message_add_header(dest_message, header)) {
-            return AWS_OP_ERR;
-        }
+        error |= aws_http_message_add_header(dest_message, header);
+        (void)error;
+        AWS_ASSERT(!error);
     }
-
-    return AWS_OP_SUCCESS;
 }
 
 /* Add a range header.*/
-static int s_s3_message_util_add_range_header(
+static void s_s3_message_util_add_range_header(
     uint64_t part_range_start,
     uint64_t part_range_end,
     struct aws_http_message *out_message) {
@@ -1016,14 +980,12 @@ static int s_s3_message_util_add_range_header(
     AWS_ASSERT(headers != NULL);
 
     int erase_result = aws_http_headers_erase(headers, range_header.name);
-    AWS_ASSERT(erase_result == AWS_OP_SUCCESS || aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND)
+    AWS_ASSERT(erase_result == AWS_OP_SUCCESS || aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
+
+    /* Only failed when the header has invalid name, which is impossible here. */
+    erase_result = aws_http_message_add_header(out_message, range_header);
+    AWS_ASSERT(erase_result == AWS_OP_SUCCESS);
     (void)erase_result;
-
-    if (aws_http_message_add_header(out_message, range_header)) {
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
 }
 
 /* Handle setting up the multipart request path for a message. */

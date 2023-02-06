@@ -395,12 +395,16 @@ AWS_TEST_CASE(test_s3_cancel_mpu_one_part_completed_fc, s_test_s3_cancel_mpu_one
 static int s_test_s3_cancel_mpu_one_part_completed_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s3_cancel_test_helper_fc(
-        allocator,
-        S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED,
-        aws_byte_cursor_from_c_str("/prefix/cancel/upload_one_part_complete_fc.txt"),
-        AWS_SCA_CRC32));
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
 
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/cancel/upload_one_part_complete_fc.txt")));
+
+    ASSERT_SUCCESS(s3_cancel_test_helper_fc(
+        allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED, aws_byte_cursor_from_buf(&path_buf), AWS_SCA_CRC32));
+
+    aws_byte_buf_clean_up(&path_buf);
     return 0;
 }
 
@@ -409,10 +413,7 @@ static int s_test_s3_cancel_mpd_one_part_completed_fc(struct aws_allocator *allo
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper_fc(
-        allocator,
-        S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED,
-        aws_byte_cursor_from_c_str("/prefix/cancel/get_one_part_complete_fc.txt"),
-        AWS_SCA_CRC32));
+        allocator, S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED, g_pre_existing_object_10MB, AWS_SCA_CRC32));
 
     return 0;
 }

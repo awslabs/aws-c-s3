@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "headers": {"Connection": "close"},
+  "body": [
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<CompleteMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+    "<Location>http://default.s3.us-west-2.amazonaws.com/default</Location>",
+    "<Bucket>default</Bucket>",
+    "<Key>default</Key>",
+    "<ETag>\"3858f62230ac3c915f300c664312c11f-9\"</ETag>",
+   "</CompleteMultipartUploadResult>"
+  ]
+}

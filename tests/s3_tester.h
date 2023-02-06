@@ -59,6 +59,7 @@ enum aws_s3_client_tls_usage {
 enum aws_s3_tester_validate_type {
     AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
     AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
 };
 
 enum aws_s3_tester_default_type_mode {
@@ -120,6 +121,7 @@ struct aws_s3_tester_client_options {
     size_t part_size;
     size_t max_part_size;
     uint32_t setup_region : 1;
+    uint32_t use_proxy : 1;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -141,6 +143,9 @@ struct aws_s3_tester_meta_request_options {
 
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
+
+    /* Optional, when enabled, the test will run against local server instead. */
+    bool mock_server;
 
     bool validate_get_response_checksum;
     enum aws_s3_checksum_algorithm checksum_algorithm;
@@ -173,6 +178,9 @@ struct aws_s3_tester_meta_request_options {
         bool ensure_multipart;
         bool invalid_request;
         bool invalid_input_stream;
+        bool valid_md5;
+        bool invalid_md5;
+        struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
     } put_options;
@@ -209,6 +217,9 @@ struct aws_s3_meta_request_test_results {
     int finished_response_status;
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
+
+    /* accumulator of amount of bytes uploaded */
+    struct aws_atomic_var total_bytes_uploaded;
 };
 
 struct aws_s3_client_config;
@@ -289,7 +300,7 @@ struct aws_http_message *aws_s3_test_get_object_request_new(
 
 struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
+    struct aws_byte_cursor *host,
     struct aws_byte_cursor content_type,
     struct aws_byte_cursor key,
     struct aws_input_stream *body_stream,
@@ -390,17 +401,27 @@ struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     size_t length,
     enum aws_s3_test_stream_value stream_value);
 
+/* Add g_upload_folder to the file path to make sure we get all the non-pre-exist files in the same folder. */
+int aws_s3_tester_upload_file_path_init(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *out_path_buffer,
+    struct aws_byte_cursor file_path);
+
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
+
+extern const struct aws_byte_cursor g_mock_server_uri;
 
 extern const struct aws_byte_cursor g_test_body_content_type;
 extern const struct aws_byte_cursor g_test_s3_region;
 extern const struct aws_byte_cursor g_test_bucket_name;
 extern const struct aws_byte_cursor g_test_public_bucket_name;
-extern const struct aws_byte_cursor g_s3_path_get_object_test_1MB;
 
 extern const struct aws_byte_cursor g_pre_existing_object_1MB;
+extern const struct aws_byte_cursor g_pre_existing_object_10MB;
 extern const struct aws_byte_cursor g_pre_existing_object_kms_10MB;
 extern const struct aws_byte_cursor g_pre_existing_object_aes256_10MB;
 extern const struct aws_byte_cursor g_pre_existing_empty_object;
+
+extern const struct aws_byte_cursor g_put_object_prefix;
 
 #endif /* AWS_S3_TESTER_H */

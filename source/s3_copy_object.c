@@ -77,7 +77,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
             copy_object,
             &s_s3_copy_object_vtable,
             &copy_object->base)) {
-        goto error_clean_up;
+        aws_mem_release(allocator, copy_object);
+        return NULL;
     }
 
     aws_array_list_init_dynamic(
@@ -90,11 +91,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new CopyObject Meta Request.", (void *)&copy_object->base);
 
     return &copy_object->base;
-
-error_clean_up:
-
-    aws_mem_release(allocator, copy_object);
-    return NULL;
 }
 
 static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *meta_request) {
@@ -667,7 +663,7 @@ static void s_s3_copy_object_request_finished(
                 }
             }
 
-            AWS_ASSERT(copy_object->synced_data.needed_response_headers == NULL)
+            AWS_ASSERT(copy_object->synced_data.needed_response_headers == NULL);
             copy_object->synced_data.needed_response_headers = needed_response_headers;
 
             copy_object->synced_data.create_multipart_upload_completed = true;

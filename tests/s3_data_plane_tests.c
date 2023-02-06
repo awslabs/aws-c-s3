@@ -50,6 +50,31 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_client_create_error, s_test_s3_client_create_error)
+static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    struct aws_http_proxy_options proxy_options = {
+        .connection_type = AWS_HPCT_HTTP_LEGACY,
+        .host = aws_byte_cursor_from_c_str("localhost"),
+        .port = 8899,
+    };
+    client_config.proxy_options = &proxy_options;
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client == NULL);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_client_monitoring_options_override, s_test_s3_client_monitoring_options_override)
 static int s_test_s3_client_monitoring_options_override(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1070,7 +1095,7 @@ AWS_TEST_CASE(test_s3_get_object_tls_disabled, s_test_s3_get_object_tls_disabled
 static int s_test_s3_get_object_tls_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_DISABLED, 0, g_s3_path_get_object_test_1MB));
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_DISABLED, 0, g_pre_existing_object_1MB));
 
     return 0;
 }
@@ -1079,7 +1104,7 @@ AWS_TEST_CASE(test_s3_get_object_tls_enabled, s_test_s3_get_object_tls_enabled)
 static int s_test_s3_get_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED, 0, g_s3_path_get_object_test_1MB));
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED, 0, g_pre_existing_object_1MB));
 
     return 0;
 }
@@ -1088,7 +1113,7 @@ AWS_TEST_CASE(test_s3_get_object_tls_default, s_test_s3_get_object_tls_default)
 static int s_test_s3_get_object_tls_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, g_s3_path_get_object_test_1MB));
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, g_pre_existing_object_1MB));
 
     return 0;
 }
@@ -1113,7 +1138,7 @@ static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message = aws_s3_test_get_object_request_new(
-        allocator, aws_byte_cursor_from_string(host_name), g_s3_path_get_object_test_1MB);
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -1158,7 +1183,7 @@ static int s_test_s3_signing_override(struct aws_allocator *allocator, void *ctx
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message = aws_s3_test_get_object_request_new(
-        allocator, aws_byte_cursor_from_string(host_name), g_s3_path_get_object_test_1MB);
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
 
     /* Getting without signing should fail since the client has no signing set up. */
     {
@@ -1222,7 +1247,7 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
-        &tester, client, g_s3_path_get_object_test_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -1273,8 +1298,6 @@ AWS_TEST_CASE(test_s3_get_object_multiple, s_test_s3_get_object_multiple)
 static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
-
     struct aws_s3_meta_request *meta_requests[4];
     struct aws_s3_meta_request_test_results meta_request_test_results[4];
     size_t num_meta_requests = AWS_ARRAY_SIZE(meta_requests);
@@ -1299,8 +1322,8 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
         /* Put together a simple S3 Get Object request. */
-        struct aws_http_message *message =
-            aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+        struct aws_http_message *message = aws_s3_test_get_object_request_new(
+            allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
 
         aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
 
@@ -1351,8 +1374,7 @@ AWS_TEST_CASE(test_s3_get_object_empty_object, s_test_s3_get_object_empty_defaul
 static int s_test_s3_get_object_empty_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    return (s_test_s3_get_object_helper(
-        allocator, AWS_S3_TLS_ENABLED, 0, aws_byte_cursor_from_c_str("/get_object_test_0MB.txt")));
+    return (s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED, 0, g_pre_existing_empty_object));
 }
 
 AWS_TEST_CASE(test_s3_get_object_sse_kms, s_test_s3_get_object_sse_kms)
@@ -1477,14 +1499,12 @@ static int s_test_s3_get_object_backpressure_helper(
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     ASSERT_NOT_NULL(client);
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
-
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
     /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message =
-        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
 
     struct aws_s3_meta_request_options options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
@@ -1707,19 +1727,20 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     for (size_t i = 0; i < num_meta_requests; ++i) {
         aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
         char object_path_buffer[128] = "";
-        snprintf(object_path_buffer, sizeof(object_path_buffer), "/get_object_test_10MB_%zu.txt", i);
+        snprintf(
+            object_path_buffer,
+            sizeof(object_path_buffer),
+            "" PRInSTR "-10MB-%zu.txt",
+            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
+            i);
         AWS_ZERO_STRUCT(input_stream_buffers[i]);
         aws_s3_create_test_buffer(allocator, 10 * 1024ULL * 1024ULL, &input_stream_buffers[i]);
         struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffers[i]);
         input_streams[i] = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
         struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
+        struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
         messages[i] = aws_s3_test_put_object_request_new(
-            allocator,
-            aws_byte_cursor_from_string(host_name),
-            test_object_path,
-            g_test_body_content_type,
-            input_streams[i],
-            0);
+            allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
         options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
@@ -1785,8 +1806,17 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 1, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 1,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -1812,8 +1842,17 @@ static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, vo
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 0, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 0,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -1840,12 +1879,18 @@ static int s_test_s3_put_object_sse_kms(struct aws_allocator *allocator, void *c
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester,
-        client,
-        10,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS,
-        NULL));
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .sse_type = AWS_S3_TESTER_SSE_KMS,
+        .put_options =
+            {
+                .object_size_mb = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -1872,12 +1917,18 @@ static int s_test_s3_put_object_sse_kms_multipart(struct aws_allocator *allocato
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester,
-        client,
-        10,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS,
-        NULL));
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .sse_type = AWS_S3_TESTER_SSE_KMS,
+        .put_options =
+            {
+                .object_size_mb = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -1904,12 +1955,18 @@ static int s_test_s3_put_object_sse_aes256(struct aws_allocator *allocator, void
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester,
-        client,
-        10,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256,
-        NULL));
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .sse_type = AWS_S3_TESTER_SSE_AES256,
+        .put_options =
+            {
+                .object_size_mb = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -1936,12 +1993,18 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester,
-        client,
-        10,
-        AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256,
-        NULL));
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .sse_type = AWS_S3_TESTER_SSE_AES256,
+        .put_options =
+            {
+                .object_size_mb = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -1968,7 +2031,13 @@ static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *all
 
     ASSERT_TRUE(client != NULL);
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        tester.allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -1985,6 +2054,7 @@ static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *all
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
     client = aws_s3_client_release(client);
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_tester_clean_up(&tester);
 
     return 0;
@@ -2010,7 +2080,13 @@ static int s_test_s3_put_object_sse_c_aes256_multipart_with_checksum(struct aws_
 
     ASSERT_TRUE(client != NULL);
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        tester.allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c_fc.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2028,6 +2104,7 @@ static int s_test_s3_put_object_sse_c_aes256_multipart_with_checksum(struct aws_
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
     client = aws_s3_client_release(client);
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_tester_clean_up(&tester);
 
     return 0;
@@ -2237,7 +2314,7 @@ static int s_test_s3_upload_part_message_helper(struct aws_allocator *allocator,
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
+        allocator, &host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     uint32_t part_number = 1;
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
@@ -2310,7 +2387,7 @@ static int s_test_s3_create_multipart_upload_message_with_content_md5(struct aws
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
+        allocator, &host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {
         .name = g_content_md5_header_name,
@@ -2359,7 +2436,7 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
 
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *base_message = aws_s3_test_put_object_request_new(
-        allocator, host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
+        allocator, &host_name, test_object_path, g_test_body_content_type, input_stream, AWS_S3_TESTER_SSE_NONE);
 
     struct aws_http_header content_md5_header = {
         .name = g_content_md5_header_name,
@@ -2412,18 +2489,26 @@ static int s_test_s3_put_object_double_slashes(struct aws_allocator *allocator, 
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(
+        aws_s3_tester_upload_file_path_init(allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix//test.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
     struct aws_s3_tester_meta_request_options options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .put_options =
             {
                 .object_size_mb = 1,
-                .object_path_override = aws_byte_cursor_from_c_str("/prefix//test.txt"),
+                .object_path_override = object_path,
             },
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     return 0;
@@ -2443,8 +2528,14 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -2473,6 +2564,7 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
@@ -2493,8 +2585,13 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_default.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_default.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2528,6 +2625,7 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
@@ -2582,6 +2680,7 @@ void s_s3_test_no_validate_checksum(
     AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
 }
 
+/* TODO: maybe refactor the fc -> flexible checksum tests to be less copy/paste */
 AWS_TEST_CASE(test_s3_round_trip_default_get_fc, s_test_s3_round_trip_default_get_fc)
 static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -2589,52 +2688,63 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_s3_tester_client_options client_options = {
-        .part_size = 16 * 1024,
+        .part_size = MB_TO_BYTES(5),
     };
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_default_fc.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
 
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
-        .validate_get_response_checksum = false,
-        .put_options =
-            {
-                .object_size_mb = 1,
-                .object_path_override = object_path,
-            },
-    };
+    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
+        char object_path_sprintf_buffer[128] = "";
+        snprintf(
+            object_path_sprintf_buffer,
+            sizeof(object_path_sprintf_buffer),
+            "/prefix/round_trip/test_default_fc_%d.txt",
+            algorithm);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+        ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+            allocator, &path_buf, aws_byte_cursor_from_c_str(object_path_sprintf_buffer)));
+        struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+        /*** PUT FILE ***/
 
-    /*** GET FILE ***/
+        struct aws_s3_tester_meta_request_options put_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .client = client,
+            .checksum_algorithm = algorithm,
+            .validate_get_response_checksum = false,
+            .put_options =
+                {
+                    .object_size_mb = 1,
+                    .object_path_override = object_path,
+                },
+        };
 
-    struct aws_s3_tester_meta_request_options get_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .client = client,
-        .expected_validate_checksum_alg = AWS_SCA_CRC32,
-        .validate_get_response_checksum = true,
-        .get_options =
-            {
-                .object_path = object_path,
-            },
-        .default_type_options =
-            {
-                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
-            },
-        .finish_callback = s_s3_test_validate_checksum,
-        .headers_callback = s_s3_validate_headers_checksum_set,
-    };
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+        /*** GET FILE ***/
+
+        struct aws_s3_tester_meta_request_options get_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .client = client,
+            .expected_validate_checksum_alg = algorithm,
+            .validate_get_response_checksum = true,
+            .get_options =
+                {
+                    .object_path = object_path,
+                },
+            .finish_callback = s_s3_test_validate_checksum,
+            .headers_callback = s_s3_validate_headers_checksum_set,
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+        aws_byte_buf_clean_up(&path_buf);
+    }
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -2655,8 +2765,13 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_fc.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_fc.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2692,6 +2807,7 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
@@ -2713,7 +2829,13 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2748,6 +2870,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
@@ -2769,7 +2892,13 @@ static int s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc(struct 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2822,6 +2951,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc(struct 
     get_options.finish_callback = s_s3_test_validate_checksum;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     aws_array_list_clean_up(&response_checksum_list);
@@ -2842,8 +2972,13 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* should we generate a unique path each time? */
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_default_get_fc.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_default_get_fc.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -2883,6 +3018,7 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
@@ -2903,8 +3039,13 @@ static int s_test_s3_chunked_then_unchunked(struct aws_allocator *allocator, voi
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_byte_cursor chunked_object_path =
-        aws_byte_cursor_from_c_str("/prefix/chunked_unchunked/test_chunked.txt");
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/chunked_unchunked/test_chunked.txt")));
+
+    struct aws_byte_cursor chunked_object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options chunked_put_options = {
         .allocator = allocator,
@@ -2921,8 +3062,11 @@ static int s_test_s3_chunked_then_unchunked(struct aws_allocator *allocator, voi
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &chunked_put_options, NULL));
 
-    struct aws_byte_cursor unchunked_object_path =
-        aws_byte_cursor_from_c_str("/prefix/chunked_unchunked/test_unchunked.txt");
+    aws_byte_buf_clean_up(&path_buf);
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/chunked_unchunked/test_unchunked.txt")));
+
+    struct aws_byte_cursor unchunked_object_path = aws_byte_cursor_from_buf(&path_buf);
 
     struct aws_s3_tester_meta_request_options unchunked_put_options = {
         .allocator = allocator,
@@ -2939,6 +3083,7 @@ static int s_test_s3_chunked_then_unchunked(struct aws_allocator *allocator, voi
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &unchunked_put_options, NULL));
 
+    aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
@@ -2961,14 +3106,12 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    const struct aws_byte_cursor test_object_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/get_object_test_1MB.txt");
-
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
     /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message =
-        aws_s3_test_get_object_request_new(allocator, aws_byte_cursor_from_string(host_name), test_object_path);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -3142,7 +3285,7 @@ static int s_test_s3_existing_host_entry(struct aws_allocator *allocator, void *
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message = aws_s3_test_get_object_request_new(
-        allocator, aws_byte_cursor_from_string(host_name), g_s3_path_get_object_test_1MB);
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -3185,7 +3328,7 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_byte_cursor test_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("test_key");
 
-    AWS_STATIC_STRING_FROM_LITERAL(invalid_host_name, "invalid_host_name");
+    AWS_STATIC_STRING_FROM_LITERAL(invalid_host_name, "invalid_host_name_totally_absolutely");
 
     /* Construct a message that points to an invalid host name. Key can be anything. */
     struct aws_http_message *message =
@@ -3201,7 +3344,9 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME);
+    ASSERT_TRUE(
+        meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME ||
+        meta_request_test_results.finished_error_code == AWS_IO_DNS_QUERY_FAILED);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -3303,7 +3448,7 @@ static int s_test_s3_get_object_fail_headers_callback(struct aws_allocator *allo
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .get_options =
             {
-                .object_path = g_s3_path_get_object_test_1MB,
+                .object_path = g_pre_existing_object_1MB,
             },
     };
 
@@ -3329,7 +3474,7 @@ static int s_test_s3_get_object_fail_body_callback(struct aws_allocator *allocat
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .get_options =
             {
-                .object_path = g_s3_path_get_object_test_1MB,
+                .object_path = g_pre_existing_object_1MB,
             },
     };
 
@@ -3359,7 +3504,7 @@ static int s_test_s3_default_fail_headers_callback(struct aws_allocator *allocat
             },
         .get_options =
             {
-                .object_path = g_s3_path_get_object_test_1MB,
+                .object_path = g_pre_existing_object_1MB,
             },
     };
 
@@ -3590,7 +3735,7 @@ static int s_test_s3_default_fail_body_callback(struct aws_allocator *allocator,
             },
         .get_options =
             {
-                .object_path = g_s3_path_get_object_test_1MB,
+                .object_path = g_pre_existing_object_1MB,
             },
     };
 
@@ -3712,8 +3857,18 @@ static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator,
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
     /* Upload should now succeed even when specifying a smaller than allowed part size. */
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, &test_results));
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
 
     ASSERT_TRUE(test_results.part_size == g_s3_min_upload_part_size);
 
@@ -3900,7 +4055,7 @@ static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *al
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
             .get_options =
                 {
-                    .object_path = g_s3_path_get_object_test_1MB,
+                    .object_path = g_pre_existing_object_1MB,
                 },
         };
 
@@ -3966,7 +4121,7 @@ static int s_test_s3_default_sending_meta_request_user_agent(struct aws_allocato
                 },
             .get_options =
                 {
-                    .object_path = g_s3_path_get_object_test_1MB,
+                    .object_path = g_pre_existing_object_1MB,
                 },
         };
 
@@ -4180,7 +4335,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 }
 
                 if (ignore_header) {
-                    aws_http_headers_erase(range_get_headers, verify_header.name);
+                    ASSERT_SUCCESS(aws_http_headers_erase(range_get_headers, verify_header.name));
                     continue;
                 }
 
@@ -4210,13 +4365,27 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                     ASSERT_TRUE(aws_byte_cursor_eq(&verify_header.value, &header_value));
                 }
 
-                aws_http_headers_erase(range_get_headers, verify_header.name);
+                ASSERT_SUCCESS(aws_http_headers_erase(range_get_headers, verify_header.name));
             }
 
             for (size_t i = 0; i < aws_http_headers_count(range_get_headers); ++i) {
                 struct aws_http_header header;
 
                 ASSERT_SUCCESS(aws_http_headers_get_index(range_get_headers, i, &header));
+                bool ignore_header = false;
+
+                /* If the ignore header doesn't exist in the verify_range_get_headers, ignore it here. */
+                for (size_t j = 0; j < AWS_ARRAY_SIZE(headers_to_ignore); ++j) {
+                    if (aws_byte_cursor_eq_ignore_case(&headers_to_ignore[j], &header.name)) {
+                        ignore_header = true;
+                        break;
+                    }
+                }
+
+                if (ignore_header) {
+                    ASSERT_SUCCESS(aws_http_headers_erase(range_get_headers, header.name));
+                    continue;
+                }
 
                 AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "Left over header: " PRInSTR, AWS_BYTE_CURSOR_PRI(header.name));
             }
@@ -4656,7 +4825,7 @@ static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool mul
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .get_options =
             {
-                .object_path = g_s3_path_get_object_test_1MB,
+                .object_path = g_pre_existing_object_1MB,
             },
     };
 
@@ -4885,6 +5054,9 @@ static void s_pause_meta_request_progress(
 
         struct aws_s3_meta_request_resume_token *resume_token = NULL;
         int pause_result = aws_s3_meta_request_pause(meta_request, &resume_token);
+        struct aws_byte_cursor upload_id = aws_s3_meta_request_resume_token_upload_id(resume_token);
+        /* Make Sure we have upload ID */
+        AWS_FATAL_ASSERT(aws_byte_cursor_eq_c_str(&upload_id, "") == false);
         aws_atomic_store_int(&test_data->pause_result, pause_result);
         aws_atomic_store_ptr(&test_data->persistable_state_ptr, resume_token);
     }
@@ -5035,8 +5207,8 @@ static int s_test_s3_put_pause_resume_helper(
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_pause_resume, s_test_s3_put_pause_resume)
-static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_pause_resume_happy_path, s_test_s3_put_pause_resume_happy_path)
+static int s_test_s3_put_pause_resume_happy_path(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -5069,9 +5241,10 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         destination_key,
         initial_upload_stream,
         NULL,
-        AWS_SCA_NONE,
+        AWS_SCA_CRC32,
         AWS_ERROR_S3_PAUSED,
         0));
+
     if (tester.bound_to_client) {
         aws_s3_tester_wait_for_client_shutdown(&tester);
         tester.bound_to_client = false;
@@ -5099,7 +5272,7 @@ static int s_test_s3_put_pause_resume(struct aws_allocator *allocator, void *ctx
         destination_key,
         resume_upload_stream,
         persistable_state,
-        AWS_SCA_NONE,
+        AWS_SCA_CRC32,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK));
 

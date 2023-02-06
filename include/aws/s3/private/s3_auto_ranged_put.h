@@ -40,27 +40,30 @@ struct aws_s3_auto_ranged_put {
         uint32_t next_part_number;
     } threaded_update_data;
 
-    /* Should only be used during prepare requests. Note: stream reads must be sequential,
+    /*
+     * Should only be used during prepare requests. Note: stream reads must be sequential,
      * so prepare currently never runs concurrently with another prepare
      */
     struct {
-        /* How many parts have been read from input steam.
+        /*
+         * How many parts have been read from input steam.
          * Since reads are always sequential, this is essentially the number of how many parts were read from start of
          * stream.
          */
         uint32_t num_parts_read_from_stream;
     } prepare_data;
 
-    /* very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
+    /*
+     * Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
      * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
      * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
      * request which will only be invoked after all other parts/threads have completed.
      */
-    struct aws_byte_buf *checksums_list;
+    struct aws_byte_buf *encoded_checksum_list;
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
-        /* Array list of `struct aws_string *` */
+        /* Array list of `struct aws_string *`. */
         struct aws_array_list etag_list;
 
         struct aws_s3_paginated_operation *list_parts_operation;
@@ -79,8 +82,14 @@ struct aws_s3_auto_ranged_put {
         int complete_multipart_upload_error_code;
         int abort_multipart_upload_error_code;
 
-        uint32_t list_parts_sent : 1;
-        uint32_t list_parts_completed : 1;
+        struct {
+            /* Mark a single ListParts request has started or not */
+            uint32_t started : 1;
+            /* Mark ListParts need to continue or not */
+            uint32_t continues : 1;
+            /* Mark ListParts has completed all the pages or not */
+            uint32_t completed : 1;
+        } list_parts_state;
         uint32_t create_multipart_upload_sent : 1;
         uint32_t create_multipart_upload_completed : 1;
         uint32_t complete_multipart_upload_sent : 1;
@@ -91,8 +100,11 @@ struct aws_s3_auto_ranged_put {
     } synced_data;
 };
 
+AWS_EXTERN_C_BEGIN
+
 /* Creates a new auto-ranged put meta request.  This will do a multipart upload in parallel when appropriate. */
-struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
+
+AWS_S3_API struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
@@ -100,4 +112,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     uint32_t num_parts,
     const struct aws_s3_meta_request_options *options);
 
-#endif
+AWS_EXTERN_C_END
+
+#endif /* AWS_S3_AUTO_RANGED_PUT_H */
