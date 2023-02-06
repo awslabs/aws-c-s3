@@ -990,7 +990,7 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
 
 struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor host,
+    struct aws_byte_cursor *host,
     struct aws_byte_cursor key,
     struct aws_byte_cursor content_type,
     struct aws_input_stream *body_stream,
@@ -1010,9 +1010,12 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     if (message == NULL) {
         return NULL;
     }
-
-    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
-
+    if (host) {
+        struct aws_http_header host_header = {.name = g_host_header_name, .value = *host};
+        if (aws_http_message_add_header(message, host_header)) {
+            goto error_clean_up_message;
+        }
+    }
     struct aws_http_header content_type_header = {.name = g_content_type_header_name, .value = content_type};
 
     char content_length_buffer[64] = "";
@@ -1029,10 +1032,6 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
         .name = g_acl_header_name,
         .value = aws_byte_cursor_from_c_str("bucket-owner-read"),
     };
-
-    if (aws_http_message_add_header(message, host_header)) {
-        goto error_clean_up_message;
-    }
 
     if (aws_http_message_add_header(message, content_type_header)) {
         goto error_clean_up_message;
@@ -1114,6 +1113,14 @@ int aws_s3_tester_client_new(
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
     };
+    struct aws_http_proxy_options proxy_options = {
+        .connection_type = AWS_HPCT_HTTP_FORWARD,
+        .host = aws_byte_cursor_from_c_str("localhost"),
+        .port = 8899,
+    };
+    if (options->use_proxy) {
+        client_config.proxy_options = &proxy_options;
+    }
 
     struct aws_tls_connection_options tls_connection_options;
     AWS_ZERO_STRUCT(tls_connection_options);
@@ -1339,15 +1346,10 @@ int aws_s3_tester_send_meta_request_with_options(
             }
 
             struct aws_byte_cursor test_object_path = aws_byte_cursor_from_buf(&object_path_buffer);
-
+            struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
             /* Put together a simple S3 Put Object request. */
             struct aws_http_message *message = aws_s3_test_put_object_request_new(
-                allocator,
-                aws_byte_cursor_from_string(host_name),
-                test_object_path,
-                g_test_body_content_type,
-                input_stream,
-                options->sse_type);
+                allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, options->sse_type);
 
             aws_byte_buf_clean_up(&object_path_buffer);
 
@@ -1655,14 +1657,10 @@ int aws_s3_tester_send_put_object_meta_request(
     }
     struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
 
+    struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
     /* Put together a simple S3 Put Object request. */
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
-        allocator,
-        aws_byte_cursor_from_string(host_name),
-        test_object_path,
-        g_test_body_content_type,
-        input_stream,
-        flags);
+        allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, flags);
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5) {
         ASSERT_SUCCESS(aws_s3_message_util_add_content_md5_header(allocator, &test_buffer, message));

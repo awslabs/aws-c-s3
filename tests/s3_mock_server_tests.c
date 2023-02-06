@@ -6,6 +6,7 @@
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
+#include <aws/io/stream.h>
 #include <aws/io/uri.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
@@ -578,6 +579,108 @@ TEST_CASE(resume_after_finished_mock_server) {
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(multipart_upload_proxy_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .use_proxy = true,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
+    };
+
+    /* The request can fail if proxy is unavailable. */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(endpoint_override_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* 1 - Mock server will response without Content-Range */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 5, /* Make sure we have exactly 4 parts */
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+    };
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    /* Put together a simple S3 Put Object request. */
+    struct aws_input_stream *input_stream =
+        aws_s3_test_input_stream_new(allocator, put_options.put_options.object_size_mb);
+    struct aws_http_message *message =
+        aws_s3_test_put_object_request_new(allocator, NULL, object_path, g_test_body_content_type, input_stream, 0);
+    ASSERT_NOT_NULL(message);
+
+    /* 1. Create request without host and use endpoint override for the host info */
+    put_options.message = message;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+
+    /* 2. Create request with host info missmatch endpoint override */
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bad_host"),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(message, host_header));
+    put_options.message = message;
+    put_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+
+    /* Clean up */
+    aws_http_message_destroy(message);
+    aws_input_stream_release(input_stream);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
