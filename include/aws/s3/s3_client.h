@@ -236,6 +236,8 @@ struct aws_s3_client_config {
     /**
      * Optional.
      * Proxy configuration for http connection.
+     * If the connection_type is AWS_HPCT_HTTP_LEGACY, it will be converted to AWS_HPCT_HTTP_TUNNEL if tls_mode is
+     * ENABLED. Otherwise, it will be converted to AWS_HPCT_HTTP_FORWARD.
      */
     struct aws_http_proxy_options *proxy_options;
 
