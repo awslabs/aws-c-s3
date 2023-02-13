@@ -305,12 +305,6 @@ struct aws_s3_client *aws_s3_client_new(
         *((size_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
-    if (client_config->proxy_options) {
-        client->proxy_config = aws_http_proxy_config_new_from_proxy_options(allocator, client_config->proxy_options);
-        if (client->proxy_config == NULL) {
-            goto on_error;
-        }
-    }
     client->connect_timeout_ms = client_config->connect_timeout_ms;
     if (client_config->proxy_ev_settings) {
         client->proxy_ev_settings = aws_mem_calloc(allocator, 1, sizeof(struct proxy_env_var_settings));
@@ -362,6 +356,14 @@ struct aws_s3_client *aws_s3_client_new(
             aws_tls_ctx_release(default_tls_ctx);
             aws_tls_ctx_options_clean_up(&default_tls_ctx_options);
 #endif
+        }
+    }
+
+    if (client_config->proxy_options) {
+        client->proxy_config = aws_http_proxy_config_new_from_proxy_options_with_tls_info(
+            allocator, client_config->proxy_options, client_config->tls_mode == AWS_MR_TLS_ENABLED);
+        if (client->proxy_config == NULL) {
+            goto on_error;
         }
     }
 
@@ -451,6 +453,8 @@ struct aws_s3_client *aws_s3_client_new(
     return client;
 
 on_error:
+    aws_string_destroy(client->region);
+
     if (client->tls_connection_options) {
         aws_tls_connection_options_clean_up(client->tls_connection_options);
         aws_mem_release(client->allocator, client->tls_connection_options);
