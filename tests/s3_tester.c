@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/common/environment.h>
 #include <aws/common/system_info.h>
 #include <aws/common/uri.h>
 #include <aws/http/request_response.h>
@@ -35,9 +36,6 @@ const struct aws_byte_cursor g_test_mrap_endpoint =
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
 const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
 
-const struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
-const struct aws_byte_cursor g_test_public_bucket_name =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
 const struct aws_byte_cursor g_s3_sse_c_alg_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm");
@@ -58,6 +56,11 @@ const struct aws_byte_cursor g_pre_existing_empty_object = AWS_BYTE_CUR_INIT_FRO
 
 const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/put-object-test");
 const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
+
+/* If BUCKET_NAME envrionment variable set, load from it, otherwise use aws-c-s3-test-bucket */
+struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
+/* If BUCKET_NAME envrionment variable set, use `$BUCKET_NAME-public`, otherwise aws-c-s3-test-bucket-public */
+struct aws_byte_cursor g_test_public_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
 
 #ifdef BYO_CRYPTO
 /* Under BYO_CRYPTO, this function currently needs to be defined by the user. Defining a null implementation here so
@@ -212,6 +215,8 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
     return endpoint_string;
 }
 
+AWS_STATIC_STRING_FROM_LITERAL(s_bucket_name_env_var, "BUCKET_NAME");
+
 int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
 
     AWS_PRECONDITION(allocator);
@@ -222,6 +227,18 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
     AWS_ZERO_STRUCT(*tester);
 
     tester->allocator = allocator;
+    if (aws_get_environment_value(allocator, s_bucket_name_env_var, &tester->bucket_name) == AWS_OP_SUCCESS &&
+        tester->bucket_name != NULL) {
+        g_test_bucket_name = aws_byte_cursor_from_string(tester->bucket_name);
+        char public_bucket_name_buffer[128] = "";
+        snprintf(
+            public_bucket_name_buffer,
+            sizeof(public_bucket_name_buffer),
+            "" PRInSTR "-public",
+            AWS_BYTE_CURSOR_PRI(g_test_bucket_name));
+        tester->public_bucket_name = aws_string_new_from_c_str(allocator, public_bucket_name_buffer);
+        g_test_public_bucket_name = aws_byte_cursor_from_string(tester->public_bucket_name);
+    }
 
     aws_s3_library_init(allocator);
 
@@ -529,6 +546,8 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
         aws_s3_tester_wait_for_client_shutdown(tester);
         tester->bound_to_client = false;
     }
+    aws_string_destroy(tester->bucket_name);
+    aws_string_destroy(tester->public_bucket_name);
 
     aws_array_list_clean_up(&tester->client_vtable_patches);
     aws_array_list_clean_up(&tester->meta_request_vtable_patches);

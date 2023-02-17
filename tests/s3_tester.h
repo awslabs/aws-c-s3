@@ -93,6 +93,9 @@ struct aws_s3_tester {
     struct aws_array_list meta_request_vtable_patches;
     void *user_data;
 
+    struct aws_string *bucket_name;
+    struct aws_string *public_bucket_name;
+
     struct {
         struct aws_mutex lock;
 
@@ -411,8 +414,6 @@ extern const struct aws_byte_cursor g_mock_server_uri;
 
 extern const struct aws_byte_cursor g_test_body_content_type;
 extern const struct aws_byte_cursor g_test_s3_region;
-extern const struct aws_byte_cursor g_test_bucket_name;
-extern const struct aws_byte_cursor g_test_public_bucket_name;
 
 extern const struct aws_byte_cursor g_pre_existing_object_1MB;
 extern const struct aws_byte_cursor g_pre_existing_object_10MB;
@@ -421,5 +422,10 @@ extern const struct aws_byte_cursor g_pre_existing_object_aes256_10MB;
 extern const struct aws_byte_cursor g_pre_existing_empty_object;
 
 extern const struct aws_byte_cursor g_put_object_prefix;
+
+/* If BUCKET_NAME envrionment variable set, load from it, otherwise use aws-c-s3-test-bucket */
+extern struct aws_byte_cursor g_test_bucket_name;
+/* If BUCKET_NAME envrionment variable set, use `$BUCKET_NAME-public`, otherwise aws-c-s3-test-bucket-public */
+extern struct aws_byte_cursor g_test_public_bucket_name;
 
 #endif /* AWS_S3_TESTER_H */

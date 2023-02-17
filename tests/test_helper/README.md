@@ -6,12 +6,16 @@ To create the S3 buckets and objects that tests will use:
 
 ``` sh
 pip3 install boto3
+export BUCKET_NAME=<bucket_name>
 python3 test_helper.py init
+# change directory to the build/tests
+cd aws-c-s3/build/tests && ctest
 ```
 
 To clean up the S3 buckets created
 
 ``` sh
+export BUCKET_NAME=<bucket_name>
 python3 test_helper.py clean
 ```
 
@@ -36,12 +40,17 @@ python3 test_helper.py clean
 
 - Delete the `aws-c-s3-test-bucket` and `aws-c-s3-test-bucket-public` and every object inside them
 
+## Bucket Name
+
+You can specific the bucket name to create via args to pass to the script or environment variable. If non of those set, the `init` action will create a random bucket name, and you need to set `BUCKET_NAME` environment variable to the printed out bucket name before running the test.
+
 ## Notes
 
 - The MRAP tests are not included in this script, and it's disabled by default. To run those tests, you will need to create a MRAP access point with the buckets have `pre-existing-1MB` in it. Then update `g_test_mrap_endpoint` to the uri of the MRAP endpoint and build with `-DENABLE_MRAP_TESTS=true`.
 - To run tests in tests/s3_mock_server_tests.c, initialize the mock S3 server first from [here](./../mock_s3_server/). And build your cmake project with `-ENABLE_MOCK_SERVER_TESTS=true`
+- Note: If you are not at the aws-common-runtime AWS team account, you must set environment variable `BUCKET_NAME` to the bucket created before running the test.
 
 ## TODO
 
 - Automatic the mrap creation
-- Instead of hard-coded path, bucket and region, use the helper to set env-var and pick up from tests.
+- Instead of hard-coded path and region, make it configurable and pick up from tests.
