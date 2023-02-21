@@ -42,7 +42,7 @@ python3 test_helper.py clean
 
 ## Bucket Name
 
-You can specific the bucket name to create via args to pass to the script or environment variable. If non of those set, the `init` action will create a random bucket name, and you need to set `BUCKET_NAME` environment variable to the printed out bucket name before running the test.
+You can specify the bucket name to be created either by passing argument to the script or by setting an environment variable. If neither of these options is chosen, the `init` action will create a random bucket name. In this case, you will need to set the `BUCKET_NAME` environment variable to the printed-out bucket name before running the test.
 
 ## Notes
 

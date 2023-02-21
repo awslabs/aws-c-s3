@@ -30,13 +30,12 @@ parser.add_argument(
 parser.add_argument(
     'bucket_name',
     nargs='?',
-    help='The bucket name base to use for the test buckets. If not specified, the $BUCKET_NAME will be use, if set. Otherwise, a radom name will be generated.')
+    help='The bucket name base to use for the test buckets. If not specified, the $BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
 
 args = parser.parse_args()
 
 if args.bucket_name is not None:
     BUCKET_NAME = args.bucket_name
-    PUBLIC_BUCKET_NAME = args.bucket_name + '-public'
 else:
     if "BUCKET_NAME" in os.environ:
         BUCKET_NAME = os.environ['BUCKET_NAME']
@@ -74,7 +73,7 @@ def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public
     try:
         s3_client.put_object(**args)
     except botocore.exceptions.ClientError as e:
-        print(f"Object {keyname} failed to uploaded, with exceptions {e}")
+        print(f"Object {keyname} failed to upload, with exception {e}")
         exit(-1)
     print(f"Object {keyname} uploaded")
 
@@ -161,7 +160,7 @@ if args.action == 'init':
         create_bucket_with_public_object()
         if "BUCKET_NAME" not in os.environ or os.environ['BUCKET_NAME'] != BUCKET_NAME:
             print(
-                f"* Please set the environment variable BUCKET_NAME to {BUCKET_NAME} before run the tests.")
+                f"* Please set the environment variable BUCKET_NAME to {BUCKET_NAME} before running the tests.")
     except Exception as e:
         print(e)
         try:

@@ -423,9 +423,9 @@ extern const struct aws_byte_cursor g_pre_existing_empty_object;
 
 extern const struct aws_byte_cursor g_put_object_prefix;
 
-/* If BUCKET_NAME envrionment variable set, load from it, otherwise use aws-c-s3-test-bucket */
+/* If `$BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 extern struct aws_byte_cursor g_test_bucket_name;
-/* If BUCKET_NAME envrionment variable set, use `$BUCKET_NAME-public`, otherwise aws-c-s3-test-bucket-public */
+/* If `$BUCKET_NAME` envrionment variable is set, use `$BUCKET_NAME-public`; otherwise, use aws-c-s3-test-bucket-public */
 extern struct aws_byte_cursor g_test_public_bucket_name;
 
 #endif /* AWS_S3_TESTER_H */

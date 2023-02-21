@@ -57,9 +57,9 @@ const struct aws_byte_cursor g_pre_existing_empty_object = AWS_BYTE_CUR_INIT_FRO
 const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/put-object-test");
 const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
 
-/* If BUCKET_NAME envrionment variable set, load from it, otherwise use aws-c-s3-test-bucket */
+/* If `$BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
-/* If BUCKET_NAME envrionment variable set, use `$BUCKET_NAME-public`, otherwise aws-c-s3-test-bucket-public */
+/* If `$BUCKET_NAME` envrionment variable is set, use `$BUCKET_NAME-public`; otherwise, use aws-c-s3-test-bucket-public */
 struct aws_byte_cursor g_test_public_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
 
 #ifdef BYO_CRYPTO
