@@ -30,18 +30,17 @@ parser.add_argument(
 parser.add_argument(
     'bucket_name',
     nargs='?',
-    help='The bucket name base to use for the test buckets. If not specified, the $BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
+    help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
 
 args = parser.parse_args()
 
 if args.bucket_name is not None:
     BUCKET_NAME = args.bucket_name
+elif "CRT_S3_TEST_BUCKET_NAME" in os.environ:
+    BUCKET_NAME = os.environ['CRT_S3_TEST_BUCKET_NAME']
 else:
-    if "BUCKET_NAME" in os.environ:
-        BUCKET_NAME = os.environ['BUCKET_NAME']
-    else:
-        # Generate a random bucket name
-        BUCKET_NAME = 'aws-c-s3-test-bucket-' + str(random.random())[2:8]
+    # Generate a random bucket name
+    BUCKET_NAME = 'aws-c-s3-test-bucket-' + str(random.random())[2:8]
 
 PUBLIC_BUCKET_NAME = BUCKET_NAME + "-public"
 
@@ -158,9 +157,9 @@ if args.action == 'init':
         print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
         create_bucket_with_lifecycle()
         create_bucket_with_public_object()
-        if "BUCKET_NAME" not in os.environ or os.environ['BUCKET_NAME'] != BUCKET_NAME:
+        if "CRT_S3_TEST_BUCKET_NAME" not in os.environ or os.environ['CRT_S3_TEST_BUCKET_NAME'] != BUCKET_NAME:
             print(
-                f"* Please set the environment variable BUCKET_NAME to {BUCKET_NAME} before running the tests.")
+                f"* Please set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME} before running the tests.")
     except Exception as e:
         print(e)
         try:
@@ -173,7 +172,7 @@ if args.action == 'init':
         exit(-1)
 elif args.action == 'clean':
     if "BUCKET_NAME" not in os.environ and args.bucket_name is None:
-        print("Set the environment variable BUCKET_NAME before clean up, or pass in bucket_name as argument.")
+        print("Set the environment variable CRT_S3_TEST_BUCKET_NAME before clean up, or pass in bucket_name as argument.")
         exit(-1)
     cleanup(BUCKET_NAME)
     cleanup(PUBLIC_BUCKET_NAME)

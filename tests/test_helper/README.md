@@ -6,7 +6,7 @@ To create the S3 buckets and objects that tests will use:
 
 ``` sh
 pip3 install boto3
-export BUCKET_NAME=<bucket_name>
+export CRT_S3_TEST_BUCKET_NAME=<bucket_name>
 python3 test_helper.py init
 # change directory to the build/tests
 cd aws-c-s3/build/tests && ctest
@@ -15,7 +15,7 @@ cd aws-c-s3/build/tests && ctest
 To clean up the S3 buckets created
 
 ``` sh
-export BUCKET_NAME=<bucket_name>
+export CRT_S3_TEST_BUCKET_NAME=<bucket_name>
 python3 test_helper.py clean
 ```
 
@@ -23,7 +23,7 @@ python3 test_helper.py clean
 
 ### `init` action
 
-- Create `aws-c-s3-test-bucket` in us-west-2
+- Create `<BUCKET_NAME>` in us-west-2.
 - Add the lifecyle to automatic clean up the `upload/` after one day
 - Upload files:
   - `pre-existing-10MB-aes256-c` [SSE-C](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html#sse-c-highlights) encrypted fille
@@ -32,23 +32,23 @@ python3 test_helper.py clean
   - `pre-existing-10MB`
   - `pre-existing-1MB`
   - `pre-existing-empty`
-- Create `aws-c-s3-test-bucket-public` in us-west-2
+- Create `<BUCKET_NAME>-public` in us-west-2
 - Upload files:
   - `pre-existing-1MB` 1MB file with public read access.
 
 ### `clean` action
 
-- Delete the `aws-c-s3-test-bucket` and `aws-c-s3-test-bucket-public` and every object inside them
+- Delete the `<BUCKET_NAME>` and `<BUCKET_NAME>-public` and every object inside them
 
-## Bucket Name
+## BUCKET_NAME
 
-You can specify the bucket name to be created either by passing argument to the script or by setting an environment variable. If neither of these options is chosen, the `init` action will create a random bucket name. In this case, you will need to set the `BUCKET_NAME` environment variable to the printed-out bucket name before running the test.
+You can specify the bucket name to be created either by passing argument to the script or by setting an environment variable, the `bucket_name` passed in takes precedence. If neither of these options is chosen, the `init` action will create a random bucket name. In this case, you will need to set the `CRT_S3_TEST_BUCKET_NAME` environment variable to the printed-out bucket name before running the test.
 
 ## Notes
 
 - The MRAP tests are not included in this script, and it's disabled by default. To run those tests, you will need to create a MRAP access point with the buckets have `pre-existing-1MB` in it. Then update `g_test_mrap_endpoint` to the uri of the MRAP endpoint and build with `-DENABLE_MRAP_TESTS=true`.
 - To run tests in tests/s3_mock_server_tests.c, initialize the mock S3 server first from [here](./../mock_s3_server/). And build your cmake project with `-ENABLE_MOCK_SERVER_TESTS=true`
-- Note: If you are not at the aws-common-runtime AWS team account, you must set environment variable `BUCKET_NAME` to the bucket created before running the test.
+- Note: If you are not at the aws-common-runtime AWS team account, you must set environment variable `CRT_S3_TEST_BUCKET_NAME` to the bucket created before running the test.
 
 ## TODO
 
