@@ -5,6 +5,7 @@ import boto3
 import botocore
 import sys
 import os
+import random
 
 
 s3 = boto3.resource('s3')
@@ -14,16 +15,34 @@ s3_client = boto3.client('s3')
 s3_control_client = boto3.client('s3control')
 
 
-BUCKET_NAME = 'aws-c-s3-test-bucket'
-# Create a public bucket with one object for testing public access
-PUBLIC_BUCKET_NAME = 'aws-c-s3-test-bucket-public'
-
 REGION = 'us-west-2'
-os.environ['AWS_DEFAULT_REGION'] = REGION
 
 
 MB = 1024*1024
 GB = 1024*1024*1024
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    'action',
+    choices=['init', 'clean'],
+    help='Initialize or clean up the test buckets')
+parser.add_argument(
+    'bucket_name',
+    nargs='?',
+    help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
+
+args = parser.parse_args()
+
+if args.bucket_name is not None:
+    BUCKET_NAME = args.bucket_name
+elif "CRT_S3_TEST_BUCKET_NAME" in os.environ:
+    BUCKET_NAME = os.environ['CRT_S3_TEST_BUCKET_NAME']
+else:
+    # Generate a random bucket name
+    BUCKET_NAME = 'aws-c-s3-test-bucket-' + str(random.random())[2:8]
+
+PUBLIC_BUCKET_NAME = BUCKET_NAME + "-public"
 
 
 def create_bytes(size):
@@ -33,6 +52,7 @@ def create_bytes(size):
 def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public_read=False):
     if size == 0:
         s3_client.put_object(Bucket=bucket, Key=keyname)
+        print(f"Object {keyname} uploaded")
         return
 
     body = create_bytes(size)
@@ -49,8 +69,11 @@ def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public
 
     if public_read:
         args['ACL'] = 'public-read'
-
-    s3_client.put_object(**args)
+    try:
+        s3_client.put_object(**args)
+    except botocore.exceptions.ClientError as e:
+        print(f"Object {keyname} failed to upload, with exception {e}")
+        exit(-1)
     print(f"Object {keyname} uploaded")
 
 
@@ -97,7 +120,7 @@ def create_bucket_with_lifecycle():
         # The bucket already exists. That's fine.
         if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou' or e.response['Error']['Code'] == 'BucketAlreadyExists':
             print(
-                f"Bucket {PUBLIC_BUCKET_NAME} not created, skip initializing.", file=sys.stderr)
+                f"Bucket {BUCKET_NAME} not created, skip initializing.", file=sys.stderr)
             return
         raise e
 
@@ -115,6 +138,10 @@ def create_bucket_with_public_object():
             print(
                 f"Bucket {PUBLIC_BUCKET_NAME} not created, skip initializing.", file=sys.stderr)
             return
+        if e.response['Error']['Code'] == 'AccessDenied':
+            print(
+                f"Check your account level S3 settings, public access may be blocked.", file=sys.stderr)
+            return
         raise e
 
 
@@ -125,18 +152,27 @@ def cleanup(bucket_name):
     print(f"Bucket {bucket_name} deleted", file=sys.stderr)
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    'action',
-    choices=['init', 'clean'],
-    help='Initialize or clean up the test buckets')
-
-args = parser.parse_args()
-
 if args.action == 'init':
-    create_bucket_with_lifecycle()
-    create_bucket_with_public_object()
-
-if args.action == 'clean':
+    try:
+        print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
+        create_bucket_with_lifecycle()
+        create_bucket_with_public_object()
+        if "CRT_S3_TEST_BUCKET_NAME" not in os.environ or os.environ['CRT_S3_TEST_BUCKET_NAME'] != BUCKET_NAME:
+            print(
+                f"* Please set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME} before running the tests.")
+    except Exception as e:
+        print(e)
+        try:
+            # Try to clean up the bucket created, when initialization failed.
+            cleanup(BUCKET_NAME)
+            cleanup(PUBLIC_BUCKET_NAME)
+        except Exception as e:
+            exit(-1)
+        raise e
+        exit(-1)
+elif args.action == 'clean':
+    if "BUCKET_NAME" not in os.environ and args.bucket_name is None:
+        print("Set the environment variable CRT_S3_TEST_BUCKET_NAME before clean up, or pass in bucket_name as argument.")
+        exit(-1)
     cleanup(BUCKET_NAME)
     cleanup(PUBLIC_BUCKET_NAME)
