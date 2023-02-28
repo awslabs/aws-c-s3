@@ -17,7 +17,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-#if _MSC_VER
+#ifdef _MSC_VER
 #    pragma warning(disable : 4706) /* assignment in conditional */
 #endif                              /* _MSC_VER */
 

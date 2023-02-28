@@ -24,7 +24,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#if _MSC_VER
+#ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif
 

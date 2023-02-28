@@ -37,7 +37,7 @@
 #include <inttypes.h>
 #include <math.h>
 
-#if _MSC_VER
+#ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif                              /* _MSC_VER */
 
