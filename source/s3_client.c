@@ -77,8 +77,8 @@ static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
-/* Kill connection if it has an active request and hasn't sent or received any bytes in the last N seconds.
- * This is important for detecting dead connections. */
+/* Default time until a connection is declared dead, while handling a request but seeing no activity.
+ * 30 seconds mirrors the value currently used by the Java SDK. */
 static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 
 /* Called when ref count is 0. */
@@ -329,9 +329,11 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     if (client_config->monitoring_options) {
-        client->monitoring_options =
-            aws_mem_calloc(allocator, 1, sizeof(struct aws_http_connection_monitoring_options));
-        *client->monitoring_options = *client_config->monitoring_options;
+        client->monitoring_options = *client_config->monitoring_options;
+    } else {
+        client->monitoring_options.minimum_throughput_bytes_per_second = 0;
+        client->monitoring_options.allowable_throughput_failure_interval_seconds =
+            s_default_throughput_failure_interval_seconds;
     }
 
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED) {
@@ -473,7 +475,6 @@ on_error:
         client->proxy_ev_settings->tls_options = NULL;
     }
     aws_mem_release(client->allocator, client->proxy_ev_settings);
-    aws_mem_release(client->allocator, client->monitoring_options);
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
@@ -561,7 +562,6 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
         client->proxy_ev_settings->tls_options = NULL;
     }
     aws_mem_release(client->allocator, client->proxy_ev_settings);
-    aws_mem_release(client->allocator, client->monitoring_options);
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_mutex_clean_up(&client->synced_data.lock);
@@ -851,18 +851,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
 
         if (was_created) {
-            /* Always use monitoring to detect dead HTTP connections.
-             * If the user didn't pass in settings, use defaults. */
-            struct aws_http_connection_monitoring_options monitoring_options;
-            AWS_ZERO_STRUCT(monitoring_options);
-            if (client->monitoring_options) {
-                monitoring_options = *client->monitoring_options;
-            } else {
-                monitoring_options.minimum_throughput_bytes_per_second = 0;
-                monitoring_options.allowable_throughput_failure_interval_seconds =
-                    s_default_throughput_failure_interval_seconds;
-            }
-
             struct aws_s3_endpoint_options endpoint_options = {
                 .host_name = endpoint_host_name,
                 .client_bootstrap = client->client_bootstrap,
@@ -875,7 +863,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .proxy_ev_settings = client->proxy_ev_settings,
                 .connect_timeout_ms = client->connect_timeout_ms,
                 .tcp_keep_alive_options = client->tcp_keep_alive_options,
-                .monitoring_options = &monitoring_options,
+                .monitoring_options = &client->monitoring_options,
             };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
