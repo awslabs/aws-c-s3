@@ -77,6 +77,10 @@ static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
+/* Kill connection if it has an active request and hasn't sent or received any bytes in the last N seconds.
+ * This is important for detecting dead connections. */
+static const uint32_t s_default_throughput_failure_interval_seconds = 30;
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -847,6 +851,18 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
 
         if (was_created) {
+            /* Always use monitoring to detect dead HTTP connections.
+             * If the user didn't pass in settings, use defaults. */
+            struct aws_http_connection_monitoring_options monitoring_options;
+            AWS_ZERO_STRUCT(monitoring_options);
+            if (client->monitoring_options) {
+                monitoring_options = *client->monitoring_options;
+            } else {
+                monitoring_options.minimum_throughput_bytes_per_second = 0;
+                monitoring_options.allowable_throughput_failure_interval_seconds =
+                    s_default_throughput_failure_interval_seconds;
+            }
+
             struct aws_s3_endpoint_options endpoint_options = {
                 .host_name = endpoint_host_name,
                 .client_bootstrap = client->client_bootstrap,
@@ -859,7 +875,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .proxy_ev_settings = client->proxy_ev_settings,
                 .connect_timeout_ms = client->connect_timeout_ms,
                 .tcp_keep_alive_options = client->tcp_keep_alive_options,
-                .monitoring_options = client->monitoring_options};
+                .monitoring_options = &monitoring_options,
+            };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
 

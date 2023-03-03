@@ -90,6 +90,7 @@ struct aws_s3_endpoint_options {
 
     /**
      * Optional.
+     * If NULL, default values are used.
      * Configuration options for connection monitoring.
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
      */
