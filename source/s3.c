@@ -3,12 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/s3.h>
-
 #include <aws/auth/auth.h>
 #include <aws/common/error.h>
 #include <aws/common/hash_table.h>
 #include <aws/http/http.h>
+#include <aws/s3/s3.h>
 
 #define AWS_DEFINE_ERROR_INFO_S3(CODE, STR) AWS_DEFINE_ERROR_INFO(CODE, STR, "aws-c-s3")
 
