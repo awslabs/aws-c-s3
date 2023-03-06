@@ -92,7 +92,7 @@ static int s_test_s3_client_monitoring_options_override(struct aws_allocator *al
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_TRUE(
-        client->monitoring_options->minimum_throughput_bytes_per_second ==
+        client->monitoring_options.minimum_throughput_bytes_per_second ==
         client_config.monitoring_options->minimum_throughput_bytes_per_second);
 
     aws_s3_client_release(client);

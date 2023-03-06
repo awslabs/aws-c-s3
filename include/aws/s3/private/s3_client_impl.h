@@ -247,11 +247,11 @@ struct aws_s3_client {
     struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
 
     /**
-     * Optional.
      * Configuration options for connection monitoring.
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     * If user passes in NULL, default values are used.
      */
-    struct aws_http_connection_monitoring_options *monitoring_options;
+    struct aws_http_connection_monitoring_options monitoring_options;
 
     /* tls options from proxy environment settings. */
     struct aws_tls_connection_options *proxy_ev_tls_options;

@@ -266,6 +266,7 @@ struct aws_s3_client_config {
      * Optional.
      * Configuration options for connection monitoring.
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     * If set to NULL, default values are used.
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
 
