@@ -72,6 +72,28 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
+static struct aws_http_message *s_copy_request_but_send_filepath(
+    struct aws_allocator *allocator,
+    struct aws_http_message *original_request,
+    struct aws_byte_cursor send_filepath) {
+
+    struct aws_string *filepath_str = aws_string_new_from_cursor(allocator, &send_filepath);
+    struct aws_input_stream *body_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(filepath_str));
+    if (!body_stream) {
+        return NULL;
+    }
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(original_request);
+    struct aws_http_message *new_request = aws_http_message_new_request_with_headers(allocator, headers);
+
+    /* TODO: Content-Length ??? */
+
+    aws_http_message_set_body_stream(new_request, body_stream);
+    aws_input_stream_release(body_stream);
+
+    return new_request;
+}
+
 static int s_meta_request_get_response_headers_checksum_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
@@ -226,9 +248,17 @@ int aws_s3_meta_request_init_base(
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
 
-    /* Keep a reference to the original message structure passed in. */
-    meta_request->initial_request_message = options->message;
-    aws_http_message_acquire(options->message);
+    if (options->send_filepath.len > 0) {
+        /* Create new message based on the original, but with new body-stream */
+        meta_request->initial_request_message =
+            s_copy_request_but_send_filepath(allocator, options->message, options->send_filepath);
+        if (meta_request->initial_request_message == NULL) {
+            goto error;
+        }
+    } else {
+        /* Keep a reference to the original message structure passed in. */
+        meta_request->initial_request_message = aws_http_message_acquire(options->message);
+    }
 
     /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
     if (client != NULL) {
