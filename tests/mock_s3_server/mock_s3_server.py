@@ -14,7 +14,7 @@ import trio
 import h11
 
 MAX_RECV = 2**16
-TIMEOUT = 10
+TIMEOUT = 120 # this must be higher than any response's "delay" setting
 
 VERBOSE = False
 
@@ -175,6 +175,12 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False, ge
     with open(response_json_path, 'r') as f:
         data = json.load(f)
 
+    # if response has delay, then sleep before sending it
+    delay = data.get('delay', 0)
+    if delay > 0:
+        assert delay < TIMEOUT
+        await trio.sleep(delay)
+
     status_code = data['status']
     if generate_body:
         # generate body with a specific size instead
@@ -315,7 +321,6 @@ async def handle_mock_s3_request(wrapper, request):
     elif method == "DELETE":
         request_type = S3Opts.AbortMultipartUpload
     elif method == "GET" or method == "HEAD":
-        # There are other GET requests, but we only support GetObject for now.
         if parsed_path.query.find("uploadId") != -1:
             # GET /Key+?max-parts=MaxParts&part-number-marker=PartNumberMarker&uploadId=UploadId HTTP/1.1 -- List Parts
             request_type = S3Opts.ListParts
