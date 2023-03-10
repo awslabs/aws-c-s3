@@ -918,6 +918,42 @@ error_clean_up:
     return NULL;
 }
 
+/* Copy an existing HTTP message's headers, method, and path. */
+struct aws_http_message *aws_s3_message_util_copy_http_message_filepath_body_all_headers(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_cursor filepath) {
+
+    bool success = false;
+    struct aws_string *filepath_str = NULL;
+    struct aws_input_stream *body_stream = NULL;
+    struct aws_http_message *message = NULL;
+
+    message = aws_s3_message_util_copy_http_message_no_body_filter_headers(allocator, base_message, NULL, 0, false);
+    if (!message) {
+        goto clean_up;
+    }
+
+    filepath_str = aws_string_new_from_cursor(allocator, &filepath);
+    body_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(filepath_str));
+    if (!body_stream) {
+        goto clean_up;
+    }
+    aws_http_message_set_body_stream(message, body_stream);
+
+    success = true;
+
+clean_up:
+    aws_string_destroy(filepath_str);
+    aws_input_stream_release(body_stream);
+    if (success) {
+        return message;
+    } else {
+        aws_http_message_release(message);
+        return NULL;
+    }
+}
+
 void aws_s3_message_util_copy_headers(
     struct aws_http_message *source_message,
     struct aws_http_message *dest_message,

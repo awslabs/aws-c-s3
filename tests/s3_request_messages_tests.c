@@ -388,14 +388,9 @@ static int s_test_http_message_body_stream(
     ASSERT_TRUE(body_stream != NULL);
 
     /* Check for the content length header. */
-    struct aws_byte_cursor content_length_header_value;
-    AWS_ZERO_STRUCT(content_length_header_value);
-    ASSERT_SUCCESS(aws_http_headers_get(headers, g_content_length_header_name, &content_length_header_value));
-
-    struct aws_string *content_length_header_str = aws_string_new_from_cursor(allocator, &content_length_header_value);
-    uint32_t content_length = (uint32_t)atoi((const char *)content_length_header_str->bytes);
-    ASSERT_TRUE(content_length == (uint32_t)expected_stream_contents->len);
-    aws_string_destroy(content_length_header_str);
+    uint64_t content_length = 0;
+    ASSERT_SUCCESS(aws_s3_tester_get_content_length(headers, &content_length));
+    ASSERT_TRUE(content_length == expected_stream_contents->len);
 
     /* Check that the stream data is equal to the original buffer data. */
     struct aws_byte_buf stream_read_buffer;

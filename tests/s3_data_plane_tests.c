@@ -3025,6 +3025,66 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_round_trip_with_filepath, s_test_s3_round_trip_with_filepath)
+static int s_test_s3_round_trip_with_filepath(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /*** PUT FILE ***/
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .object_path_override = object_path,
+                .file_on_disk = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** GET FILE ***/
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_chunked_then_unchunked, s_test_s3_chunked_then_unchunked)
 static int s_test_s3_chunked_then_unchunked(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

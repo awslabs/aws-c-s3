@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/signable.h>
 #include <aws/auth/signing.h>
@@ -70,28 +71,6 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     AWS_PRECONDITION(meta_request);
 
     aws_mutex_unlock(&meta_request->synced_data.lock);
-}
-
-static struct aws_http_message *s_copy_request_but_send_filepath(
-    struct aws_allocator *allocator,
-    struct aws_http_message *original_request,
-    struct aws_byte_cursor send_filepath) {
-
-    struct aws_string *filepath_str = aws_string_new_from_cursor(allocator, &send_filepath);
-    struct aws_input_stream *body_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(filepath_str));
-    if (!body_stream) {
-        return NULL;
-    }
-
-    struct aws_http_headers *headers = aws_http_message_get_headers(original_request);
-    struct aws_http_message *new_request = aws_http_message_new_request_with_headers(allocator, headers);
-
-    /* TODO: Content-Length ??? */
-
-    aws_http_message_set_body_stream(new_request, body_stream);
-    aws_input_stream_release(body_stream);
-
-    return new_request;
 }
 
 static int s_meta_request_get_response_headers_checksum_callback(
@@ -249,9 +228,9 @@ int aws_s3_meta_request_init_base(
     }
 
     if (options->send_filepath.len > 0) {
-        /* Create new message based on the original, but with new body-stream */
-        meta_request->initial_request_message =
-            s_copy_request_but_send_filepath(allocator, options->message, options->send_filepath);
+        /* Create new message based on the original, but with body-stream that reads directly from file */
+        meta_request->initial_request_message = aws_s3_message_util_copy_http_message_filepath_body_all_headers(
+            allocator, options->message, options->send_filepath);
         if (meta_request->initial_request_message == NULL) {
             goto error;
         }

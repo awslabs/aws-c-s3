@@ -11,6 +11,7 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/environment.h>
+#include <aws/common/file.h>
 #include <aws/common/system_info.h>
 #include <aws/common/uri.h>
 #include <aws/http/request_response.h>
@@ -1196,6 +1197,8 @@ int aws_s3_tester_send_meta_request_with_options(
 
     struct aws_allocator *allocator = options->allocator;
 
+    struct aws_string *filepath_str = NULL;
+
     struct aws_s3_tester local_tester;
     AWS_ZERO_STRUCT(local_tester);
     bool clean_up_local_tester = false;
@@ -1371,8 +1374,6 @@ int aws_s3_tester_send_meta_request_with_options(
             struct aws_http_message *message = aws_s3_test_put_object_request_new(
                 allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, options->sse_type);
 
-            aws_byte_buf_clean_up(&object_path_buffer);
-
             if (options->put_options.content_length) {
                 /* make a invalid request */
                 char content_length_buffer[64] = "";
@@ -1389,7 +1390,43 @@ int aws_s3_tester_send_meta_request_with_options(
                 aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("invalid_path"));
             }
 
+            if (options->put_options.file_on_disk) {
+                /* write input_stream to a tmp file on disk */
+                struct aws_byte_buf filepath_buf;
+                aws_byte_buf_init(&filepath_buf, allocator, 128);
+                struct aws_byte_cursor filepath_prefix = aws_byte_cursor_from_c_str("tmp");
+                aws_byte_buf_append_dynamic(&filepath_buf, &filepath_prefix);
+                aws_byte_buf_append_dynamic(&filepath_buf, &test_object_path);
+                for (size_t i = 0; i < filepath_buf.len; ++i) {
+                    if (!isalnum(filepath_buf.buffer[i])) {
+                        filepath_buf.buffer[i] = '_'; /* sanitize filename */
+                    }
+                }
+                filepath_str = aws_string_new_from_buf(allocator, &filepath_buf);
+                aws_byte_buf_clean_up(&filepath_buf);
+
+                FILE *file = aws_fopen(aws_string_c_str(filepath_str), "wb");
+                ASSERT_NOT_NULL(file, "Cannot open file for write: %s", aws_string_c_str(filepath_str));
+
+                int64_t stream_length = 0;
+                ASSERT_SUCCESS(aws_input_stream_get_length(input_stream, &stream_length));
+
+                struct aws_byte_buf data_buf;
+                ASSERT_SUCCESS(aws_byte_buf_init(&data_buf, allocator, (size_t)stream_length));
+                ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data_buf));
+                ASSERT_UINT_EQUALS((size_t)stream_length, data_buf.len);
+
+                ASSERT_UINT_EQUALS(data_buf.len, fwrite(data_buf.buffer, 1, data_buf.len, file));
+                fclose(file);
+                aws_byte_buf_clean_up(&data_buf);
+
+                /* use filepath instead of input_stream */
+                meta_request_options.send_filepath = aws_byte_cursor_from_string(filepath_str);
+                aws_http_message_set_body_stream(message, NULL);
+            }
+
             meta_request_options.message = message;
+            aws_byte_buf_clean_up(&object_path_buffer);
         }
 
         ASSERT_TRUE(meta_request_options.message != NULL);
@@ -1475,6 +1512,11 @@ int aws_s3_tester_send_meta_request_with_options(
         aws_s3_tester_clean_up(&local_tester);
     }
     aws_uri_clean_up(&mock_server);
+
+    if (filepath_str) {
+        aws_file_delete(filepath_str);
+        aws_string_destroy(filepath_str);
+    }
 
     return AWS_OP_SUCCESS;
 }
@@ -1590,15 +1632,6 @@ int aws_s3_tester_validate_get_object_results(
     ASSERT_TRUE(meta_request_test_results->error_response_headers == NULL);
     ASSERT_TRUE(meta_request_test_results->error_response_body.len == 0);
 
-    struct aws_s3_tester *tester = meta_request_test_results->tester;
-
-    struct aws_byte_cursor content_length_cursor;
-    AWS_ZERO_STRUCT(content_length_cursor);
-    ASSERT_SUCCESS(aws_http_headers_get(
-        meta_request_test_results->response_headers,
-        aws_byte_cursor_from_c_str("Content-Length"),
-        &content_length_cursor));
-
     struct aws_byte_cursor sse_byte_cursor;
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_SSE_KMS) {
@@ -1619,12 +1652,8 @@ int aws_s3_tester_validate_get_object_results(
         ASSERT_TRUE(aws_byte_cursor_eq_c_str(&sse_byte_cursor, "AES256"));
     }
 
-    struct aws_string *content_length_str = aws_string_new_from_cursor(tester->allocator, &content_length_cursor);
-
-    char *content_length_str_end = NULL;
-    uint64_t content_length = strtoull((const char *)content_length_str->bytes, &content_length_str_end, 10);
-
-    aws_string_destroy(content_length_str);
+    uint64_t content_length = 0;
+    ASSERT_SUCCESS(aws_s3_tester_get_content_length(meta_request_test_results->response_headers, &content_length));
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
@@ -1781,5 +1810,14 @@ int aws_s3_tester_upload_file_path_init(
     ASSERT_SUCCESS(aws_byte_buf_init_copy_from_cursor(out_path_buffer, allocator, g_upload_folder));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(out_path_buffer, &file_path));
 
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uint64_t *out_content_length) {
+    struct aws_byte_cursor value_cursor;
+    AWS_ZERO_STRUCT(value_cursor);
+    ASSERT_SUCCESS(aws_http_headers_get(headers, aws_byte_cursor_from_c_str("Content-Length"), &value_cursor));
+
+    ASSERT_SUCCESS(aws_byte_cursor_utf8_parse_u64(value_cursor, out_content_length));
     return AWS_OP_SUCCESS;
 }
