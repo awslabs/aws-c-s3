@@ -1008,23 +1008,15 @@ struct aws_s3_meta_request_vtable_patch *aws_s3_tester_get_meta_request_vtable_p
     aws_array_list_get_at_ptr(&tester->meta_request_vtable_patches, (void **)&patch, index);
     return patch;
 }
-
-struct aws_http_message *aws_s3_test_put_object_request_new(
+struct aws_http_message *aws_s3_test_put_object_request_new_without_body(
     struct aws_allocator *allocator,
     struct aws_byte_cursor *host,
-    struct aws_byte_cursor key,
     struct aws_byte_cursor content_type,
-    struct aws_input_stream *body_stream,
+    struct aws_byte_cursor key,
+    uint64_t content_length,
     uint32_t flags) {
 
     AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(body_stream);
-
-    int64_t body_stream_length = 0;
-
-    if (aws_input_stream_get_length(body_stream, &body_stream_length)) {
-        return NULL;
-    }
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
 
@@ -1040,7 +1032,7 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_http_header content_type_header = {.name = g_content_type_header_name, .value = content_type};
 
     char content_length_buffer[64] = "";
-    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRId64 "", body_stream_length);
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64 "", content_length);
 
     struct aws_http_header content_length_header = {
         .name = g_content_length_header_name,
@@ -1108,8 +1100,6 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
         goto error_clean_up_message;
     }
 
-    aws_http_message_set_body_stream(message, body_stream);
-
     return message;
 
 error_clean_up_message:
@@ -1120,6 +1110,32 @@ error_clean_up_message:
     }
 
     return NULL;
+}
+
+struct aws_http_message *aws_s3_test_put_object_request_new(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor *host,
+    struct aws_byte_cursor key,
+    struct aws_byte_cursor content_type,
+    struct aws_input_stream *body_stream,
+    uint32_t flags) {
+
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(body_stream);
+
+    int64_t body_stream_length = 0;
+    if (aws_input_stream_get_length(body_stream, &body_stream_length)) {
+        return NULL;
+    }
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, host, key, content_type, (uint64_t)body_stream_length, flags);
+    if (!message) {
+        return NULL;
+    }
+
+    aws_http_message_set_body_stream(message, body_stream);
+    return message;
 }
 
 int aws_s3_tester_client_new(

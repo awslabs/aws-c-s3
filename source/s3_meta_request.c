@@ -216,10 +216,6 @@ int aws_s3_meta_request_init_base(
         goto error;
     }
 
-    /* Nothing can fail after here. Leave the impl not affected by failure of initializing base. */
-    meta_request->impl = impl;
-    meta_request->vtable = vtable;
-
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     checksum_config_init(&meta_request->checksum_config, options->checksum_config);
@@ -227,8 +223,9 @@ int aws_s3_meta_request_init_base(
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
 
+    /* Set initial_meta_request */
     if (options->send_filepath.len > 0) {
-        /* Create new message based on the original, but with body-stream that reads directly from file */
+        /* Create copy of original message, but with body-stream that reads directly from file */
         meta_request->initial_request_message = aws_s3_message_util_copy_http_message_filepath_body_all_headers(
             allocator, options->message, options->send_filepath);
         if (meta_request->initial_request_message == NULL) {
@@ -268,6 +265,10 @@ int aws_s3_meta_request_init_base(
         meta_request->body_callback = options->body_callback;
         meta_request->finish_callback = options->finish_callback;
     }
+
+    /* Nothing can fail after here. Leave the impl not affected by failure of initializing base. */
+    meta_request->impl = impl;
+    meta_request->vtable = vtable;
 
     return AWS_OP_SUCCESS;
 error:

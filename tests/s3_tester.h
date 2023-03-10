@@ -309,6 +309,14 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_input_stream *body_stream,
     uint32_t flags);
 
+struct aws_http_message *aws_s3_test_put_object_request_new_without_body(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor *host,
+    struct aws_byte_cursor content_type,
+    struct aws_byte_cursor key,
+    uint64_t content_length,
+    uint32_t flags);
+
 int aws_s3_tester_client_new(
     struct aws_s3_tester *tester,
     struct aws_s3_tester_client_options *options,

@@ -3833,6 +3833,41 @@ static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *alloc
     return 0;
 }
 
+/* Test that we fail to create a metarequest when an invalid `send_filepath` is passed in */
+AWS_TEST_CASE(test_s3_put_fail_object_invalid_send_filepath, s_test_s3_put_fail_object_invalid_send_filepath)
+static int s_test_s3_put_fail_object_invalid_send_filepath(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_name, g_test_body_content_type, object_key, 1024 /*content_length*/, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .message = message,
+        .send_filepath = aws_byte_cursor_from_c_str("obviously_invalid_file_path"),
+    };
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+    ASSERT_NULL(meta_request);
+    ASSERT_INT_EQUALS(AWS_ERROR_FILE_INVALID_PATH, aws_last_error());
+
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 AWS_TEST_CASE(
     test_s3_put_single_part_fail_object_inputstream_fail_reading,
     s_test_s3_put_single_part_fail_object_inputstream_fail_reading)
