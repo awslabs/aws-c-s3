@@ -1129,7 +1129,7 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     }
 
     struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
-        allocator, host, key, content_type, (uint64_t)body_stream_length, flags);
+        allocator, host, content_type, key, (uint64_t)body_stream_length, flags);
     if (!message) {
         return NULL;
     }
