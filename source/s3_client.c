@@ -331,7 +331,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->monitoring_options) {
         client->monitoring_options = *client_config->monitoring_options;
     } else {
-        client->monitoring_options.minimum_throughput_bytes_per_second = 0;
+        client->monitoring_options.minimum_throughput_bytes_per_second = 1;
         client->monitoring_options.allowable_throughput_failure_interval_seconds =
             s_default_throughput_failure_interval_seconds;
     }
