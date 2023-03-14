@@ -918,7 +918,7 @@ error_clean_up:
     return NULL;
 }
 
-/* Copy an existing HTTP message's headers, method, and path. */
+/* Copy message and retain all headers, but replace body with one that reads directly from a filepath. */
 struct aws_http_message *aws_s3_message_util_copy_http_message_filepath_body_all_headers(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
@@ -929,11 +929,18 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_filepath_body_all
     struct aws_input_stream *body_stream = NULL;
     struct aws_http_message *message = NULL;
 
-    message = aws_s3_message_util_copy_http_message_no_body_filter_headers(allocator, base_message, NULL, 0, false);
+    /* Copy message and retain all headers */
+    message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+        allocator,
+        base_message,
+        NULL /*excluded_header_array*/,
+        0 /*excluded_header_array_size*/,
+        false /*exclude_x_amz_meta*/);
     if (!message) {
         goto clean_up;
     }
 
+    /* Create body-stream that reads from file */
     filepath_str = aws_string_new_from_cursor(allocator, &filepath);
     body_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(filepath_str));
     if (!body_stream) {
