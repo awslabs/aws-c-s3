@@ -678,7 +678,12 @@ int s_apply_endpoint_override(
     struct aws_byte_cursor host_value;
     AWS_FATAL_ASSERT(aws_http_headers_get(message_headers, g_host_header_name, &host_value) == AWS_OP_SUCCESS);
 
-    if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, endpoint_authority)) {
+    // endpoint may be of form host[:port] in dev mode of other object storage like MinIO
+    // We need to compare only the host part in below condition
+    const struct aws_byte_cursor substr = {0};
+    aws_byte_cursor_next_split(endpoint_authority, ':', &substr);
+
+    if (endpoint_authority != NULL && !aws_byte_cursor_eq(&host_value, &substr)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request; host header value " PRInSTR
