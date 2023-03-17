@@ -182,6 +182,8 @@ struct aws_s3_tester_meta_request_options {
         bool invalid_input_stream;
         bool valid_md5;
         bool invalid_md5;
+        /* write file to desk, and then send via aws_s3_meta_request_options.send_filepath */
+        bool file_on_disk;
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
@@ -307,6 +309,14 @@ struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_input_stream *body_stream,
     uint32_t flags);
 
+struct aws_http_message *aws_s3_test_put_object_request_new_without_body(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor *host,
+    struct aws_byte_cursor content_type,
+    struct aws_byte_cursor key,
+    uint64_t content_length,
+    uint32_t flags);
+
 int aws_s3_tester_client_new(
     struct aws_s3_tester *tester,
     struct aws_s3_tester_client_options *options,
@@ -407,6 +417,8 @@ int aws_s3_tester_upload_file_path_init(
     struct aws_allocator *allocator,
     struct aws_byte_buf *out_path_buffer,
     struct aws_byte_cursor file_path);
+
+int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uint64_t *out_content_length);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 

@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0.
 import argparse
@@ -72,7 +74,9 @@ def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public
     try:
         s3_client.put_object(**args)
     except botocore.exceptions.ClientError as e:
-        print(f"Object {keyname} failed to upload, with exception {e}")
+        print(f"Object {keyname} failed to upload, with exception: {e}")
+        if public_read and e.response['Error']['Code'] == 'AccessDenied':
+            print(f"Check your account level S3 settings, public access may be blocked.")
         exit(-1)
     print(f"Object {keyname} uploaded")
 
@@ -138,10 +142,6 @@ def create_bucket_with_public_object():
             print(
                 f"Bucket {PUBLIC_BUCKET_NAME} not created, skip initializing.", file=sys.stderr)
             return
-        if e.response['Error']['Code'] == 'AccessDenied':
-            print(
-                f"Check your account level S3 settings, public access may be blocked.", file=sys.stderr)
-            return
         raise e
 
 
@@ -157,7 +157,7 @@ if args.action == 'init':
         print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
         create_bucket_with_lifecycle()
         create_bucket_with_public_object()
-        if "CRT_S3_TEST_BUCKET_NAME" not in os.environ or os.environ['CRT_S3_TEST_BUCKET_NAME'] != BUCKET_NAME:
+        if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME:
             print(
                 f"* Please set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME} before running the tests.")
     except Exception as e:
@@ -171,7 +171,7 @@ if args.action == 'init':
         raise e
         exit(-1)
 elif args.action == 'clean':
-    if "BUCKET_NAME" not in os.environ and args.bucket_name is None:
+    if "CRT_S3_TEST_BUCKET_NAME" not in os.environ and args.bucket_name is None:
         print("Set the environment variable CRT_S3_TEST_BUCKET_NAME before clean up, or pass in bucket_name as argument.")
         exit(-1)
     cleanup(BUCKET_NAME)

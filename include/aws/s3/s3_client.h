@@ -266,6 +266,7 @@ struct aws_s3_client_config {
      * Optional.
      * Configuration options for connection monitoring.
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
+     * If set to NULL, default values are used.
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
 
@@ -349,8 +350,17 @@ struct aws_s3_meta_request_options {
      * be used. If not NULL, these options will override the client options. */
     const struct aws_signing_config_aws *signing_config;
 
-    /* Initial HTTP message that defines what operation we are doing. */
+    /* Initial HTTP message that defines what operation we are doing.
+     * When uploading a file, you should set `send_filepath` (instead of the message's body-stream)
+     * for better performance. */
     struct aws_http_message *message;
+
+    /**
+     * Optional.
+     * If set, this file is sent as the request body, and the `message` body-stream is ignored.
+     * This can give better performance than sending data using the body-stream.
+     */
+    struct aws_byte_cursor send_filepath;
 
     /**
      * Optional.

@@ -92,7 +92,7 @@ static int s_test_s3_client_monitoring_options_override(struct aws_allocator *al
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_TRUE(
-        client->monitoring_options->minimum_throughput_bytes_per_second ==
+        client->monitoring_options.minimum_throughput_bytes_per_second ==
         client_config.monitoring_options->minimum_throughput_bytes_per_second);
 
     aws_s3_client_release(client);
@@ -3025,6 +3025,66 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_round_trip_with_filepath, s_test_s3_round_trip_with_filepath)
+static int s_test_s3_round_trip_with_filepath(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /*** PUT FILE ***/
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .object_path_override = object_path,
+                .file_on_disk = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** GET FILE ***/
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_chunked_then_unchunked, s_test_s3_chunked_then_unchunked)
 static int s_test_s3_chunked_then_unchunked(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -3770,6 +3830,41 @@ static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *alloc
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
+    return 0;
+}
+
+/* Test that we fail to create a metarequest when an invalid `send_filepath` is passed in */
+AWS_TEST_CASE(test_s3_put_fail_object_invalid_send_filepath, s_test_s3_put_fail_object_invalid_send_filepath)
+static int s_test_s3_put_fail_object_invalid_send_filepath(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_name, g_test_body_content_type, object_key, 1024 /*content_length*/, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .message = message,
+        .send_filepath = aws_byte_cursor_from_c_str("obviously_invalid_file_path"),
+    };
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+    ASSERT_NULL(meta_request);
+    ASSERT_INT_EQUALS(AWS_ERROR_FILE_INVALID_PATH, aws_last_error());
+
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
     return 0;
 }
 
