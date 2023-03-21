@@ -10,6 +10,6 @@
       "throughput_gbps": 100
     }
   },
-  "auto-tear-down": true,
+  "auto-tear-down": false,
   "key-pair-name": "aws-common-runtime-keys"
 }
