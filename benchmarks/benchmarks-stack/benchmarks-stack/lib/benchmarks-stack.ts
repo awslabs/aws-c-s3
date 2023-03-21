@@ -153,7 +153,8 @@ export class BenchmarksStack extends cdk.Stack {
         role: canary_role,
         keyName: key_name ? key_name : 'S3-EC2-Canary-key-pair',
         securityGroup: security_group,
-        vpcSubnets: subnetSelection
+        vpcSubnets: subnetSelection,
+        requireImdsv2: true
       });
     }
 
