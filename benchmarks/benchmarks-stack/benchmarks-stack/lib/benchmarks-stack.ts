@@ -50,10 +50,10 @@ export class BenchmarksStack extends cdk.Stack {
     });
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
-    const canaryBucketName = "s3canary-temp-bucket";
+    const canaryBucketName = "crt-s3canary-temp-bucket-123124136734";
 
     const tempBucket = new s3.Bucket(this, 'TempBucketForCanary', {
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
       bucketName: canaryBucketName,
       autoDeleteObjects: true,
     });
