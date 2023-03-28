@@ -50,6 +50,13 @@ export class BenchmarksStack extends cdk.Stack {
     });
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
+
+    /**
+     * This bucket already exists in the aws crt team account.
+     * It has lifetime rules to delete objects older than a day.
+     * If you are trying to run this stack in a different account,
+     * you will have to create a bucket and change this variable name to the bucket name.
+     */
     const canaryBucketName = "crt-s3canary-bucket-123124136734";
 
     const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
