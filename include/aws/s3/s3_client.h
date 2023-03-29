@@ -145,7 +145,7 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 /**
  * Information sent in the meta_request telemetry callback.
  */
-struct aws_s3_request_metrics {
+struct aws_s3_request_telemetry_metrics {
     /* X-AMZ-REQUEST-ID Header value. */
     struct aws_byte_cursor request_id;
     /* The IP address of the request connected to */
@@ -189,7 +189,7 @@ struct aws_s3_request_metrics {
  */
 typedef void(aws_s3_meta_request_telemetry_fn)(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_request_metrics *metrics,
+    const struct aws_s3_request_telemetry_metrics *metrics,
     void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
@@ -282,15 +282,6 @@ struct aws_s3_client_config {
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
-
-    /**
-     * Optional.
-     * To get telemetry metrics when a single request finishes.
-     * If set the request will keep track the metrics from `aws_s3_request_metrics`, and fire the callback when the
-     * request finishes receiving response.
-     */
-    aws_s3_meta_request_telemetry_fn *telemetry_callback;
-    void *telemetry_callback_user_data;
 
     /**
      * Optional.
@@ -462,6 +453,14 @@ struct aws_s3_meta_request_options {
      * See `aws_s3_meta_request_progress_fn`
      */
     aws_s3_meta_request_progress_fn *progress_callback;
+
+    /**
+     * Optional.
+     * To get telemetry metrics when a single request finishes.
+     * If set the request will keep track the metrics from `aws_s3_request_metrics`, and fire the callback when the
+     * request finishes receiving response.
+     */
+    aws_s3_meta_request_telemetry_fn *telemetry_callback;
 
     /**
      * Optional.
