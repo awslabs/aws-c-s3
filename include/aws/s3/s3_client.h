@@ -142,6 +142,56 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
+/**
+ * Information sent in the meta_request telemetry callback.
+ */
+struct aws_s3_request_metrics {
+    /* X-AMZ-REQUEST-ID Header value. */
+    struct aws_byte_cursor request_id;
+    /* The IP address of the request connected to */
+    struct aws_byte_cursor ip_address;
+
+    struct {
+        /* The total time for the single request started sending to finish (response received or failed). */
+        uint64_t total_duration_time_ns;
+        /* The time for the request started sending to start receiving response. */
+        uint64_t response_latency_time_ns;
+        /* The time for the request started sending to finish sending. */
+        uint64_t send_time_ns;
+        /* The time for the request started receiving to finish receiving response. */
+        uint64_t receive_time_ns;
+        /* The time stamp when the request started to be sent */
+        uint64_t started_sending_time_stamp;
+    } time_metrics;
+
+    struct {
+        /* Response status code for the request */
+        uint32_t response_status;
+        /* HTTP Headers of the response received. */
+        struct aws_http_headers *response_headers;
+        /* The request line: method, path and query of the request.  */
+        struct aws_byte_cursor request_line;
+    } req_resp_info_metrics;
+
+    struct {
+        /* The pointer ID to the connection that request was made from */
+        size_t connection_id;
+        /* The pointer ID to the thread that request was made from */
+        size_t thread_id;
+        /* CRT error code. */
+        int error_code;
+    } crt_info_metrics;
+};
+
+/**
+ * Invoked to report the telemetry of the meta request once a single request finishes. Invoked from the thread of the
+ * connection that request made from.
+ */
+typedef void(aws_s3_meta_request_telemetry_fn)(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request_metrics *metrics,
+    void *user_data);
+
 enum aws_s3_meta_request_tls_mode {
     AWS_MR_TLS_ENABLED,
     AWS_MR_TLS_DISABLED,
@@ -232,6 +282,15 @@ struct aws_s3_client_config {
     /* Callback and associated user data for when the client has completed its shutdown process. */
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback;
     void *shutdown_callback_user_data;
+
+    /**
+     * Optional.
+     * To get telemetry metrics when a single request finishes.
+     * If set the request will keep track the metrics from `aws_s3_request_metrics`, and fire the callback when the
+     * request finishes receiving response.
+     */
+    aws_s3_meta_request_telemetry_fn *telemetry_callback;
+    void *telemetry_callback_user_data;
 
     /**
      * Optional.
@@ -653,6 +712,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_acquire(struct aws_s3_meta_reque
 AWS_S3_API
 struct aws_s3_meta_request *aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request);
 
+/**
+ * Initialize the configuration for a default S3 signing.
+ */
 AWS_S3_API
 void aws_s3_init_default_signing_config(
     struct aws_signing_config_aws *signing_config,
