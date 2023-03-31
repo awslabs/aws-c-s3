@@ -138,6 +138,7 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     AWS_ASSERT(!err);
     err = aws_byte_buf_init_copy_from_cursor(&metrics->req_resp_info_metrics.request_path_query, allocator, out_path);
     AWS_ASSERT(!err);
+    (void)err;
     aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy);
 
     return metrics;
