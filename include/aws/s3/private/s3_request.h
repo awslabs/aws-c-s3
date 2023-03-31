@@ -23,6 +23,62 @@ enum aws_s3_request_flags {
     AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000004,
 };
 
+/**
+ * Information sent in the meta_request telemetry callback.
+ */
+struct aws_s3_request_metrics {
+    struct aws_allocator *allocator;
+
+    struct {
+        /* The time stamp when the request started by S3 client */
+        uint64_t start_timestamp_ns;
+        /* The time stamp when the request finished by S3 client */
+        uint64_t end_timestamp_ns;
+        /* The time duration for the request from start to finish. end_timestamp_ns - start_timestamp_ns */
+        uint64_t total_duration_ns;
+
+        /* The time stamp when the request started to be sent from HTTP level */
+        uint64_t send_start_timestamp_ns;
+        /* The time stamp when the request finished to be sent from HTTP level */
+        uint64_t send_end_timestamp_ns;
+        /* The time duration for the request from start sending to finish sending. send_end_timestamp_ns -
+         * send_start_timestamp_ns */
+        uint64_t sending_duration_ns;
+
+        /* The time stamp when the response started to be received from HTTP level */
+        uint64_t receive_start_timestamp_ns;
+        /* The time stamp when the response finished to be received from HTTP level */
+        uint64_t receive_end_timestamp_ns;
+        /* The time duration for the request from start sending to finish sending. send_end_timestamp_ns -
+         * send_start_timestamp_ns */
+        uint64_t receiving_duration_ns;
+    } time_metrics;
+
+    struct {
+        /* Response status code for the request */
+        int response_status;
+        /* HTTP Headers of the response received. */
+        struct aws_http_headers *response_headers;
+        /* The request line: method, path and query of the request. */
+        struct aws_byte_buf request_path_query;
+    } req_resp_info_metrics;
+
+    struct {
+        /* The IP address of the request connected to */
+        struct aws_byte_buf ip_address;
+        /* The pointer ID to the connection that request was made from */
+        size_t connection_id;
+        /* The pointer ID to the thread that request was made from */
+        size_t thread_id;
+        /* The request-count on the connection when this request was created */
+        size_t connection_request_count;
+        /* CRT error code. */
+        int error_code;
+    } crt_info_metrics;
+
+    struct aws_ref_count ref_count;
+};
+
 /* Represents a single request made to S3. */
 struct aws_s3_request {
 
@@ -103,6 +159,8 @@ struct aws_s3_request {
         /* Returned response status of this request. */
         int response_status;
 
+        /* The metrics for the request telemetry */
+        struct aws_s3_request_metrics *metrics;
     } send_data;
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
@@ -146,6 +204,11 @@ void aws_s3_request_acquire(struct aws_s3_request *request);
 
 AWS_S3_API
 void aws_s3_request_release(struct aws_s3_request *request);
+
+AWS_S3_API
+struct aws_s3_request_metrics *aws_s3_request_metrics_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message);
 
 AWS_EXTERN_C_END
 

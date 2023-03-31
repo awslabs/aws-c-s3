@@ -26,6 +26,8 @@ struct aws_s3_meta_request_resume_token;
 struct aws_uri;
 struct aws_string;
 
+struct aws_s3_request_metrics;
+
 /**
  * A Meta Request represents a group of generated requests that are being done on behalf of the
  * original request. For example, one large GetObject request can be transformed into a series
@@ -143,53 +145,12 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
 /**
- * Information sent in the meta_request telemetry callback.
- */
-struct aws_s3_request_telemetry_metrics {
-    /* X-AMZ-REQUEST-ID Header value. */
-    struct aws_byte_cursor request_id;
-    /* The IP address of the request connected to */
-    struct aws_byte_cursor ip_address;
-
-    struct {
-        /* The total time for the single request started sending to finish (response received or failed). */
-        uint64_t total_duration_time_ns;
-        /* The time for the request started sending to start receiving response. */
-        uint64_t response_latency_time_ns;
-        /* The time for the request started sending to finish sending. */
-        uint64_t send_time_ns;
-        /* The time for the request started receiving to finish receiving response. */
-        uint64_t receive_time_ns;
-        /* The time stamp when the request started to be sent */
-        uint64_t started_sending_time_stamp;
-    } time_metrics;
-
-    struct {
-        /* Response status code for the request */
-        uint32_t response_status;
-        /* HTTP Headers of the response received. */
-        struct aws_http_headers *response_headers;
-        /* The request line: method, path and query of the request.  */
-        struct aws_byte_cursor request_line;
-    } req_resp_info_metrics;
-
-    struct {
-        /* The pointer ID to the connection that request was made from */
-        size_t connection_id;
-        /* The pointer ID to the thread that request was made from */
-        size_t thread_id;
-        /* CRT error code. */
-        int error_code;
-    } crt_info_metrics;
-};
-
-/**
  * Invoked to report the telemetry of the meta request once a single request finishes. Invoked from the thread of the
  * connection that request made from.
  */
 typedef void(aws_s3_meta_request_telemetry_fn)(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_request_telemetry_metrics *metrics,
+    const struct aws_s3_request_metrics *metrics,
     void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
@@ -459,6 +420,10 @@ struct aws_s3_meta_request_options {
      * To get telemetry metrics when a single request finishes.
      * If set the request will keep track the metrics from `aws_s3_request_metrics`, and fire the callback when the
      * request finishes receiving response.
+     *
+     * Note: the callback will be invoked multiple times from different thread.
+     * TODO: do we want a separate user data for telemetry callback?
+     * TODO: provide a register callback API?
      */
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
 
@@ -719,6 +684,106 @@ void aws_s3_init_default_signing_config(
     struct aws_signing_config_aws *signing_config,
     const struct aws_byte_cursor region,
     struct aws_credentials_provider *credentials_provider);
+
+/**
+ * Add a reference, keeping this object alive.
+ * The reference must be released when you are done with it, or it's memory will never be cleaned up.
+ * Always returns the same pointer that was passed in.
+ */
+AWS_S3_API
+struct aws_s3_request_metrics *aws_s3_request_metrics_acquire(struct aws_s3_request_metrics *metrics);
+
+/**
+ * Release a reference.
+ * When the reference count drops to 0, this object will be cleaned up.
+ * It's OK to pass in NULL (nothing happens).
+ * Always returns NULL.
+ */
+AWS_S3_API
+struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_request_metrics *metrics);
+
+/*************************************  Getters for s3 request metrics ************************************************/
+/* TODO: maybe have a return value if the data can be unavailable? */
+/* Ge the request ID from aws_s3_request_metrics, return empty cursor when data unavailable */
+AWS_S3_API
+int aws_s3_request_metrics_get_request_id(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *request_id);
+
+/* Ge the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. */
+AWS_S3_API
+void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time);
+
+AWS_S3_API
+void aws_s3_request_metrics_get_end_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *end_time);
+
+AWS_S3_API
+void aws_s3_request_metrics_get_total_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *total_duration);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_send_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *send_start_time);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_send_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *send_end_time);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_sending_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *sending_duration);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_receive_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *receive_start_time);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_receive_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *receive_end_time);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_receiving_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *receiving_duration);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_response_status(const struct aws_s3_request_metrics *metrics, int *response_status);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_response_headers(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_http_headers **response_headers);
+
+AWS_S3_API
+void aws_s3_request_metrics_get_request_path_query(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *request_path_query);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_ip_address(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *ip_address);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *connection_id);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, size_t *thread_id);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_connection_request_count(
+    const struct aws_s3_request_metrics *metrics,
+    size_t *connection_request_count);
+
+/* Get the AWS CRT error code from request metics. */
+AWS_S3_API
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
 
 AWS_EXTERN_C_END
 

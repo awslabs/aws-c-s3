@@ -250,6 +250,7 @@ int aws_s3_meta_request_init_base(
     meta_request->user_data = options->user_data;
     meta_request->shutdown_callback = options->shutdown_callback;
     meta_request->progress_callback = options->progress_callback;
+    meta_request->telemetry_callback = options->telemetry_callback;
 
     if (meta_request->checksum_config.validate_response_checksum) {
         /* TODO: the validate for auto range get should happen for each response received. */
