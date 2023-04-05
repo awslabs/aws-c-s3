@@ -347,7 +347,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
             s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
     }
 
-    /* Tiny range corner cases. */
+    /* 1 byte range corner case. */
     {
         const uint32_t expected_num_parts = 1;
         const uint64_t object_range_start = 8;
