@@ -478,10 +478,6 @@ int aws_s3_parse_content_length_response_header(
 }
 
 uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
-    if ((object_range_start - object_range_end) == 0ULL) {
-        return 0;
-    }
-
     uint32_t num_parts = 1;
 
     uint64_t first_part_size = part_size;
