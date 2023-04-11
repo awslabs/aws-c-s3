@@ -1736,6 +1736,9 @@ void aws_s3_client_notify_connection_finished(
 
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_PRECONDITION(endpoint);
+    if (request->send_data.metrics) {
+        request->send_data.metrics->crt_info_metrics.error_code = error_code;
+    }
 
     /* If we're trying to setup a retry... */
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {

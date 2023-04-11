@@ -353,6 +353,9 @@ int aws_s3_tester_bind_meta_request(
     ASSERT_TRUE(options->shutdown_callback == NULL);
     options->shutdown_callback = s_s3_test_meta_request_shutdown;
 
+    ASSERT_TRUE(options->telemetry_callback == NULL);
+    options->telemetry_callback = s_s3_test_meta_request_shutdown;
+
     options->progress_callback = meta_request_test_results->progress_callback;
 
     ASSERT_TRUE(options->user_data == NULL);

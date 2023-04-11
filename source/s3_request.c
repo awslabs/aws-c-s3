@@ -5,7 +5,9 @@
 
 #include "aws/s3/private/s3_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_util.h"
 #include <aws/auth/signable.h>
+#include <aws/common/clock.h>
 #include <aws/io/stream.h>
 #include <aws/s3/s3_client.h>
 
@@ -47,6 +49,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
         /* start the telemetry for the request to be sent */
         request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
         /* Start the timestamp */
+        aws_high_res_clock_get_ticks(&request->send_data.metrics->time_metrics.start_timestamp_ns);
     }
 
     aws_http_message_acquire(message);
@@ -77,11 +80,15 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
         /* TODO: I checked the code path that can invoke this call, we never hold a lock from any of those code path.
          * But, can we be more clear that it's a requirement to not have lock held here? */
         struct aws_s3_meta_request *meta_request = request->meta_request;
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks(&metric->time_metrics.end_timestamp_ns);
+        metric->time_metrics.total_duration_ns =
+            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
         /* End the timestamp */
         if (meta_request->telemetry_callback) {
-            meta_request->telemetry_callback(meta_request, request->send_data.metrics, meta_request->user_data);
+            meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
         }
-        request->send_data.metrics = aws_s3_request_metrics_release(request->send_data.metrics);
+        request->send_data.metrics = aws_s3_request_metrics_release(metric);
     }
 
     aws_http_headers_release(request->send_data.response_headers);
@@ -122,6 +129,12 @@ static void s_s3_request_destroy(void *user_data) {
 
 static void s_s3_request_metrics_destroy(void *arg) {
     struct aws_s3_request_metrics *metrics = arg;
+    if (metrics == NULL) {
+        return;
+    }
+    aws_http_headers_release(metrics->req_resp_info_metrics.response_headers);
+    aws_byte_buf_clean_up(&metrics->req_resp_info_metrics.request_path_query);
+    aws_byte_buf_clean_up(&metrics->crt_info_metrics.ip_address);
 
     aws_mem_release(metrics->allocator, metrics);
 }
@@ -156,4 +169,180 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_requ
         aws_ref_count_release(&metrics->ref_count);
     }
     return NULL;
+}
+
+int aws_s3_request_metrics_get_request_id(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *request_id) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(request_id);
+    if (metrics->req_resp_info_metrics.response_headers == NULL) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    if (aws_http_headers_get(metrics->req_resp_info_metrics.response_headers, g_request_id_header_name, request_id)) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    return AWS_OP_SUCCESS;
+}
+
+void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(start_time);
+    *start_time = metrics->time_metrics.start_timestamp_ns;
+}
+
+void aws_s3_request_metrics_get_end_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *end_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(end_time);
+    *end_time = metrics->time_metrics.end_timestamp_ns;
+}
+
+void aws_s3_request_metrics_get_total_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *total_duration) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(total_duration);
+    *total_duration = metrics->time_metrics.total_duration_ns;
+}
+
+int aws_s3_request_metrics_get_send_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *send_start_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(send_start_time);
+    if (metrics->time_metrics.send_start_timestamp_ns == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *send_start_time = metrics->time_metrics.send_start_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_send_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *send_end_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(send_end_time);
+    if (metrics->time_metrics.send_end_timestamp_ns == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *send_end_time = metrics->time_metrics.send_end_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_sending_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *sending_duration) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(sending_duration);
+    if (metrics->time_metrics.send_end_timestamp_ns == 0 || metrics->time_metrics.send_start_timestamp_ns == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *sending_duration = metrics->time_metrics.sending_duration_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_receive_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *receive_start_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(receive_start_time);
+    if (metrics->time_metrics.receive_start_timestamp_ns == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *receive_start_time = metrics->time_metrics.receive_start_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_receive_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *receive_end_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(receive_end_time);
+    if (metrics->time_metrics.receive_end_timestamp_ns == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *receive_end_time = metrics->time_metrics.receive_end_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_receiving_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *receiving_duration) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(receiving_duration);
+    if (metrics->time_metrics.receive_end_timestamp_ns == 0 || metrics->time_metrics.receive_start_timestamp_ns == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *receiving_duration = metrics->time_metrics.receiving_duration_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_response_status(const struct aws_s3_request_metrics *metrics, int *response_status) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(response_status);
+    if (metrics->req_resp_info_metrics.response_status == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *response_status = metrics->req_resp_info_metrics.response_status;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_response_headers(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_http_headers **response_headers) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(response_headers);
+    if (metrics->req_resp_info_metrics.response_headers == NULL) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *response_headers = metrics->req_resp_info_metrics.response_headers;
+    return AWS_OP_SUCCESS;
+}
+
+void aws_s3_request_metrics_get_request_path_query(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *request_path_query) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(request_path_query);
+    *request_path_query = aws_byte_cursor_from_buf(&metrics->req_resp_info_metrics.request_path_query);
+}
+
+int aws_s3_request_metrics_get_ip_address(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *ip_address) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(ip_address);
+    if (metrics->crt_info_metrics.ip_address.len == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *ip_address = aws_byte_cursor_from_buf(&metrics->crt_info_metrics.ip_address);
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, void **connection_id) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(connection_id);
+    if (metrics->crt_info_metrics.connection_id == NULL) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *connection_id = metrics->crt_info_metrics.connection_id;
+    return AWS_OP_SUCCESS;
+}
+
+// AWS_S3_API
+// int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, void **thread_id);
+
+int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, size_t *stream_id) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(stream_id);
+    if (metrics->crt_info_metrics.stream_id == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *stream_id = metrics->crt_info_metrics.stream_id;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics) {
+    AWS_PRECONDITION(metrics);
+    return metrics->crt_info_metrics.error_code;
 }

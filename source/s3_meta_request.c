@@ -18,6 +18,7 @@
 #include <aws/common/system_info.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/retry_strategy.h>
+#include <aws/io/socket.h>
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
@@ -52,6 +53,11 @@ static int s_s3_meta_request_incoming_headers(
     enum aws_http_header_block header_block,
     const struct aws_http_header *headers,
     size_t headers_count,
+    void *user_data);
+
+static void s_s3_meta_request_stream_metrics(
+    struct aws_http_stream *stream,
+    const struct aws_http_stream_metrics *metrics,
     void *user_data);
 
 static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, int error_code, void *user_data);
@@ -816,6 +822,15 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     options.on_response_headers = s_s3_meta_request_incoming_headers;
     options.on_response_header_block_done = NULL;
     options.on_response_body = s_s3_meta_request_incoming_body;
+    if (request->send_data.metrics) {
+        options.on_metrics = s_s3_meta_request_stream_metrics;
+        // const struct aws_socket *socket =
+        //     aws_channel_get_socket(aws_http_connection_get_channel(connection->http_connection));
+        // aws_byte_buf_init_copy_from_cursor(
+        //     &request->send_data.metrics->crt_info_metrics.ip_address,
+        //     request->allocator,
+        //     aws_byte_cursor_from_c_str(socket->remote_endpoint.address));
+    }
     options.on_complete = s_s3_meta_request_stream_complete;
 
     struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
@@ -1059,6 +1074,35 @@ static int s_s3_meta_request_incoming_body(
     }
 
     return AWS_OP_SUCCESS;
+}
+
+static void s_s3_meta_request_stream_metrics(
+    struct aws_http_stream *stream,
+    const struct aws_http_stream_metrics *http_metrics,
+    void *user_data) {
+    (void)stream;
+    struct aws_s3_connection *connection = user_data;
+    AWS_PRECONDITION(connection);
+
+    struct aws_s3_request *request = connection->request;
+    AWS_PRECONDITION(request);
+    AWS_ASSERT(request->send_data.metrics);
+    struct aws_s3_request_metrics *s3_metrics = request->send_data.metrics;
+    /* Copy over the time metrics from aws_http_stream_metrics to aws_s3_request_metrics */
+    s3_metrics->time_metrics.send_start_timestamp_ns = http_metrics->send_start_timestamp_ns;
+    s3_metrics->time_metrics.send_end_timestamp_ns = http_metrics->send_end_timestamp_ns;
+    s3_metrics->time_metrics.sending_duration_ns = http_metrics->sending_duration_ns;
+    s3_metrics->time_metrics.receive_start_timestamp_ns = http_metrics->receive_start_timestamp_ns;
+    s3_metrics->time_metrics.receive_end_timestamp_ns = http_metrics->receive_end_timestamp_ns;
+    s3_metrics->time_metrics.receiving_duration_ns = http_metrics->receiving_duration_ns;
+
+    s3_metrics->req_resp_info_metrics.response_status = request->send_data.response_status;
+    s3_metrics->req_resp_info_metrics.response_headers = request->send_data.response_headers;
+    aws_http_headers_acquire(request->send_data.response_headers);
+
+    s3_metrics->crt_info_metrics.stream_id = http_metrics->stream_id;
+    s3_metrics->crt_info_metrics.connection_id = (void *)connection->http_connection;
+    s3_metrics->crt_info_metrics.thread_id = aws_thread_current_thread_id();
 }
 
 /* Finish up the processing of the request work. */

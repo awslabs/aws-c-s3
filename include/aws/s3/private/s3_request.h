@@ -9,6 +9,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
 #include <aws/s3/private/s3_checksums.h>
@@ -30,9 +31,9 @@ struct aws_s3_request_metrics {
     struct aws_allocator *allocator;
 
     struct {
-        /* The time stamp when the request started by S3 client */
+        /* The time stamp when the request started by S3 client, which is prepared time by the client */
         uint64_t start_timestamp_ns;
-        /* The time stamp when the request finished by S3 client */
+        /* The time stamp when the request finished by S3 client succeed or failed or to be retried */
         uint64_t end_timestamp_ns;
         /* The time duration for the request from start to finish. end_timestamp_ns - start_timestamp_ns */
         uint64_t total_duration_ns;
@@ -66,13 +67,13 @@ struct aws_s3_request_metrics {
     struct {
         /* The IP address of the request connected to */
         struct aws_byte_buf ip_address;
-        /* The pointer ID to the connection that request was made from */
-        size_t connection_id;
-        /* The pointer ID to the thread that request was made from */
-        size_t thread_id;
-        /* The request-count on the connection when this request was created */
-        size_t connection_request_count;
-        /* CRT error code. */
+        /* The pointer to the connection that request was made from */
+        void *connection_id;
+        /* The aws_thread_id_t to the thread that request ran on */
+        aws_thread_id_t thread_id;
+        /* The stream-id, which is the idex when the stream was activated. */
+        size_t stream_id;
+        /* CRT error code when the aws_s3_request finishes. */
         int error_code;
     } crt_info_metrics;
 

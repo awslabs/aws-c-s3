@@ -703,7 +703,6 @@ AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_request_metrics *metrics);
 
 /*************************************  Getters for s3 request metrics ************************************************/
-/* TODO: maybe have a return value if the data can be unavailable? */
 /* Ge the request ID from aws_s3_request_metrics, return empty cursor when data unavailable */
 AWS_S3_API
 int aws_s3_request_metrics_get_request_id(
@@ -771,15 +770,13 @@ int aws_s3_request_metrics_get_ip_address(
     struct aws_byte_cursor *ip_address);
 
 AWS_S3_API
-int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *connection_id);
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, void **connection_id);
 
 AWS_S3_API
-int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, size_t *thread_id);
+int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, void **thread_id);
 
 AWS_S3_API
-int aws_s3_request_metrics_get_connection_request_count(
-    const struct aws_s3_request_metrics *metrics,
-    size_t *connection_request_count);
+int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, size_t *stream_id);
 
 /* Get the AWS CRT error code from request metics. */
 AWS_S3_API
