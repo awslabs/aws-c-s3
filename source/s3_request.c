@@ -329,8 +329,15 @@ int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics
     return AWS_OP_SUCCESS;
 }
 
-// AWS_S3_API
-// int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, void **thread_id);
+int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, aws_thread_id_t *thread_id) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(thread_id);
+    if (metrics->crt_info_metrics.thread_id == 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *thread_id = metrics->crt_info_metrics.thread_id;
+    return AWS_OP_SUCCESS;
+}
 
 int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, size_t *stream_id) {
     AWS_PRECONDITION(metrics);

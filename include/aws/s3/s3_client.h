@@ -773,7 +773,7 @@ int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics
 
 /* Get the thread ID of the thread that request was made from */
 AWS_S3_API
-int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, void **thread_id);
+int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, aws_thread_id_t *thread_id);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, size_t *stream_id);
