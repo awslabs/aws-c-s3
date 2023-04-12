@@ -150,7 +150,7 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
  */
 typedef void(aws_s3_meta_request_telemetry_fn)(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_request_metrics *metrics,
+    struct aws_s3_request_metrics *metrics,
     void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
@@ -423,7 +423,6 @@ struct aws_s3_meta_request_options {
      *
      * Note: the callback will be invoked multiple times from different thread.
      * TODO: do we want a separate user data for telemetry callback?
-     * TODO: provide a register callback API?
      */
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
 
@@ -772,6 +771,7 @@ int aws_s3_request_metrics_get_ip_address(
 AWS_S3_API
 int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, void **connection_id);
 
+/* Get the thread ID of the thread that request was made from */
 AWS_S3_API
 int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, void **thread_id);
 

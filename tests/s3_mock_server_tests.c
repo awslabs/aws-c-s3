@@ -18,6 +18,47 @@
 #define DEFINE_HEADER(NAME, VALUE)                                                                                     \
     { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
 
+static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list) {
+    /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
+     * upload parts and one complete MPU */
+    ASSERT_UINT_EQUALS(aws_array_list_length(metrics_list), 4);
+    struct aws_s3_request_metrics *metrics = NULL;
+
+    /* First metrics should be the CreateMPU */
+    aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
+    struct aws_http_headers *response_headers = NULL;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_response_headers(metrics, &response_headers));
+    struct aws_byte_cursor ip_address;
+    AWS_ZERO_STRUCT(ip_address);
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_ip_address(metrics, &ip_address));
+    /* Should be default local ip for ipv6/ipv4 */
+    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&ip_address, "::1") || aws_byte_cursor_eq_c_str(&ip_address, "127.0.0.1"));
+    int response_status = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_response_status(metrics, &response_status));
+    ASSERT_UINT_EQUALS(response_status, 200);
+    size_t stream_id = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_stream_id(metrics, &stream_id));
+    ASSERT_UINT_EQUALS(stream_id, 1);
+    struct aws_byte_cursor request_path_query;
+    AWS_ZERO_STRUCT(request_path_query);
+    aws_s3_request_metrics_get_request_path_query(metrics, &request_path_query);
+    ASSERT_UINT_EQUALS(aws_s3_request_metrics_get_error_code(metrics), AWS_ERROR_SUCCESS);
+
+    /* Second metrics should be the Upload Part */
+    aws_array_list_get_at(metrics_list, (void **)&metrics, 1);
+    struct aws_byte_cursor header_value;
+    AWS_ZERO_STRUCT(header_value);
+    response_headers = NULL;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_response_headers(metrics, &response_headers));
+    ASSERT_SUCCESS(aws_http_headers_get(response_headers, aws_byte_cursor_from_c_str("ETag"), &header_value));
+    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&header_value, "b54357faf0632cce46e942fa68356b38"));
+    ASSERT_SUCCESS(aws_http_headers_get(response_headers, aws_byte_cursor_from_c_str("Connection"), &header_value));
+    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&header_value, "keep-alive"));
+    /* All the rest should be similar */
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(multipart_upload_mock_server) {
     (void)ctx;
 
@@ -46,9 +87,11 @@ TEST_CASE(multipart_upload_mock_server) {
             },
         .mock_server = true,
     };
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
-
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics));
+    aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 

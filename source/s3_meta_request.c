@@ -824,12 +824,6 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     options.on_response_body = s_s3_meta_request_incoming_body;
     if (request->send_data.metrics) {
         options.on_metrics = s_s3_meta_request_stream_metrics;
-        // const struct aws_socket *socket =
-        //     aws_channel_get_socket(aws_http_connection_get_channel(connection->http_connection));
-        // aws_byte_buf_init_copy_from_cursor(
-        //     &request->send_data.metrics->crt_info_metrics.ip_address,
-        //     request->allocator,
-        //     aws_byte_cursor_from_c_str(socket->remote_endpoint.address));
     }
     options.on_complete = s_s3_meta_request_stream_complete;
 
@@ -990,6 +984,21 @@ static int s_s3_meta_request_incoming_headers(
             (void *)meta_request,
             (void *)request);
     }
+    if (request->send_data.metrics) {
+        /* Record the headers to the metrics */
+        struct aws_s3_request_metrics *s3_metrics = request->send_data.metrics;
+        if (s3_metrics->req_resp_info_metrics.response_headers == NULL) {
+            s3_metrics->req_resp_info_metrics.response_headers = aws_http_headers_new(meta_request->allocator);
+        }
+
+        for (size_t i = 0; i < headers_count; ++i) {
+            const struct aws_byte_cursor *name = &headers[i].name;
+            const struct aws_byte_cursor *value = &headers[i].value;
+
+            aws_http_headers_add(s3_metrics->req_resp_info_metrics.response_headers, *name, *value);
+        }
+        s3_metrics->req_resp_info_metrics.response_status = request->send_data.response_status;
+    }
 
     bool successful_response =
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
@@ -1095,13 +1104,16 @@ static void s_s3_meta_request_stream_metrics(
     s3_metrics->time_metrics.receive_start_timestamp_ns = http_metrics->receive_start_timestamp_ns;
     s3_metrics->time_metrics.receive_end_timestamp_ns = http_metrics->receive_end_timestamp_ns;
     s3_metrics->time_metrics.receiving_duration_ns = http_metrics->receiving_duration_ns;
-
-    s3_metrics->req_resp_info_metrics.response_status = request->send_data.response_status;
-    s3_metrics->req_resp_info_metrics.response_headers = request->send_data.response_headers;
-    aws_http_headers_acquire(request->send_data.response_headers);
-
     s3_metrics->crt_info_metrics.stream_id = http_metrics->stream_id;
+
+    /* Also related metrics from the request/response. */
     s3_metrics->crt_info_metrics.connection_id = (void *)connection->http_connection;
+    struct aws_byte_cursor remote_address =
+        aws_http_connection_get_remote_endpoint_address(connection->http_connection);
+    int result = aws_byte_buf_init_copy_from_cursor(
+        &request->send_data.metrics->crt_info_metrics.ip_address, request->allocator, remote_address);
+    AWS_ASSERT(result == AWS_OP_SUCCESS);
+    (void)result;
     s3_metrics->crt_info_metrics.thread_id = aws_thread_current_thread_id();
 }
 

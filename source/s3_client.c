@@ -1582,9 +1582,9 @@ static void s_s3_client_create_connection_for_request_default(
     struct aws_http_headers *message_headers = aws_http_message_get_headers(meta_request->initial_request_message);
     AWS_ASSERT(message_headers);
 
-    int get_header_result = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
-    AWS_ASSERT(get_header_result == AWS_OP_SUCCESS);
-    (void)get_header_result;
+    int result = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
+    AWS_ASSERT(result == AWS_OP_SUCCESS);
+    (void)result;
 
     if (aws_retry_strategy_acquire_retry_token(
             client->retry_strategy, &host_header_value, s_s3_client_acquired_retry_token, connection, 0)) {
