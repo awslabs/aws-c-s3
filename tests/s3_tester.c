@@ -190,6 +190,7 @@ static void s_s3_test_meta_request_telemetry(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request_metrics *metrics,
     void *user_data) {
+    (void)meta_request;
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     struct aws_s3_tester *tester = meta_request_test_results->tester;
 

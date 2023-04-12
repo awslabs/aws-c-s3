@@ -49,7 +49,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
         /* start the telemetry for the request to be sent */
         request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
         /* Start the timestamp */
-        aws_high_res_clock_get_ticks(&request->send_data.metrics->time_metrics.start_timestamp_ns);
+        aws_sys_clock_get_ticks(&request->send_data.metrics->time_metrics.start_timestamp_ns);
     }
 
     aws_http_message_acquire(message);
@@ -81,7 +81,7 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
          * But, can we be more clear that it's a requirement to not have lock held here? */
         struct aws_s3_meta_request *meta_request = request->meta_request;
         struct aws_s3_request_metrics *metric = request->send_data.metrics;
-        aws_high_res_clock_get_ticks(&metric->time_metrics.end_timestamp_ns);
+        aws_sys_clock_get_ticks(&metric->time_metrics.end_timestamp_ns);
         metric->time_metrics.total_duration_ns =
             metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
         /* End the timestamp */
