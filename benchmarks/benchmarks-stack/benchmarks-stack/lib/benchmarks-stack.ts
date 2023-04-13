@@ -50,13 +50,14 @@ export class BenchmarksStack extends cdk.Stack {
     });
 
     const assetBucket = s3.Bucket.fromBucketName(this, 'AssetBucket', init_instance_sh.s3BucketName)
-    const canaryBucketName = "s3canary-temp-bucket";
 
-    const tempBucket = new s3.Bucket(this, 'TempBucketForCanary', {
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      bucketName: canaryBucketName,
-      autoDeleteObjects: true,
-    });
+    /**
+     * This bucket already exists in the aws crt team account.
+     * It has lifetime rules to delete objects older than a day.
+     * If you are trying to run this stack in a different account,
+     * you will have to create a bucket and change this variable name to the bucket name.
+     */
+    const canaryBucketName = "crt-s3canary-bucket-123124136734";
 
     const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
       tags: { 'S3CanaryResources': 'VPC' }
@@ -153,7 +154,8 @@ export class BenchmarksStack extends cdk.Stack {
         role: canary_role,
         keyName: key_name ? key_name : 'S3-EC2-Canary-key-pair',
         securityGroup: security_group,
-        vpcSubnets: subnetSelection
+        vpcSubnets: subnetSelection,
+        requireImdsv2: true
       });
     }
 

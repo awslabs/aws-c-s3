@@ -4296,6 +4296,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         // No range at all.
         {0, NULL},
 
+        // Single byte range.
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=8-8"),
+
         // First 8K.  8K < client's 16K part size.
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-8191"),
 
