@@ -28,6 +28,10 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
     struct aws_http_headers *response_headers = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_response_headers(metrics, &response_headers));
+    struct aws_byte_cursor request_id;
+    AWS_ZERO_STRUCT(request_id);
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_id(metrics, &request_id));
+    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&request_id, "12345"));
     struct aws_byte_cursor ip_address;
     AWS_ZERO_STRUCT(ip_address);
     ASSERT_SUCCESS(aws_s3_request_metrics_get_ip_address(metrics, &ip_address));
@@ -44,7 +48,38 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     aws_s3_request_metrics_get_request_path_query(metrics, &request_path_query);
     aws_thread_id_t thread_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_thread_id(metrics, &thread_id));
+    void *connection_id = NULL;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_connection_id(metrics, &connection_id));
     ASSERT_UINT_EQUALS(aws_s3_request_metrics_get_error_code(metrics), AWS_ERROR_SUCCESS);
+    /* Get all those time stamp */
+    uint64_t time_stamp = 0;
+    aws_s3_request_metrics_get_start_timestamp_ns(metrics, &time_stamp);
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    aws_s3_request_metrics_get_end_timestamp_ns(metrics, &time_stamp);
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    aws_s3_request_metrics_get_total_duration_ns(metrics, &time_stamp);
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_send_start_timestamp_ns(metrics, &time_stamp));
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_send_end_timestamp_ns(metrics, &time_stamp));
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_sending_duration_ns(metrics, &time_stamp));
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_receive_start_timestamp_ns(metrics, &time_stamp));
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_receive_end_timestamp_ns(metrics, &time_stamp));
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_receiving_duration_ns(metrics, &time_stamp));
+    ASSERT_FALSE(time_stamp == 0);
+    time_stamp = 0;
 
     /* Second metrics should be the Upload Part */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 1);
