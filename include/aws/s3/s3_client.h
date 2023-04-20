@@ -702,24 +702,30 @@ AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_request_metrics *metrics);
 
 /*************************************  Getters for s3 request metrics ************************************************/
-/* Ge the request ID from aws_s3_request_metrics, return empty cursor when data unavailable */
+/* Ge the request ID from aws_s3_request_metrics, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised when data
+ * unavailable */
 AWS_S3_API
 int aws_s3_request_metrics_get_request_id(
     const struct aws_s3_request_metrics *metrics,
     struct aws_byte_cursor *request_id);
 
-/* Ge the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. */
+/* Ge the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always be
+ * available. Timestamp are from `aws_high_res_clock_get_ticks`  */
 AWS_S3_API
 void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time);
 
+/* Ge the end time from aws_s3_request_metrics. Always be available */
 AWS_S3_API
 void aws_s3_request_metrics_get_end_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *end_time);
 
+/* Ge the total duration time from aws_s3_request_metrics. Always be available */
 AWS_S3_API
 void aws_s3_request_metrics_get_total_duration_ns(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *total_duration);
 
+/* Ge the start time stamp when request was sent to the network channel from aws_s3_request_metrics.
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if the request was end before it gets sent. */
 AWS_S3_API
 int aws_s3_request_metrics_get_send_start_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
