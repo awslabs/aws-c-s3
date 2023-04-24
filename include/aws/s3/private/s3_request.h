@@ -31,24 +31,30 @@ struct aws_s3_request_metrics {
     struct aws_allocator *allocator;
 
     struct {
-        /* The time stamp when the request started by S3 client, which is prepared time by the client */
+        /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps
+         * are from `aws_high_res_clock_get_ticks` */
         uint64_t start_timestamp_ns;
-        /* The time stamp when the request finished by S3 client succeed or failed or to be retried */
+        /* The time stamp when the request finished by S3 client succeed or failed or to be retried. Timestamps
+         * are from `aws_high_res_clock_get_ticks` */
         uint64_t end_timestamp_ns;
         /* The time duration for the request from start to finish. end_timestamp_ns - start_timestamp_ns */
         uint64_t total_duration_ns;
 
-        /* The time stamp when the request started to be sent from HTTP level */
+        /* The time stamp when the request started to be sent to the network channel. Timestamps
+         * are from `aws_high_res_clock_get_ticks` */
         uint64_t send_start_timestamp_ns;
-        /* The time stamp when the request finished to be sent from HTTP level */
+        /* The time stamp when the request finished to be sent to the network channel. Timestamps
+         * are from `aws_high_res_clock_get_ticks` */
         uint64_t send_end_timestamp_ns;
         /* The time duration for the request from start sending to finish sending. send_end_timestamp_ns -
          * send_start_timestamp_ns */
         uint64_t sending_duration_ns;
 
-        /* The time stamp when the response started to be received from HTTP level */
+        /* The time stamp when the response started to be received from the network channel. Timestamps
+         * are from `aws_high_res_clock_get_ticks` */
         uint64_t receive_start_timestamp_ns;
-        /* The time stamp when the response finished to be received from HTTP level */
+        /* The time stamp when the response finished to be received from the network channel. Timestamps
+         * are from `aws_high_res_clock_get_ticks` */
         uint64_t receive_end_timestamp_ns;
         /* The time duration for the request from start sending to finish sending. send_end_timestamp_ns -
          * send_start_timestamp_ns */
