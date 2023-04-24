@@ -437,7 +437,7 @@ extern const struct aws_byte_cursor g_put_object_prefix;
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 extern struct aws_byte_cursor g_test_bucket_name;
-/* If `$CRT_S3_TEST_BUCKET_NAME` envrionment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
  * aws-c-s3-test-bucket-public
  */
 extern struct aws_byte_cursor g_test_public_bucket_name;

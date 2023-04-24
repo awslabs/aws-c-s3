@@ -350,6 +350,9 @@ struct aws_s3_meta_request_options {
      * be used. If not NULL, these options will override the client options. */
     const struct aws_signing_config_aws *signing_config;
 
+    /* The presigned url*/
+    const char *presigned_url;
+
     /* Initial HTTP message that defines what operation we are doing.
      * When uploading a file, you should set `send_filepath` (instead of the message's body-stream)
      * for better performance. */

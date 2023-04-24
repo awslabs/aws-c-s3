@@ -665,6 +665,19 @@ static void s_s3_meta_request_sign_request(
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
 }
 
+void aws_s3_meta_request_presigned_request_override(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(on_signing_complete);
+
+    on_signing_complete(NULL, AWS_ERROR_SUCCESS, user_data);
+    return;
+}
+
 /* Handles signing a message for the caller. */
 void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,

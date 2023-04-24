@@ -46,6 +46,16 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
     .finish = aws_s3_meta_request_finish_default,
 };
+static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_presigned_vtable = {
+    .update = s_s3_auto_ranged_get_update,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
+    .prepare_request = s_s3_auto_ranged_get_prepare_request,
+    .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
+    .sign_request = aws_s3_meta_request_presigned_request_override,
+    .finished_request = s_s3_auto_ranged_get_request_finished,
+    .destroy = s_s3_meta_request_auto_ranged_get_destroy,
+    .finish = aws_s3_meta_request_finish_default,
+};
 
 static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
@@ -59,6 +69,7 @@ static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_
 
     return AWS_S3_RESPONSE_STATUS_SUCCESS;
 }
+static struct aws_s3_meta_request_vtable vtable;
 
 /* Allocate a new auto-ranged-get meta request. */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
@@ -75,15 +86,14 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_get));
 
     /* Try to initialize the base type. */
+
+    if (options->presigned_url != NULL) {
+        vtable = s_s3_auto_ranged_get_presigned_vtable;
+    } else {
+        vtable = s_s3_auto_ranged_get_vtable;
+    }
     if (aws_s3_meta_request_init_base(
-            allocator,
-            client,
-            part_size,
-            false,
-            options,
-            auto_ranged_get,
-            &s_s3_auto_ranged_get_vtable,
-            &auto_ranged_get->base)) {
+            allocator, client, part_size, false, options, auto_ranged_get, &vtable, &auto_ranged_get->base)) {
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
