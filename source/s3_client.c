@@ -305,6 +305,10 @@ struct aws_s3_client *aws_s3_client_new(
         *((size_t *)&client->max_part_size) = (size_t)s_default_max_part_size;
     }
 
+    if (client_config->multipart_upload_threshold != 0) {
+        *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
+    }
+
     if (client_config->max_part_size < client_config->part_size) {
         *((size_t *)&client_config->max_part_size) = client_config->part_size;
     }
@@ -1009,7 +1013,9 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
                     client_max_part_size = g_s3_min_upload_part_size;
                 }
-                if (content_length <= client_part_size) {
+                uint64_t multipart_upload_threshold =
+                    client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
+                if (content_length <= multipart_upload_threshold) {
                     return aws_s3_meta_request_default_new(
                         client->allocator,
                         client,
