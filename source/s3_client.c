@@ -1066,6 +1066,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 if (part_size < client_part_size) {
                     part_size = client_part_size;
                 }
+                if (content_length < part_size) {
+                    /* When the content length is smaller than part size and larger than the threshold, we set one part
+                     * with the whole length */
+                    part_size = content_length;
+                }
 
                 uint32_t num_parts = (uint32_t)(content_length / part_size);
 

@@ -217,9 +217,9 @@ struct aws_s3_client_config {
     size_t max_part_size;
 
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
-     * request. Uploads over this size will automatically use a multipart upload strategy, while uploads smaller than
-     * this threshold will use a single connection to upload the whole object. If not set, `part_size` will be used as
-     * threshold. */
+     * request. Uploads over this size will automatically use a multipart upload strategy,while uploads smaller or
+     * equal to this threshold will use a single request to upload the whole object. If not set, `part_size` will be
+     * used as threshold. */
     uint64_t multipart_upload_threshold;
 
     /* Throughput target in Gbps that we are trying to reach. */
