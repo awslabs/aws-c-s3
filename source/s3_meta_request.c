@@ -1108,8 +1108,8 @@ static void s_s3_meta_request_stream_metrics(
 
     /* Also related metrics from the request/response. */
     s3_metrics->crt_info_metrics.connection_id = (void *)connection->http_connection;
-    struct aws_byte_cursor remote_address =
-        aws_http_connection_get_remote_endpoint_address(connection->http_connection);
+    const struct aws_socket_endpoint *endpoint = aws_http_connection_get_remote_endpoint(connection->http_connection);
+    struct aws_byte_cursor remote_address = aws_byte_cursor_from_c_str(endpoint->address);
     int result = aws_byte_buf_init_copy_from_cursor(
         &request->send_data.metrics->crt_info_metrics.ip_address, request->allocator, remote_address);
     AWS_ASSERT(result == AWS_OP_SUCCESS);
