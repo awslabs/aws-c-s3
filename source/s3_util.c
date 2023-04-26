@@ -325,7 +325,7 @@ struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_
     return aws_string_new_from_cursor(allocator, &in_cur);
 }
 
-int aws_last_error_or_unknown() {
+int aws_last_error_or_unknown(void) {
     int error = aws_last_error();
 
     if (error == AWS_ERROR_SUCCESS) {
