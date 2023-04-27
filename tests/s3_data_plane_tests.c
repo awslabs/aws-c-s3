@@ -1405,7 +1405,7 @@ static int s_apply_backpressure_until_meta_request_finish(
     struct aws_s3_tester *tester,
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_test_results *test_results,
-    size_t part_size,
+    uint64_t part_size,
     size_t window_initial_size,
     uint64_t window_increment_size) {
 
@@ -1480,7 +1480,7 @@ static int s_apply_backpressure_until_meta_request_finish(
 
 static int s_test_s3_get_object_backpressure_helper(
     struct aws_allocator *allocator,
-    size_t part_size,
+    uint64_t part_size,
     size_t window_initial_size,
     uint64_t window_increment_size) {
 
@@ -1561,7 +1561,7 @@ static int s_test_s3_get_object_backpressure_small_increments(struct aws_allocat
      * Only 1 part at a time should be in flight */
     (void)ctx;
     size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
-    size_t part_size = file_size / 4;
+    uint64_t part_size = file_size / 4;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size / 2;
     return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
@@ -1573,7 +1573,7 @@ static int s_test_s3_get_object_backpressure_big_increments(struct aws_allocator
      * Multiple parts should be in flight at a time */
     (void)ctx;
     size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
-    size_t part_size = file_size / 8;
+    uint64_t part_size = file_size / 8;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size * 3;
     return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
@@ -1584,7 +1584,7 @@ static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_alloca
     /* Test with initial window size of zero */
     (void)ctx;
     size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
-    size_t part_size = file_size / 4;
+    uint64_t part_size = file_size / 4;
     size_t window_initial_size = 0;
     uint64_t window_increment_size = part_size / 2;
     return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
@@ -2223,7 +2223,7 @@ static int s_test_s3_put_object_content_md5_helper(
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    size_t part_size = 5 * 1024 * 1024;
+    uint64_t part_size = 5 * 1024 * 1024;
     if (!multipart_upload) {
         /* content_length < part_size */
         part_size = 15 * 1024 * 1024;

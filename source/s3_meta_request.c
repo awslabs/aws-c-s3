@@ -165,7 +165,7 @@ static void s_meta_request_get_response_finish_checksum_callback(
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
-    size_t part_size,
+    uint64_t part_size,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
     void *impl,
@@ -193,7 +193,7 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
 
-    if (part_size == SIZE_MAX) {
+    if (part_size == UINT64_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         goto error;
     }
@@ -216,7 +216,7 @@ int aws_s3_meta_request_init_base(
         goto error;
     }
 
-    *((size_t *)&meta_request->part_size) = part_size;
+    *((uint64_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     checksum_config_init(&meta_request->checksum_config, options->checksum_config);
     if (options->signing_config) {

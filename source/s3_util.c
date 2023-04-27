@@ -477,7 +477,7 @@ int aws_s3_parse_content_length_response_header(
     return result;
 }
 
-uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
+uint32_t aws_s3_get_num_parts(uint64_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
     uint32_t num_parts = 1;
 
     uint64_t first_part_size = part_size;
@@ -506,7 +506,7 @@ uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uin
 void aws_s3_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
-    size_t part_size,
+    uint64_t part_size,
     uint32_t part_number,
     uint64_t *out_part_range_start,
     uint64_t *out_part_range_end) {

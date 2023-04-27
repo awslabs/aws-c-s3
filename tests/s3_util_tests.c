@@ -248,7 +248,7 @@ static int s_test_s3_parse_content_length_response_header(struct aws_allocator *
 static int s_validate_part_ranges(
     uint64_t object_range_start,
     uint64_t object_range_end,
-    size_t part_size,
+    uint64_t part_size,
     uint32_t num_parts,
     const uint64_t *part_ranges) {
     ASSERT_TRUE(part_ranges != NULL);
@@ -272,7 +272,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
     (void)allocator;
     (void)ctx;
 
-    const size_t part_size = 16 * 1024;
+    const uint64_t part_size = 16 * 1024;
 
     /* Perfectly aligned on part boundaries. */
     {

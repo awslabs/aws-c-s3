@@ -64,7 +64,7 @@ static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
-    size_t part_size,
+    uint64_t part_size,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);

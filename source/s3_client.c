@@ -66,13 +66,10 @@ const uint32_t g_max_num_connections_per_vip = 10;
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
- * Default max part size is SIZE_MAX on 32bit systems, which is around 4GiB; and 5GiB on a 64bit system.
- *      The server limit is 5GiB, but object size limit is 5TiB for now. We should be good enough for all the cases.
- *      The max number of upload parts is 10000, which limits the object size to 39TiB on 32bit and 49TiB on 64bit.
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const uint64_t s_default_max_part_size = SIZE_MAX < 5368709120ULL ? SIZE_MAX : 5368709120ULL;
+static const uint64_t s_default_max_part_size = 5368709120ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
@@ -1050,7 +1047,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     return NULL;
                 }
 
-                size_t part_size = (size_t)part_size_uint64;
+                uint64_t part_size = (size_t)part_size_uint64;
 
                 if (part_size > client_max_part_size) {
                     AWS_LOGF_ERROR(
@@ -2023,7 +2020,7 @@ enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
     return resume_token->type;
 }
 
-size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
+uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
     return resume_token->part_size;
 }

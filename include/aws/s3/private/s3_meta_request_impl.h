@@ -108,7 +108,7 @@ struct aws_s3_meta_request {
     struct aws_http_message *initial_request_message;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
-    const size_t part_size;
+    const uint64_t part_size;
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
@@ -208,7 +208,7 @@ AWS_S3_API
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
-    size_t part_size,
+    uint64_t part_size,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options,
     void *impl,

@@ -186,11 +186,11 @@ struct aws_s3_client {
 
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
-    const size_t part_size;
+    const uint64_t part_size;
 
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
-    const size_t max_part_size;
+    const uint64_t max_part_size;
 
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
      * request. Uploads over this size will automatically use a multipart upload strategy, while uploads smaller or
@@ -358,7 +358,7 @@ struct aws_s3_meta_request_resume_token {
         upload specific fields. Extending it to support other types is left as
         exercise for future. */
     struct aws_string *multipart_upload_id;
-    size_t part_size;
+    uint64_t part_size;
     size_t total_num_parts;
 
     /* Note: this field is used only when s3 tells us that upload id no longer

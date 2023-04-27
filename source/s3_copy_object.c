@@ -362,20 +362,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
         /* Prepares the CreateMultipartUpload sub-request. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
-            uint64_t part_size_uint64 = copy_object->synced_data.content_length / (uint64_t)g_s3_max_num_upload_parts;
-
-            if (part_size_uint64 > SIZE_MAX) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "Could not create multipart copy meta request; required part size of %" PRIu64
-                    " bytes is too large for platform.",
-                    part_size_uint64);
-
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return AWS_OP_ERR;
-            }
-
-            size_t part_size = (size_t)part_size_uint64;
+            uint64_t part_size = copy_object->synced_data.content_length / (uint64_t)g_s3_max_num_upload_parts;
 
             const size_t MIN_PART_SIZE = 64L * 1024L * 1024L; /* minimum partition size */
             if (part_size < MIN_PART_SIZE) {
@@ -393,7 +380,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
-                "Starting multi-part Copy using part size=%zu, total_num_parts=%zu",
+                "Starting multi-part Copy using part size=%" PRIu64 ", total_num_parts=%zu",
                 part_size,
                 (size_t)num_parts);
 
