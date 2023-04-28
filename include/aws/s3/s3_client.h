@@ -211,10 +211,11 @@ struct aws_s3_client_config {
     struct aws_signing_config_aws *signing_config;
 
     /* Size of parts the files will be downloaded or uploaded in. */
-    size_t part_size;
+    uint64_t part_size;
 
-    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to.. */
-    size_t max_part_size;
+    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to. On 32
+     * bit machine, it will be forced to SIZE_MAX. */
+    uint64_t max_part_size;
 
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
      * request. Uploads over this size will automatically use a multipart upload strategy,while uploads smaller or

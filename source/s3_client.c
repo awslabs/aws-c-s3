@@ -66,13 +66,10 @@ const uint32_t g_max_num_connections_per_vip = 10;
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
- * Default max part size is SIZE_MAX on 32bit systems, which is around 4GiB; and 5GiB on a 64bit system.
- *      The server limit is 5GiB, but object size limit is 5TiB for now. We should be good enough for all the cases.
- *      The max number of upload parts is 10000, which limits the object size to 39TiB on 32bit and 49TiB on 64bit.
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const uint64_t s_default_max_part_size = SIZE_MAX < 5368709120ULL ? SIZE_MAX : 5368709120ULL;
+static const uint64_t s_default_max_part_size = 5368709120ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
@@ -294,15 +291,19 @@ struct aws_s3_client *aws_s3_client_new(
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
     if (client_config->part_size != 0) {
-        *((size_t *)&client->part_size) = client_config->part_size;
+        if (client_config->part_size > SIZE_MAX) {
+            *((size_t *)&client->part_size) = SIZE_MAX;
+        } else {
+            *((size_t *)&client->part_size) = (size_t)client_config->part_size;
+        }
     } else {
         *((size_t *)&client->part_size) = s_default_part_size;
     }
 
     if (client_config->max_part_size != 0) {
-        *((size_t *)&client->max_part_size) = client_config->max_part_size;
+        *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
     } else {
-        *((size_t *)&client->max_part_size) = (size_t)s_default_max_part_size;
+        *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
     }
 
     if (client_config->multipart_upload_threshold != 0) {
