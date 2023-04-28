@@ -702,91 +702,93 @@ AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_request_metrics *metrics);
 
 /*************************************  Getters for s3 request metrics ************************************************/
-/* Ge the request ID from aws_s3_request_metrics, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised when data
+/* Get the request ID from aws_s3_request_metrics, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised when data
  * unavailable */
 AWS_S3_API
 int aws_s3_request_metrics_get_request_id(
     const struct aws_s3_request_metrics *metrics,
-    struct aws_byte_cursor *request_id);
+    struct aws_byte_cursor *out_request_id);
 
 /* Ge the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always be
  * available. Timestamp are from `aws_high_res_clock_get_ticks`  */
 AWS_S3_API
-void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time);
+void aws_s3_request_metrics_get_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_start_time);
 
 /* Ge the end time from aws_s3_request_metrics. Always be available */
 AWS_S3_API
-void aws_s3_request_metrics_get_end_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *end_time);
+void aws_s3_request_metrics_get_end_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *out_end_time);
 
 /* Ge the total duration time from aws_s3_request_metrics. Always be available */
 AWS_S3_API
 void aws_s3_request_metrics_get_total_duration_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *total_duration);
+    uint64_t *out_total_duration);
 
 /* Ge the start time stamp when request was sent to the network channel from aws_s3_request_metrics.
  * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if the request was end before it gets sent. */
 AWS_S3_API
 int aws_s3_request_metrics_get_send_start_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *send_start_time);
+    uint64_t *out_send_start_time);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_send_end_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *send_end_time);
+    uint64_t *out_send_end_time);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_sending_duration_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *sending_duration);
+    uint64_t *out_sending_duration);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_receive_start_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *receive_start_time);
+    uint64_t *out_receive_start_time);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_receive_end_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *receive_end_time);
+    uint64_t *out_receive_end_time);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_receiving_duration_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *receiving_duration);
+    uint64_t *out_receiving_duration);
 
 AWS_S3_API
-int aws_s3_request_metrics_get_response_status(const struct aws_s3_request_metrics *metrics, int *response_status);
+int aws_s3_request_metrics_get_response_status(const struct aws_s3_request_metrics *metrics, int *out_response_status);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_response_headers(
     const struct aws_s3_request_metrics *metrics,
-    struct aws_http_headers **response_headers);
+    struct aws_http_headers **out_response_headers);
 
 AWS_S3_API
 void aws_s3_request_metrics_get_request_path_query(
     const struct aws_s3_request_metrics *metrics,
-    struct aws_byte_cursor *request_path_query);
+    struct aws_byte_cursor *out_request_path_query);
 
 AWS_S3_API
 int aws_s3_request_metrics_get_ip_address(
     const struct aws_s3_request_metrics *metrics,
-    struct aws_byte_cursor *ip_address);
+    struct aws_byte_cursor *out_ip_address);
 
 AWS_S3_API
-int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, void **connection_id);
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, void **out_connection_id);
 
 /* Get the thread ID of the thread that request was made from */
 AWS_S3_API
-int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, aws_thread_id_t *thread_id);
+int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, aws_thread_id_t *out_thread_id);
 
 AWS_S3_API
-int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, size_t *stream_id);
+int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, size_t *out_stream_id);
 
 /* Get the AWS CRT error code from request metics. */
 AWS_S3_API
-int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *out_metrics);
 
 AWS_EXTERN_C_END
 
