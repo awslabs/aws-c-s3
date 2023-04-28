@@ -13,7 +13,7 @@ struct aws_s3_client;
 struct aws_s3_meta_request_default {
     struct aws_s3_meta_request base;
 
-    uint64_t content_length;
+    size_t content_length;
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {

@@ -121,7 +121,7 @@ struct aws_s3_tester {
 
 struct aws_s3_tester_client_options {
     enum aws_s3_client_tls_usage tls_usage;
-    uint64_t part_size;
+    size_t part_size;
     size_t max_part_size;
     uint32_t setup_region : 1;
     uint32_t use_proxy : 1;
@@ -186,7 +186,7 @@ struct aws_s3_tester_meta_request_options {
         bool file_on_disk;
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
-        uint64_t content_length;
+        size_t content_length;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
@@ -209,7 +209,7 @@ struct aws_s3_meta_request_test_results {
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
-    uint64_t part_size;
+    size_t part_size;
 
     int headers_response_status;
     struct aws_http_headers *response_headers;

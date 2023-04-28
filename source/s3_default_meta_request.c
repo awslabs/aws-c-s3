@@ -60,6 +60,16 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
         return NULL;
     }
 
+    if (content_length > SIZE_MAX) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create Default Meta Request; content length of %" PRIu64 " bytes is too large for platform.",
+            content_length);
+
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     struct aws_s3_meta_request_default *meta_request_default =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_default));
 
@@ -83,7 +93,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
         return NULL;
     }
 
-    meta_request_default->content_length = content_length;
+    meta_request_default->content_length = (size_t)content_length;
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
 

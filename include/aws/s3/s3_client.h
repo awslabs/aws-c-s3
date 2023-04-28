@@ -211,10 +211,10 @@ struct aws_s3_client_config {
     struct aws_signing_config_aws *signing_config;
 
     /* Size of parts the files will be downloaded or uploaded in. */
-    uint64_t part_size;
+    size_t part_size;
 
     /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to.. */
-    uint64_t max_part_size;
+    size_t max_part_size;
 
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
      * request. Uploads over this size will automatically use a multipart upload strategy,while uploads smaller or
@@ -569,7 +569,7 @@ int aws_s3_meta_request_pause(
  */
 struct aws_s3_upload_resume_token_options {
     struct aws_byte_cursor upload_id; /* Required */
-    uint64_t part_size;               /* Required */
+    size_t part_size;                 /* Required */
     size_t total_num_parts;           /* Required */
 
     /**
@@ -618,7 +618,7 @@ enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
  * Part size associated with operation.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
+size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
  * Total num parts associated with operation.

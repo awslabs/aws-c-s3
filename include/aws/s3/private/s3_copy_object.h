@@ -36,7 +36,7 @@ struct aws_s3_copy_object {
 
         /* obtained through a HEAD request against the source object */
         uint64_t content_length;
-        uint64_t part_size;
+        size_t part_size;
 
         uint32_t total_num_parts;
         uint32_t num_parts_sent;

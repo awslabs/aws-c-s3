@@ -1394,10 +1394,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 /* make a invalid request */
                 char content_length_buffer[64] = "";
                 snprintf(
-                    content_length_buffer,
-                    sizeof(content_length_buffer),
-                    "%" PRIu64 "",
-                    options->put_options.content_length);
+                    content_length_buffer, sizeof(content_length_buffer), "%zu", options->put_options.content_length);
 
                 struct aws_http_headers *headers = aws_http_message_get_headers(message);
                 aws_http_headers_set(
