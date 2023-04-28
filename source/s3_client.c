@@ -291,11 +291,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
     if (client_config->part_size != 0) {
-        if (client_config->part_size > SIZE_MAX) {
-            *((size_t *)&client->part_size) = SIZE_MAX;
-        } else {
-            *((size_t *)&client->part_size) = (size_t)client_config->part_size;
-        }
+        *((size_t *)&client->part_size) = (size_t)client_config->part_size;
     } else {
         *((size_t *)&client->part_size) = s_default_part_size;
     }
@@ -305,13 +301,17 @@ struct aws_s3_client *aws_s3_client_new(
     } else {
         *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
     }
+    if (client->max_part_size > SIZE_MAX) {
+        /* For the 32bit max part size to be SIZE_MAX */
+        *((uint64_t *)&client->max_part_size) = SIZE_MAX;
+    }
 
     if (client_config->multipart_upload_threshold != 0) {
         *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
-        *((size_t *)&client_config->max_part_size) = client_config->part_size;
+        *((uint64_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
     client->connect_timeout_ms = client_config->connect_timeout_ms;
@@ -990,7 +990,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             if (options->resume_token == NULL) {
 
                 size_t client_part_size = client->part_size;
-                size_t client_max_part_size = client->max_part_size;
+                uint64_t client_max_part_size = client->max_part_size;
 
                 if (client_part_size < g_s3_min_upload_part_size) {
                     AWS_LOGF_WARN(
@@ -1003,7 +1003,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     client_part_size = g_s3_min_upload_part_size;
                 }
 
-                if (client_max_part_size < g_s3_min_upload_part_size) {
+                if (client_max_part_size < (uint64_t)g_s3_min_upload_part_size) {
                     AWS_LOGF_WARN(
                         AWS_LS_S3_META_REQUEST,
                         "Client config max part size of %" PRIu64
@@ -1012,7 +1012,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         (uint64_t)client_max_part_size,
                         (uint64_t)g_s3_min_upload_part_size);
 
-                    client_max_part_size = g_s3_min_upload_part_size;
+                    client_max_part_size = (uint64_t)g_s3_min_upload_part_size;
                 }
                 uint64_t multipart_upload_threshold =
                     client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
