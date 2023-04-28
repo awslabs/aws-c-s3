@@ -91,7 +91,7 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
 static int s_try_update_part_info_from_resume_token(
     uint64_t content_length,
     const struct aws_s3_meta_request_resume_token *resume_token,
-    uint64_t *out_part_size,
+    size_t *out_part_size,
     uint32_t *out_total_num_parts) {
 
     if (!resume_token) {
