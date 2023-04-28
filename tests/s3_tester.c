@@ -193,6 +193,37 @@ static void s_s3_test_meta_request_telemetry(
     (void)meta_request;
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     struct aws_s3_tester *tester = meta_request_test_results->tester;
+    uint64_t time_stamp = 0;
+    aws_s3_request_metrics_get_start_timestamp_ns(metrics, &time_stamp);
+    AWS_FATAL_ASSERT(time_stamp > 0);
+    aws_s3_request_metrics_get_end_timestamp_ns(metrics, &time_stamp);
+    AWS_FATAL_ASSERT(time_stamp > 0);
+    aws_s3_request_metrics_get_total_duration_ns(metrics, &time_stamp);
+    AWS_FATAL_ASSERT(time_stamp > 0);
+    if (!aws_s3_request_metrics_get_send_end_timestamp_ns(metrics, &time_stamp)) {
+        AWS_FATAL_ASSERT(time_stamp > 0);
+        uint64_t start_time = 0;
+        uint64_t end_time = 0;
+        uint64_t during_time = 0;
+        int error = 0;
+        error |= aws_s3_request_metrics_get_send_start_timestamp_ns(metrics, &start_time);
+        error |= aws_s3_request_metrics_get_send_end_timestamp_ns(metrics, &end_time);
+        error |= aws_s3_request_metrics_get_sending_duration_ns(metrics, &during_time);
+        AWS_FATAL_ASSERT(error == AWS_OP_SUCCESS);
+        AWS_FATAL_ASSERT(during_time == (end_time - start_time));
+    }
+    if (!aws_s3_request_metrics_get_receive_end_timestamp_ns(metrics, &time_stamp)) {
+        AWS_FATAL_ASSERT(time_stamp > 0);
+        uint64_t start_time = 0;
+        uint64_t end_time = 0;
+        uint64_t during_time = 0;
+        int error = 0;
+        error |= aws_s3_request_metrics_get_receive_start_timestamp_ns(metrics, &start_time);
+        error |= aws_s3_request_metrics_get_receive_end_timestamp_ns(metrics, &end_time);
+        error |= aws_s3_request_metrics_get_receiving_duration_ns(metrics, &during_time);
+        AWS_FATAL_ASSERT(error == AWS_OP_SUCCESS);
+        AWS_FATAL_ASSERT(during_time == (end_time - start_time));
+    }
 
     aws_s3_tester_lock_synced_data(tester);
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
