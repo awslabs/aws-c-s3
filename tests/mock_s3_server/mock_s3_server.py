@@ -14,9 +14,10 @@ import trio
 import h11
 
 MAX_RECV = 2**16
-TIMEOUT = 120 # this must be higher than any response's "delay" setting
+TIMEOUT = 120  # this must be higher than any response's "delay" setting
 
-VERBOSE = False
+VERBOSE = True
+SHOULD_THROTTLE = True
 
 
 class S3Opts(Enum):
@@ -36,6 +37,7 @@ class TrioHTTPWrapper:
 
     def __init__(self, stream):
         self.stream = stream
+        self.should_throttle = SHOULD_THROTTLE
         self.conn = h11.Connection(h11.SERVER)
         # A unique id for this connection, to include in debugging output
         # (useful for understanding what's going on if there are multiple
@@ -218,6 +220,16 @@ async def send_mock_s3_response(wrapper, request_type, path, generate_body=False
         wrapper.info(response_file, "not exist, using the default response")
         response_file = os.path.join(
             base_dir, request_type.name, f"default.json")
+    if "throttle" in response_file:
+        # We throttle the request half the time to make sure it succeeds after a retry
+        if wrapper.should_throttle is False:
+            wrapper.info("Skipping throttling")
+            response_file = os.path.join(
+                base_dir, request_type.name, f"default.json")
+        else:
+            wrapper.info("Throttling")
+        # Flip the flag
+        wrapper.should_throttle = not wrapper.should_throttle
     await send_response_from_json(wrapper, response_file, generate_body=generate_body, generate_body_size=generate_body_size)
 
 

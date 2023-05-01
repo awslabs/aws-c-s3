@@ -815,6 +815,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                 }
                 ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
             }
+            /* Clean up the buffer in case of it's initialized before and retry happens. */
+            // aws_byte_buf_clean_up(&auto_ranged_put->encoded_checksum_list[request->part_number - 1]);
             /* Create a new put-object message to upload a part. */
             message = aws_s3_upload_part_message_new(
                 meta_request->allocator,
