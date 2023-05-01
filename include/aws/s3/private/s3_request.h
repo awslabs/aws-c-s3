@@ -25,7 +25,7 @@ enum aws_s3_request_flags {
 };
 
 /**
- * Information sent in the meta_request telemetry callback.
+ * Information sent in the telemetry_callback after each aws_s3_request finished/retried from meta request.
  */
 struct aws_s3_request_metrics {
     struct aws_allocator *allocator;
@@ -67,8 +67,11 @@ struct aws_s3_request_metrics {
         int response_status;
         /* HTTP Headers of the response received. */
         struct aws_http_headers *response_headers;
-        /* The request line: method, path and query of the request. */
+        /* Path and query of the request. */
         struct aws_byte_buf request_path_query;
+        /* Part number that this request refers to.  If this is not a part, this will be 0.  (S3 Part Numbers start
+         * at 1.) */
+        uint32_t part_number;
     } req_resp_info_metrics;
 
     struct {

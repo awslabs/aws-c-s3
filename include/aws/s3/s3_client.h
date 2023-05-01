@@ -147,6 +147,8 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 /**
  * Invoked to report the telemetry of the meta request once a single request finishes. Invoked from the thread of the
  * connection that request made from.
+ * Note: *metrics is only valid for the duration of the callback. If you need to keep it around, use
+ * `aws_s3_request_metrics_acquire`
  */
 typedef void(aws_s3_meta_request_telemetry_fn)(
     struct aws_s3_meta_request *meta_request,
@@ -420,9 +422,10 @@ struct aws_s3_meta_request_options {
      * To get telemetry metrics when a single request finishes.
      * If set the request will keep track the metrics from `aws_s3_request_metrics`, and fire the callback when the
      * request finishes receiving response.
+     * See `aws_s3_meta_request_telemetry_fn`
      *
-     * Note: the callback will be invoked multiple times from different thread.
-     * TODO: do we want a separate user data for telemetry callback?
+     * Notes:
+     * - The callback will be invoked multiple times from different thread.
      */
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
 
@@ -771,13 +774,17 @@ void aws_s3_request_metrics_get_request_path_query(
     const struct aws_s3_request_metrics *metrics,
     struct aws_byte_cursor *out_request_path_query);
 
+/* Get the part number of the request, if the request is not associated with a part, error code will be raised. */
+AWS_S3_API
+int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number);
+
 AWS_S3_API
 int aws_s3_request_metrics_get_ip_address(
     const struct aws_s3_request_metrics *metrics,
     struct aws_byte_cursor *out_ip_address);
 
 AWS_S3_API
-int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, void **out_connection_id);
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *out_connection_id);
 
 /* Get the thread ID of the thread that request was made from */
 AWS_S3_API

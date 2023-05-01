@@ -48,6 +48,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     if (meta_request->telemetry_callback) {
         /* start the telemetry for the request to be sent */
         request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
+        request->send_data.metrics->req_resp_info_metrics.part_number = request->part_number;
         /* Start the timestamp */
         aws_high_res_clock_get_ticks(&request->send_data.metrics->time_metrics.start_timestamp_ns);
     }
@@ -82,7 +83,6 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
         aws_high_res_clock_get_ticks(&metric->time_metrics.end_timestamp_ns);
         metric->time_metrics.total_duration_ns =
             metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
-        /* End the timestamp */
         if (meta_request->telemetry_callback) {
             meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
         }
@@ -302,6 +302,17 @@ void aws_s3_request_metrics_get_request_path_query(
     *request_path_query = aws_byte_cursor_from_buf(&metrics->req_resp_info_metrics.request_path_query);
 }
 
+int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_part_number);
+    if (metrics->req_resp_info_metrics.part_number == 0) {
+        /* If the request is not a part, this will be 0.  (S3 Part Numbers start at 1.) */
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_part_number = metrics->req_resp_info_metrics.part_number;
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_request_metrics_get_ip_address(
     const struct aws_s3_request_metrics *metrics,
     struct aws_byte_cursor *ip_address) {
@@ -314,13 +325,13 @@ int aws_s3_request_metrics_get_ip_address(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, void **connection_id) {
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *connection_id) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(connection_id);
     if (metrics->crt_info_metrics.connection_id == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    *connection_id = metrics->crt_info_metrics.connection_id;
+    *connection_id = (size_t)metrics->crt_info_metrics.connection_id;
     return AWS_OP_SUCCESS;
 }
 
