@@ -57,7 +57,10 @@ TEST_CASE(multipart_upload_mock_server) {
 
 TEST_CASE(multipart_upload_checksum_with_retry_mock_server) {
     (void)ctx;
-
+    /**
+     * We had a memory leak when the retry was triggered and the checksum was calculated.
+     * The retry will initialize the checksum buffer again, but the previous one was not freed.
+     */
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_s3_tester_client_options client_options = {
