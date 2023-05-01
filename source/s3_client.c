@@ -2015,9 +2015,9 @@ enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
     return resume_token->type;
 }
 
-size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
+uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
-    return resume_token->part_size;
+    return (uint64_t)resume_token->part_size;
 }
 
 size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token) {
