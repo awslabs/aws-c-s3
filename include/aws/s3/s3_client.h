@@ -420,12 +420,12 @@ struct aws_s3_meta_request_options {
     /**
      * Optional.
      * To get telemetry metrics when a single request finishes.
-     * If set the request will keep track the metrics from `aws_s3_request_metrics`, and fire the callback when the
+     * If set the request will keep track of the metrics from `aws_s3_request_metrics`, and fire the callback when the
      * request finishes receiving response.
      * See `aws_s3_meta_request_telemetry_fn`
      *
      * Notes:
-     * - The callback will be invoked multiple times from different thread.
+     * - The callback will be invoked multiple times from different threads.
      */
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
 
