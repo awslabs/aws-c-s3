@@ -571,7 +571,7 @@ int aws_s3_meta_request_pause(
  */
 struct aws_s3_upload_resume_token_options {
     struct aws_byte_cursor upload_id; /* Required */
-    uint64_t part_size;               /* Required */
+    uint64_t part_size;               /* Required. Must be less than SIZE_MAX */
     size_t total_num_parts;           /* Required */
 
     /**

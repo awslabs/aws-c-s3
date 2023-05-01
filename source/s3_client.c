@@ -1994,10 +1994,14 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_up
     const struct aws_s3_upload_resume_token_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(options);
+    if (options->part_size > SIZE_MAX) {
+        aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
+        return NULL;
+    }
 
     struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(allocator);
     token->multipart_upload_id = aws_string_new_from_cursor(allocator, &options->upload_id);
-    token->part_size = options->part_size;
+    token->part_size = (size_t)options->part_size;
     token->total_num_parts = options->total_num_parts;
     token->num_parts_completed = options->num_parts_completed;
     token->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
