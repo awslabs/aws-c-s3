@@ -588,7 +588,7 @@ int aws_s3_meta_request_pause(
  */
 struct aws_s3_upload_resume_token_options {
     struct aws_byte_cursor upload_id; /* Required */
-    uint64_t part_size;               /* Required */
+    size_t part_size;                 /* Required */
     size_t total_num_parts;           /* Required */
 
     /**
@@ -637,7 +637,7 @@ enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
  * Part size associated with operation.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
+size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
  * Total num parts associated with operation.
