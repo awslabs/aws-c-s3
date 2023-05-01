@@ -48,7 +48,7 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     aws_s3_request_metrics_get_request_path_query(metrics, &request_path_query);
     aws_thread_id_t thread_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_thread_id(metrics, &thread_id));
-    void *connection_id = NULL;
+    size_t connection_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_connection_id(metrics, &connection_id));
     ASSERT_UINT_EQUALS(aws_s3_request_metrics_get_error_code(metrics), AWS_ERROR_SUCCESS);
     /* Get all those time stamp */
