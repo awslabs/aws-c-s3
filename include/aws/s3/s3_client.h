@@ -774,6 +774,11 @@ void aws_s3_request_metrics_get_request_path_query(
     const struct aws_s3_request_metrics *metrics,
     struct aws_byte_cursor *out_request_path_query);
 
+AWS_S3_API
+void aws_s3_request_metrics_get_host_address(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *out_host_address);
+
 /* Get the part number of the request, if the request is not associated with a part, error code will be raised. */
 AWS_S3_API
 int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number);

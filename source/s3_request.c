@@ -132,6 +132,7 @@ static void s_s3_request_metrics_destroy(void *arg) {
     }
     aws_http_headers_release(metrics->req_resp_info_metrics.response_headers);
     aws_byte_buf_clean_up(&metrics->req_resp_info_metrics.request_path_query);
+    aws_byte_buf_clean_up(&metrics->req_resp_info_metrics.host_address);
     aws_byte_buf_clean_up(&metrics->crt_info_metrics.ip_address);
 
     aws_mem_release(metrics->allocator, metrics);
@@ -149,6 +150,18 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     AWS_ASSERT(!err);
     err = aws_byte_buf_init_copy_from_cursor(&metrics->req_resp_info_metrics.request_path_query, allocator, out_path);
     AWS_ASSERT(!err);
+
+    /* Get the host header value */
+    struct aws_byte_cursor host_header_value;
+    AWS_ZERO_STRUCT(host_header_value);
+    struct aws_http_headers *message_headers = aws_http_message_get_headers(message);
+    AWS_ASSERT(message_headers);
+    err = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
+    AWS_ASSERT(!err);
+    err =
+        aws_byte_buf_init_copy_from_cursor(&metrics->req_resp_info_metrics.host_address, allocator, host_header_value);
+    AWS_ASSERT(!err);
+
     (void)err;
     aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy);
 
@@ -300,6 +313,14 @@ void aws_s3_request_metrics_get_request_path_query(
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(request_path_query);
     *request_path_query = aws_byte_cursor_from_buf(&metrics->req_resp_info_metrics.request_path_query);
+}
+
+void aws_s3_request_metrics_get_host_address(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_byte_cursor *host_address) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(host_address);
+    *host_address = aws_byte_cursor_from_buf(&metrics->req_resp_info_metrics.host_address);
 }
 
 int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number) {

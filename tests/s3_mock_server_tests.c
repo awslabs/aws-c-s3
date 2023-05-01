@@ -46,6 +46,11 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     struct aws_byte_cursor request_path_query;
     AWS_ZERO_STRUCT(request_path_query);
     aws_s3_request_metrics_get_request_path_query(metrics, &request_path_query);
+    ASSERT_TRUE(request_path_query.len > 0);
+    struct aws_byte_cursor host_address;
+    AWS_ZERO_STRUCT(host_address);
+    aws_s3_request_metrics_get_host_address(metrics, &host_address);
+    ASSERT_TRUE(host_address.len > 0);
     aws_thread_id_t thread_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_thread_id(metrics, &thread_id));
     size_t connection_id = 0;

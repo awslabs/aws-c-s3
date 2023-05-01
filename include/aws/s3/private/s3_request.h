@@ -69,6 +69,8 @@ struct aws_s3_request_metrics {
         struct aws_http_headers *response_headers;
         /* Path and query of the request. */
         struct aws_byte_buf request_path_query;
+        /* The host address of the request. */
+        struct aws_byte_buf host_address;
         /* Part number that this request refers to.  If this is not a part, this will be 0.  (S3 Part Numbers start
          * at 1.) */
         uint32_t part_number;
