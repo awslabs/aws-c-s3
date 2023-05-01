@@ -20,10 +20,12 @@ struct aws_s3_auto_ranged_get {
     enum aws_s3_checksum_algorithm validation_algorithm;
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
-        /* The starting byte of the data that we will be retrieved from the object.*/
+        /* The starting byte of the data that we will be retrieved from the object.
+         * (ignore this if object_range_empty) */
         uint64_t object_range_start;
 
-        /* The last byte of the data that will be retrieved from the object.*/
+        /* The last byte of the data that will be retrieved from the object.
+         * (ignore this if object_range_empty) */
         uint64_t object_range_end;
 
         /* The total number of parts that are being used in downloading the object range. Note that "part" here
@@ -37,6 +39,10 @@ struct aws_s3_auto_ranged_get {
         uint32_t num_parts_checksum_validated;
 
         uint32_t object_range_known : 1;
+
+        /* True if object_range_known, and it's found to be empty.
+         * If this is true, ignore object_range_start and object_range_end */
+        uint32_t object_range_empty : 1;
         uint32_t head_object_sent : 1;
         uint32_t head_object_completed : 1;
         uint32_t get_without_range_sent : 1;
