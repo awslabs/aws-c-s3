@@ -224,10 +224,18 @@ struct aws_s3_client_config {
     struct aws_signing_config_aws *signing_config;
 
     /* Size of parts the files will be downloaded or uploaded in. */
-    size_t part_size;
+    uint64_t part_size;
 
-    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to.. */
-    size_t max_part_size;
+    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to. On 32
+     * bit machine, it will be forced to SIZE_MAX, which is around 4GiB. The server limit is 5GiB, but object size limit
+     * is 5TiB for now. We should be good enough for all the cases. */
+    uint64_t max_part_size;
+
+    /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
+     * request. Uploads over this size will automatically use a multipart upload strategy,while uploads smaller or
+     * equal to this threshold will use a single request to upload the whole object. If not set, `part_size` will be
+     * used as threshold. */
+    uint64_t multipart_upload_threshold;
 
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
@@ -588,7 +596,7 @@ int aws_s3_meta_request_pause(
  */
 struct aws_s3_upload_resume_token_options {
     struct aws_byte_cursor upload_id; /* Required */
-    size_t part_size;                 /* Required */
+    uint64_t part_size;               /* Required. Must be less than SIZE_MAX */
     size_t total_num_parts;           /* Required */
 
     /**
@@ -637,7 +645,7 @@ enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
  * Part size associated with operation.
  */
 AWS_S3_API
-size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
+uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
  * Total num parts associated with operation.
