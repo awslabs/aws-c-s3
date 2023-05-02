@@ -167,7 +167,7 @@ def cleanup(bucket_name):
 if args.action == 'init':
     try:
         print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
-        # create_bucket_with_lifecycle()
+        create_bucket_with_lifecycle()
         create_bucket_with_public_object()
         if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME:
             print(
