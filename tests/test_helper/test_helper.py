@@ -132,7 +132,19 @@ def create_bucket_with_lifecycle():
 def create_bucket_with_public_object():
     try:
         s3_client.create_bucket(Bucket=PUBLIC_BUCKET_NAME,
-                                CreateBucketConfiguration={'LocationConstraint': REGION})
+                                CreateBucketConfiguration={
+                                    'LocationConstraint': REGION},
+                                ObjectOwnership='ObjectWriter'
+                                )
+        s3_client.put_public_access_block(
+            Bucket=PUBLIC_BUCKET_NAME,
+            PublicAccessBlockConfiguration={
+                'BlockPublicAcls': False,
+                'IgnorePublicAcls': False,
+                'BlockPublicPolicy': False,
+                'RestrictPublicBuckets': False
+            }
+        )
         print(f"Bucket {PUBLIC_BUCKET_NAME} created", file=sys.stderr)
         put_pre_existing_objects(
             1*MB, 'pre-existing-1MB', bucket=PUBLIC_BUCKET_NAME, public_read=True)
@@ -155,7 +167,7 @@ def cleanup(bucket_name):
 if args.action == 'init':
     try:
         print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
-        create_bucket_with_lifecycle()
+        # create_bucket_with_lifecycle()
         create_bucket_with_public_object()
         if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME:
             print(
