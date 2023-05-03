@@ -719,7 +719,7 @@ AWS_S3_API
 int aws_s3_request_metrics_get_request_id(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *out_request_id);
+    struct aws_string **out_request_id);
 
 /* Get the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always
  * available. Timestamp are from `aws_high_res_clock_get_ticks`  */
@@ -802,7 +802,7 @@ AWS_S3_API
 void aws_s3_request_metrics_get_request_path_query(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *out_request_path_query);
+    struct aws_string **out_request_path_query);
 
 /* Get the host_address of the request. Note: you need to clean up the string after usage.
  * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
@@ -810,7 +810,7 @@ AWS_S3_API
 void aws_s3_request_metrics_get_host_address(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *out_host_address);
+    struct aws_string **out_host_address);
 
 /* Get the part number of the request, if the request is not associated with a part, error code will be raised. */
 AWS_S3_API
@@ -822,7 +822,7 @@ AWS_S3_API
 int aws_s3_request_metrics_get_ip_address(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *out_ip_address);
+    struct aws_string **out_ip_address);
 
 /* Get the id of connection that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data
  * not available */

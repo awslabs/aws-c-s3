@@ -29,11 +29,11 @@ static int s_validate_mpu_mock_server_metrics(struct aws_allocator *allocator, s
     struct aws_http_headers *response_headers = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_response_headers(metrics, &response_headers));
     struct aws_string *request_id = NULL;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_id(allocator, metrics, request_id));
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_id(allocator, metrics, &request_id));
     ASSERT_TRUE(aws_string_eq_c_str(request_id, "12345"));
     aws_string_destroy(request_id);
     struct aws_string *ip_address = NULL;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_ip_address(allocator, metrics, ip_address));
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_ip_address(allocator, metrics, &ip_address));
     /* Should be default local ip for ipv6/ipv4 */
     ASSERT_TRUE(aws_string_eq_c_str(ip_address, "::1") || aws_string_eq_c_str(ip_address, "127.0.0.1"));
     aws_string_destroy(ip_address);
@@ -44,12 +44,13 @@ static int s_validate_mpu_mock_server_metrics(struct aws_allocator *allocator, s
     ASSERT_SUCCESS(aws_s3_request_metrics_get_request_stream_id(metrics, &stream_id));
     ASSERT_UINT_EQUALS(stream_id, 1);
     struct aws_string *request_path_query = NULL;
-    aws_s3_request_metrics_get_request_path_query(allocator, metrics, request_path_query);
+    aws_s3_request_metrics_get_request_path_query(allocator, metrics, &request_path_query);
     ASSERT_TRUE(request_path_query->len > 0);
-    aws_string_destroy(ip_address);
+    aws_string_destroy(request_path_query);
     struct aws_string *host_address = NULL;
-    aws_s3_request_metrics_get_host_address(allocator, metrics, host_address);
+    aws_s3_request_metrics_get_host_address(allocator, metrics, &host_address);
     ASSERT_TRUE(host_address->len > 0);
+    aws_string_destroy(host_address);
     aws_thread_id_t thread_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_thread_id(metrics, &thread_id));
     size_t connection_id = 0;

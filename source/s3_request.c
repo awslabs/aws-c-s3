@@ -195,7 +195,7 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_requ
 int aws_s3_request_metrics_get_request_id(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *out_request_id) {
+    struct aws_string **out_request_id) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(out_request_id);
@@ -207,8 +207,8 @@ int aws_s3_request_metrics_get_request_id(
     if (aws_http_headers_get(metrics->req_resp_info_metrics.response_headers, g_request_id_header_name, &request_id)) {
         return AWS_OP_ERR;
     }
-    out_request_id = aws_string_new_from_cursor(allocator, &request_id);
-    return out_request_id ? AWS_OP_SUCCESS : AWS_OP_ERR;
+    *out_request_id = aws_string_new_from_cursor(allocator, &request_id);
+    return *out_request_id ? AWS_OP_SUCCESS : AWS_OP_ERR;
 }
 
 void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time) {
@@ -330,21 +330,21 @@ int aws_s3_request_metrics_get_response_headers(
 void aws_s3_request_metrics_get_request_path_query(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *request_path_query) {
+    struct aws_string **request_path_query) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(request_path_query);
-    request_path_query = aws_string_new_from_buf(allocator, &metrics->req_resp_info_metrics.request_path_query);
+    *request_path_query = aws_string_new_from_buf(allocator, &metrics->req_resp_info_metrics.request_path_query);
 }
 
 void aws_s3_request_metrics_get_host_address(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *host_address) {
+    struct aws_string **host_address) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(host_address);
-    host_address = aws_string_new_from_buf(allocator, &metrics->req_resp_info_metrics.host_address);
+    *host_address = aws_string_new_from_buf(allocator, &metrics->req_resp_info_metrics.host_address);
 }
 
 int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number) {
@@ -361,15 +361,15 @@ int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *
 int aws_s3_request_metrics_get_ip_address(
     struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string *ip_address) {
+    struct aws_string **ip_address) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(ip_address);
     if (metrics->crt_info_metrics.ip_address.len == 0) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    ip_address = aws_string_new_from_buf(allocator, &metrics->crt_info_metrics.ip_address);
-    return ip_address ? AWS_OP_SUCCESS : AWS_OP_ERR;
+    *ip_address = aws_string_new_from_buf(allocator, &metrics->crt_info_metrics.ip_address);
+    return *ip_address ? AWS_OP_SUCCESS : AWS_OP_ERR;
 }
 
 int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *connection_id) {
