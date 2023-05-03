@@ -140,9 +140,6 @@ def create_bucket_with_public_object():
             Bucket=PUBLIC_BUCKET_NAME,
             PublicAccessBlockConfiguration={
                 'BlockPublicAcls': False,
-                'IgnorePublicAcls': False,
-                'BlockPublicPolicy': False,
-                'RestrictPublicBuckets': False
             }
         )
         print(f"Bucket {PUBLIC_BUCKET_NAME} created", file=sys.stderr)
