@@ -18,7 +18,7 @@
 #define DEFINE_HEADER(NAME, VALUE)                                                                                     \
     { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
 
-static int s_validate_mpu_mock_server_metrics(struct aws_allocator *allocator, struct aws_array_list *metrics_list) {
+static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list) {
     /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
      * upload parts and one complete MPU */
     ASSERT_UINT_EQUALS(aws_array_list_length(metrics_list), 4);
@@ -129,7 +129,7 @@ TEST_CASE(multipart_upload_mock_server) {
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(allocator, &out_results.synced_data.metrics));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics));
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
