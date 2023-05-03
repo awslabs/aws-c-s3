@@ -33,33 +33,33 @@ struct aws_s3_request_metrics {
     struct {
         /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps
          * are from `aws_high_res_clock_get_ticks`. This will always be available. */
-        uint64_t start_timestamp_ns;
+        int64_t start_timestamp_ns;
         /* The time stamp when the request finished by S3 client succeed or failed or to be retried. Timestamps
          * are from `aws_high_res_clock_get_ticks`. This will always be available. */
-        uint64_t end_timestamp_ns;
+        int64_t end_timestamp_ns;
         /* The time duration for the request from start to finish. end_timestamp_ns - start_timestamp_ns. This will
          * always be available. */
-        uint64_t total_duration_ns;
+        int64_t total_duration_ns;
 
-        /* The time stamp when the request started to be encoded. 0 means data not available. Timestamp
+        /* The time stamp when the request started to be encoded. -1 means data not available. Timestamp
          * are from `aws_high_res_clock_get_ticks` */
-        uint64_t send_start_timestamp_ns;
-        /* The time stamp when the request finished to be encoded. 0 means data not available.
+        int64_t send_start_timestamp_ns;
+        /* The time stamp when the request finished to be encoded. -1 means data not available.
          * Timestamp are from `aws_high_res_clock_get_ticks` */
-        uint64_t send_end_timestamp_ns;
+        int64_t send_end_timestamp_ns;
         /* The time duration for the request from start encoding to finish encoding (send_end_timestamp_ns -
-         * send_start_timestamp_ns). When send_end_timestamp_ns is 0, means data not available. */
-        uint64_t sending_duration_ns;
+         * send_start_timestamp_ns). When send_end_timestamp_ns is -1, means data not available. */
+        int64_t sending_duration_ns;
 
-        /* The time stamp when the response started to be received from the network channel. 0 means data not
+        /* The time stamp when the response started to be received from the network channel. -1 means data not
          * available. Timestamp are from `aws_high_res_clock_get_ticks` */
-        uint64_t receive_start_timestamp_ns;
-        /* The time stamp when the response finished to be received from the network channel. 0 means data not
+        int64_t receive_start_timestamp_ns;
+        /* The time stamp when the response finished to be received from the network channel. -1 means data not
          * available. Timestamp are from `aws_high_res_clock_get_ticks` */
-        uint64_t receive_end_timestamp_ns;
-        /* The time duration for the request from start receiving to finish receiving. receive_end_timestamp_ns -
-         * receive_start_timestamp_ns. When receive_end_timestamp_ns is 0, means data not available. */
-        uint64_t receiving_duration_ns;
+        int64_t receive_end_timestamp_ns;
+        /* The time duration for the request from start receiving to finish receiving (receive_end_timestamp_ns -
+         * receive_start_timestamp_ns). When receive_end_timestamp_ns is 0, means data not available. */
+        int64_t receiving_duration_ns;
     } time_metrics;
 
     struct {
@@ -84,7 +84,7 @@ struct aws_s3_request_metrics {
         /* The aws_thread_id_t to the thread that request ran on */
         aws_thread_id_t thread_id;
         /* The stream-id, which is the idex when the stream was activated. */
-        size_t stream_id;
+        uint32_t stream_id;
         /* CRT error code when the aws_s3_request finishes. */
         int error_code;
     } crt_info_metrics;

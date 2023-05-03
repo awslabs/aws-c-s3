@@ -1098,24 +1098,13 @@ static void s_s3_meta_request_stream_metrics(
     AWS_ASSERT(request->send_data.metrics);
     struct aws_s3_request_metrics *s3_metrics = request->send_data.metrics;
     /* Copy over the time metrics from aws_http_stream_metrics to aws_s3_request_metrics */
-    if (http_metrics->send_start_timestamp_ns > 0) {
-        s3_metrics->time_metrics.send_start_timestamp_ns = http_metrics->send_start_timestamp_ns;
-    }
-    if (http_metrics->send_end_timestamp_ns > 0) {
-        s3_metrics->time_metrics.send_end_timestamp_ns = http_metrics->send_end_timestamp_ns;
-    }
-    if (http_metrics->send_end_timestamp_ns > 0 && http_metrics->send_start_timestamp_ns > 0) {
-        s3_metrics->time_metrics.sending_duration_ns = http_metrics->sending_duration_ns;
-    }
-    if (http_metrics->receive_start_timestamp_ns > 0) {
-        s3_metrics->time_metrics.receive_start_timestamp_ns = http_metrics->receive_start_timestamp_ns;
-    }
-    if (http_metrics->receive_end_timestamp_ns > 0) {
-        s3_metrics->time_metrics.receive_end_timestamp_ns = http_metrics->receive_end_timestamp_ns;
-    }
-    if (http_metrics->receive_end_timestamp_ns > 0 && http_metrics->receive_start_timestamp_ns > 0) {
-        s3_metrics->time_metrics.receiving_duration_ns = http_metrics->receiving_duration_ns;
-    }
+    s3_metrics->time_metrics.send_start_timestamp_ns = http_metrics->send_start_timestamp_ns;
+    s3_metrics->time_metrics.send_end_timestamp_ns = http_metrics->send_end_timestamp_ns;
+    s3_metrics->time_metrics.sending_duration_ns = http_metrics->sending_duration_ns;
+    s3_metrics->time_metrics.receive_start_timestamp_ns = http_metrics->receive_start_timestamp_ns;
+    s3_metrics->time_metrics.receive_end_timestamp_ns = http_metrics->receive_end_timestamp_ns;
+    s3_metrics->time_metrics.receiving_duration_ns = http_metrics->receiving_duration_ns;
+
     s3_metrics->crt_info_metrics.stream_id = http_metrics->stream_id;
 
     /* Also related metrics from the request/response. */
