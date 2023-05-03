@@ -713,13 +713,14 @@ AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_request_metrics *metrics);
 
 /*************************************  Getters for s3 request metrics ************************************************/
-/* Get the request ID from aws_s3_request_metrics, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised when data
- * unavailable */
+/**
+ * Get the request ID from aws_s3_request_metrics.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ **/
 AWS_S3_API
 int aws_s3_request_metrics_get_request_id(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **out_request_id);
+    struct aws_byte_cursor *out_request_id);
 
 /* Get the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always
  * available. Timestamp are from `aws_high_res_clock_get_ticks`  */
@@ -796,33 +797,41 @@ int aws_s3_request_metrics_get_response_headers(
     const struct aws_s3_request_metrics *metrics,
     struct aws_http_headers **out_response_headers);
 
-/* Get the path and query of the request. Note: you need to clean up the string after usage.
- * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+/**
+ * Get the path and query of the request.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_request_path_query will be set to a string. Be warned this string's lifetime is tied to the metrics
+ * object.
+ */
 AWS_S3_API
 void aws_s3_request_metrics_get_request_path_query(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **out_request_path_query);
+    const struct aws_string **out_request_path_query);
 
-/* Get the host_address of the request. Note: you need to clean up the string after usage.
- * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+/**
+ * Get the host_address of the request.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_host_address will be set to a string. Be warned this string's lifetime is tied to the metrics
+ * object.
+ */
 AWS_S3_API
 void aws_s3_request_metrics_get_host_address(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **out_host_address);
+    const struct aws_string **out_host_address);
 
 /* Get the part number of the request, if the request is not associated with a part, error code will be raised. */
 AWS_S3_API
 int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number);
 
-/* Get The IP address of the request connected to. Note: you need to clean up the string after usage.
- * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+/**
+ * Get the IP address of the request connected to.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_ip_address will be set to a string. Be warned this string's lifetime is tied to the metrics object.
+ */
 AWS_S3_API
 int aws_s3_request_metrics_get_ip_address(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **out_ip_address);
+    const struct aws_string **out_ip_address);
 
 /* Get the id of connection that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data
  * not available */

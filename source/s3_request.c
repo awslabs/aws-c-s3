@@ -131,9 +131,9 @@ static void s_s3_request_metrics_destroy(void *arg) {
         return;
     }
     aws_http_headers_release(metrics->req_resp_info_metrics.response_headers);
-    aws_byte_buf_clean_up(&metrics->req_resp_info_metrics.request_path_query);
-    aws_byte_buf_clean_up(&metrics->req_resp_info_metrics.host_address);
-    aws_byte_buf_clean_up(&metrics->crt_info_metrics.ip_address);
+    aws_string_destroy(metrics->req_resp_info_metrics.request_path_query);
+    aws_string_destroy(metrics->req_resp_info_metrics.host_address);
+    aws_string_destroy(metrics->crt_info_metrics.ip_address);
 
     aws_mem_release(metrics->allocator, metrics);
 }
@@ -148,8 +148,8 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     int err = aws_http_message_get_request_path(message, &out_path);
     /* If there is no path of the message, it should be a program error. */
     AWS_ASSERT(!err);
-    err = aws_byte_buf_init_copy_from_cursor(&metrics->req_resp_info_metrics.request_path_query, allocator, out_path);
-    AWS_ASSERT(!err);
+    metrics->req_resp_info_metrics.request_path_query = aws_string_new_from_cursor(allocator, &out_path);
+    AWS_ASSERT(metrics->req_resp_info_metrics.request_path_query != NULL);
 
     /* Get the host header value */
     struct aws_byte_cursor host_header_value;
@@ -158,9 +158,8 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     AWS_ASSERT(message_headers);
     err = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
     AWS_ASSERT(!err);
-    err =
-        aws_byte_buf_init_copy_from_cursor(&metrics->req_resp_info_metrics.host_address, allocator, host_header_value);
-    AWS_ASSERT(!err);
+    metrics->req_resp_info_metrics.host_address = aws_string_new_from_cursor(allocator, &host_header_value);
+    AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
 
     metrics->time_metrics.start_timestamp_ns = -1;
     metrics->time_metrics.end_timestamp_ns = -1;
@@ -171,6 +170,8 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->time_metrics.receive_start_timestamp_ns = -1;
     metrics->time_metrics.receive_end_timestamp_ns = -1;
     metrics->time_metrics.receiving_duration_ns = -1;
+
+    metrics->req_resp_info_metrics.response_status = -1;
 
     (void)err;
     aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy);
@@ -193,22 +194,15 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_requ
 }
 
 int aws_s3_request_metrics_get_request_id(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **out_request_id) {
-    AWS_PRECONDITION(allocator);
+    struct aws_byte_cursor *out_request_id) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(out_request_id);
     if (metrics->req_resp_info_metrics.response_headers == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    struct aws_byte_cursor request_id;
-    AWS_ZERO_STRUCT(request_id);
-    if (aws_http_headers_get(metrics->req_resp_info_metrics.response_headers, g_request_id_header_name, &request_id)) {
-        return AWS_OP_ERR;
-    }
-    *out_request_id = aws_string_new_from_cursor(allocator, &request_id);
-    return *out_request_id ? AWS_OP_SUCCESS : AWS_OP_ERR;
+    return aws_http_headers_get(
+        metrics->req_resp_info_metrics.response_headers, g_request_id_header_name, out_request_id);
 }
 
 void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time) {
@@ -260,7 +254,7 @@ int aws_s3_request_metrics_get_sending_duration_ns(
     uint64_t *sending_duration) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(sending_duration);
-    if (metrics->time_metrics.send_end_timestamp_ns < 0 || metrics->time_metrics.send_start_timestamp_ns < 0) {
+    if (metrics->time_metrics.sending_duration_ns < 0) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
     *sending_duration = metrics->time_metrics.sending_duration_ns;
@@ -296,7 +290,7 @@ int aws_s3_request_metrics_get_receiving_duration_ns(
     uint64_t *receiving_duration) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(receiving_duration);
-    if (metrics->time_metrics.receive_end_timestamp_ns < 0 || metrics->time_metrics.receive_start_timestamp_ns < 0) {
+    if (metrics->time_metrics.receiving_duration_ns < 0) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
     *receiving_duration = metrics->time_metrics.receiving_duration_ns;
@@ -308,7 +302,7 @@ int aws_s3_request_metrics_get_response_status_code(
     int *response_status) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(response_status);
-    if (metrics->req_resp_info_metrics.response_status == 0) {
+    if (metrics->req_resp_info_metrics.response_status == -1) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
     *response_status = metrics->req_resp_info_metrics.response_status;
@@ -328,23 +322,19 @@ int aws_s3_request_metrics_get_response_headers(
 }
 
 void aws_s3_request_metrics_get_request_path_query(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **request_path_query) {
-    AWS_PRECONDITION(allocator);
+    const struct aws_string **request_path_query) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(request_path_query);
-    *request_path_query = aws_string_new_from_buf(allocator, &metrics->req_resp_info_metrics.request_path_query);
+    *request_path_query = metrics->req_resp_info_metrics.request_path_query;
 }
 
 void aws_s3_request_metrics_get_host_address(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **host_address) {
-    AWS_PRECONDITION(allocator);
+    const struct aws_string **host_address) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(host_address);
-    *host_address = aws_string_new_from_buf(allocator, &metrics->req_resp_info_metrics.host_address);
+    *host_address = metrics->req_resp_info_metrics.host_address;
 }
 
 int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number) {
@@ -359,17 +349,15 @@ int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *
 }
 
 int aws_s3_request_metrics_get_ip_address(
-    struct aws_allocator *allocator,
     const struct aws_s3_request_metrics *metrics,
-    struct aws_string **ip_address) {
-    AWS_PRECONDITION(allocator);
+    const struct aws_string **ip_address) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(ip_address);
-    if (metrics->crt_info_metrics.ip_address.len == 0) {
+    if (metrics->crt_info_metrics.ip_address == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    *ip_address = aws_string_new_from_buf(allocator, &metrics->crt_info_metrics.ip_address);
-    return *ip_address ? AWS_OP_SUCCESS : AWS_OP_ERR;
+    *ip_address = metrics->crt_info_metrics.ip_address;
+    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *connection_id) {

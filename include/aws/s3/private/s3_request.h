@@ -68,9 +68,9 @@ struct aws_s3_request_metrics {
         /* HTTP Headers of the response received. */
         struct aws_http_headers *response_headers;
         /* Path and query of the request. */
-        struct aws_byte_buf request_path_query;
+        struct aws_string *request_path_query;
         /* The host address of the request. */
-        struct aws_byte_buf host_address;
+        struct aws_string *host_address;
         /* Part number that this request refers to.  If this is not a part, this will be 0.  (S3 Part Numbers start
          * at 1.) */
         uint32_t part_number;
@@ -78,7 +78,7 @@ struct aws_s3_request_metrics {
 
     struct {
         /* The IP address of the request connected to */
-        struct aws_byte_buf ip_address;
+        struct aws_string *ip_address;
         /* The pointer to the connection that request was made from */
         void *connection_id;
         /* The aws_thread_id_t to the thread that request ran on */
