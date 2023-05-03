@@ -190,7 +190,13 @@ struct aws_s3_client {
 
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
-    const size_t max_part_size;
+    const uint64_t max_part_size;
+
+    /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
+     * request. Uploads over this size will automatically use a multipart upload strategy, while uploads smaller or
+     * equal to this threshold will use a single request to upload the whole object. If not set, `part_size` will be
+     * used as threshold. */
+    const uint64_t multipart_upload_threshold;
 
     /* TLS Options to be used for each connection. */
     struct aws_tls_connection_options *tls_connection_options;
