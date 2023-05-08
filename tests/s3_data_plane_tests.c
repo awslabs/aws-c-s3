@@ -1984,14 +1984,13 @@ static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocato
 
     ASSERT_TRUE(client != NULL);
 
-    /* First smaller than the part size */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
         .put_options =
             {
-                .object_size_mb = 16,
+                .object_size_mb = 19,
                 .skip_content_length = true,
             },
     };
@@ -2008,8 +2007,8 @@ static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocato
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_no_content_length_single_part, s_test_s3_put_object_no_content_length_single_part)
-static int s_test_s3_put_object_no_content_length_single_part(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_put_object_single_part_no_content_length, s_test_s3_put_object_single_part_no_content_length)
+static int s_test_s3_put_object_single_part_no_content_length(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -2026,7 +2025,6 @@ static int s_test_s3_put_object_no_content_length_single_part(struct aws_allocat
 
     ASSERT_TRUE(client != NULL);
 
-    /* First smaller than the part size */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,

@@ -471,16 +471,20 @@ static bool s_s3_auto_ranged_put_update(
             }
 
             /* There is one more request to send after all the parts (the complete-multipart-upload) but it can't be
-             * done until all the parts have been completed.*/
-            if ((!auto_ranged_put->prepare_data.is_body_stream_at_end) &&
-                auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->synced_data.total_num_parts) {
-                goto has_work_remaining;
+            * done until all the parts have been completed. 
+            * TODO: slightly different handling right now between known and
+            * unknown content length. can this be unified?*/
+            if (auto_ranged_put->has_content_length) {
+                if (auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->synced_data.total_num_parts) {
+                    goto has_work_remaining;
+                }
+            } else {
+                if ((auto_ranged_put->prepare_data.is_body_stream_at_end) &&
+                    auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->synced_data.num_parts_sent) {
+                    goto has_work_remaining;
+                }
             }
 
-            if ((auto_ranged_put->prepare_data.is_body_stream_at_end) &&
-                auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->synced_data.num_parts_sent) {
-                goto has_work_remaining;
-            }
 
             /* If the complete-multipart-upload request hasn't been set yet, then send it now. */
             if (!auto_ranged_put->synced_data.complete_multipart_upload_sent) {
@@ -830,6 +834,13 @@ static int s_s3_auto_ranged_put_prepare_request(
 
             size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
 
+            AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p UploadPart for Multi-part Upload, with ID:%s with size %d",
+                        (void *)meta_request,
+                        aws_string_c_str(auto_ranged_put->upload_id),
+                        request_body_size);
+
             if (request->num_times_prepared == 0) {
                 if (auto_ranged_put->has_content_length && s_skip_parts_from_stream(
                                                                meta_request,
@@ -842,11 +853,18 @@ static int s_s3_auto_ranged_put_prepare_request(
                 aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
                 if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+                    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "could not read");
                     goto message_create_failed;
                 }
                 ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
                 auto_ranged_put->prepare_data.is_body_stream_at_end =
                     aws_s3_meta_request_body_has_no_more_data(meta_request);
+                AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p UploadPart for Multi-part Upload, with ID:%s body at end: %d",
+                        (void *)meta_request,
+                        aws_string_c_str(auto_ranged_put->upload_id),
+                        auto_ranged_put->prepare_data.is_body_stream_at_end);
             }
 
             struct aws_byte_buf *checksum_buf = NULL;
@@ -1301,9 +1319,16 @@ static int s_s3_auto_ranged_put_pause(
 
     *out_resume_token = NULL;
 
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    if (!auto_ranged_put->has_content_length) {
+        AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST,
+            "id=%p: Failed to pause request with unknown content length",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
     /* lock */
     aws_s3_meta_request_lock_synced_data(meta_request);
-    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
