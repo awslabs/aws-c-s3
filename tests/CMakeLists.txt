@@ -104,6 +104,7 @@ add_net_test_case(test_s3_upload_part_message_without_content_md5)
 add_net_test_case(test_s3_create_multipart_upload_message_with_content_md5)
 add_net_test_case(test_s3_complete_multipart_message_with_content_md5)
 add_net_test_case(test_s3_put_object_double_slashes)
+add_net_test_case(test_s3_put_object_no_content_length)
 
 if(ENABLE_MRAP_TESTS)
     add_net_test_case(test_s3_get_object_less_than_part_size_mrap)

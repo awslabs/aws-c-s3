@@ -75,7 +75,7 @@ struct aws_s3_request {
     bool checksum_match;
 
     /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
-     * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
+     * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests. (For example, they can
      * be more contextual, like "first part" instead of just "part".) */
 
     /* TODO: this should be a union type to make it clear that this could be one of two enums for puts, and gets. */

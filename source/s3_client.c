@@ -16,7 +16,6 @@
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
-#include <aws/common/environment.h>
 #include <aws/common/json.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -33,7 +32,6 @@
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
 
-#include <aws/s3/private/s3_copy_object.h>
 #include <inttypes.h>
 #include <math.h>
 
@@ -971,14 +969,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
 
-            if (!content_length_header_found) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-
             struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
 
             if ((input_stream == NULL) && (options->send_filepath.len == 0)) {
@@ -1018,7 +1008,9 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 }
                 uint64_t multipart_upload_threshold =
                     client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
-                if (content_length <= multipart_upload_threshold) {
+                
+                if (content_length_header_found && 
+                    content_length <= multipart_upload_threshold) {
                     return aws_s3_meta_request_default_new(
                         client->allocator,
                         client,
@@ -1028,63 +1020,67 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         options);
                 } else {
                     if (aws_s3_message_util_check_checksum_header(options->message)) {
-                        /* The checksum header has been set and the request will be splitted. We fail the request */
+                        /* The checksum header has been set and the request will be split. We fail the request */
                         AWS_LOGF_ERROR(
                             AWS_LS_S3_META_REQUEST,
                             "Could not create auto-ranged-put meta request; checksum headers has been set for "
                             "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
-                            "single "
-                            "part upload.");
+                            "single part upload.");
                         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                         return NULL;
                     }
                 }
 
-                uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
+                size_t part_size = client_part_size;
+                uint32_t num_parts = 0;
 
-                if (part_size_uint64 > SIZE_MAX) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "Could not create auto-ranged-put meta request; required part size of %" PRIu64
-                        " bytes is too large for platform.",
-                        part_size_uint64);
+                if (content_length_header_found) {
+                    uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
 
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
+                    if (part_size_uint64 > SIZE_MAX) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "Could not create auto-ranged-put meta request; required part size of %" PRIu64
+                            " bytes is too large for platform.",
+                            part_size_uint64);
 
-                size_t part_size = (size_t)part_size_uint64;
+                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                        return NULL;
+                    }
 
-                if (part_size > client_max_part_size) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
-                        ", but current maximum part size is %" PRIu64,
-                        (uint64_t)part_size,
-                        (uint64_t)client_max_part_size);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
+                    part_size = (size_t)part_size_uint64;
 
-                if (part_size < client_part_size) {
-                    part_size = client_part_size;
-                }
-                if (content_length < part_size) {
-                    /* When the content length is smaller than part size and larger than the threshold, we set one part
-                     * with the whole length */
-                    part_size = (size_t)content_length;
-                }
+                    if (part_size > client_max_part_size) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
+                            ", but current maximum part size is %" PRIu64,
+                            (uint64_t)part_size,
+                            (uint64_t)client_max_part_size);
+                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                        return NULL;
+                    }
 
-                uint32_t num_parts = (uint32_t)(content_length / part_size);
+                    if (part_size < client_part_size) {
+                        part_size = client_part_size;
+                    }
+                    if (content_length < part_size) {
+                        /* When the content length is smaller than part size and larger than the threshold, we set one part
+                        * with the whole length */
+                        part_size = (size_t)content_length;
+                    }
 
-                if ((content_length % part_size) > 0) {
-                    ++num_parts;
+                    num_parts = (uint32_t)(content_length / part_size);
+
+                    if ((content_length % part_size) > 0) {
+                        ++num_parts;
+                    }
                 }
 
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length, num_parts, options);
             } else {
-                /* dont pass part size and total num parts. constructor will pick it up from token */
+                /* don't pass part size and total num parts. constructor will pick it up from token */
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, 0, content_length, 0, options);
             }
@@ -1751,7 +1747,7 @@ void aws_s3_client_notify_connection_finished(
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_PRECONDITION(endpoint);
 
-    /* If we're trying to setup a retry... */
+    /* If we're trying to set up a retry... */
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
 
         if (connection->retry_token == NULL) {

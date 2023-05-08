@@ -464,7 +464,7 @@ struct aws_s3_meta_request_result {
      * uploaded as a multipart object.
      *
      * If the object to get is multipart object, the part checksum MAY be validated if the part size to get matches the
-     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will failed with
+     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will fail with
      * checksum mismatch. However, even if the parts checksum were validated, this will NOT be set to true, as the
      * checksum for the whole meta request was NOT validated.
      **/

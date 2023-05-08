@@ -29,6 +29,7 @@ struct aws_s3_auto_ranged_put {
     struct aws_s3_meta_request_resume_token *resume_token;
 
     uint64_t content_length;
+    bool has_content_length;
 
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
@@ -51,15 +52,17 @@ struct aws_s3_auto_ranged_put {
          * stream.
          */
         uint32_t num_parts_read_from_stream;
+        
+        bool is_body_stream_at_end; 
     } prepare_data;
 
     /*
      * Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
-     * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
+     * corresponding index to its checksum result, so while the list is shared across threads each index will only be
      * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
      * request which will only be invoked after all other parts/threads have completed.
      */
-    struct aws_byte_buf *encoded_checksum_list;
+    struct aws_array_list encoded_checksum_list;
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {

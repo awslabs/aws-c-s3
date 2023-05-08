@@ -105,7 +105,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
     }
 }
 
-/* warning this might get screwed up with retrys/restarts */
+/* warning this might get screwed up with retries/restarts */
 static int s_meta_request_get_response_body_checksum_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -907,7 +907,7 @@ static void s_get_part_response_headers_checksum_helper(
     }
 }
 
-/* warning this might get screwed up with retrys/restarts */
+/* warning this might get screwed up with retries/restarts */
 static void s_get_part_response_body_checksum_helper(
     struct aws_s3_checksum *running_response_sum,
     const struct aws_byte_cursor *body) {
@@ -1544,6 +1544,21 @@ int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, stru
     }
 
     return AWS_OP_SUCCESS;
+}
+
+bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_input_stream *initial_body_stream =
+        aws_http_message_get_body_stream(meta_request->initial_request_message);
+    AWS_FATAL_ASSERT(initial_body_stream);
+
+    struct aws_stream_status status;
+    if (aws_input_stream_get_status(initial_body_stream, &status)) {
+        return true;
+    }
+
+    return status.is_end_of_stream;
 }
 
 void aws_s3_meta_request_result_setup(
