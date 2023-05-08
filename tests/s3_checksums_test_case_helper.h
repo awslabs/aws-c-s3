@@ -5,7 +5,7 @@
 #include "aws/s3/private/s3_checksums.h"
 #include <aws/testing/aws_test_harness.h>
 
-typedef struct aws_s3_checksum * aws_checksum_new_fn(
+typedef struct aws_s3_checksum *aws_checksum_new_fn(
     struct aws_allocator *allocator, 
     enum aws_s3_checksum_algorithm algorithm);
 
