@@ -31,8 +31,7 @@ static int s_aws_s3_test_input_stream_read(
     struct aws_s3_test_input_stream_impl *test_input_stream =
         AWS_CONTAINER_OF(stream, struct aws_s3_test_input_stream_impl, base);
 
-    while (dest->len < dest->capacity && 
-        test_input_stream->position < test_input_stream->length) {
+    while (dest->len < dest->capacity && test_input_stream->position < test_input_stream->length) {
         size_t buffer_pos = test_input_stream->position % test_string->len;
 
         struct aws_byte_cursor source_byte_cursor = {
