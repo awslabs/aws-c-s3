@@ -849,7 +849,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     aws_s3_meta_request_body_has_no_more_data(meta_request);
             }
 
-            struct aws_byte_buf *checksum_buf;
+            struct aws_byte_buf *checksum_buf = NULL;
             aws_array_list_get_at_ptr(
                 &auto_ranged_put->encoded_checksum_list, (void **)&checksum_buf, request->part_number - 1);
             /* Clean up the buffer in case of it's initialized before and retry happens. */
