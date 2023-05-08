@@ -52,8 +52,8 @@ struct aws_s3_auto_ranged_put {
          * stream.
          */
         uint32_t num_parts_read_from_stream;
-        
-        bool is_body_stream_at_end; 
+
+        bool is_body_stream_at_end;
     } prepare_data;
 
     /*

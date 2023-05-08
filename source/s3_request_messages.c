@@ -641,10 +641,10 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             if (aws_byte_buf_append_dynamic(body_buffer, &s_close_part_number_tag)) {
                 goto error_clean_up;
             }
-            
+
             if (mpu_algorithm_checksum_name) {
                 struct aws_byte_buf checksum_buf;
-                
+
                 aws_array_list_get_at(checksums, &checksum_buf, etag_index);
 
                 struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(&checksum_buf);

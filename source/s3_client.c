@@ -1008,9 +1008,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 }
                 uint64_t multipart_upload_threshold =
                     client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
-                
-                if (content_length_header_found && 
-                    content_length <= multipart_upload_threshold) {
+
+                if (content_length_header_found && content_length <= multipart_upload_threshold) {
                     return aws_s3_meta_request_default_new(
                         client->allocator,
                         client,
@@ -1053,8 +1052,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     if (part_size > client_max_part_size) {
                         AWS_LOGF_ERROR(
                             AWS_LS_S3_META_REQUEST,
-                            "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
-                            ", but current maximum part size is %" PRIu64,
+                            "Could not create auto-ranged-put meta request; required part size for put request is "
+                            "%" PRIu64 ", but current maximum part size is %" PRIu64,
                             (uint64_t)part_size,
                             (uint64_t)client_max_part_size);
                         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -1065,8 +1064,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         part_size = client_part_size;
                     }
                     if (content_length < part_size) {
-                        /* When the content length is smaller than part size and larger than the threshold, we set one part
-                        * with the whole length */
+                        /* When the content length is smaller than part size and larger than the threshold, we set one
+                         * part with the whole length */
                         part_size = (size_t)content_length;
                     }
 
