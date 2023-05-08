@@ -610,8 +610,6 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
             aws_array_list_get_at(etags, &etag, etag_index);
 
-            AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "huuh %d", etag_index);
-
             AWS_FATAL_ASSERT(etag != NULL);
 
             if (aws_byte_buf_append_dynamic(body_buffer, &s_part_section_string_0)) {
