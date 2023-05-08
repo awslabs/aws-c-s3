@@ -2008,7 +2008,7 @@ static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocato
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_no_content_length, s_test_s3_put_object_no_content_length)
+AWS_TEST_CASE(test_s3_put_object_no_content_length_single_part, s_test_s3_put_object_no_content_length_single_part)
 static int s_test_s3_put_object_no_content_length_single_part(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
