@@ -4,7 +4,8 @@
  */
 #include "aws/s3/private/s3_checksums.h"
 
-typedef struct aws_s3_checksum * aws_checksum_new_fn (struct aws_allocator *allocator, 
+typedef struct aws_s3_checksum * aws_checksum_new_fn (
+    struct aws_allocator *allocator, 
     enum aws_s3_checksum_algorithm algorithm);
 
 static inline int s_verify_checksum_test_case(
