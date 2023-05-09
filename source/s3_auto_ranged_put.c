@@ -866,6 +866,18 @@ static int s_s3_auto_ranged_put_prepare_request(
                     goto message_create_failed;
                 }
                 ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
+
+                /* BEGIN CRITICAL SECTION */
+                {
+                    aws_s3_meta_request_lock_synced_data(meta_request);
+
+                    auto_ranged_put->prepare_data.is_body_stream_at_end =
+                    aws_s3_meta_request_body_has_no_more_data(meta_request);
+
+                    aws_s3_meta_request_unlock_synced_data(meta_request);
+                }
+                /* END CRITICAL SECTION */
+
                 auto_ranged_put->prepare_data.is_body_stream_at_end =
                     aws_s3_meta_request_body_has_no_more_data(meta_request);
                 AWS_LOGF_DEBUG(
