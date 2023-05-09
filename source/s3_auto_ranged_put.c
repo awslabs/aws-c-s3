@@ -85,10 +85,10 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
     if (info->part_number > current_num_parts) {
         struct aws_byte_buf empty_buf = {0};
         struct aws_string *null_etag = NULL;
-
-        for (size_t i = info->part_number - 1; i >= current_num_parts; ++i) {
-            aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &empty_buf, i);
-            aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, i);
+        
+        for (size_t i = info->part_number ; i > current_num_parts; --i) {
+            aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &empty_buf, i-1);
+            aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, i-1);
         }
     }
 
@@ -497,7 +497,7 @@ static bool s_s3_auto_ranged_put_update(
                     goto has_work_remaining;
                 }
             } else {
-                if ((auto_ranged_put->prepare_data.is_body_stream_at_end) &&
+                if ((!auto_ranged_put->prepare_data.is_body_stream_at_end) ||
                     auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->synced_data.num_parts_sent) {
                     goto has_work_remaining;
                 }
