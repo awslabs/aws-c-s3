@@ -994,6 +994,10 @@ static int s_s3_meta_request_incoming_headers(
         for (size_t i = 0; i < headers_count; ++i) {
             const struct aws_byte_cursor *name = &headers[i].name;
             const struct aws_byte_cursor *value = &headers[i].value;
+            if (aws_byte_cursor_eq(name, &g_request_id_header_name)) {
+                s3_metrics->req_resp_info_metrics.request_id =
+                    aws_string_new_from_cursor(connection->request->allocator, value);
+            }
 
             aws_http_headers_add(s3_metrics->req_resp_info_metrics.response_headers, *name, *value);
         }
@@ -1110,10 +1114,8 @@ static void s_s3_meta_request_stream_metrics(
     /* Also related metrics from the request/response. */
     s3_metrics->crt_info_metrics.connection_id = (void *)connection->http_connection;
     const struct aws_socket_endpoint *endpoint = aws_http_connection_get_remote_endpoint(connection->http_connection);
-    struct aws_byte_cursor remote_address = aws_byte_cursor_from_c_str(endpoint->address);
-
     request->send_data.metrics->crt_info_metrics.ip_address =
-        aws_string_new_from_cursor(request->allocator, &remote_address);
+        aws_string_new_from_c_str(request->allocator, endpoint->address);
     AWS_ASSERT(request->send_data.metrics->crt_info_metrics.ip_address != NULL);
 
     s3_metrics->crt_info_metrics.thread_id = aws_thread_current_thread_id();

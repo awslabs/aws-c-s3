@@ -47,7 +47,7 @@ You can specify the bucket name to be created either by passing argument to the 
 ## Notes
 
 * The MRAP tests are not included in this script, and it's disabled by default. To run those tests, you will need to create a MRAP access point with the buckets have `pre-existing-1MB` in it. Then update `g_test_mrap_endpoint` to the uri of the MRAP endpoint and build with `-DENABLE_MRAP_TESTS=true`.
-* To run tests in tests/s3_mock_server_tests.c, initialize the mock S3 server first from [here](./../mock_s3_server/). And build your cmake project with `-ENABLE_MOCK_SERVER_TESTS=true`
+* To run tests in tests/s3_mock_server_tests.c, initialize the mock S3 server first from [here](./../mock_s3_server/). And build your cmake project with `-DENABLE_MOCK_SERVER_TESTS=true`
 * Note: If you are not at the aws-common-runtime AWS team account, you must set environment variable `CRT_S3_TEST_BUCKET_NAME` to the bucket created before running the test.
 * When you see error with "Check your account level S3 settings, public access may be blocked.", Check https://docs.aws.amazon.com/AmazonS3/latest/userguide/configuring-block-public-access-account.html to set `BlockPublicAcls` to false, which enables public read of the object with `public-read` ACL in the bucket.
 

@@ -140,10 +140,6 @@ typedef void(aws_s3_meta_request_progress_fn)(
     const struct aws_s3_meta_request_progress *progress,
     void *user_data);
 
-typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
-
-typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
-
 /**
  * Invoked to report the telemetry of the meta request once a single request finishes. Invoked from the thread of the
  * connection that request made from.
@@ -154,6 +150,10 @@ typedef void(aws_s3_meta_request_telemetry_fn)(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request_metrics *metrics,
     void *user_data);
+
+typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
+
+typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
     AWS_MR_TLS_ENABLED,
@@ -716,11 +716,13 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_requ
 /**
  * Get the request ID from aws_s3_request_metrics.
  * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_request_id will be set to a string. Be warned this string's lifetime is tied to the metrics
+ * object.
  **/
 AWS_S3_API
 int aws_s3_request_metrics_get_request_id(
     const struct aws_s3_request_metrics *metrics,
-    struct aws_byte_cursor *out_request_id);
+    const struct aws_string **out_request_id);
 
 /* Get the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always
  * available. Timestamp are from `aws_high_res_clock_get_ticks`  */

@@ -195,14 +195,14 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_requ
 
 int aws_s3_request_metrics_get_request_id(
     const struct aws_s3_request_metrics *metrics,
-    struct aws_byte_cursor *out_request_id) {
+    const struct aws_string **out_request_id) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(out_request_id);
-    if (metrics->req_resp_info_metrics.response_headers == NULL) {
+    if (metrics->req_resp_info_metrics.request_id == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    return aws_http_headers_get(
-        metrics->req_resp_info_metrics.response_headers, g_request_id_header_name, out_request_id);
+    *out_request_id = metrics->req_resp_info_metrics.request_id;
+    return AWS_OP_SUCCESS;
 }
 
 void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time) {

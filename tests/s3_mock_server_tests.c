@@ -28,10 +28,9 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
     struct aws_http_headers *response_headers = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_response_headers(metrics, &response_headers));
-    struct aws_byte_cursor request_id;
-    AWS_ZERO_STRUCT(request_id);
+    const struct aws_string *request_id = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_request_id(metrics, &request_id));
-    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&request_id, "12345"));
+    ASSERT_TRUE(aws_string_eq_c_str(request_id, "12345"));
     const struct aws_string *ip_address = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_ip_address(metrics, &ip_address));
     /* Should be default local ip for ipv6/ipv4 */
