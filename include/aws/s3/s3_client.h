@@ -10,6 +10,8 @@
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 
+AWS_PUSH_SANE_WARNING_LEVEL
+
 struct aws_allocator;
 
 struct aws_http_stream;
@@ -668,5 +670,6 @@ void aws_s3_init_default_signing_config(
     struct aws_credentials_provider *credentials_provider);
 
 AWS_EXTERN_C_END
+AWS_POP_SANE_WARNING_LEVEL
 
 #endif /* AWS_S3_CLIENT_H */
