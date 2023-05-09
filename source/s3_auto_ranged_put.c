@@ -15,7 +15,10 @@
 static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
-static const uint32_t s_unknown_length_default_num_parts = 20;
+/* For unknown length body we no longer know the number of parts. to avoid
+* resizing arrays for etags/checksums to much, those array start out with
+* capacity specified by the constant bellow. */
+static const uint32_t s_unknown_length_default_num_parts = 200;
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
@@ -72,6 +75,21 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
         default:
             AWS_ASSERT(false);
             break;
+    }
+
+    /* Parts might be out of order or have gaps in them. array list allows
+    * setting elements outside of current length, but values between old length
+    * and new value will be uninitialized. as a workaround when processing
+    * element make sure to init any new elements to zeroed values. */
+    size_t current_num_parts = aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
+    if (info->part_number > current_num_parts) {
+        struct aws_byte_buf empty_buf = {0};
+        struct aws_string *null_etag = NULL;
+
+        for (size_t i = info->part_number - 1; i >= current_num_parts; ++i) {
+            aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &empty_buf, i);
+            aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, i);
+        }
     }
 
     if (checksum_cur) {
@@ -739,7 +757,10 @@ static int s_skip_parts_from_stream(
         }
 
         struct aws_byte_buf checksum_buf;
-        aws_array_list_get_at(&auto_ranged_put->encoded_checksum_list, &checksum_buf, part_index);
+        if (aws_array_list_get_at(&auto_ranged_put->encoded_checksum_list, &checksum_buf, part_index)) {
+             AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "failed");
+        }
+        AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "getting checksum at %d with len %d", part_index, checksum_buf.len);
 
         // compare skipped checksum to previously uploaded checksum
         if (checksum_buf.len > 0 && s_verify_part_matches_checksum(
