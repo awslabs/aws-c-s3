@@ -133,6 +133,7 @@ static void s_s3_request_metrics_destroy(void *arg) {
     aws_http_headers_release(metrics->req_resp_info_metrics.response_headers);
     aws_string_destroy(metrics->req_resp_info_metrics.request_path_query);
     aws_string_destroy(metrics->req_resp_info_metrics.host_address);
+    aws_string_destroy(metrics->req_resp_info_metrics.request_id);
     aws_string_destroy(metrics->crt_info_metrics.ip_address);
 
     aws_mem_release(metrics->allocator, metrics);
