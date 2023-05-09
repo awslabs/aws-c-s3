@@ -380,10 +380,19 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
-     * If set, this file is sent as the request body, and the `message` body-stream is ignored.
+     * If set, this file is sent as the request body.
      * This can give better performance than sending data using the body-stream.
+     * If set, the `message` body-stream and `send_async_stream` are ignored.
      */
     struct aws_byte_cursor send_filepath;
+
+    /**
+     * Optional
+     * If set, the request body comes from this async stream.
+     * Use this when outgoing data will be produced in asynchronous chunks.
+     * If set, the `message` body-stream and `send_filepath` are ignored.
+     */
+    struct aws_async_stream *send_async_stream;
 
     /**
      * Optional.

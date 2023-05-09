@@ -11,6 +11,13 @@
 #    pragma warning(disable : 4996)
 #endif
 
+/* Context for aws_s3_meta_request_default's vtable->prepare_request_async() operation */
+struct aws_s3_default_prepare_request_async_ctx {
+    struct aws_allocator *allocator;
+    struct aws_s3_request *request;
+    struct aws_future *future; /* aws_future<void> to set when this whole operation completes */
+};
+
 static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_request);
 
 static bool s_s3_meta_request_default_update(
@@ -18,9 +25,13 @@ static bool s_s3_meta_request_default_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static int s_s3_meta_request_default_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request);
+static struct aws_future *s_s3_default_prepare_request_async(struct aws_s3_request *request);
+
+static void s_s3_default_prepare_request_on_read_done(struct aws_future *read_future, void *user_data);
+
+static void s_s3_default_prepare_request_finish(
+    struct aws_s3_default_prepare_request_async_ctx *request_prep,
+    int error_code);
 
 static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -30,7 +41,7 @@ static void s_s3_meta_request_default_request_finished(
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .update = s_s3_meta_request_default_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_handle_async_error,
-    .prepare_request = s_s3_meta_request_default_prepare_request,
+    .prepare_request_async = s_s3_default_prepare_request_async,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_meta_request_default_request_finished,
@@ -208,20 +219,82 @@ static bool s_s3_meta_request_default_update(
 }
 
 /* Given a request, prepare it for sending based on its description. */
-static int s_s3_meta_request_default_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request) {
+static struct aws_future *s_s3_default_prepare_request_async(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
+    struct aws_future *preparation_future = aws_future_new(request->allocator, AWS_FUTURE_VALUELESS);
+
+    /* Store context for async operation */
+    struct aws_s3_default_prepare_request_async_ctx *request_prep =
+        aws_mem_calloc(request->allocator, 1, sizeof(struct aws_s3_default_prepare_request_async_ctx));
+    request_prep->allocator = request->allocator;
+    request_prep->request = request;
+    request_prep->future = aws_future_acquire(preparation_future);
+
     if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
-        if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-            return AWS_OP_ERR;
-        }
+        /* Kick off the async read */
+        struct aws_future *read_future = aws_s3_meta_request_read_body(meta_request, &request->request_body);
+        aws_future_register_callback(read_future, s_s3_default_prepare_request_on_read_done, request_prep);
+    } else {
+        /* Don't need to read body, jump directly to the last step */
+        s_s3_default_prepare_request_finish(request_prep, AWS_ERROR_SUCCESS);
+    }
+
+    return preparation_future;
+}
+
+/* Completion callback for reading the body stream */
+static void s_s3_default_prepare_request_on_read_done(struct aws_future *read_future, void *user_data) {
+
+    struct aws_s3_default_prepare_request_async_ctx *request_prep = user_data;
+    struct aws_s3_request *request = request_prep->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    int error_code = aws_future_get_error(read_future);
+    read_future = aws_future_release(read_future);
+
+    if (error_code != AWS_OP_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Failed reading request body, error %d (%s)",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code));
+        goto finish;
+    }
+
+    /* TODO: support for unknown content length. move this check to read_body()? */
+    if (request->request_body.len < request->request_body.capacity) {
+        error_code = aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER);
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Request body is smaller than 'Content-Length' header said it would be",
+            (void *)meta_request);
+        goto finish;
+    }
+
+finish:
+    s_s3_default_prepare_request_finish(request_prep, error_code);
+}
+
+/* Finish async preparation of the request */
+static void s_s3_default_prepare_request_finish(
+    struct aws_s3_default_prepare_request_async_ctx *request_prep,
+    int error_code) {
+
+    struct aws_s3_request *request = request_prep->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    if (error_code != AWS_ERROR_SUCCESS) {
+        goto finish;
     }
 
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_all_headers(
@@ -251,7 +324,14 @@ static int s_s3_meta_request_default_prepare_request(
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p: Meta Request prepared request %p", (void *)meta_request, (void *)request);
 
-    return AWS_OP_SUCCESS;
+finish:
+    if (error_code == AWS_ERROR_SUCCESS) {
+        aws_future_set_valueless(request_prep->future);
+    } else {
+        aws_future_set_error(request_prep->future, error_code);
+    }
+    aws_future_release(request_prep->future);
+    aws_mem_release(request_prep->allocator, request_prep);
 }
 
 static void s_s3_meta_request_default_request_finished(

@@ -9,6 +9,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
+#include <aws/common/async_stream.h>
 #include <aws/common/byte_buf.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
@@ -835,6 +836,49 @@ error_clean_up:
     return NULL;
 }
 
+/* Given all possible ways to send a request body, always return an async-stream */
+struct aws_async_stream *aws_s3_message_util_acquire_async_body_stream(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    struct aws_byte_cursor send_filepath,
+    struct aws_async_stream *send_async_stream) {
+
+    AWS_PRECONDITION(message);
+
+    /* If user provides async-stream, use it */
+    if (send_async_stream != NULL) {
+        return aws_async_stream_acquire(send_async_stream);
+    }
+
+    /* If user provides filepath, create aws_input_stream to read it, and wrap that in an async-stream */
+    if (send_filepath.len > 0) {
+        struct aws_string *filepath_str = aws_string_new_from_cursor(allocator, &send_filepath);
+        struct aws_input_stream *body_stream =
+            aws_input_stream_new_from_file(allocator, aws_string_c_str(filepath_str));
+        aws_string_destroy(filepath_str);
+        if (body_stream == NULL) {
+            return NULL;
+        }
+        send_async_stream = aws_async_stream_new_from_input_stream(allocator, body_stream);
+        aws_input_stream_release(body_stream);
+        return send_async_stream;
+    }
+
+    /* If user provides HTTP message with aws_input_stream body, wrap that in an async stream */
+    struct aws_input_stream *request_body = aws_http_message_get_body_stream(message);
+    if (request_body) {
+        return aws_async_stream_new_from_input_stream(allocator, request_body);
+    }
+
+    /* Otherwise, no body provided, just create empty async-stream */
+    struct aws_byte_cursor empty_cursor = {.len = 0};
+    struct aws_input_stream *empty_stream = aws_input_stream_new_from_cursor(allocator, &empty_cursor);
+    AWS_ASSERT(empty_stream);
+    send_async_stream = aws_async_stream_new_from_input_stream(allocator, empty_stream);
+    aws_input_stream_release(empty_stream);
+    return send_async_stream;
+}
+
 bool aws_s3_message_util_check_checksum_header(struct aws_http_message *message) {
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
@@ -939,49 +983,6 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
 error_clean_up:
     aws_http_message_release(message);
     return NULL;
-}
-
-/* Copy message and retain all headers, but replace body with one that reads directly from a filepath. */
-struct aws_http_message *aws_s3_message_util_copy_http_message_filepath_body_all_headers(
-    struct aws_allocator *allocator,
-    struct aws_http_message *base_message,
-    struct aws_byte_cursor filepath) {
-
-    bool success = false;
-    struct aws_string *filepath_str = NULL;
-    struct aws_input_stream *body_stream = NULL;
-    struct aws_http_message *message = NULL;
-
-    /* Copy message and retain all headers */
-    message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-        allocator,
-        base_message,
-        NULL /*excluded_header_array*/,
-        0 /*excluded_header_array_size*/,
-        false /*exclude_x_amz_meta*/);
-    if (!message) {
-        goto clean_up;
-    }
-
-    /* Create body-stream that reads from file */
-    filepath_str = aws_string_new_from_cursor(allocator, &filepath);
-    body_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(filepath_str));
-    if (!body_stream) {
-        goto clean_up;
-    }
-    aws_http_message_set_body_stream(message, body_stream);
-
-    success = true;
-
-clean_up:
-    aws_string_destroy(filepath_str);
-    aws_input_stream_release(body_stream);
-    if (success) {
-        return message;
-    } else {
-        aws_http_message_release(message);
-        return NULL;
-    }
 }
 
 void aws_s3_message_util_copy_headers(

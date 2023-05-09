@@ -981,10 +981,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
             struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
 
-            if ((input_stream == NULL) && (options->send_filepath.len == 0)) {
+            if ((input_stream == NULL) && (options->send_filepath.len == 0) && (options->send_async_stream == NULL)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "Could not create auto-ranged-put meta request; filepath or body stream must be set.");
+                    "Could not create auto-ranged-put meta request."
+                    " Body must be set via filepath, async stream, or body stream.");
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }

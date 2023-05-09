@@ -27,9 +27,7 @@ static bool s_s3_auto_ranged_get_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static int s_s3_auto_ranged_get_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request);
+static struct aws_future *s_s3_auto_ranged_get_prepare_request_async(struct aws_s3_request *request);
 
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -39,7 +37,7 @@ static void s_s3_auto_ranged_get_request_finished(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
-    .prepare_request = s_s3_auto_ranged_get_prepare_request,
+    .prepare_request_async = s_s3_auto_ranged_get_prepare_request_async,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_get_request_finished,
@@ -336,16 +334,17 @@ static bool s_s3_auto_ranged_get_update(
     return work_remaining;
 }
 
-/* Given a request, prepare it for sending based on its description. */
-static int s_s3_auto_ranged_get_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request) {
-    AWS_PRECONDITION(meta_request);
+/* Given a request, prepare it for sending based on its description.
+ * Currently, this is actually synchronous. */
+static struct aws_future *s_s3_auto_ranged_get_prepare_request_async(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
+    struct aws_s3_meta_request *meta_request = request->meta_request;
 
     /* Generate a new ranged get request based on the original message. */
     struct aws_http_message *message = NULL;
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+
+    bool success = false;
 
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
@@ -375,7 +374,7 @@ static int s_s3_auto_ranged_get_prepare_request(
             "id=%p Could not create message for request with tag %d for auto-ranged-get meta request.",
             (void *)meta_request,
             request->request_tag);
-        goto message_alloc_failed;
+        goto finish;
     }
     if (meta_request->checksum_config.validate_response_checksum) {
         aws_http_headers_set(aws_http_message_get_headers(message), g_request_validation_mode, g_enabled);
@@ -397,6 +396,7 @@ static int s_s3_auto_ranged_get_prepare_request(
     aws_s3_request_setup_send_data(request, message);
     aws_http_message_release(message);
 
+    /* Success! */
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Created request %p for part %d",
@@ -404,11 +404,16 @@ static int s_s3_auto_ranged_get_prepare_request(
         (void *)request,
         request->part_number);
 
-    return AWS_OP_SUCCESS;
+    success = true;
 
-message_alloc_failed:
-
-    return AWS_OP_ERR;
+finish:;
+    struct aws_future *future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
+    if (success) {
+        aws_future_set_valueless(future);
+    } else {
+        aws_future_set_error(future, aws_last_error_or_unknown());
+    }
+    return future;
 }
 
 /* Check the finish result of meta request, in case of the request failed because of downloading an empty file */

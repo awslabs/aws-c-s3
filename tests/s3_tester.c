@@ -793,12 +793,10 @@ static void s_s3_meta_request_schedule_prepare_request_empty(
     (void)user_data;
 }
 
-static int s_s3_meta_request_prepare_request_empty(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request) {
-    (void)meta_request;
-    (void)request;
-    return AWS_OP_ERR;
+static struct aws_future *s_s3_meta_request_prepare_request_async_empty(struct aws_s3_request *request) {
+    struct aws_future *future = aws_future_new(request->allocator, AWS_FUTURE_VALUELESS);
+    aws_future_set_error(future, AWS_ERROR_UNKNOWN);
+    return future;
 }
 
 static void s_s3_meta_request_init_signing_date_time_empty(
@@ -829,7 +827,7 @@ static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
     .update = s_s3_meta_request_update_empty,
     .send_request_finish = s_s3_meta_request_send_request_finish_empty,
     .schedule_prepare_request = s_s3_meta_request_schedule_prepare_request_empty,
-    .prepare_request = s_s3_meta_request_prepare_request_empty,
+    .prepare_request_async = s_s3_meta_request_prepare_request_async_empty,
     .finished_request = s_s3_meta_request_finished_request_empty,
     .init_signing_date_time = s_s3_meta_request_init_signing_date_time_empty,
     .sign_request = s_s3_meta_request_sign_request_empty,
