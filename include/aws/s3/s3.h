@@ -59,6 +59,12 @@ struct aws_s3_cpu_group_info {
     size_t nic_name_array_length;
 };
 
+#ifdef _MSC_VER
+#    pragma warning(push)
+#    pragma warning(disable : 4626) /* assignment operator was implicitly defined as deleted */
+#    pragma warning(disable : 5027) /* move assignment operator was implicitly defined as deleted */
+#endif
+
 struct aws_s3_compute_platform_info {
     /* name of the instance-type: example c5n.18xlarge */
     const struct aws_byte_cursor instance_type;
@@ -69,6 +75,10 @@ struct aws_s3_compute_platform_info {
     /* length of cpu group info array */
     size_t cpu_group_info_array_length;
 };
+
+#ifdef _MSC_VER
+#    pragma warning(pop)
+#endif
 
 AWS_EXTERN_C_BEGIN
 
