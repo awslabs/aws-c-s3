@@ -132,7 +132,16 @@ def create_bucket_with_lifecycle():
 def create_bucket_with_public_object():
     try:
         s3_client.create_bucket(Bucket=PUBLIC_BUCKET_NAME,
-                                CreateBucketConfiguration={'LocationConstraint': REGION})
+                                CreateBucketConfiguration={
+                                    'LocationConstraint': REGION},
+                                ObjectOwnership='ObjectWriter'
+                                )
+        s3_client.put_public_access_block(
+            Bucket=PUBLIC_BUCKET_NAME,
+            PublicAccessBlockConfiguration={
+                'BlockPublicAcls': False,
+            }
+        )
         print(f"Bucket {PUBLIC_BUCKET_NAME} created", file=sys.stderr)
         put_pre_existing_objects(
             1*MB, 'pre-existing-1MB', bucket=PUBLIC_BUCKET_NAME, public_read=True)

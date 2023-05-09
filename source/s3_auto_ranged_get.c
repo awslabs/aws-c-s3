@@ -206,8 +206,7 @@ static bool s_s3_auto_ranged_get_update(
             }
 
             /* If the object range is known and that range is empty, then we have an empty file to request. */
-            if (auto_ranged_get->synced_data.object_range_start == 0 &&
-                auto_ranged_get->synced_data.object_range_end == 0) {
+            if (auto_ranged_get->synced_data.object_range_empty != 0) {
                 if (auto_ranged_get->synced_data.get_without_range_sent) {
                     if (auto_ranged_get->synced_data.get_without_range_completed) {
                         goto no_work_remaining;
@@ -663,6 +662,7 @@ update_synced_data:
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
 
             auto_ranged_get->synced_data.object_range_known = true;
+            auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
             auto_ranged_get->synced_data.total_num_parts =

@@ -66,13 +66,12 @@ const uint32_t g_max_num_connections_per_vip = 10;
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
- * Default max part size is SIZE_MAX on 32bit systems, which is around 4GiB; and 5GiB on a 64bit system.
- *      The server limit is 5GiB, but object size limit is 5TiB for now. We should be good enough for all the cases.
- *      The max number of upload parts is 10000, which limits the object size to 39TiB on 32bit and 49TiB on 64bit.
+ * Default max part size is 5GiB as the server limit. Object size limit is 5TiB for now.
+ *        max number of upload parts is 10000.
  * TODO Provide more information on other values.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const uint64_t s_default_max_part_size = SIZE_MAX < 5368709120ULL ? SIZE_MAX : 5368709120ULL;
+static const uint64_t s_default_max_part_size = 5368709120ULL;
 static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
@@ -294,19 +293,27 @@ struct aws_s3_client *aws_s3_client_new(
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
     if (client_config->part_size != 0) {
-        *((size_t *)&client->part_size) = client_config->part_size;
+        *((size_t *)&client->part_size) = (size_t)client_config->part_size;
     } else {
         *((size_t *)&client->part_size) = s_default_part_size;
     }
 
     if (client_config->max_part_size != 0) {
-        *((size_t *)&client->max_part_size) = client_config->max_part_size;
+        *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
     } else {
-        *((size_t *)&client->max_part_size) = (size_t)s_default_max_part_size;
+        *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
+    }
+    if (client->max_part_size > SIZE_MAX) {
+        /* For the 32bit max part size to be SIZE_MAX */
+        *((uint64_t *)&client->max_part_size) = SIZE_MAX;
+    }
+
+    if (client_config->multipart_upload_threshold != 0) {
+        *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
-        *((size_t *)&client_config->max_part_size) = client_config->part_size;
+        *((uint64_t *)&client_config->max_part_size) = client_config->part_size;
     }
 
     client->connect_timeout_ms = client_config->connect_timeout_ms;
@@ -985,7 +992,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             if (options->resume_token == NULL) {
 
                 size_t client_part_size = client->part_size;
-                size_t client_max_part_size = client->max_part_size;
+                uint64_t client_max_part_size = client->max_part_size;
 
                 if (client_part_size < g_s3_min_upload_part_size) {
                     AWS_LOGF_WARN(
@@ -998,7 +1005,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     client_part_size = g_s3_min_upload_part_size;
                 }
 
-                if (client_max_part_size < g_s3_min_upload_part_size) {
+                if (client_max_part_size < (uint64_t)g_s3_min_upload_part_size) {
                     AWS_LOGF_WARN(
                         AWS_LS_S3_META_REQUEST,
                         "Client config max part size of %" PRIu64
@@ -1007,9 +1014,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         (uint64_t)client_max_part_size,
                         (uint64_t)g_s3_min_upload_part_size);
 
-                    client_max_part_size = g_s3_min_upload_part_size;
+                    client_max_part_size = (uint64_t)g_s3_min_upload_part_size;
                 }
-                if (content_length <= client_part_size) {
+                uint64_t multipart_upload_threshold =
+                    client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
+                if (content_length <= multipart_upload_threshold) {
                     return aws_s3_meta_request_default_new(
                         client->allocator,
                         client,
@@ -1059,6 +1068,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
                 if (part_size < client_part_size) {
                     part_size = client_part_size;
+                }
+                if (content_length < part_size) {
+                    /* When the content length is smaller than part size and larger than the threshold, we set one part
+                     * with the whole length */
+                    part_size = (size_t)content_length;
                 }
 
                 uint32_t num_parts = (uint32_t)(content_length / part_size);
@@ -1980,10 +1994,14 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_up
     const struct aws_s3_upload_resume_token_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(options);
+    if (options->part_size > SIZE_MAX) {
+        aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
+        return NULL;
+    }
 
     struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(allocator);
     token->multipart_upload_id = aws_string_new_from_cursor(allocator, &options->upload_id);
-    token->part_size = options->part_size;
+    token->part_size = (size_t)options->part_size;
     token->total_num_parts = options->total_num_parts;
     token->num_parts_completed = options->num_parts_completed;
     token->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
@@ -2012,9 +2030,9 @@ enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
     return resume_token->type;
 }
 
-size_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
+uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
-    return resume_token->part_size;
+    return (uint64_t)resume_token->part_size;
 }
 
 size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token) {

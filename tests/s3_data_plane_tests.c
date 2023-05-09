@@ -1825,6 +1825,111 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_put_object_multipart_threshold, s_test_s3_put_object_multipart_threshold)
+static int s_test_s3_put_object_multipart_threshold(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(8),
+        .multipart_upload_threshold = MB_TO_BYTES(15),
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    /* First smaller than the part size */
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 5,
+            },
+    };
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+    /* Result in a single part upload, and have 0 as part size */
+    ASSERT_UINT_EQUALS(meta_request_test_results.part_size, 0);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    /* Second smaller than threshold and larger than part size */
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    put_options.put_options.object_size_mb = 10;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+    /* Result in a single part upload, and have 0 as part size */
+    ASSERT_UINT_EQUALS(meta_request_test_results.part_size, 0);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    /* Third larger than threshold*/
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    put_options.put_options.object_size_mb = 20;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+    /* Result in multi-part upload, and have the real part size */
+    ASSERT_UINT_EQUALS(meta_request_test_results.part_size, client_config.part_size);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_put_object_multipart_threshold_less_than_part_size,
+    s_test_s3_put_object_multipart_threshold_less_than_part_size)
+static int s_test_s3_put_object_multipart_threshold_less_than_part_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(8),
+        .multipart_upload_threshold = MB_TO_BYTES(5),
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    /* First smaller than the part size */
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 6,
+            },
+    };
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+    /* Result in a one part of multipart upload, and have the content length as part size */
+    ASSERT_UINT_EQUALS(meta_request_test_results.part_size, MB_TO_BYTES(put_options.put_options.object_size_mb));
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_object_empty_object, s_test_s3_put_object_empty_object)
 static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -4294,6 +4399,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
         // Single byte range.
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=8-8"),
+
+        // Single byte range (first byte).
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
 
         // First 8K.  8K < client's 16K part size.
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-8191"),
