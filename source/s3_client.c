@@ -1497,7 +1497,7 @@ static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    bool request_is_noop = 0;
+    uint32_t request_is_noop = 0;
 
     if (error_code != AWS_ERROR_SUCCESS || request->is_noop) {
         request_is_noop = request->is_noop;
