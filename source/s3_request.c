@@ -48,7 +48,6 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     if (meta_request->telemetry_callback) {
         /* start the telemetry for the request to be sent */
         request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
-        request->send_data.metrics->req_resp_info_metrics.part_number = request->part_number;
         /* Start the timestamp */
         aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.start_timestamp_ns);
     }
@@ -336,17 +335,6 @@ void aws_s3_request_metrics_get_host_address(
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(host_address);
     *host_address = metrics->req_resp_info_metrics.host_address;
-}
-
-int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number) {
-    AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(out_part_number);
-    if (metrics->req_resp_info_metrics.part_number == 0) {
-        /* If the request is not a part, this will be 0.  (S3 Part Numbers start at 1.) */
-        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
-    }
-    *out_part_number = metrics->req_resp_info_metrics.part_number;
-    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_request_metrics_get_ip_address(

@@ -73,9 +73,6 @@ struct aws_s3_request_metrics {
         struct aws_string *host_address;
         /* The the request ID header value. */
         struct aws_string *request_id;
-        /* Part number that this request refers to.  If this is not a part, this will be 0.  (S3 Part Numbers start
-         * at 1.) */
-        uint32_t part_number;
     } req_resp_info_metrics;
 
     struct {
