@@ -329,7 +329,7 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     aws_s3_paginated_operation_release(auto_ranged_put->synced_data.list_parts_operation);
 
         AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "Number of parts %lu number of etags %lu",
+            AWS_LS_S3_META_REQUEST, "Number of parts %lu number of etags %u",
             aws_array_list_length(&auto_ranged_put->synced_data.etag_list),
             auto_ranged_put->synced_data.num_parts_completed
             );
