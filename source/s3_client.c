@@ -1512,7 +1512,7 @@ static void s_s3_client_prepare_callback_queue_request(
         aws_s3_client_lock_synced_data(client);
 
         if (error_code == AWS_ERROR_SUCCESS) {
-            if (request_is_noop) {
+            if (!request_is_noop) {
                 aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
             }
         } else {
