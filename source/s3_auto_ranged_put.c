@@ -855,7 +855,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 }
 
                 if (aws_s3_meta_request_body_has_no_more_data(meta_request)) {
-                    request->is_noop = true;
+                    request->is_noop = 1;
 
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
