@@ -452,11 +452,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
 }
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
-    const struct aws_s3_request **request_a = (const struct aws_s3_request **)a;
+    const struct aws_s3_request * const *request_a = a;
     AWS_PRECONDITION(request_a);
     AWS_PRECONDITION(*request_a);
 
-    const struct aws_s3_request **request_b = (const struct aws_s3_request **)b;
+    const struct aws_s3_request * const *request_b = b;
     AWS_PRECONDITION(request_b);
     AWS_PRECONDITION(*request_b);
 
@@ -583,7 +583,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    const struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
     /* Client owns this event loop group. A cancel should not be possible. */

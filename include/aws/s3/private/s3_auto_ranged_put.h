@@ -77,6 +77,7 @@ struct aws_s3_auto_ranged_put {
         uint32_t num_parts_completed;
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
+        uint32_t num_parts_noop;
 
         struct aws_http_headers *needed_response_headers;
 

@@ -196,6 +196,7 @@ static int s_try_init_resume_state_from_persisted_data(
 
     auto_ranged_put->synced_data.num_parts_sent = 0;
     auto_ranged_put->synced_data.num_parts_completed = 0;
+    auto_ranged_put->synced_data.num_parts_noop = 0;
     auto_ranged_put->synced_data.create_multipart_upload_sent = true;
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
     auto_ranged_put->upload_id = aws_string_clone_or_reuse(allocator, resume_token->multipart_upload_id);
@@ -448,8 +449,7 @@ static bool s_s3_auto_ranged_put_update(
                         auto_ranged_put->synced_data.total_num_parts);
                 }
 
-                if (((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) ||
-                    !auto_ranged_put->has_content_length) {
+                if (((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0)) {
                     uint32_t num_parts_in_flight =
                         (auto_ranged_put->synced_data.num_parts_sent -
                          auto_ranged_put->synced_data.num_parts_completed);
@@ -469,11 +469,6 @@ static bool s_s3_auto_ranged_put_update(
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
-
-                struct aws_string *etag = NULL;
-                aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, request->part_number - 1);
-                struct aws_byte_buf checksum_buf = {0};
-                aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &checksum_buf, request->part_number - 1);
 
                 ++auto_ranged_put->threaded_update_data.next_part_number;
                 ++auto_ranged_put->synced_data.num_parts_sent;
@@ -858,34 +853,48 @@ static int s_s3_auto_ranged_put_prepare_request(
                                                                request->part_number - 1)) {
                     goto message_create_failed;
                 }
-                auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
 
-                aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+                if (aws_s3_meta_request_body_has_no_more_data(meta_request)) {
+                    request->is_noop = true;
 
-                if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-                    goto message_create_failed;
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p UploadPart with part num %u for Multi-part Upload, with ID:%s"
+                        "is noop due to encountering end of stream",
+                        (void *)meta_request,
+                        request->part_number,
+                        aws_string_c_str(auto_ranged_put->upload_id));
+
+                } else {
+                    auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
+
+                    aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+
+                    if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
+                        goto message_create_failed;
+                    }
+                    ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
+
+                    /* BEGIN CRITICAL SECTION */
+                    {
+                        aws_s3_meta_request_lock_synced_data(meta_request);
+
+                        auto_ranged_put->prepare_data.is_body_stream_at_end =
+                            aws_s3_meta_request_body_has_no_more_data(meta_request);
+
+                        struct aws_byte_buf checksum_buf = {0};
+                        aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &checksum_buf, request->part_number - 1);
+
+                        aws_s3_meta_request_unlock_synced_data(meta_request);
+                    }
+                    /* END CRITICAL SECTION */
                 }
-                ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
 
-                /* BEGIN CRITICAL SECTION */
-                {
-                    aws_s3_meta_request_lock_synced_data(meta_request);
-
-                    auto_ranged_put->prepare_data.is_body_stream_at_end =
-                    aws_s3_meta_request_body_has_no_more_data(meta_request);
-
-                    aws_s3_meta_request_unlock_synced_data(meta_request);
-                }
-                /* END CRITICAL SECTION */
-
-                auto_ranged_put->prepare_data.is_body_stream_at_end =
-                    aws_s3_meta_request_body_has_no_more_data(meta_request);
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p UploadPart for Multi-part Upload, with ID:%s body at end: %d",
+                    "id=%p UploadPart for Multi-part Upload, with ID:%s",
                     (void *)meta_request,
-                    aws_string_c_str(auto_ranged_put->upload_id),
-                    auto_ranged_put->prepare_data.is_body_stream_at_end);
+                    aws_string_c_str(auto_ranged_put->upload_id));
             }
 
             struct aws_byte_buf *checksum_buf = NULL;
@@ -1179,41 +1188,49 @@ static void s_s3_auto_ranged_put_request_finished(
             AWS_FATAL_ASSERT(part_number > 0);
             size_t part_index = part_number - 1;
             struct aws_string *etag = NULL;
+            bool request_is_noop = request->is_noop;
 
-            if (error_code == AWS_ERROR_SUCCESS) {
-                /* Find the ETag header if it exists and cache it. */
-                struct aws_byte_cursor etag_within_quotes;
+            if(!request_is_noop) {
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    /* Find the ETag header if it exists and cache it. */
+                    struct aws_byte_cursor etag_within_quotes;
 
-                AWS_ASSERT(request->send_data.response_headers);
+                    AWS_ASSERT(request->send_data.response_headers);
 
-                if (aws_http_headers_get(
-                        request->send_data.response_headers, g_etag_header_name, &etag_within_quotes) !=
-                    AWS_OP_SUCCESS) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Could not find ETag header for request %p",
-                        (void *)meta_request,
-                        (void *)request);
+                    if (aws_http_headers_get(
+                            request->send_data.response_headers, g_etag_header_name, &etag_within_quotes) !=
+                        AWS_OP_SUCCESS) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p Could not find ETag header for request %p",
+                            (void *)meta_request,
+                            (void *)request);
 
-                    error_code = AWS_ERROR_S3_MISSING_ETAG;
-                } else {
-                    /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up
-                     * later, so just get rid of the quotes now. */
-                    etag = aws_strip_quotes(meta_request->allocator, etag_within_quotes);
+                        error_code = AWS_ERROR_S3_MISSING_ETAG;
+                    } else {
+                        /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up
+                        * later, so just get rid of the quotes now. */
+                        etag = aws_strip_quotes(meta_request->allocator, etag_within_quotes);
+                    }
+                }
+                if (error_code == AWS_ERROR_SUCCESS && meta_request->progress_callback != NULL) {
+                    struct aws_s3_meta_request_progress progress = {
+                        .bytes_transferred = meta_request->part_size,
+                        .content_length = auto_ranged_put->content_length,
+                    };
+                    meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
                 }
             }
-            if (error_code == AWS_ERROR_SUCCESS && meta_request->progress_callback != NULL) {
-                struct aws_s3_meta_request_progress progress = {
-                    .bytes_transferred = meta_request->part_size,
-                    .content_length = auto_ranged_put->content_length,
-                };
-                meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
-            }
+
             /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
 
                 ++auto_ranged_put->synced_data.num_parts_completed;
+
+                if (request_is_noop) {
+                    ++auto_ranged_put->synced_data.num_parts_noop;
+                }
 
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,
@@ -1222,18 +1239,20 @@ static void s_s3_auto_ranged_put_request_finished(
                     auto_ranged_put->synced_data.num_parts_completed,
                     auto_ranged_put->synced_data.total_num_parts);
 
-                if (error_code == AWS_ERROR_SUCCESS) {
-                    AWS_ASSERT(etag != NULL);
+                if (!request_is_noop) {
+                    if (error_code == AWS_ERROR_SUCCESS) {
+                        AWS_ASSERT(etag != NULL);
 
-                    ++auto_ranged_put->synced_data.num_parts_successful;
+                        ++auto_ranged_put->synced_data.num_parts_successful;
 
-                    /* ETags need to be associated with their part number, so we keep the etag indices consistent with
-                     * part numbers. This means we may have to add padding to the list in the case that parts finish out
-                     * of order. */
-                    aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
-                } else {
-                    ++auto_ranged_put->synced_data.num_parts_failed;
-                    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+                        /* ETags need to be associated with their part number, so we keep the etag indices consistent with
+                        * part numbers. This means we may have to add padding to the list in the case that parts finish out
+                        * of order. */
+                        aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
+                    } else {
+                        ++auto_ranged_put->synced_data.num_parts_failed;
+                        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+                    }
                 }
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
