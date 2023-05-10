@@ -1497,10 +1497,10 @@ static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    uint32_t request_is_noop = 0;
+    bool request_is_noop = false;
 
     if (error_code != AWS_ERROR_SUCCESS || request->is_noop) {
-        request_is_noop = request->is_noop;
+        request_is_noop = request->is_noop != 0;
         s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
 
         aws_s3_request_release(request);

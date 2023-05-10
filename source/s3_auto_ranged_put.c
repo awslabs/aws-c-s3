@@ -1189,7 +1189,7 @@ static void s_s3_auto_ranged_put_request_finished(
             AWS_FATAL_ASSERT(part_number > 0);
             size_t part_index = part_number - 1;
             struct aws_string *etag = NULL;
-            bool request_is_noop = request->is_noop;
+            bool request_is_noop = request->is_noop != 0;
 
             if (!request_is_noop) {
                 if (error_code == AWS_ERROR_SUCCESS) {
