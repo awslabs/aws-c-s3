@@ -892,30 +892,30 @@ static int s_s3_auto_ranged_put_prepare_request(
                 }
             }
 
-                AWS_LOGF_DEBUG(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p UploadPart for Multi-part Upload, with ID:%s",
-                    (void *)meta_request,
-                    aws_string_c_str(auto_ranged_put->upload_id));
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p UploadPart for Multi-part Upload, with ID:%s",
+                (void *)meta_request,
+                aws_string_c_str(auto_ranged_put->upload_id));
 
-                struct aws_byte_buf *checksum_buf = NULL;
-                if (!request->is_noop) {
-                    aws_array_list_get_at_ptr(
-                        &auto_ranged_put->encoded_checksum_list, (void **)&checksum_buf, request->part_number - 1);
-                    /* Clean up the buffer in case of it's initialized before and retry happens. */
-                    aws_byte_buf_clean_up(checksum_buf);
-                }
+            struct aws_byte_buf *checksum_buf = NULL;
+            if (!request->is_noop) {
+                aws_array_list_get_at_ptr(
+                    &auto_ranged_put->encoded_checksum_list, (void **)&checksum_buf, request->part_number - 1);
+                /* Clean up the buffer in case of it's initialized before and retry happens. */
+                aws_byte_buf_clean_up(checksum_buf);
+            }
 
-                /* Create a new put-object message to upload a part. */
-                message = aws_s3_upload_part_message_new(
-                    meta_request->allocator,
-                    meta_request->initial_request_message,
-                    &request->request_body,
-                    request->part_number,
-                    auto_ranged_put->upload_id,
-                    meta_request->should_compute_content_md5,
-                    &meta_request->checksum_config,
-                    checksum_buf);
+            /* Create a new put-object message to upload a part. */
+            message = aws_s3_upload_part_message_new(
+                meta_request->allocator,
+                meta_request->initial_request_message,
+                &request->request_body,
+                request->part_number,
+                auto_ranged_put->upload_id,
+                meta_request->should_compute_content_md5,
+                &meta_request->checksum_config,
+                checksum_buf);
 
             break;
         }
