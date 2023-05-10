@@ -452,11 +452,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
 }
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
-    const struct aws_s3_request * const *request_a = a;
+    const struct aws_s3_request *const *request_a = a;
     AWS_PRECONDITION(request_a);
     AWS_PRECONDITION(*request_a);
 
-    const struct aws_s3_request * const *request_b = b;
+    const struct aws_s3_request *const *request_b = b;
     AWS_PRECONDITION(request_b);
     AWS_PRECONDITION(*request_b);
 

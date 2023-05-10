@@ -85,10 +85,10 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
     if (info->part_number > current_num_parts) {
         struct aws_byte_buf empty_buf = {0};
         struct aws_string *null_etag = NULL;
-        
-        for (size_t i = info->part_number ; i > current_num_parts; --i) {
-            aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &empty_buf, i-1);
-            aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, i-1);
+
+        for (size_t i = info->part_number; i > current_num_parts; --i) {
+            aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &empty_buf, i - 1);
+            aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, i - 1);
         }
     }
 
@@ -883,7 +883,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                             aws_s3_meta_request_body_has_no_more_data(meta_request);
 
                         struct aws_byte_buf checksum_buf = {0};
-                        aws_array_list_set_at(&auto_ranged_put->encoded_checksum_list, &checksum_buf, request->part_number - 1);
+                        aws_array_list_set_at(
+                            &auto_ranged_put->encoded_checksum_list, &checksum_buf, request->part_number - 1);
 
                         aws_s3_meta_request_unlock_synced_data(meta_request);
                     }
@@ -1190,7 +1191,7 @@ static void s_s3_auto_ranged_put_request_finished(
             struct aws_string *etag = NULL;
             bool request_is_noop = request->is_noop;
 
-            if(!request_is_noop) {
+            if (!request_is_noop) {
                 if (error_code == AWS_ERROR_SUCCESS) {
                     /* Find the ETag header if it exists and cache it. */
                     struct aws_byte_cursor etag_within_quotes;
@@ -1209,7 +1210,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         error_code = AWS_ERROR_S3_MISSING_ETAG;
                     } else {
                         /* The ETag value arrives in quotes, but we don't want it in quotes when we send it back up
-                        * later, so just get rid of the quotes now. */
+                         * later, so just get rid of the quotes now. */
                         etag = aws_strip_quotes(meta_request->allocator, etag_within_quotes);
                     }
                 }
@@ -1245,9 +1246,9 @@ static void s_s3_auto_ranged_put_request_finished(
 
                         ++auto_ranged_put->synced_data.num_parts_successful;
 
-                        /* ETags need to be associated with their part number, so we keep the etag indices consistent with
-                        * part numbers. This means we may have to add padding to the list in the case that parts finish out
-                        * of order. */
+                        /* ETags need to be associated with their part number, so we keep the etag indices consistent
+                         * with part numbers. This means we may have to add padding to the list in the case that parts
+                         * finish out of order. */
                         aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
                     } else {
                         ++auto_ranged_put->synced_data.num_parts_failed;

@@ -122,13 +122,13 @@ struct aws_s3_request {
     uint32_t discovers_object_size : 1;
 
     /* When true, this request does not represent a useful http request and
-    * must not be send, but should still go through the rest of the flow. Those
-    * requests can occur when request is optimistically created during update,
-    * but cannot be prepared. ex. when put has no content length, requests will
-    * be scheduled as regular to ensure fair distribution against other
-    * requests, but can also result in requests for uploading data after the end
-    * of the stream (those requests will use below flag to indicate that they
-    * should not be sent). */
+     * must not be send, but should still go through the rest of the flow. Those
+     * requests can occur when request is optimistically created during update,
+     * but cannot be prepared. ex. when put has no content length, requests will
+     * be scheduled as regular to ensure fair distribution against other
+     * requests, but can also result in requests for uploading data after the end
+     * of the stream (those requests will use below flag to indicate that they
+     * should not be sent). */
     uint32_t is_noop : 1;
 };
 
