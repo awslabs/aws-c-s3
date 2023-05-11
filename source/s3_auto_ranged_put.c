@@ -16,9 +16,10 @@ static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 /* For unknown length body we no longer know the number of parts. to avoid
- * resizing arrays for etags/checksums to much, those array start out with
- * capacity specified by the constant bellow. */
-static const uint32_t s_unknown_length_default_num_parts = 200;
+ * resizing arrays for etags/checksums too much, those array start out with
+ * capacity specified by the constant bellow. Note: constant value is an
+ *  */
+static const uint32_t s_unknown_length_default_num_parts = 512;
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
@@ -449,7 +450,7 @@ static bool s_s3_auto_ranged_put_update(
                         auto_ranged_put->synced_data.total_num_parts);
                 }
 
-                if (((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0)) {
+                if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
                     uint32_t num_parts_in_flight =
                         (auto_ranged_put->synced_data.num_parts_sent -
                          auto_ranged_put->synced_data.num_parts_completed);
@@ -1368,7 +1369,7 @@ static int s_s3_auto_ranged_put_pause(
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     if (!auto_ranged_put->has_content_length) {
-        AWS_LOGF_DEBUG(
+        AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p: Failed to pause request with unknown content length", (void *)meta_request);
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
