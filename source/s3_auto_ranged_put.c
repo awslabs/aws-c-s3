@@ -328,12 +328,6 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 
     aws_s3_paginated_operation_release(auto_ranged_put->synced_data.list_parts_operation);
 
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "Number of parts %lu number of etags %u",
-            aws_array_list_length(&auto_ranged_put->synced_data.etag_list),
-            auto_ranged_put->synced_data.num_parts_completed
-            );
-
     for (size_t etag_index = 0; etag_index < aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
          ++etag_index) {
         struct aws_string *etag = NULL;
@@ -892,6 +886,9 @@ static int s_s3_auto_ranged_put_prepare_request(
                         aws_array_list_set_at(
                             &auto_ranged_put->encoded_checksum_list, &checksum_buf, request->part_number - 1);
 
+                        struct aws_string *null_etag = NULL;
+                        aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
+
                         aws_s3_meta_request_unlock_synced_data(meta_request);
                     }
                     /* END CRITICAL SECTION */
@@ -1258,8 +1255,6 @@ static void s_s3_auto_ranged_put_request_finished(
                         /* ETags need to be associated with their part number, so we keep the etag indices consistent
                          * with part numbers. This means we may have to add padding to the list in the case that parts
                          * finish out of order. */
-                        AWS_LOGF_DEBUG(
-                            AWS_LS_S3_META_REQUEST, "setting etag at %lu", part_index);
                         aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
                     } else {
                         ++auto_ranged_put->synced_data.num_parts_failed;
