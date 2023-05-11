@@ -131,6 +131,8 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
 
+    aws_s3_meta_request_telemetry_fn *telemetry_callback;
+
     /* Customer specified callbacks to be called by our specialized callback to calculate the response checksum. */
     aws_s3_meta_request_headers_callback_fn *headers_user_callback_after_checksum;
     aws_s3_meta_request_receive_body_callback_fn *body_user_callback_after_checksum;

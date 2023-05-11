@@ -224,6 +224,12 @@ struct aws_s3_meta_request_test_results {
 
     /* accumulator of amount of bytes uploaded */
     struct aws_atomic_var total_bytes_uploaded;
+
+    /* Protected the tester->synced_data.lock */
+    struct {
+        /* The array_list of `struct aws_s3_request_metrics *` */
+        struct aws_array_list metrics;
+    } synced_data;
 };
 
 struct aws_s3_client_config;

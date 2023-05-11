@@ -26,6 +26,8 @@ struct aws_s3_meta_request_resume_token;
 struct aws_uri;
 struct aws_string;
 
+struct aws_s3_request_metrics;
+
 /**
  * A Meta Request represents a group of generated requests that are being done on behalf of the
  * original request. For example, one large GetObject request can be transformed into a series
@@ -142,6 +144,17 @@ struct aws_s3_meta_request_progress {
 typedef void(aws_s3_meta_request_progress_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_progress *progress,
+    void *user_data);
+
+/**
+ * Invoked to report the telemetry of the meta request once a single request finishes. Invoked from the thread of the
+ * connection that request made from.
+ * Note: *metrics is only valid for the duration of the callback. If you need to keep it around, use
+ * `aws_s3_request_metrics_acquire`
+ */
+typedef void(aws_s3_meta_request_telemetry_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request_metrics *metrics,
     void *user_data);
 
 typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
@@ -420,6 +433,18 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
+     * To get telemetry metrics when a single request finishes.
+     * If set the request will keep track of the metrics from `aws_s3_request_metrics`, and fire the callback when the
+     * request finishes receiving response.
+     * See `aws_s3_meta_request_telemetry_fn`
+     *
+     * Notes:
+     * - The callback will be invoked multiple times from different threads.
+     */
+    aws_s3_meta_request_telemetry_fn *telemetry_callback;
+
+    /**
+     * Optional.
      * Endpoint override for request. Can be used to override scheme and port of
      * the endpoint.
      * There is some overlap between Host header and Endpoint and corner cases
@@ -667,11 +692,169 @@ struct aws_s3_meta_request *aws_s3_meta_request_acquire(struct aws_s3_meta_reque
 AWS_S3_API
 struct aws_s3_meta_request *aws_s3_meta_request_release(struct aws_s3_meta_request *meta_request);
 
+/**
+ * Initialize the configuration for a default S3 signing.
+ */
 AWS_S3_API
 void aws_s3_init_default_signing_config(
     struct aws_signing_config_aws *signing_config,
     const struct aws_byte_cursor region,
     struct aws_credentials_provider *credentials_provider);
+
+/**
+ * Add a reference, keeping this object alive.
+ * The reference must be released when you are done with it, or it's memory will never be cleaned up.
+ * Always returns the same pointer that was passed in.
+ */
+AWS_S3_API
+struct aws_s3_request_metrics *aws_s3_request_metrics_acquire(struct aws_s3_request_metrics *metrics);
+
+/**
+ * Release a reference.
+ * When the reference count drops to 0, this object will be cleaned up.
+ * It's OK to pass in NULL (nothing happens).
+ * Always returns NULL.
+ */
+AWS_S3_API
+struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_request_metrics *metrics);
+
+/*************************************  Getters for s3 request metrics ************************************************/
+/**
+ * Get the request ID from aws_s3_request_metrics.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_request_id will be set to a string. Be warned this string's lifetime is tied to the metrics
+ * object.
+ **/
+AWS_S3_API
+int aws_s3_request_metrics_get_request_id(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_request_id);
+
+/* Get the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always
+ * available. Timestamp are from `aws_high_res_clock_get_ticks`  */
+AWS_S3_API
+void aws_s3_request_metrics_get_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_start_time);
+
+/* Get the end time from aws_s3_request_metrics. Always available */
+AWS_S3_API
+void aws_s3_request_metrics_get_end_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *out_end_time);
+
+/* Get the total duration time from aws_s3_request_metrics. Always available */
+AWS_S3_API
+void aws_s3_request_metrics_get_total_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_total_duration);
+
+/* Get the time stamp when the request started to be encoded. Timestamps are from `aws_high_res_clock_get_ticks`
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if the request ended before it gets sent. */
+AWS_S3_API
+int aws_s3_request_metrics_get_send_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_send_start_time);
+
+/* Get the time stamp when the request finished to be encoded. Timestamps are from `aws_high_res_clock_get_ticks`
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_send_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_send_end_time);
+
+/* The time duration for the request from start encoding to finish encoding (send_end_timestamp_ns -
+ * send_start_timestamp_ns).
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_sending_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_sending_duration);
+
+/* Get the time stamp when the response started to be received from the network channel. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_receive_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_receive_start_time);
+
+/* Get the time stamp when the response finished to be received from the network channel. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_receive_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_receive_end_time);
+
+/* The time duration for the request from start receiving to finish receiving (receive_end_timestamp_ns -
+ * receive_start_timestamp_ns).
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_receiving_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_receiving_duration);
+
+/* Get the response status code for the request. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_response_status_code(
+    const struct aws_s3_request_metrics *metrics,
+    int *out_response_status);
+
+/* Get the HTTP Headers of the response received for the request. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised
+ * if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_response_headers(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_http_headers **out_response_headers);
+
+/**
+ * Get the path and query of the request.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_request_path_query will be set to a string. Be warned this string's lifetime is tied to the metrics
+ * object.
+ */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_path_query(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_request_path_query);
+
+/**
+ * Get the host_address of the request.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_host_address will be set to a string. Be warned this string's lifetime is tied to the metrics
+ * object.
+ */
+AWS_S3_API
+void aws_s3_request_metrics_get_host_address(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_host_address);
+
+/**
+ * Get the IP address of the request connected to.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_ip_address will be set to a string. Be warned this string's lifetime is tied to the metrics object.
+ */
+AWS_S3_API
+int aws_s3_request_metrics_get_ip_address(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_ip_address);
+
+/* Get the id of connection that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data
+ * not available */
+AWS_S3_API
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *out_connection_id);
+
+/* Get the thread ID of the thread that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if
+ * data not available */
+AWS_S3_API
+int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, aws_thread_id_t *out_thread_id);
+
+/* Get the stream-id, which is the idex when the stream was activated. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be
+ * raised if data not available */
+AWS_S3_API
+int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, uint32_t *out_stream_id);
+
+/* Get the AWS CRT error code from request metrics. */
+AWS_S3_API
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *out_metrics);
 
 AWS_EXTERN_C_END
 

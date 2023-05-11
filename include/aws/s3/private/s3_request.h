@@ -9,6 +9,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
 #include <aws/s3/private/s3_checksums.h>
@@ -21,6 +22,73 @@ enum aws_s3_request_flags {
     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS = 0x00000001,
     AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY = 0x00000002,
     AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000004,
+};
+
+/**
+ * Information sent in the telemetry_callback after each aws_s3_request finished/retried from meta request.
+ */
+struct aws_s3_request_metrics {
+    struct aws_allocator *allocator;
+
+    struct {
+        /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps
+         * are from `aws_high_res_clock_get_ticks`. This will always be available. */
+        int64_t start_timestamp_ns;
+        /* The time stamp when the request finished by S3 client succeed or failed or to be retried. Timestamps
+         * are from `aws_high_res_clock_get_ticks`. This will always be available. */
+        int64_t end_timestamp_ns;
+        /* The time duration for the request from start to finish. end_timestamp_ns - start_timestamp_ns. This will
+         * always be available. */
+        int64_t total_duration_ns;
+
+        /* The time stamp when the request started to be encoded. -1 means data not available. Timestamp
+         * are from `aws_high_res_clock_get_ticks` */
+        int64_t send_start_timestamp_ns;
+        /* The time stamp when the request finished to be encoded. -1 means data not available.
+         * Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t send_end_timestamp_ns;
+        /* The time duration for the request from start encoding to finish encoding (send_end_timestamp_ns -
+         * send_start_timestamp_ns). When send_end_timestamp_ns is -1, means data not available. */
+        int64_t sending_duration_ns;
+
+        /* The time stamp when the response started to be received from the network channel. -1 means data not
+         * available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t receive_start_timestamp_ns;
+        /* The time stamp when the response finished to be received from the network channel. -1 means data not
+         * available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t receive_end_timestamp_ns;
+        /* The time duration for the request from start receiving to finish receiving (receive_end_timestamp_ns -
+         * receive_start_timestamp_ns). When receive_end_timestamp_ns is 0, means data not available. */
+        int64_t receiving_duration_ns;
+    } time_metrics;
+
+    struct {
+        /* Response status code for the request */
+        int response_status;
+        /* HTTP Headers of the response received. */
+        struct aws_http_headers *response_headers;
+        /* Path and query of the request. */
+        struct aws_string *request_path_query;
+        /* The host address of the request. */
+        struct aws_string *host_address;
+        /* The the request ID header value. */
+        struct aws_string *request_id;
+    } req_resp_info_metrics;
+
+    struct {
+        /* The IP address of the request connected to */
+        struct aws_string *ip_address;
+        /* The pointer to the connection that request was made from */
+        void *connection_id;
+        /* The aws_thread_id_t to the thread that request ran on */
+        aws_thread_id_t thread_id;
+        /* The stream-id, which is the idex when the stream was activated. */
+        uint32_t stream_id;
+        /* CRT error code when the aws_s3_request finishes. */
+        int error_code;
+    } crt_info_metrics;
+
+    struct aws_ref_count ref_count;
 };
 
 /* Represents a single request made to S3. */
@@ -103,6 +171,8 @@ struct aws_s3_request {
         /* Returned response status of this request. */
         int response_status;
 
+        /* The metrics for the request telemetry */
+        struct aws_s3_request_metrics *metrics;
     } send_data;
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
@@ -156,6 +226,11 @@ void aws_s3_request_acquire(struct aws_s3_request *request);
 
 AWS_S3_API
 void aws_s3_request_release(struct aws_s3_request *request);
+
+AWS_S3_API
+struct aws_s3_request_metrics *aws_s3_request_metrics_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message);
 
 AWS_EXTERN_C_END
 
