@@ -888,7 +888,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                             &auto_ranged_put->encoded_checksum_list, &checksum_buf, request->part_number - 1);
 
                         struct aws_string *null_etag = NULL;
-                        aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
+                        aws_array_list_set_at(
+                            &auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
 
                         aws_s3_meta_request_unlock_synced_data(meta_request);
                     }
