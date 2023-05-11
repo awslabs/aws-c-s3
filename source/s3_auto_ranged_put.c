@@ -1370,7 +1370,7 @@ static int s_s3_auto_ranged_put_pause(
     if (!auto_ranged_put->has_content_length) {
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST, "id=%p: Failed to pause request with unknown content length", (void *)meta_request);
-        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
 
     /* lock */
