@@ -50,7 +50,7 @@ enum aws_s3_meta_request_type {
     /**
      * The PutObject request will be split into MultiPart uploads that are executed in parallel
      * to improve throughput, when possible.
-     * Note: put object supports both know and unknown body length. The client
+     * Note: put object supports both known and unknown body length. The client
      * relies on Content-Length header to determine length of the body.
      * Request with unknown content length do have the following limitations:
      * - multipart threshold is ignored and all request are made through mpu,
