@@ -187,6 +187,7 @@ struct aws_s3_tester_meta_request_options {
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
+        struct aws_byte_cursor content_encoding;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;

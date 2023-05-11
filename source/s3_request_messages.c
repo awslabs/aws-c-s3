@@ -745,6 +745,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     }
 
     struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &buffer_byte_cursor);
+    struct aws_byte_buf content_encoding_header_buf;
+    AWS_ZERO_STRUCT(content_encoding_header_buf);
 
     if (input_stream == NULL) {
         goto error_clean_up;
@@ -754,11 +756,21 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         if (checksum_config->location == AWS_SCL_TRAILER) {
             /* aws-chunked encode the payload and add related headers */
 
-            /* set Content-Encoding header. TODO: the aws-chunked should be appended to the existing content encoding.
+            /* set Content-Encoding header. If the header already exists, append the exisiting value to aws-chunked
              */
-            if (aws_http_headers_set(headers, g_content_encoding_header_name, g_content_encoding_header_aws_chunked)) {
+            struct aws_byte_cursor content_encoding_header_cursor;
+            aws_byte_buf_init_copy_from_cursor(
+                &content_encoding_header_buf, allocator, g_content_encoding_header_aws_chunked);
+            if (aws_http_headers_get(headers, g_content_encoding_header_name, &content_encoding_header_cursor) ==
+                AWS_OP_SUCCESS) {
+                aws_byte_buf_append_byte_dynamic(&content_encoding_header_buf, ',');
+                aws_byte_buf_append_dynamic(&content_encoding_header_buf, &content_encoding_header_cursor);
+            }
+            if (aws_http_headers_set(
+                    headers, g_content_encoding_header_name, aws_byte_cursor_from_buf(&content_encoding_header_buf))) {
                 goto error_clean_up;
             }
+
             /* set x-amz-trailer header */
             if (aws_http_headers_set(
                     headers,
@@ -803,12 +815,13 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     aws_http_message_set_body_stream(out_message, input_stream);
     /* Let the message take the full ownership */
     aws_input_stream_release(input_stream);
-
+    aws_byte_buf_clean_up(&content_encoding_header_buf);
     return input_stream;
 
 error_clean_up:
     AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
     aws_input_stream_release(input_stream);
+    aws_byte_buf_clean_up(&content_encoding_header_buf);
     return NULL;
 }
 
