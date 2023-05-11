@@ -1258,6 +1258,8 @@ static void s_s3_auto_ranged_put_request_finished(
                         /* ETags need to be associated with their part number, so we keep the etag indices consistent
                          * with part numbers. This means we may have to add padding to the list in the case that parts
                          * finish out of order. */
+                        AWS_LOGF_DEBUG(
+                            AWS_LS_S3_META_REQUEST, "setting etag at %lu", part_index);
                         aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
                     } else {
                         ++auto_ranged_put->synced_data.num_parts_failed;
