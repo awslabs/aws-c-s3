@@ -377,7 +377,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
 
             size_t part_size = (size_t)part_size_uint64;
 
-            const size_t MIN_PART_SIZE = 64L * 1024L * 1024L; /* minimum partition size */
+            const size_t MIN_PART_SIZE = 128L * 1024L * 1024L; /* minimum partition size */
             if (part_size < MIN_PART_SIZE) {
                 part_size = MIN_PART_SIZE;
             }
