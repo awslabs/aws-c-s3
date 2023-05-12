@@ -54,10 +54,14 @@ enum aws_s3_meta_request_type {
      * to improve throughput, when possible.
      * Note: put object supports both known and unknown body length. The client
      * relies on Content-Length header to determine length of the body.
-     * Request with unknown content length do have the following limitations:
+     * Request with unknown content length are always sent using multipart
+     * upload regardless of final number of parts and do have the following limitations:
      * - multipart threshold is ignored and all request are made through mpu,
      *   even if they only need one part
      * - pause/resume is not supported
+     * - meta request will throw error if checksum header is provider (due to
+     *   general limitation of checksum not being usable if meta request is
+     *   getting split)
      */
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
 

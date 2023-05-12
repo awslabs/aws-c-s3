@@ -53,6 +53,9 @@ struct aws_s3_auto_ranged_put {
          */
         uint32_t num_parts_read_from_stream;
 
+        /*
+         * Whether body stream is exhausted.
+         */
         bool is_body_stream_at_end;
     } prepare_data;
 
@@ -72,11 +75,17 @@ struct aws_s3_auto_ranged_put {
         struct aws_s3_paginated_operation *list_parts_operation;
         struct aws_string *list_parts_continuation_token;
 
+        /* Note: total num parts is known only if content-length is known,
+        otherwise it will be 0. */
         uint32_t total_num_parts;
         uint32_t num_parts_sent;
+        uint32_t num_parts_prepared;
         uint32_t num_parts_completed;
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
+        /* When content length is not known, requests are optimistically
+         * scheduled, bellow represents how many requests were scheduled and had no
+         * work to do*/
         uint32_t num_parts_noop;
 
         struct aws_http_headers *needed_response_headers;

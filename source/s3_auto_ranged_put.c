@@ -18,8 +18,15 @@ static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 /* For unknown length body we no longer know the number of parts. to avoid
  * resizing arrays for etags/checksums too much, those array start out with
  * capacity specified by the constant bellow. Note: constant value is an
- *  */
-static const uint32_t s_unknown_length_default_num_parts = 512;
+ */
+static const uint32_t s_unknown_length_default_num_parts = 256;
+
+/* For unknown length body we dont know how many parts we'll end up with.
+ * We optimistically schedule upload requests, but cap the number of requests
+ * being prepared by bellow number to avoid unknown length request dominating the
+ * queue.
+ * TODO: this value needs further benchmarking.*/
+static const uint32_t s_unknown_length_max_optimistic_prepared_parts = 5;
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
@@ -462,6 +469,17 @@ static bool s_s3_auto_ranged_put_update(
                     }
                 }
 
+                if (!auto_ranged_put->has_content_length) {
+                    uint32_t num_parts_being_prepared =
+                        (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_prepared);
+
+                    /* Because uploads must read from their streams serially, we try to limit the amount of in flight
+                     * requests for a given multipart upload if we can. */
+                    if (num_parts_being_prepared > s_unknown_length_max_optimistic_prepared_parts) {
+                        goto has_work_remaining;
+                    }
+                }
+
                 /* Allocate a request for another part. */
                 request = aws_s3_request_new(
                     meta_request,
@@ -879,6 +897,8 @@ static int s_s3_auto_ranged_put_prepare_request(
                     /* BEGIN CRITICAL SECTION */
                     {
                         aws_s3_meta_request_lock_synced_data(meta_request);
+
+                        ++auto_ranged_put->synced_data.num_parts_prepared;
 
                         auto_ranged_put->prepare_data.is_body_stream_at_end =
                             aws_s3_meta_request_body_has_no_more_data(meta_request);

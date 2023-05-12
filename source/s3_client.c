@@ -940,7 +940,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
     uint64_t content_length = 0;
     struct aws_byte_cursor content_length_cursor;
-    bool content_length_header_found = false;
+    bool content_length_found = false;
 
     if (!aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor)) {
         if (aws_byte_cursor_utf8_parse_u64(content_length_cursor, &content_length)) {
@@ -951,7 +951,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
             return NULL;
         }
-        content_length_header_found = true;
+        content_length_found = true;
     }
 
     /* Call the appropriate meta-request new function. */
@@ -977,6 +977,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     "Could not create auto-ranged-put meta request; filepath or body stream must be set.");
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
+            }
+
+            int64_t stream_length = 0;
+            if (content_length_found == false && input_stream != NULL &&
+                aws_input_stream_get_length(input_stream, &stream_length) == AWS_OP_SUCCESS) {
+                content_length = (uint64_t)stream_length;
+                content_length_found = true;
             }
 
             if (options->resume_token == NULL) {
@@ -1009,7 +1016,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 uint64_t multipart_upload_threshold =
                     client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
 
-                if (content_length_header_found && content_length <= multipart_upload_threshold) {
+                if (content_length_found && content_length <= multipart_upload_threshold) {
                     return aws_s3_meta_request_default_new(
                         client->allocator,
                         client,
@@ -1033,7 +1040,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 size_t part_size = client_part_size;
                 uint32_t num_parts = 0;
 
-                if (content_length_header_found) {
+                if (content_length_found) {
                     uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
 
                     if (part_size_uint64 > SIZE_MAX) {
@@ -1079,7 +1086,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length, num_parts, options);
             } else {
-                if (!content_length_header_found) {
+                if (!content_length_found) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "Could not create auto-ranged-put meta request; content_length must be specified.");
