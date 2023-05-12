@@ -49,7 +49,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
         /* start the telemetry for the request to be sent */
         request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
         if (!meta_request->vtable->get_request_type) {
-            request->send_data.metrics->req_resp_info_metrics.request_type = AWS_S3_REQUEST_TYPE_AUTO_RANGE_DEFAULT;
+            request->send_data.metrics->req_resp_info_metrics.request_type = AWS_S3_REQUEST_TYPE_DEFAULT;
         } else {
             request->send_data.metrics->req_resp_info_metrics.request_type =
                 meta_request->vtable->get_request_type(request);

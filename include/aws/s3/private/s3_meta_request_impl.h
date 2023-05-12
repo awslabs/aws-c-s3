@@ -90,7 +90,7 @@ struct aws_s3_meta_request_vtable {
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
-    /* Pause the given request */
+    /* Get the type of the aws_s3_request */
     int (*get_request_type)(struct aws_s3_request *request);
 };
 
