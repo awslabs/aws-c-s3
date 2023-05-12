@@ -73,6 +73,8 @@ struct aws_s3_request_metrics {
         struct aws_string *host_address;
         /* The the request ID header value. */
         struct aws_string *request_id;
+        /* The type of request made */
+        enum aws_s3_request_type request_type;
     } req_resp_info_metrics;
 
     struct {

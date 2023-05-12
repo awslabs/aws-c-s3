@@ -67,6 +67,29 @@ enum aws_s3_meta_request_type {
 };
 
 /**
+ * The type of S3 request made. Used by metrics.
+ */
+enum aws_s3_request_type {
+
+    /* Auto Ranged PUT request types */
+    AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_LIST_PARTS,
+    AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_CREATE_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_PART,
+    AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_ABORT_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_COMPLETE_MULTIPART_UPLOAD,
+
+    /* Auto Ranged GET request types */
+    AWS_S3_REQUEST_TYPE_AUTO_RANGE_GET_HEAD_OBJECT,
+    AWS_S3_REQUEST_TYPE_AUTO_RANGE_GET_PART,
+    AWS_S3_REQUEST_TYPE_AUTO_RANGE_GET_INITIAL_MESSAGE,
+
+    /* The default type. Same as default meta request */
+    AWS_S3_REQUEST_TYPE_AUTO_RANGE_DEFAULT,
+
+    AWS_S3_REQUEST_TYPE_MAX,
+};
+
+/**
  * Invoked to provide response headers received during execution of the meta request, both for
  * success and error HTTP status codes.
  *
@@ -846,9 +869,15 @@ int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *me
 AWS_S3_API
 int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, uint32_t *out_stream_id);
 
+/* Get the request type from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_type(
+    const struct aws_s3_request_metrics *metrics,
+    enum aws_s3_request_type *out_request_type);
+
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API
-int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *out_metrics);
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
 
 AWS_EXTERN_C_END
 
