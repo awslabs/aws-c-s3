@@ -762,7 +762,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             bool has_content_encoding_header =
                 aws_http_headers_get(headers, g_content_encoding_header_name, &content_encoding_header_cursor) ==
                 AWS_OP_SUCCESS;
-            int content_encoding_header_buf_size =
+            size_t content_encoding_header_buf_size =
                 has_content_encoding_header
                     ? g_content_encoding_header_aws_chunked.len + content_encoding_header_cursor.len + 1
                     : g_content_encoding_header_aws_chunked.len;
