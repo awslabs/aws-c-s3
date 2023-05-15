@@ -757,6 +757,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             /* aws-chunked encode the payload and add related headers */
 
             /* set Content-Encoding header. If the header already exists, append the exisiting value to aws-chunked
+             * We already made sure that the existing value is not 'aws_chunked' in 'aws_s3_client_make_meta_request'
+             * function.
              */
             struct aws_byte_cursor content_encoding_header_cursor;
             bool has_content_encoding_header =
