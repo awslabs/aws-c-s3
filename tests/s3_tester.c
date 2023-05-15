@@ -186,6 +186,50 @@ static void s_s3_test_meta_request_shutdown(void *user_data) {
 
     aws_s3_tester_notify_meta_request_shutdown(tester);
 }
+static void s_s3_test_meta_request_telemetry(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request_metrics *metrics,
+    void *user_data) {
+    (void)meta_request;
+    struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
+    struct aws_s3_tester *tester = meta_request_test_results->tester;
+    uint64_t time_stamp = 0;
+    aws_s3_request_metrics_get_start_timestamp_ns(metrics, &time_stamp);
+    AWS_FATAL_ASSERT(time_stamp > 0);
+    aws_s3_request_metrics_get_end_timestamp_ns(metrics, &time_stamp);
+    AWS_FATAL_ASSERT(time_stamp > 0);
+    aws_s3_request_metrics_get_total_duration_ns(metrics, &time_stamp);
+    AWS_FATAL_ASSERT(time_stamp > 0);
+    if (!aws_s3_request_metrics_get_send_end_timestamp_ns(metrics, &time_stamp)) {
+        AWS_FATAL_ASSERT(time_stamp > 0);
+        uint64_t start_time = 0;
+        uint64_t end_time = 0;
+        uint64_t during_time = 0;
+        int error = 0;
+        error |= aws_s3_request_metrics_get_send_start_timestamp_ns(metrics, &start_time);
+        error |= aws_s3_request_metrics_get_send_end_timestamp_ns(metrics, &end_time);
+        error |= aws_s3_request_metrics_get_sending_duration_ns(metrics, &during_time);
+        AWS_FATAL_ASSERT(error == AWS_OP_SUCCESS);
+        AWS_FATAL_ASSERT(during_time == (end_time - start_time));
+    }
+    if (!aws_s3_request_metrics_get_receive_end_timestamp_ns(metrics, &time_stamp)) {
+        AWS_FATAL_ASSERT(time_stamp > 0);
+        uint64_t start_time = 0;
+        uint64_t end_time = 0;
+        uint64_t during_time = 0;
+        int error = 0;
+        error |= aws_s3_request_metrics_get_receive_start_timestamp_ns(metrics, &start_time);
+        error |= aws_s3_request_metrics_get_receive_end_timestamp_ns(metrics, &end_time);
+        error |= aws_s3_request_metrics_get_receiving_duration_ns(metrics, &during_time);
+        AWS_FATAL_ASSERT(error == AWS_OP_SUCCESS);
+        AWS_FATAL_ASSERT(during_time == (end_time - start_time));
+    }
+
+    aws_s3_tester_lock_synced_data(tester);
+    aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
+    aws_s3_request_metrics_acquire(metrics);
+    aws_s3_tester_unlock_synced_data(tester);
+}
 
 /* Notify the tester that a particular clean up step has finished. */
 static void s_s3_test_client_shutdown(void *user_data);
@@ -353,6 +397,9 @@ int aws_s3_tester_bind_meta_request(
     ASSERT_TRUE(options->shutdown_callback == NULL);
     options->shutdown_callback = s_s3_test_meta_request_shutdown;
 
+    ASSERT_TRUE(options->telemetry_callback == NULL);
+    options->telemetry_callback = s_s3_test_meta_request_telemetry;
+
     options->progress_callback = meta_request_test_results->progress_callback;
 
     ASSERT_TRUE(options->user_data == NULL);
@@ -369,6 +416,8 @@ void aws_s3_meta_request_test_results_init(
     AWS_ZERO_STRUCT(*test_meta_request);
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
     aws_atomic_init_int(&test_meta_request->total_bytes_uploaded, 0);
+    aws_array_list_init_dynamic(
+        &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -379,6 +428,13 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
     aws_http_headers_release(test_meta_request->error_response_headers);
     aws_byte_buf_clean_up(&test_meta_request->error_response_body);
     aws_http_headers_release(test_meta_request->response_headers);
+    while (aws_array_list_length(&test_meta_request->synced_data.metrics) > 0) {
+        struct aws_s3_request_metrics *metrics = NULL;
+        aws_array_list_back(&test_meta_request->synced_data.metrics, (void **)&metrics);
+        aws_array_list_pop_back(&test_meta_request->synced_data.metrics);
+        aws_s3_request_metrics_release(metrics);
+    }
+    aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
 
     AWS_ZERO_STRUCT(*test_meta_request);
 }
