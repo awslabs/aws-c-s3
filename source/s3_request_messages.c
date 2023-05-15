@@ -759,13 +759,14 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             /* set Content-Encoding header. If the header already exists, append the exisiting value to aws-chunked
              */
             struct aws_byte_cursor content_encoding_header_cursor;
-            aws_byte_buf_init_copy_from_cursor(
-                &content_encoding_header_buf, allocator, g_content_encoding_header_aws_chunked);
+            aws_byte_buf_init(&content_encoding_header_buf, allocator, g_content_encoding_header_aws_chunked.len);
             if (aws_http_headers_get(headers, g_content_encoding_header_name, &content_encoding_header_cursor) ==
                 AWS_OP_SUCCESS) {
-                aws_byte_buf_append_byte_dynamic(&content_encoding_header_buf, ',');
                 aws_byte_buf_append_dynamic(&content_encoding_header_buf, &content_encoding_header_cursor);
+                aws_byte_buf_append_byte_dynamic(&content_encoding_header_buf, ',');
             }
+            aws_byte_buf_append_dynamic(&content_encoding_header_buf, &g_content_encoding_header_aws_chunked);
+
             if (aws_http_headers_set(
                     headers, g_content_encoding_header_name, aws_byte_cursor_from_buf(&content_encoding_header_buf))) {
                 goto error_clean_up;
