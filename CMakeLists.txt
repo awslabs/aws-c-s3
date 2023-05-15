@@ -69,7 +69,6 @@ endif()
 
 file(GLOB S3_HEADERS
         ${AWS_S3_ROOT_HEADERS}
-        ${AWS_S3_MODEL_HEADERS}
         ${AWS_S3_PRIVATE_HEADERS}
         ${AWS_S3_EXTERNAL_HEADERS}
         )
@@ -83,7 +82,7 @@ file(GLOB S3_SRC
 add_library(${PROJECT_NAME} ${S3_HEADERS} ${S3_SRC})
 aws_set_common_properties(${PROJECT_NAME})
 aws_prepare_symbol_visibility_args(${PROJECT_NAME} "AWS_S3")
-aws_check_headers(${PROJECT_NAME} ${S3_HEADERS})
+aws_check_headers(${PROJECT_NAME} ${AWS_S3_ROOT_HEADERS})
 
 aws_add_sanitizers(${PROJECT_NAME})
 
