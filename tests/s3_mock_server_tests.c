@@ -83,7 +83,7 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     time_stamp = 0;
     enum aws_s3_request_type request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
-    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_CREATE_MULTIPART_UPLOAD, request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, request_type);
 
     /* Second metrics should be the Upload Part */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 1);
@@ -97,19 +97,19 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     ASSERT_TRUE(aws_byte_cursor_eq_c_str(&header_value, "keep-alive"));
     request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
-    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_PART, request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_UPLOAD_PART, request_type);
 
     /* Third metrics still be Upload Part */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 2);
     request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
-    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_PART, request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_UPLOAD_PART, request_type);
 
     /* Fourth should be complete MPU */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 3);
     request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
-    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_AUTO_RANGED_PUT_COMPLETE_MULTIPART_UPLOAD, request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD, request_type);
     /* All the rest should be similar */
 
     return AWS_OP_SUCCESS;

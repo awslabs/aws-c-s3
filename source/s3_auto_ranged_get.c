@@ -53,10 +53,10 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
 static int s_s3_auto_ranged_get_request_type(struct aws_s3_request *request) {
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
-            return AWS_S3_REQUEST_TYPE_AUTO_RANGE_GET_HEAD_OBJECT;
+            return AWS_S3_REQUEST_TYPE_GET_OBJECT_HEAD;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
-            return AWS_S3_REQUEST_TYPE_AUTO_RANGE_GET_PART;
+            return AWS_S3_REQUEST_TYPE_GET_OBJECT_PART;
     }
     AWS_ASSERT(false);
     return AWS_S3_REQUEST_TYPE_MAX;
