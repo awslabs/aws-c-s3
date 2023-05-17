@@ -897,6 +897,10 @@ static int s_s3_auto_ranged_put_prepare_request(
                     }
                 }
 
+                if (!auto_ranged_put->has_content_length) {
+                    ++auto_ranged_put->synced_data.total_num_parts;
+                }
+
                 /* Some streams might require additional read to realize that
                  * there is no more data to read. So lets try to read and mark
                  * part as no_op is we cannot read anymore. */
@@ -918,9 +922,6 @@ static int s_s3_auto_ranged_put_prepare_request(
                     {
                         aws_s3_meta_request_lock_synced_data(meta_request);
 
-                        if (!auto_ranged_put->has_content_length) {
-                            ++auto_ranged_put->synced_data.total_num_parts;
-                        }
                         ++auto_ranged_put->synced_data.num_parts_read;
 
                         auto_ranged_put->synced_data.is_body_stream_at_end =
