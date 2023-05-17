@@ -935,8 +935,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
 
-    const struct aws_http_headers *initial_message_headers = 
-        aws_http_message_get_headers(options->message);
+    const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
     AWS_ASSERT(initial_message_headers);
 
     uint64_t content_length = 0;

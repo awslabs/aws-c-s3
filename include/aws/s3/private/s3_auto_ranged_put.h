@@ -54,18 +54,14 @@ struct aws_s3_auto_ranged_put {
         uint32_t num_parts_read_from_stream;
     } prepare_data;
 
-    /*
-     * Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
-     * corresponding index to its checksum result, so while the list is shared across threads each index will only be
-     * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
-     * request which will only be invoked after all other parts/threads have completed.
-     */
-    struct aws_array_list encoded_checksum_list;
-
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
         /* Array list of `struct aws_string *`. */
         struct aws_array_list etag_list;
+
+        /* Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set
+         * the corresponding index to its checksum result. */
+        struct aws_array_list encoded_checksum_list;
 
         struct aws_s3_paginated_operation *list_parts_operation;
         struct aws_string *list_parts_continuation_token;
@@ -117,9 +113,9 @@ struct aws_s3_auto_ranged_put {
 AWS_EXTERN_C_BEGIN
 
 /* Creates a new auto-ranged put meta request.
-* This will do a multipart upload in parallel when appropriate.
-* Note: if has_content_length is false, content_length and num_parts are ignored. 
-*/
+ * This will do a multipart upload in parallel when appropriate.
+ * Note: if has_content_length is false, content_length and num_parts are ignored.
+ */
 
 AWS_S3_API struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
