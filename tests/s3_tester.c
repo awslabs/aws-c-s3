@@ -1502,6 +1502,14 @@ int aws_s3_tester_send_meta_request_with_options(
                 aws_http_message_set_body_stream(message, NULL);
             }
 
+            if (options->put_options.content_encoding.ptr != NULL) {
+                struct aws_http_header content_encoding_header = {
+                    .name = g_content_encoding_header_name,
+                    .value = options->put_options.content_encoding,
+                };
+                aws_http_message_add_header(message, content_encoding_header);
+            }
+
             meta_request_options.message = message;
             aws_byte_buf_clean_up(&object_path_buffer);
         }
