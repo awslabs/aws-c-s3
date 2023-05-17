@@ -1078,7 +1078,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length_found, content_length, num_parts, options);
-            } else {
+            } else { /* else using resume token */
                 if (!content_length_found) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
