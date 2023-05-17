@@ -17,7 +17,8 @@ static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 /* For unknown length body we no longer know the number of parts. to avoid
  * resizing arrays for etags/checksums too much, those array start out with
- * capacity specified by the constant bellow. Note: constant value is an
+ * capacity specified by the constant bellow. Note: constant has been arbitrary
+ * picked to avoid using allocations and using too much memory. might change in future.
  */
 static const uint32_t s_unknown_length_default_num_parts = 32;
 

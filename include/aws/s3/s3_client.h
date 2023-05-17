@@ -431,9 +431,6 @@ struct aws_s3_meta_request_options {
 
     /**
      * Invoked to report progress of the meta request execution.
-     * Currently, the progress callback is invoked only for the CopyObject meta request type.
-     * TODO: support this callback for all the types of meta requests
-     * See `aws_s3_meta_request_progress_fn`
      */
     aws_s3_meta_request_progress_fn *progress_callback;
 
