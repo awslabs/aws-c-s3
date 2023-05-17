@@ -935,7 +935,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
 
-    struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
+    const struct aws_http_headers *initial_message_headers = 
+        aws_http_message_get_headers(options->message);
     AWS_ASSERT(initial_message_headers);
 
     uint64_t content_length = 0;
@@ -969,7 +970,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
 
-            struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
+            const struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
 
             if ((input_stream == NULL) && (options->send_filepath.len == 0)) {
                 AWS_LOGF_ERROR(
@@ -977,13 +978,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     "Could not create auto-ranged-put meta request; filepath or body stream must be set.");
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
-            }
-
-            int64_t stream_length = 0;
-            if (content_length_found == false && input_stream != NULL &&
-                aws_input_stream_get_length(input_stream, &stream_length) == AWS_OP_SUCCESS) {
-                content_length = (uint64_t)stream_length;
-                content_length_found = true;
             }
 
             if (options->resume_token == NULL) {
@@ -1084,19 +1078,19 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 }
 
                 return aws_s3_meta_request_auto_ranged_put_new(
-                    client->allocator, client, part_size, content_length, num_parts, options);
+                    client->allocator, client, part_size, content_length_found, content_length, num_parts, options);
             } else {
                 if (!content_length_found) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
-                        "Could not create auto-ranged-put meta request; content_length must be specified.");
+                        "Could not create auto-ranged-put resume meta request; content_length must be specified.");
                     aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                     return NULL;
                 }
 
                 /* don't pass part size and total num parts. constructor will pick it up from token */
                 return aws_s3_meta_request_auto_ranged_put_new(
-                    client->allocator, client, 0, content_length, 0, options);
+                    client->allocator, client, 0, true, content_length, 0, options);
             }
         }
         case AWS_S3_META_REQUEST_TYPE_COPY_OBJECT: {
