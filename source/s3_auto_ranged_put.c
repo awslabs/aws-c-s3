@@ -493,7 +493,7 @@ static bool s_s3_auto_ranged_put_update(
 
                 /* Because uploads must read from their streams serially, we try to limit the amount of in flight
                  * requests for a given multipart upload if we can. */
-                if (num_parts_not_read > s_unknown_length_max_optimistic_prepared_parts) {
+                if (num_parts_not_read >= s_unknown_length_max_optimistic_prepared_parts) {
                     goto has_work_remaining;
                 }
 
@@ -947,6 +947,17 @@ static int s_s3_auto_ranged_put_prepare_request(
                 } else {
                     request->is_noop = true;
 
+                    /* BEGIN CRITICAL SECTION */
+                    {
+                        aws_s3_meta_request_lock_synced_data(meta_request);
+
+                        ++auto_ranged_put->synced_data.num_parts_read;
+                        auto_ranged_put->synced_data.is_body_stream_at_end = true;
+
+                        aws_s3_meta_request_unlock_synced_data(meta_request);
+                    }
+                    /* END CRITICAL SECTION */
+
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p UploadPart with part num %u for Multi-part Upload, with ID:%s"
@@ -987,6 +998,17 @@ static int s_s3_auto_ranged_put_prepare_request(
             break;
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
+
+            if (auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Could not create complete multipart upload for meta request with zero content length.",
+                    (void*)meta_request
+                );
+
+                aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH);
+                goto message_create_failed;
+            }
 
             if (request->num_times_prepared == 0) {
 

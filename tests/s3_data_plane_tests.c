@@ -2190,7 +2190,6 @@ static int s_test_s3_put_object_single_part_no_content_length(struct aws_allocat
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_s3_client_release(client);
 
@@ -2221,6 +2220,7 @@ static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
                 .object_size_mb = 0,
@@ -2231,6 +2231,10 @@ static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+
+    ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INVALID_CONTENT_LENGTH);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_s3_client_release(client);
