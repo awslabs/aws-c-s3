@@ -382,42 +382,43 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
     const struct s3_request_part_config_example valid_request_part_config[] = {
         {
             .name = "simple case",
-            .content_length = 10000,
-            .client_part_size = 5,
+            .content_length = MB_TO_BYTES((uint64_t)10000),
+            .client_part_size = MB_TO_BYTES(5),
             .client_max_part_size = default_max_part_size,
-            .expected_part_size = 5,
+            .expected_part_size = 5242880,
             .expected_num_parts = 2000,
         },
         {
             .name = "large content length with small part size",
-            .content_length = 990000,
-            .client_part_size = 5,
+            .content_length = MB_TO_BYTES((uint64_t)990000),
+            .client_part_size = MB_TO_BYTES(5),
             .client_max_part_size = default_max_part_size,
-            .expected_part_size = 99,
+            .expected_part_size = 103809024,
             .expected_num_parts = 10000,
         },
         {
+
             .name = "large content length with large part size",
-            .content_length = 1000000,
-            .client_part_size = 500,
+            .content_length = MB_TO_BYTES((uint64_t)1000000),
+            .client_part_size = MB_TO_BYTES(500),
             .client_max_part_size = default_max_part_size,
-            .expected_part_size = 500,
+            .expected_part_size = MB_TO_BYTES(500),
             .expected_num_parts = 2000,
         },
         {
             .name = "large odd content length",
-            .content_length = 995649,
-            .client_part_size = 5,
+            .content_length = 1044013645824,
+            .client_part_size = 5242880,
             .client_max_part_size = default_max_part_size,
-            .expected_part_size = 100,
-            .expected_num_parts = 9957,
+            .expected_part_size = 104401365,
+            .expected_num_parts = 10000,
         },
         {
-            .name = "10k",
-            .content_length = 50000,
-            .client_part_size = 5,
+            .name = "10k parts",
+            .content_length = MB_TO_BYTES((uint64_t)50000),
+            .client_part_size = MB_TO_BYTES(5),
             .client_max_part_size = default_max_part_size,
-            .expected_part_size = 5,
+            .expected_part_size = MB_TO_BYTES(5),
             .expected_num_parts = 10000,
         },
         {
@@ -463,15 +464,15 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
         },
         {
             .name = "5 tb content length",
-            .content_length = 5 * 1024 * 1024,
-            .client_part_size = 5,
+            .content_length = MB_TO_BYTES((uint64_t)5 * 1024 * 1024),
+            .client_part_size = MB_TO_BYTES((uint64_t)5),
             .client_max_part_size = default_max_part_size,
-            .expected_part_size = 525,
-            .expected_num_parts = 9987,
+            .expected_part_size = 549755814,
+            .expected_num_parts = 10000,
         },
     };
     for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_request_part_config); ++i) {
-        printf("valid example [%zu]: %s\n", i, valid_request_part_config[i].name);
+        AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "valid example [%zu]: %s\n", i, valid_request_part_config[i].name);
 
         uint64_t content_length = valid_request_part_config[i].content_length;
         size_t part_size;
