@@ -364,6 +364,112 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
     return 0;
 }
 
+struct s3_request_part_config_example {
+    const char *name;
+    uint64_t content_length;
+    size_t client_part_size;
+    uint64_t client_max_part_size;
+};
+
+AWS_TEST_CASE(test_s3_mpu_get_part_size_and_num_parts, s_test_s3_mpu_get_part_size_and_num_parts)
+static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+    uint64_t default_max_part_size = 5368709120ULL;
+
+    const struct s3_request_part_config_example valid_request_part_config[] = {
+        {
+            .name = "simple case",
+            .content_length = 10000,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "large content length with small part size",
+            .content_length = 990000,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "large content length with large part size",
+            .content_length = 1000000,
+            .client_part_size = 500,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "large odd content length",
+            .content_length = 995649,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "10k",
+            .content_length = 50000,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "10k - 1 parts",
+            .content_length = 49999,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "10k + 1 parts",
+            .content_length = 50001,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "bump content length",
+            .content_length = 100000,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "bump content length with non-zero mod",
+            .content_length = 999999,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+        {
+            .name = "5 tb content length",
+            .content_length = 5 * 1024 * 1024,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+        },
+    };
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_request_part_config); ++i) {
+        printf("valid example [%zu]: %s\n", i, valid_request_part_config[i].name);
+        size_t part_size;
+        ASSERT_SUCCESS(aws_s3_get_mpu_part_size(
+            valid_request_part_config[i].content_length,
+            valid_request_part_config[i].client_part_size,
+            valid_request_part_config[i].client_max_part_size,
+            &part_size));
+        aws_s3_get_mpu_num_parts(valid_request_part_config[i].content_length, part_size);
+    }
+
+    /* Invalid cases */
+    const struct s3_request_part_config_example invalid_request_part_config[] = {{
+        .name = "max part < required part size",
+        .content_length = 900000,
+        .client_part_size = 5,
+        .client_max_part_size = 10,
+    }};
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(invalid_request_part_config); ++i) {
+        printf("invalid example [%zu]: %s\n", i, invalid_request_part_config[i].name);
+        size_t part_size;
+        ASSERT_FAILS(aws_s3_get_mpu_part_size(
+            invalid_request_part_config[i].content_length,
+            invalid_request_part_config[i].client_part_size,
+            invalid_request_part_config[i].client_max_part_size,
+            &part_size));
+    }
+    return AWS_OP_SUCCESS;
+}
+
 AWS_TEST_CASE(test_s3_aws_xml_get_top_level_tag_with_root_name, s_test_s3_aws_xml_get_top_level_tag_with_root_name)
 static int s_test_s3_aws_xml_get_top_level_tag_with_root_name(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;

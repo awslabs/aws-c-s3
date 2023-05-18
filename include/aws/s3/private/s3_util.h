@@ -236,6 +236,16 @@ int aws_s3_parse_content_length_response_header(
 AWS_S3_API
 uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end);
 
+AWS_S3_API
+int aws_s3_get_mpu_part_size(
+    uint64_t content_length,
+    size_t client_part_size,
+    uint64_t client_max_part_size,
+    size_t *out_part_size);
+
+AWS_S3_API
+uint32_t aws_s3_get_mpu_num_parts(uint64_t content_length, size_t part_size);
+
 /* Calculates the part range for a part given overall object range, size of each part, and the part's number. Note: part
  * numbers begin at one. This takes into account aligning part-ranges on part_size. Intended to be used in conjunction
  * with aws_s3_get_num_parts. part_number should be less than or equal to the result of aws_s3_get_num_parts. */
