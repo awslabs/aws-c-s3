@@ -237,7 +237,7 @@ AWS_S3_API
 uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end);
 
 /**
- * Calculates the optimal part size given the 'content_length' and 'client_part_size'.
+ * Calculates the optimal part size and num parts given the 'content_length' and 'client_part_size'.
  * This will increase the part size to stay within S3's number of parts.
  * If the required part size exceeds the 'client_max_part_size' or
  * if the system cannot support the required part size, it will raise an 'AWS_ERROR_INVALID_ARGUMENT' argument.
