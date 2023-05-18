@@ -1010,7 +1010,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set Content-Length header to 0 to upload empty object",
                     (void *)meta_request);
 
-                aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH);
+                aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH);
                 goto message_create_failed;
             }
 
