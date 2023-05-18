@@ -369,6 +369,8 @@ struct s3_request_part_config_example {
     uint64_t content_length;
     size_t client_part_size;
     uint64_t client_max_part_size;
+    size_t expected_part_size;
+    uint32_t expected_num_parts;
 };
 
 AWS_TEST_CASE(test_s3_mpu_get_part_size_and_num_parts, s_test_s3_mpu_get_part_size_and_num_parts)
@@ -383,60 +385,89 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
             .content_length = 10000,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 2000,
         },
         {
             .name = "large content length with small part size",
             .content_length = 990000,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 99,
+            .expected_num_parts = 10000,
         },
         {
             .name = "large content length with large part size",
             .content_length = 1000000,
             .client_part_size = 500,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 500,
+            .expected_num_parts = 2000,
         },
         {
             .name = "large odd content length",
             .content_length = 995649,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 100,
+            .expected_num_parts = 9957,
         },
         {
             .name = "10k",
             .content_length = 50000,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 10000,
         },
         {
             .name = "10k - 1 parts",
-            .content_length = 49999,
+            .content_length = 49995,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 9999,
+        },
+        {
+            .name = "10k with smaller last part",
+            .content_length = 49998,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 10000,
         },
         {
             .name = "10k + 1 parts",
             .content_length = 50001,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 6,
+            .expected_num_parts = 8334,
+
         },
         {
             .name = "bump content length",
             .content_length = 100000,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 10,
+            .expected_num_parts = 10000,
         },
         {
             .name = "bump content length with non-zero mod",
             .content_length = 999999,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 100,
+            .expected_num_parts = 10000,
         },
         {
             .name = "5 tb content length",
             .content_length = 5 * 1024 * 1024,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
+            .expected_part_size = 525,
+            .expected_num_parts = 9987,
         },
     };
     for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_request_part_config); ++i) {
@@ -452,8 +483,8 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
             valid_request_part_config[i].client_max_part_size,
             &part_size,
             &num_parts));
-
-        ASSERT_TRUE(num_parts <= g_s3_max_num_upload_parts);
+        ASSERT_INT_EQUALS(valid_request_part_config[i].expected_part_size, part_size);
+        ASSERT_INT_EQUALS(valid_request_part_config[i].expected_num_parts, num_parts);
     }
 
     /* Invalid cases */
