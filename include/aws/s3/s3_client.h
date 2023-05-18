@@ -10,6 +10,8 @@
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 
+AWS_PUSH_SANE_WARNING_LEVEL
+
 struct aws_allocator;
 
 struct aws_http_stream;
@@ -854,5 +856,6 @@ AWS_S3_API
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *out_metrics);
 
 AWS_EXTERN_C_END
+AWS_POP_SANE_WARNING_LEVEL
 
 #endif /* AWS_S3_CLIENT_H */
