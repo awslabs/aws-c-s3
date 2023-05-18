@@ -999,8 +999,7 @@ static int s_s3_auto_ranged_put_prepare_request(
         }
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
 
-            if (!auto_ranged_put->has_content_length &&
-                auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
+            if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not create complete multipart upload for meta request with zero content length.",
