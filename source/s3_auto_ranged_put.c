@@ -1003,8 +1003,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Could not create complete multipart upload for meta request with zero content length.",
-                    (void*)meta_request
-                );
+                    (void *)meta_request);
 
                 aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH);
                 goto message_create_failed;
