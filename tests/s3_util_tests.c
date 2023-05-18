@@ -441,13 +441,19 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
     };
     for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_request_part_config); ++i) {
         printf("valid example [%zu]: %s\n", i, valid_request_part_config[i].name);
+
+        uint64_t content_length = valid_request_part_config[i].content_length;
         size_t part_size;
-        ASSERT_SUCCESS(aws_s3_get_mpu_part_size(
-            valid_request_part_config[i].content_length,
+        uint32_t num_parts;
+
+        ASSERT_SUCCESS(aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+            content_length,
             valid_request_part_config[i].client_part_size,
             valid_request_part_config[i].client_max_part_size,
-            &part_size));
-        aws_s3_get_mpu_num_parts(valid_request_part_config[i].content_length, part_size);
+            &part_size,
+            &num_parts));
+
+        ASSERT_TRUE(num_parts <= g_s3_max_num_upload_parts);
     }
 
     /* Invalid cases */
@@ -461,11 +467,13 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
     for (size_t i = 0; i < AWS_ARRAY_SIZE(invalid_request_part_config); ++i) {
         printf("invalid example [%zu]: %s\n", i, invalid_request_part_config[i].name);
         size_t part_size;
-        ASSERT_FAILS(aws_s3_get_mpu_part_size(
+        uint32_t num_parts;
+        ASSERT_FAILS(aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
             invalid_request_part_config[i].content_length,
             invalid_request_part_config[i].client_part_size,
             invalid_request_part_config[i].client_max_part_size,
-            &part_size));
+            &part_size,
+            &num_parts));
     }
     return AWS_OP_SUCCESS;
 }

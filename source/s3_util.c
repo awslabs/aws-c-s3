@@ -547,11 +547,16 @@ void aws_s3_get_part_range(
     }
 }
 
-int aws_s3_get_mpu_part_size(
+int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     uint64_t content_length,
     size_t client_part_size,
     uint64_t client_max_part_size,
-    size_t *out_part_size) {
+    size_t *out_part_size,
+    uint32_t *out_num_parts) {
+
+    AWS_FATAL_ASSERT(out_part_size);
+    AWS_FATAL_ASSERT(out_num_parts);
+
     uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
 
     if ((content_length % g_s3_max_num_upload_parts) > 0) {
@@ -583,25 +588,22 @@ int aws_s3_get_mpu_part_size(
     if (part_size < client_part_size) {
         part_size = client_part_size;
     }
+
     if (content_length < part_size) {
         /* When the content length is smaller than part size and larger than the threshold, we set one part
          * with the whole length */
         part_size = (size_t)content_length;
     }
 
-    *out_part_size = part_size;
-    return AWS_OP_SUCCESS;
-}
-
-uint32_t aws_s3_get_mpu_num_parts(uint64_t content_length, size_t part_size) {
     uint32_t num_parts = (uint32_t)(content_length / part_size);
-
     if ((content_length % part_size) > 0) {
         ++num_parts;
     }
-
     AWS_ASSERT(num_parts <= g_s3_max_num_upload_parts);
-    return num_parts;
+
+    *out_part_size = part_size;
+    *out_num_parts = num_parts;
+    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string) {

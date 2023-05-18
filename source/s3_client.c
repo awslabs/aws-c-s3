@@ -1041,10 +1041,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 }
 
                 size_t part_size;
-                if (aws_s3_get_mpu_part_size(content_length, client_part_size, client_max_part_size, &part_size)) {
+                u_int32_t num_parts;
+                if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+                        content_length, client_part_size, client_max_part_size, &part_size, &num_parts)) {
                     return NULL;
                 }
-                uint32_t num_parts = aws_s3_get_mpu_num_parts(content_length, part_size);
 
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length, num_parts, options);
