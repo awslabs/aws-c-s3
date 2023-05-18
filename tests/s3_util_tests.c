@@ -429,7 +429,7 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
             .expected_num_parts = 9999,
         },
         {
-            .name = "10k with smaller last part",
+            .name = "10k with small last part",
             .content_length = 49998,
             .client_part_size = 5,
             .client_max_part_size = default_max_part_size,
