@@ -1041,7 +1041,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 }
 
                 size_t part_size;
-                u_int32_t num_parts;
+                uint32_t num_parts;
                 if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
                         content_length, client_part_size, client_max_part_size, &part_size, &num_parts)) {
                     return NULL;
