@@ -1030,50 +1030,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     }
                 }
 
-                size_t part_size = client_part_size;
-                uint32_t num_parts = 0;
-
+                size_t part_size;
+                uint32_t num_parts;
                 if (content_length_found) {
-                    uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
-
-                    if (part_size_uint64 > SIZE_MAX) {
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "Could not create auto-ranged-put meta request; required part size of %" PRIu64
-                            " bytes is too large for platform.",
-                            part_size_uint64);
-
-                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                        return NULL;
-                    }
-
-                    part_size = (size_t)part_size_uint64;
-
-                    if (part_size > client_max_part_size) {
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "Could not create auto-ranged-put meta request; required part size for put request is "
-                            "%" PRIu64 ", but current maximum part size is %" PRIu64,
-                            (uint64_t)part_size,
-                            (uint64_t)client_max_part_size);
-                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                        return NULL;
-                    }
-
-                    if (part_size < client_part_size) {
-                        part_size = client_part_size;
-                    }
-                    if (content_length < part_size) {
-                        /* When the content length is smaller than part size and larger than the threshold, we set one
-                         * part with the whole length */
-                        part_size = (size_t)content_length;
-                    }
-
-                    num_parts = (uint32_t)(content_length / part_size);
-
-                    if ((content_length % part_size) > 0) {
-                        ++num_parts;
-                    }
+                  if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+                          content_length, client_part_size, client_max_part_size, &part_size, &num_parts)) {
+                      return NULL;
+                  }
                 }
 
                 return aws_s3_meta_request_auto_ranged_put_new(

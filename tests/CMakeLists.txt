@@ -163,6 +163,7 @@ add_test_case(test_s3_strip_quotes)
 add_test_case(test_s3_parse_content_range_response_header)
 add_test_case(test_s3_parse_content_length_response_header)
 add_test_case(test_s3_get_num_parts_and_get_part_range)
+add_test_case(test_s3_mpu_get_part_size_and_num_parts)
 add_test_case(test_s3_aws_xml_get_top_level_tag_with_root_name)
 add_test_case(test_add_user_agent_header)
 
