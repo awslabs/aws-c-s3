@@ -2233,7 +2233,7 @@ static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
 
-    ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INVALID_CONTENT_LENGTH);
+    ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

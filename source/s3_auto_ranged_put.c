@@ -998,16 +998,17 @@ static int s_s3_auto_ranged_put_prepare_request(
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
 
             /* Note: completeMPU fails if no parts are provided. We could
-            * workaround it by uploading an empty part at the cost of
-            * complicating flow logic for dealing with noop parts, but that
-            * arguably adds a lot of complexity for little benefit.
-            * Pre-buffering parts to determine whether mpu is needed will
-            * resolve this issue.
-            */
+             * workaround it by uploading an empty part at the cost of
+             * complicating flow logic for dealing with noop parts, but that
+             * arguably adds a lot of complexity for little benefit.
+             * Pre-buffering parts to determine whether mpu is needed will
+             * resolve this issue.
+             */
             if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set Content-Length header to 0 to upload empty object",
+                    "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
+                    "Content-Length header to 0 to upload empty object",
                     (void *)meta_request);
 
                 aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH);
