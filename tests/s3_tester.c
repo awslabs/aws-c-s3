@@ -262,6 +262,7 @@ struct aws_string *aws_s3_tester_build_endpoint_string(
 }
 
 AWS_STATIC_STRING_FROM_LITERAL(s_bucket_name_env_var, "CRT_S3_TEST_BUCKET_NAME");
+AWS_STATIC_STRING_FROM_LITERAL(s_presigned_url_env_var, "CRT_S3_TEST_PRESIGNED_URL");
 
 int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *tester) {
 
@@ -284,6 +285,10 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
             AWS_BYTE_CURSOR_PRI(g_test_bucket_name));
         tester->public_bucket_name = aws_string_new_from_c_str(allocator, public_bucket_name_buffer);
         g_test_public_bucket_name = aws_byte_cursor_from_string(tester->public_bucket_name);
+    }
+    if (aws_get_environment_value(allocator, s_presigned_url_env_var, &tester->presigned_url) == AWS_OP_SUCCESS &&
+        tester->presigned_url != NULL) {
+        g_test_presigned_url = aws_byte_cursor_from_string(tester->presigned_url);
     }
 
     aws_s3_library_init(allocator);

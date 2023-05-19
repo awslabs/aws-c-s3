@@ -95,6 +95,7 @@ struct aws_s3_tester {
 
     struct aws_string *bucket_name;
     struct aws_string *public_bucket_name;
+    struct aws_string *presigned_url;
 
     struct {
         struct aws_mutex lock;
@@ -448,5 +449,7 @@ extern struct aws_byte_cursor g_test_bucket_name;
  * aws-c-s3-test-bucket-public
  */
 extern struct aws_byte_cursor g_test_public_bucket_name;
+
+extern struct aws_byte_cursor g_test_presigned_url;
 
 #endif /* AWS_S3_TESTER_H */

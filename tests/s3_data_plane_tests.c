@@ -1294,6 +1294,45 @@ static int s_test_s3_put_object_with_part_remainder(struct aws_allocator *alloca
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_presigned_url, s_test_s3_get_object_presigned_url)
+static int s_test_s3_get_object_presigned_url(struct aws_allocator *allocator,void *ctx) {
+    (void)ctx;
+    struct aws_s3_meta_request *meta_request;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+    options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+    options.message = message;
+    options.presigned_url = aws_string_c_str(aws_string_new_from_cursor(allocator, &g_test_presigned_url));
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
+        &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_get_object_multiple, s_test_s3_get_object_multiple)
 static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
