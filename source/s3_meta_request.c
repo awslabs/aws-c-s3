@@ -617,8 +617,8 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
     /* Kick off the async vtable->prepare_request()
      * Each subclass has its own implementation of this. */
-    struct aws_future *preparation_future = vtable->prepare_request_async(request);
-    aws_future_register_callback(preparation_future, s_s3_meta_request_on_request_prepared, payload);
+    payload->preparation_future = vtable->prepare_request_async(request);
+    aws_future_register_callback(payload->preparation_future, s_s3_meta_request_on_request_prepared, payload);
     return;
 }
 

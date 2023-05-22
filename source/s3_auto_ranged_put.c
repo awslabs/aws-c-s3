@@ -990,9 +990,9 @@ struct aws_future *s_s3_prepare_upload_part_async(struct aws_s3_request *request
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
-        struct aws_future *skipping_future = s_skip_parts_from_stream_async(
+        part_prep->skipping_future = s_skip_parts_from_stream_async(
             meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
-        aws_future_register_callback(skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
+        aws_future_register_callback(part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */
@@ -1121,12 +1121,15 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload_async(struct aw
 
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
-        struct aws_future *skipping_future = s_skip_parts_from_stream_async(
+        complete_mpu_prep->skipping_future = s_skip_parts_from_stream_async(
             meta_request,
             auto_ranged_put->prepare_data.num_parts_read_from_stream,
             auto_ranged_put->synced_data.total_num_parts);
+
         aws_future_register_callback(
-            skipping_future, s_s3_prepare_complete_multipart_upload_on_skipping_done, complete_mpu_prep);
+            complete_mpu_prep->skipping_future,
+            s_s3_prepare_complete_multipart_upload_on_skipping_done,
+            complete_mpu_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps. */
