@@ -1011,7 +1011,7 @@ static int s_s3_auto_ranged_put_prepare_request(
                     "Content-Length header to 0 to upload empty object",
                     (void *)meta_request);
 
-                aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH);
+                aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
                 goto message_create_failed;
             }
 
