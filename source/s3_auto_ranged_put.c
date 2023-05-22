@@ -26,21 +26,25 @@ static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
 struct aws_s3_auto_ranged_put_prepare_request_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *future; /* aws_future<void> to set when this operation completes */
+    struct aws_future *message_future; /* aws_future<aws_http_message *> for type-specific prep step */
+    struct aws_future *my_future;      /* aws_future<void> to set when this operation completes */
 };
 
 /* Context for async preparation of an UploadPart request */
 struct aws_s3_prepare_upload_part_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *message_future; /* aws_future<aws_http_message *> to set when this operation completes */
+    struct aws_future *skipping_future;  /* aws_future<void> for skipping step */
+    struct aws_future *read_part_future; /* aws_future<void> for reading step */
+    struct aws_future *my_future;        /* aws_future<aws_http_message *> to set when this operation completes */
 };
 
 /* Context for async preparation of a CompleteMultipartUpload request */
 struct aws_s3_prepare_complete_multipart_upload_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *message_future; // aws_future<aws_http_message *> to set when this operation completes */
+    struct aws_future *skipping_future; /* aws_future<void> for skipping step */
+    struct aws_future *my_future;       // aws_future<aws_http_message *> to set when this operation completes */
 };
 
 static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request *meta_request);
@@ -50,24 +54,22 @@ static bool s_s3_auto_ranged_put_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static void s_skip_parts_from_stream_loop(struct aws_future *read_part_future, void *user_data);
+static void s_skip_parts_from_stream_loop(void *user_data);
 
 static struct aws_future *s_s3_auto_ranged_put_prepare_request_async(struct aws_s3_request *request);
-static void s_s3_auto_ranged_put_prepare_request_finish(struct aws_future *message_future, void *user_data);
+static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data);
 
 static struct aws_future *s_s3_prepare_list_parts_async(struct aws_s3_request *request);
 
 static struct aws_future *s_s3_prepare_create_multipart_upload_async(struct aws_s3_request *request);
 
 static struct aws_future *s_s3_prepare_upload_part_async(struct aws_s3_request *request);
-static void s_s3_prepare_upload_part_on_skipping_done(struct aws_future *skipping_future, void *user_data);
-static void s_s3_prepare_upload_part_on_read_done(struct aws_future *read_part_future, void *user_data);
+static void s_s3_prepare_upload_part_on_skipping_done(void *user_data);
+static void s_s3_prepare_upload_part_on_read_done(void *user_data);
 static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_async_ctx *part_prep, int error_code);
 
 static struct aws_future *s_s3_prepare_complete_multipart_upload_async(struct aws_s3_request *request);
-static void s_s3_prepare_complete_multipart_upload_on_skipping_done(
-    struct aws_future *skipping_future,
-    void *user_data);
+static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_data);
 static void s_s3_prepare_complete_multipart_upload_finish(
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep,
     int error_code);
@@ -696,7 +698,8 @@ struct aws_s3_skip_parts_from_stream_async_ctx {
     uint32_t part_index;
     uint32_t skip_until_part_number;
     struct aws_byte_buf temp_body_buf;
-    struct aws_future *future;
+    struct aws_future *read_part_future; /* aws_future<bool> for each read-part step */
+    struct aws_future *my_future;        /* aws_future<void> to set when this operation completes */
 };
 
 /**
@@ -734,7 +737,7 @@ static struct aws_future *s_skip_parts_from_stream_async(
     skip_ctx->meta_request = meta_request;
     skip_ctx->part_index = num_parts_read_from_stream;
     skip_ctx->skip_until_part_number = skip_until_part_number;
-    skip_ctx->future = aws_future_acquire(skip_future);
+    skip_ctx->my_future = aws_future_acquire(skip_future);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
@@ -744,7 +747,7 @@ static struct aws_future *s_skip_parts_from_stream_async(
         skip_until_part_number);
 
     /* Kick off async work loop */
-    s_skip_parts_from_stream_loop(NULL, skip_ctx);
+    s_skip_parts_from_stream_loop(skip_ctx);
 
     return skip_future;
 }
@@ -757,7 +760,7 @@ static struct aws_future *s_skip_parts_from_stream_async(
  * It would have been simpler to always set a completion callback,
  * but this risks the call stack growing very large (if there are many parts
  * to skip and the reads all complete immediately). */
-static void s_skip_parts_from_stream_loop(struct aws_future *read_part_future, void *user_data) {
+static void s_skip_parts_from_stream_loop(void *user_data) {
     struct aws_s3_skip_parts_from_stream_async_ctx *skip_ctx = user_data;
     struct aws_s3_meta_request *meta_request = skip_ctx->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
@@ -768,7 +771,7 @@ static void s_skip_parts_from_stream_loop(struct aws_future *read_part_future, v
     for (; skip_ctx->part_index < skip_ctx->skip_until_part_number; ++skip_ctx->part_index) {
 
         /* unless we just re-entered loop due to async read completion, kick off a new async read */
-        if (read_part_future == NULL) {
+        if (skip_ctx->read_part_future == NULL) {
             size_t request_body_size = s_compute_request_body_size(meta_request, skip_ctx->part_index + 1);
 
             if (temp_body_buf->capacity != request_body_size) {
@@ -780,10 +783,11 @@ static void s_skip_parts_from_stream_loop(struct aws_future *read_part_future, v
                 aws_byte_buf_reset(temp_body_buf, false);
             }
 
-            read_part_future = aws_s3_meta_request_read_body(skip_ctx->meta_request, &skip_ctx->temp_body_buf);
+            skip_ctx->read_part_future = aws_s3_meta_request_read_body(skip_ctx->meta_request, temp_body_buf);
 
             /* the read may or may not complete immediately */
-            if (aws_future_register_callback_if_not_done(read_part_future, s_skip_parts_from_stream_loop, skip_ctx)) {
+            if (aws_future_register_callback_if_not_done(
+                    skip_ctx->read_part_future, s_skip_parts_from_stream_loop, skip_ctx)) {
 
                 /* read is pending, we'll resume this loop when callback fires */
                 return;
@@ -791,8 +795,8 @@ static void s_skip_parts_from_stream_loop(struct aws_future *read_part_future, v
         }
 
         /* read is complete, check results */
-        error_code = aws_future_get_error(read_part_future);
-        read_part_future = aws_future_release(read_part_future);
+        error_code = aws_future_get_error(skip_ctx->read_part_future);
+        skip_ctx->read_part_future = aws_future_release(skip_ctx->read_part_future); /* release and set NULL */
 
         if (error_code != AWS_ERROR_SUCCESS) {
             AWS_LOGF_ERROR(
@@ -829,11 +833,11 @@ static void s_skip_parts_from_stream_loop(struct aws_future *read_part_future, v
 on_done:
     aws_byte_buf_clean_up(&skip_ctx->temp_body_buf);
     if (error_code == AWS_ERROR_SUCCESS) {
-        aws_future_set_valueless(skip_ctx->future);
+        aws_future_set_valueless(skip_ctx->my_future);
     } else {
-        aws_future_set_error(skip_ctx->future, error_code);
+        aws_future_set_error(skip_ctx->my_future, error_code);
     }
-    aws_future_release(skip_ctx->future);
+    aws_future_release(skip_ctx->my_future);
     aws_mem_release(skip_ctx->allocator, skip_ctx);
 }
 
@@ -852,26 +856,25 @@ static struct aws_future *s_s3_auto_ranged_put_prepare_request_async(struct aws_
     struct aws_s3_auto_ranged_put_prepare_request_async_ctx *request_prep =
         aws_mem_calloc(request->allocator, 1, sizeof(struct aws_s3_auto_ranged_put_prepare_request_async_ctx));
     request_prep->allocator = request->allocator;
-    request_prep->future = aws_future_acquire(preparation_future);
+    request_prep->my_future = aws_future_acquire(preparation_future);
     request_prep->request = request;
 
     /* Each type of request prepares an aws_http_message in its own way, which maybe require async substeps */
-    struct aws_future *message_future = NULL; /* aws_future<aws_http_message *> */
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS:
-            message_future = s_s3_prepare_list_parts_async(request);
+            request_prep->message_future = s_s3_prepare_list_parts_async(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
-            message_future = s_s3_prepare_create_multipart_upload_async(request);
+            request_prep->message_future = s_s3_prepare_create_multipart_upload_async(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART:
-            message_future = s_s3_prepare_upload_part_async(request);
+            request_prep->message_future = s_s3_prepare_upload_part_async(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD:
-            message_future = s_s3_prepare_complete_multipart_upload_async(request);
+            request_prep->message_future = s_s3_prepare_complete_multipart_upload_async(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
-            message_future = s_s3_prepare_abort_multipart_upload_async(request);
+            request_prep->message_future = s_s3_prepare_abort_multipart_upload_async(request);
             break;
         default:
             AWS_FATAL_ASSERT(0);
@@ -879,7 +882,8 @@ static struct aws_future *s_s3_auto_ranged_put_prepare_request_async(struct aws_
     }
 
     /* When the specific type of message is ready, finish common preparation steps */
-    aws_future_register_callback(message_future, s_s3_auto_ranged_put_prepare_request_finish, request_prep);
+    aws_future_register_callback(
+        request_prep->message_future, s_s3_auto_ranged_put_prepare_request_finish, request_prep);
 
     return preparation_future;
 }
@@ -979,7 +983,7 @@ struct aws_future *s_s3_prepare_upload_part_async(struct aws_s3_request *request
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_upload_part_async_ctx));
     part_prep->allocator = allocator;
     part_prep->request = request;
-    part_prep->message_future = aws_future_acquire(message_future);
+    part_prep->my_future = aws_future_acquire(message_future);
 
     if (request->num_times_prepared == 0) {
         /* Preparing request for the first time.
@@ -999,14 +1003,13 @@ struct aws_future *s_s3_prepare_upload_part_async(struct aws_s3_request *request
 }
 
 /* Completion callback for skipping over parts that were previously uploaded. */
-static void s_s3_prepare_upload_part_on_skipping_done(struct aws_future *skipping_future, void *user_data) {
+static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
     struct aws_s3_prepare_upload_part_async_ctx *part_prep = user_data;
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    int error_code = aws_future_get_error(skipping_future);
-    skipping_future = aws_future_release(skipping_future);
+    int error_code = aws_future_get_error(part_prep->skipping_future);
 
     /* If skipping failed, the prepare-upload-part operation has failed. */
     if (error_code) {
@@ -1022,19 +1025,18 @@ static void s_s3_prepare_upload_part_on_skipping_done(struct aws_future *skippin
 
     aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
-    struct aws_future *read_part_future = aws_s3_meta_request_read_body(meta_request, &request->request_body);
-    aws_future_register_callback(read_part_future, s_s3_prepare_upload_part_on_read_done, part_prep);
+    part_prep->read_part_future = aws_s3_meta_request_read_body(meta_request, &request->request_body);
+    aws_future_register_callback(part_prep->read_part_future, s_s3_prepare_upload_part_on_read_done, part_prep);
 }
 
 /* Completion callback for reading this part's chunk of the body stream */
-static void s_s3_prepare_upload_part_on_read_done(struct aws_future *read_part_future, void *user_data) {
+static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     struct aws_s3_prepare_upload_part_async_ctx *part_prep = user_data;
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    int error_code = aws_future_get_error(read_part_future);
-    read_part_future = aws_future_release(read_part_future);
+    int error_code = aws_future_get_error(part_prep->read_part_future);
 
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
@@ -1067,10 +1069,9 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_as
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    struct aws_future *message_future = part_prep->message_future;
 
     if (error_code != AWS_ERROR_SUCCESS) {
-        aws_future_set_error(message_future, error_code);
+        aws_future_set_error(part_prep->my_future, error_code);
         goto on_done;
     }
 
@@ -1087,16 +1088,18 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_as
         &meta_request->checksum_config,
         &auto_ranged_put->encoded_checksum_list[request->part_number - 1]);
     if (message == NULL) {
-        aws_future_set_error(message_future, aws_last_error());
+        aws_future_set_error(part_prep->my_future, aws_last_error());
         goto on_done;
     }
 
     /* Success! */
-    aws_future_set_pointer(message_future, message, s_destroy_message_pointer);
+    aws_future_set_pointer(part_prep->my_future, message, s_destroy_message_pointer);
 
 on_done:
-    AWS_FATAL_ASSERT(aws_future_is_done(message_future));
-    aws_future_release(message_future);
+    AWS_FATAL_ASSERT(aws_future_is_done(part_prep->my_future));
+    aws_future_release(part_prep->skipping_future);
+    aws_future_release(part_prep->read_part_future);
+    aws_future_release(part_prep->my_future);
     aws_mem_release(part_prep->allocator, part_prep);
 }
 
@@ -1112,7 +1115,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload_async(struct aw
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_complete_multipart_upload_async_ctx));
     complete_mpu_prep->allocator = allocator;
     complete_mpu_prep->request = request;
-    complete_mpu_prep->message_future = aws_future_acquire(message_future);
+    complete_mpu_prep->my_future = aws_future_acquire(message_future);
 
     if (request->num_times_prepared == 0) {
 
@@ -1134,17 +1137,14 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload_async(struct aw
 }
 
 /* Completion callback for skipping over parts that were previously uploaded. */
-static void s_s3_prepare_complete_multipart_upload_on_skipping_done(
-    struct aws_future *skipping_future,
-    void *user_data) {
+static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_data) {
 
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep = user_data;
     struct aws_s3_request *request = complete_mpu_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    int error_code = aws_future_get_error(skipping_future);
-    skipping_future = aws_future_release(skipping_future);
+    int error_code = aws_future_get_error(complete_mpu_prep->skipping_future);
     if (error_code != AWS_ERROR_SUCCESS) {
         s_s3_prepare_complete_multipart_upload_finish(complete_mpu_prep, error_code);
         return;
@@ -1168,10 +1168,9 @@ static void s_s3_prepare_complete_multipart_upload_finish(
     struct aws_s3_request *request = complete_mpu_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    struct aws_future *message_future = complete_mpu_prep->message_future;
 
     if (error_code != AWS_ERROR_SUCCESS) {
-        aws_future_set_error(message_future, error_code);
+        aws_future_set_error(complete_mpu_prep->my_future, error_code);
         goto on_done;
     }
 
@@ -1197,16 +1196,17 @@ static void s_s3_prepare_complete_multipart_upload_finish(
     /* END CRITICAL SECTION */
 
     if (message == NULL) {
-        aws_future_set_error(message_future, aws_last_error());
+        aws_future_set_error(complete_mpu_prep->my_future, aws_last_error());
         goto on_done;
     }
 
     /* Success! */
-    aws_future_set_pointer(message_future, message, s_destroy_message_pointer);
+    aws_future_set_pointer(complete_mpu_prep->my_future, message, s_destroy_message_pointer);
 
 on_done:
-    AWS_FATAL_ASSERT(aws_future_is_done(message_future));
-    aws_future_release(message_future);
+    AWS_FATAL_ASSERT(aws_future_is_done(complete_mpu_prep->my_future));
+    aws_future_release(complete_mpu_prep->skipping_future);
+    aws_future_release(complete_mpu_prep->my_future);
     aws_mem_release(complete_mpu_prep->allocator, complete_mpu_prep);
 }
 
@@ -1244,13 +1244,13 @@ struct aws_future *s_s3_prepare_abort_multipart_upload_async(struct aws_s3_reque
 }
 
 /* Finish the vtable->prepare_request_async() operation */
-static void s_s3_auto_ranged_put_prepare_request_finish(struct aws_future *message_future, void *user_data) {
+static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data) {
     struct aws_s3_auto_ranged_put_prepare_request_async_ctx *request_prep = user_data;
     struct aws_s3_request *request = request_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
     /* Did we successfully create the type-specific HTTP message? */
-    int error_code = aws_future_get_error(message_future);
+    int error_code = aws_future_get_error(request_prep->message_future);
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -1262,7 +1262,7 @@ static void s_s3_auto_ranged_put_prepare_request_finish(struct aws_future *messa
     }
 
     /* Success! Apply aws_http_message to aws_s3_request */
-    struct aws_http_message *message = aws_future_get_pointer(message_future);
+    struct aws_http_message *message = aws_future_get_pointer(request_prep->message_future);
     aws_s3_request_setup_send_data(request, message);
 
     AWS_LOGF_DEBUG(
@@ -1274,13 +1274,13 @@ static void s_s3_auto_ranged_put_prepare_request_finish(struct aws_future *messa
 
 on_done:
     if (error_code == AWS_ERROR_SUCCESS) {
-        aws_future_set_valueless(request_prep->future);
+        aws_future_set_valueless(request_prep->my_future);
     } else {
-        aws_future_set_error(request_prep->future, error_code);
+        aws_future_set_error(request_prep->my_future, error_code);
     }
 
-    aws_future_release(message_future);
-    aws_future_release(request_prep->future);
+    aws_future_release(request_prep->message_future);
+    aws_future_release(request_prep->my_future);
     aws_mem_release(request_prep->allocator, request_prep);
 }
 

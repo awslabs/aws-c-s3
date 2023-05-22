@@ -51,6 +51,7 @@ struct aws_s3_prepare_request_payload {
     aws_s3_meta_request_prepare_request_callback_fn *callback;
     void *user_data;
     struct aws_task task;
+    struct aws_future *preparation_future; /* aws_future<void> this operation is waiting on */
 };
 
 struct aws_s3_meta_request_vtable {

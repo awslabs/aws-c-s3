@@ -504,7 +504,7 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
 }
 
 static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
-static void s_s3_meta_request_on_request_prepared(struct aws_future *prepare_future, void *user_data);
+static void s_s3_meta_request_on_request_prepared(void *user_data);
 
 /* TODO: document how this is final step in prepare-request sequence.
  * Could be invoked on any thread. */
@@ -539,6 +539,7 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
         payload->callback(meta_request, payload->request, error_code, payload->user_data);
     }
 
+    aws_future_release(payload->preparation_future);
     aws_mem_release(payload->allocator, payload);
 }
 
@@ -622,14 +623,12 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 }
 
 /* Called after vtable->prepare_request has succeeded or failed. */
-static void s_s3_meta_request_on_request_prepared(struct aws_future *preparation_future, void *user_data) {
+static void s_s3_meta_request_on_request_prepared(void *user_data) {
     struct aws_s3_prepare_request_payload *payload = user_data;
     struct aws_s3_request *request = payload->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
-    int error_code = aws_future_get_error(preparation_future);
-    preparation_future = aws_future_release(preparation_future);
-
+    int error_code = aws_future_get_error(payload->preparation_future);
     if (error_code) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
         return;
