@@ -6,11 +6,6 @@
 #include <aws/common/string.h>
 #include <inttypes.h>
 
-#ifdef _MSC_VER
-/* sscanf warning (not currently scanning for strings) */
-#    pragma warning(disable : 4996)
-#endif
-
 static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_request);
 
 static bool s_s3_meta_request_default_update(

@@ -29,7 +29,6 @@ struct aws_allocator;
 struct aws_http_stream;
 struct aws_http_headers;
 struct aws_http_message;
-struct aws_event_loop;
 
 enum aws_s3_response_status {
     AWS_S3_RESPONSE_STATUS_SUCCESS = 200,
