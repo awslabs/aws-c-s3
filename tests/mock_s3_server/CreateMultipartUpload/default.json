@@ -1,6 +1,6 @@
 {
   "status": 200,
-  "headers": {},
+  "headers": {"x-amz-request-id": "12345"},
   "body": [
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
     "<InitiateMultipartUploadResult>",

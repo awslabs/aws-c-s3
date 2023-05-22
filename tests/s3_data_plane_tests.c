@@ -1825,6 +1825,157 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
+AWS_TEST_CASE(
+    test_s3_put_object_less_than_part_size_with_content_encoding,
+    s_test_s3_put_object_less_than_part_size_with_content_encoding)
+static int s_test_s3_put_object_less_than_part_size_with_content_encoding(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 20 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_byte_cursor content_encoding_cursor = aws_byte_cursor_from_c_str("gzip");
+    uint32_t object_size_mb = 1;
+    char object_path_sprintf_buffer[128] = "";
+    snprintf(
+        object_path_sprintf_buffer,
+        sizeof(object_path_sprintf_buffer),
+        "" PRInSTR "-content-encoding-%uMB.txt",
+        AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
+        object_size_mb);
+    struct aws_byte_cursor object_path_cursor = aws_byte_cursor_from_c_str(object_path_sprintf_buffer);
+
+    /*** put file with encoding ***/
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_SHA256,
+        .put_options =
+            {
+                .object_size_mb = object_size_mb,
+                .object_path_override = object_path_cursor,
+                .content_encoding = content_encoding_cursor,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** get file and validate encoding ***/
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path_cursor,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results get_object_result;
+    aws_s3_meta_request_test_results_init(&get_object_result, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &get_object_result));
+    struct aws_byte_cursor content_encoding_header_cursor;
+    ASSERT_SUCCESS(aws_http_headers_get(
+        get_object_result.response_headers, g_content_encoding_header_name, &content_encoding_header_cursor));
+    ASSERT_TRUE(aws_byte_cursor_eq(&content_encoding_cursor, &content_encoding_header_cursor));
+    aws_s3_meta_request_test_results_clean_up(&get_object_result);
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_mpu_with_content_encoding, s_test_s3_put_object_mpu_with_content_encoding)
+static int s_test_s3_put_object_mpu_with_content_encoding(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_byte_cursor content_encoding_cursor = aws_byte_cursor_from_c_str("gzip");
+    uint32_t object_size_mb = 10;
+    char object_path_sprintf_buffer[128] = "";
+    snprintf(
+        object_path_sprintf_buffer,
+        sizeof(object_path_sprintf_buffer),
+        "" PRInSTR "-content-encoding-%uMB.txt",
+        AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
+        object_size_mb);
+    struct aws_byte_cursor object_path_cursor = aws_byte_cursor_from_c_str(object_path_sprintf_buffer);
+
+    /*** put file with encoding ***/
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_SHA256,
+        .put_options =
+            {
+                .object_size_mb = object_size_mb,
+                .object_path_override = object_path_cursor,
+                .content_encoding = content_encoding_cursor,
+                .ensure_multipart = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** get file and validate encoding ***/
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path_cursor,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results get_object_result;
+    aws_s3_meta_request_test_results_init(&get_object_result, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &get_object_result));
+    struct aws_byte_cursor content_encoding_header_cursor;
+    ASSERT_SUCCESS(aws_http_headers_get(
+        get_object_result.response_headers, g_content_encoding_header_name, &content_encoding_header_cursor));
+    ASSERT_TRUE(aws_byte_cursor_eq(&content_encoding_cursor, &content_encoding_header_cursor));
+    aws_s3_meta_request_test_results_clean_up(&get_object_result);
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_object_multipart_threshold, s_test_s3_put_object_multipart_threshold)
 static int s_test_s3_put_object_multipart_threshold(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -3302,6 +3453,10 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
 
     aws_s3_tester_unlock_synced_data(&tester);
+    /* Check the size of the metrics should be the same as the number of requests, which should be 1 */
+    ASSERT_UINT_EQUALS(aws_array_list_length(&meta_request_test_results.synced_data.metrics), 1);
+    struct aws_s3_request_metrics *metrics = NULL;
+    aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
 

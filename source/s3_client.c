@@ -1040,45 +1040,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     }
                 }
 
-                uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
-
-                if (part_size_uint64 > SIZE_MAX) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "Could not create auto-ranged-put meta request; required part size of %" PRIu64
-                        " bytes is too large for platform.",
-                        part_size_uint64);
-
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                size_t part_size;
+                uint32_t num_parts;
+                if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+                        content_length, client_part_size, client_max_part_size, &part_size, &num_parts)) {
                     return NULL;
-                }
-
-                size_t part_size = (size_t)part_size_uint64;
-
-                if (part_size > client_max_part_size) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
-                        ", but current maximum part size is %" PRIu64,
-                        (uint64_t)part_size,
-                        (uint64_t)client_max_part_size);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-
-                if (part_size < client_part_size) {
-                    part_size = client_part_size;
-                }
-                if (content_length < part_size) {
-                    /* When the content length is smaller than part size and larger than the threshold, we set one part
-                     * with the whole length */
-                    part_size = (size_t)content_length;
-                }
-
-                uint32_t num_parts = (uint32_t)(content_length / part_size);
-
-                if ((content_length % part_size) > 0) {
-                    ++num_parts;
                 }
 
                 return aws_s3_meta_request_auto_ranged_put_new(
@@ -1593,9 +1559,9 @@ static void s_s3_client_create_connection_for_request_default(
     struct aws_http_headers *message_headers = aws_http_message_get_headers(meta_request->initial_request_message);
     AWS_ASSERT(message_headers);
 
-    int get_header_result = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
-    AWS_ASSERT(get_header_result == AWS_OP_SUCCESS);
-    (void)get_header_result;
+    int result = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
+    AWS_ASSERT(result == AWS_OP_SUCCESS);
+    (void)result;
 
     if (aws_retry_strategy_acquire_retry_token(
             client->retry_strategy, &host_header_value, s_s3_client_acquired_retry_token, connection, 0)) {
@@ -1747,6 +1713,9 @@ void aws_s3_client_notify_connection_finished(
 
     struct aws_s3_endpoint *endpoint = meta_request->endpoint;
     AWS_PRECONDITION(endpoint);
+    if (request->send_data.metrics) {
+        request->send_data.metrics->crt_info_metrics.error_code = error_code;
+    }
 
     /* If we're trying to setup a retry... */
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {

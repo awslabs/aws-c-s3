@@ -187,6 +187,7 @@ struct aws_s3_tester_meta_request_options {
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
+        struct aws_byte_cursor content_encoding;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
@@ -223,6 +224,12 @@ struct aws_s3_meta_request_test_results {
 
     /* accumulator of amount of bytes uploaded */
     struct aws_atomic_var total_bytes_uploaded;
+
+    /* Protected the tester->synced_data.lock */
+    struct {
+        /* The array_list of `struct aws_s3_request_metrics *` */
+        struct aws_array_list metrics;
+    } synced_data;
 };
 
 struct aws_s3_client_config;
