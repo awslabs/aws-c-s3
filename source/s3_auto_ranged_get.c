@@ -27,7 +27,7 @@ static bool s_s3_auto_ranged_get_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static struct aws_future *s_s3_auto_ranged_get_prepare_request_async(struct aws_s3_request *request);
+static struct aws_future *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request);
 
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -37,7 +37,7 @@ static void s_s3_auto_ranged_get_request_finished(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
-    .prepare_request_async = s_s3_auto_ranged_get_prepare_request_async,
+    .prepare_request = s_s3_auto_ranged_get_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_get_request_finished,
@@ -336,7 +336,7 @@ static bool s_s3_auto_ranged_get_update(
 
 /* Given a request, prepare it for sending based on its description.
  * Currently, this is actually synchronous. */
-static struct aws_future *s_s3_auto_ranged_get_prepare_request_async(struct aws_s3_request *request) {
+static struct aws_future *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
     struct aws_s3_meta_request *meta_request = request->meta_request;
 

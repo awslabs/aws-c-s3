@@ -540,7 +540,7 @@ struct test_s3_cancel_prepare_meta_request_prepare_request_async_ctx {
 
 static void s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_done(void *user_data);
 
-static struct aws_future *s_test_s3_cancel_prepare_meta_request_prepare_request_async(struct aws_s3_request *request) {
+static struct aws_future *s_test_s3_cancel_prepare_meta_request_prepare_request(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_ASSERT(meta_request != NULL);
 
@@ -561,7 +561,7 @@ static struct aws_future *s_test_s3_cancel_prepare_meta_request_prepare_request_
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    patched_prep->original_future = original_meta_request_vtable->prepare_request_async(request);
+    patched_prep->original_future = original_meta_request_vtable->prepare_request(request);
     aws_future_register_callback(
         patched_prep->original_future,
         s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_done,
@@ -615,7 +615,7 @@ static struct aws_s3_meta_request *s_test_s3_cancel_prepare_meta_request_factory
 
     struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
-    patched_meta_request_vtable->prepare_request_async = s_test_s3_cancel_prepare_meta_request_prepare_request_async;
+    patched_meta_request_vtable->prepare_request = s_test_s3_cancel_prepare_meta_request_prepare_request;
 
     return meta_request;
 }

@@ -188,7 +188,7 @@ int aws_s3_meta_request_init_base(
     AWS_ZERO_STRUCT(*meta_request);
 
     AWS_ASSERT(vtable->update);
-    AWS_ASSERT(vtable->prepare_request_async);
+    AWS_ASSERT(vtable->prepare_request);
     AWS_ASSERT(vtable->destroy);
     AWS_ASSERT(vtable->sign_request);
     AWS_ASSERT(vtable->init_signing_date_time);
@@ -617,7 +617,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
     /* Kick off the async vtable->prepare_request()
      * Each subclass has its own implementation of this. */
-    payload->preparation_future = vtable->prepare_request_async(request);
+    payload->preparation_future = vtable->prepare_request(request);
     aws_future_register_callback(payload->preparation_future, s_s3_meta_request_on_request_prepared, payload);
     return;
 }

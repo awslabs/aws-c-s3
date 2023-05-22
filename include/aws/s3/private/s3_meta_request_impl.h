@@ -59,7 +59,7 @@ struct aws_s3_meta_request_vtable {
      * progress, false if there is not. */
     bool (*update)(struct aws_s3_meta_request *meta_request, uint32_t flags, struct aws_s3_request **out_request);
 
-    /* Run vtable->prepare_request_async() on the meta-request's event loop.
+    /* Run vtable->prepare_request() on the meta-request's event loop.
      * We do this because body streaming is slow, and we don't want it on our networking threads.
      * The callback may fire on any thread (an async sub-step may run on another thread). */
     void (*schedule_prepare_request)(
@@ -71,7 +71,7 @@ struct aws_s3_meta_request_vtable {
     /* Given a request, asynchronously prepare it for sending
      * (creating the correct HTTP message, reading from a stream (if necessary), computing hashes, etc.).
      * Returns aws_future<void>, which may complete on any thread (and may complete synchronously). */
-    struct aws_future *(*prepare_request_async)(struct aws_s3_request *request);
+    struct aws_future *(*prepare_request)(struct aws_s3_request *request);
 
     void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
 

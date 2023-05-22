@@ -22,7 +22,7 @@ static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
 };
 
-/* Context for aws_s3_auto_ranged_put's vtable->prepare_request_async() operation */
+/* Context for aws_s3_auto_ranged_put's async vtable->prepare_request() operation */
 struct aws_s3_auto_ranged_put_prepare_request_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
@@ -56,25 +56,25 @@ static bool s_s3_auto_ranged_put_update(
 
 static void s_skip_parts_from_stream_loop(void *user_data);
 
-static struct aws_future *s_s3_auto_ranged_put_prepare_request_async(struct aws_s3_request *request);
+static struct aws_future *s_s3_auto_ranged_put_prepare_request(struct aws_s3_request *request);
 static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data);
 
-static struct aws_future *s_s3_prepare_list_parts_async(struct aws_s3_request *request);
+static struct aws_future *s_s3_prepare_list_parts(struct aws_s3_request *request);
 
-static struct aws_future *s_s3_prepare_create_multipart_upload_async(struct aws_s3_request *request);
+static struct aws_future *s_s3_prepare_create_multipart_upload(struct aws_s3_request *request);
 
-static struct aws_future *s_s3_prepare_upload_part_async(struct aws_s3_request *request);
+static struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request);
 static void s_s3_prepare_upload_part_on_skipping_done(void *user_data);
 static void s_s3_prepare_upload_part_on_read_done(void *user_data);
 static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_async_ctx *part_prep, int error_code);
 
-static struct aws_future *s_s3_prepare_complete_multipart_upload_async(struct aws_s3_request *request);
+static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_request *request);
 static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_data);
 static void s_s3_prepare_complete_multipart_upload_finish(
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep,
     int error_code);
 
-static struct aws_future *s_s3_prepare_abort_multipart_upload_async(struct aws_s3_request *request);
+static struct aws_future *s_s3_prepare_abort_multipart_upload(struct aws_s3_request *request);
 
 static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -257,7 +257,7 @@ static int s_try_init_resume_state_from_persisted_data(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
     .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
-    .prepare_request_async = s_s3_auto_ranged_put_prepare_request_async,
+    .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_put_request_finished,
@@ -711,7 +711,7 @@ struct aws_s3_skip_parts_from_stream_async_ctx {
  *
  * Returns an aws_future<void>
  */
-static struct aws_future *s_skip_parts_from_stream_async(
+static struct aws_future *s_skip_parts_from_stream(
     struct aws_s3_meta_request *meta_request,
     uint32_t num_parts_read_from_stream,
     uint32_t skip_until_part_number) {
@@ -848,7 +848,7 @@ static void s_destroy_message_pointer(void *user_data) {
 }
 
 /* Given a request, prepare it for sending based on its description. */
-static struct aws_future *s_s3_auto_ranged_put_prepare_request_async(struct aws_s3_request *request) {
+static struct aws_future *s_s3_auto_ranged_put_prepare_request(struct aws_s3_request *request) {
 
     struct aws_future *preparation_future = aws_future_new(request->allocator, AWS_FUTURE_VALUELESS);
 
@@ -862,19 +862,19 @@ static struct aws_future *s_s3_auto_ranged_put_prepare_request_async(struct aws_
     /* Each type of request prepares an aws_http_message in its own way, which maybe require async substeps */
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS:
-            request_prep->message_future = s_s3_prepare_list_parts_async(request);
+            request_prep->message_future = s_s3_prepare_list_parts(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
-            request_prep->message_future = s_s3_prepare_create_multipart_upload_async(request);
+            request_prep->message_future = s_s3_prepare_create_multipart_upload(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART:
-            request_prep->message_future = s_s3_prepare_upload_part_async(request);
+            request_prep->message_future = s_s3_prepare_upload_part(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD:
-            request_prep->message_future = s_s3_prepare_complete_multipart_upload_async(request);
+            request_prep->message_future = s_s3_prepare_complete_multipart_upload(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
-            request_prep->message_future = s_s3_prepare_abort_multipart_upload_async(request);
+            request_prep->message_future = s_s3_prepare_abort_multipart_upload(request);
             break;
         default:
             AWS_FATAL_ASSERT(0);
@@ -890,7 +890,7 @@ static struct aws_future *s_s3_auto_ranged_put_prepare_request_async(struct aws_
 
 /* Prepare a ListParts request.
  * Currently, this is actually synchronous. */
-static struct aws_future *s_s3_prepare_list_parts_async(struct aws_s3_request *request) {
+static struct aws_future *s_s3_prepare_list_parts(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
@@ -953,7 +953,7 @@ on_done:;
 
 /* Prepare a CreateMultipartUpload request.
  * Currently, this is actually synchronous. */
-struct aws_future *s_s3_prepare_create_multipart_upload_async(struct aws_s3_request *request) {
+struct aws_future *s_s3_prepare_create_multipart_upload(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
     /* Create the message to create a new multipart upload. */
@@ -972,7 +972,7 @@ struct aws_future *s_s3_prepare_create_multipart_upload_async(struct aws_s3_requ
 }
 
 /* Prepare an UploadPart request */
-struct aws_future *s_s3_prepare_upload_part_async(struct aws_s3_request *request) {
+struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     struct aws_allocator *allocator = request->allocator;
@@ -990,7 +990,7 @@ struct aws_future *s_s3_prepare_upload_part_async(struct aws_s3_request *request
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
-        part_prep->skipping_future = s_skip_parts_from_stream_async(
+        part_prep->skipping_future = s_skip_parts_from_stream(
             meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
         aws_future_register_callback(part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
     } else {
@@ -1104,7 +1104,7 @@ on_done:
 }
 
 /* Prepare a CompleteMultipartUpload request. */
-static struct aws_future *s_s3_prepare_complete_multipart_upload_async(struct aws_s3_request *request) {
+static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     struct aws_allocator *allocator = request->allocator;
@@ -1121,7 +1121,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload_async(struct aw
 
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
-        complete_mpu_prep->skipping_future = s_skip_parts_from_stream_async(
+        complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
             meta_request,
             auto_ranged_put->prepare_data.num_parts_read_from_stream,
             auto_ranged_put->synced_data.total_num_parts);
@@ -1215,7 +1215,7 @@ on_done:
 
 /* Prepare an AbortMultipartUpload request.
  * Currently, this is actually synchronous. */
-struct aws_future *s_s3_prepare_abort_multipart_upload_async(struct aws_s3_request *request) {
+struct aws_future *s_s3_prepare_abort_multipart_upload(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
@@ -1246,7 +1246,7 @@ struct aws_future *s_s3_prepare_abort_multipart_upload_async(struct aws_s3_reque
     return future;
 }
 
-/* Finish the vtable->prepare_request_async() operation */
+/* Finish the vtable->prepare_request() operation */
 static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data) {
     struct aws_s3_auto_ranged_put_prepare_request_async_ctx *request_prep = user_data;
     struct aws_s3_request *request = request_prep->request;
