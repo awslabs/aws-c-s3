@@ -69,7 +69,7 @@ struct aws_s3_meta_request_vtable {
         void *user_data);
 
     /* Given a request, asynchronously prepare it for sending
-     * (creating the correct HTTP message, reading from a stream (if necessary), signing it, computing hashes, etc.).
+     * (creating the correct HTTP message, reading from a stream (if necessary), computing hashes, etc.).
      * Returns aws_future<void>, which may complete on any thread (and may complete synchronously). */
     struct aws_future *(*prepare_request_async)(struct aws_s3_request *request);
 
