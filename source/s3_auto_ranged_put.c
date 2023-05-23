@@ -1183,14 +1183,23 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
          * reset twice (if we are preparing part in between
          * previously completed parts). */
         struct aws_byte_buf checksum_buf = {0};
-        aws_array_list_set_at(
-            &auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, request->part_number - 1);
+        /* BEGIN CRITICAL SECTION */
+        {
+            aws_s3_meta_request_lock_synced_data(meta_request);
 
-        struct aws_string *null_etag = NULL;
-        aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
+            aws_array_list_set_at(
+                &auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, request->part_number - 1);
 
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-        ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
+            struct aws_string *null_etag = NULL;
+            aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
+
+            // TODO: why remove this?
+            ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
+            ++auto_ranged_put->synced_data.num_parts_read;
+
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+        }
+        /* END CRITICAL SECTION */
     }
 
 on_done:
@@ -1683,9 +1692,9 @@ static void s_s3_auto_ranged_put_request_finished(
 
                         ++auto_ranged_put->synced_data.num_parts_successful;
 
-                        /* ETags need to be associated with their part number, so we keep the etag indices consistent
-                         * with part numbers. This means we may have to add padding to the list in the case that parts
-                         * finish out of order. */
+                        /* ETags need to be associated with their part number, so we keep the etag indices
+                         * consistent with part numbers. This means we may have to add padding to the list in the
+                         * case that parts finish out of order. */
                         aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &etag, part_index);
                     } else {
                         ++auto_ranged_put->synced_data.num_parts_failed;
