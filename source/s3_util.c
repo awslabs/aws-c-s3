@@ -9,7 +9,6 @@
 #include <aws/common/string.h>
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
-#include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
 #include <inttypes.h>
 
@@ -340,7 +339,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
 
-    const struct aws_byte_cursor space_delimeter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
+    const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
 
     const size_t user_agent_product_version_length =
@@ -356,16 +355,16 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     AWS_ZERO_STRUCT(user_agent_buffer);
 
     if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
-        /* If the header was found, then create a buffer with the total size we'll need, and append the curent user
+        /* If the header was found, then create a buffer with the total size we'll need, and append the current user
          * agent header with a trailing space. */
         aws_byte_buf_init(
             &user_agent_buffer,
             allocator,
-            current_user_agent_header.len + space_delimeter.len + user_agent_product_version_length);
+            current_user_agent_header.len + space_delimiter.len + user_agent_product_version_length);
 
         aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
 
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimeter);
+        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
 
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
@@ -545,6 +544,65 @@ void aws_s3_get_part_range(
     if (*out_part_range_end > object_range_end) {
         *out_part_range_end = object_range_end;
     }
+}
+
+int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+    uint64_t content_length,
+    size_t client_part_size,
+    uint64_t client_max_part_size,
+    size_t *out_part_size,
+    uint32_t *out_num_parts) {
+
+    AWS_FATAL_ASSERT(out_part_size);
+    AWS_FATAL_ASSERT(out_num_parts);
+
+    uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
+
+    if ((content_length % g_s3_max_num_upload_parts) > 0) {
+        ++part_size_uint64;
+    }
+
+    if (part_size_uint64 > SIZE_MAX) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create auto-ranged-put meta request; required part size of %" PRIu64
+            " bytes is too large for platform.",
+            part_size_uint64);
+
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    size_t part_size = (size_t)part_size_uint64;
+
+    if (part_size > client_max_part_size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
+            ", but current maximum part size is %" PRIu64,
+            (uint64_t)part_size,
+            (uint64_t)client_max_part_size);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    if (part_size < client_part_size) {
+        part_size = client_part_size;
+    }
+
+    if (content_length < part_size) {
+        /* When the content length is smaller than part size and larger than the threshold, we set one part
+         * with the whole length */
+        part_size = (size_t)content_length;
+    }
+
+    uint32_t num_parts = (uint32_t)(content_length / part_size);
+    if ((content_length % part_size) > 0) {
+        ++num_parts;
+    }
+    AWS_ASSERT(num_parts <= g_s3_max_num_upload_parts);
+
+    *out_part_size = part_size;
+    *out_num_parts = num_parts;
+    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string) {

@@ -29,6 +29,7 @@ struct aws_s3_auto_ranged_put {
     struct aws_s3_meta_request_resume_token *resume_token;
 
     uint64_t content_length;
+    bool has_content_length;
 
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
@@ -53,29 +54,38 @@ struct aws_s3_auto_ranged_put {
         uint32_t num_parts_read_from_stream;
     } prepare_data;
 
-    /*
-     * Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set the
-     * corresponding index to it's checksum result, so while the list is shared across threads each index will only be
-     * accessed once to initialize by the corresponding part number, and then again during the complete multipart upload
-     * request which will only be invoked after all other parts/threads have completed.
-     */
-    struct aws_byte_buf *encoded_checksum_list;
-
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
         /* Array list of `struct aws_string *`. */
         struct aws_array_list etag_list;
 
+        /* Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set
+         * the corresponding index to its checksum result. */
+        struct aws_array_list encoded_checksum_list;
+
         struct aws_s3_paginated_operation *list_parts_operation;
         struct aws_string *list_parts_continuation_token;
 
+        /* Note: total num parts is known only if content-length is known,
+        otherwise it is running total of number of parts read from stream. */
         uint32_t total_num_parts;
+        /* Number of parts we've started work on */
         uint32_t num_parts_sent;
+        /* Number of "sent" parts we've finished reading the body for
+         * (does not include skipped parts in the case of pause/resume) */
+        uint32_t num_parts_read;
         uint32_t num_parts_completed;
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
+        /* When content length is not known, requests are optimistically
+         * scheduled, below represents how many requests were scheduled and had no
+         * work to do*/
+        uint32_t num_parts_noop;
 
         struct aws_http_headers *needed_response_headers;
+
+        /* Whether body stream is exhausted. */
+        bool is_body_stream_at_end;
 
         int list_parts_error_code;
         int create_multipart_upload_error_code;
@@ -102,12 +112,16 @@ struct aws_s3_auto_ranged_put {
 
 AWS_EXTERN_C_BEGIN
 
-/* Creates a new auto-ranged put meta request.  This will do a multipart upload in parallel when appropriate. */
+/* Creates a new auto-ranged put meta request.
+ * This will do a multipart upload in parallel when appropriate.
+ * Note: if has_content_length is false, content_length and num_parts are ignored.
+ */
 
 AWS_S3_API struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    bool has_content_length,
     uint64_t content_length,
     uint32_t num_parts,
     const struct aws_s3_meta_request_options *options);
