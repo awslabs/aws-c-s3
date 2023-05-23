@@ -47,7 +47,7 @@ struct aws_s3_auto_ranged_put_prepare_request_async_ctx {
 struct aws_s3_prepare_upload_part_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *skipping_future;  /* aws_future<void> for skipping step */
+    struct aws_future *skipping_future;  /* aws_future<bool> for skipping step */
     struct aws_future *read_part_future; /* aws_future<void> for reading step */
     struct aws_future *my_future;        /* aws_future<aws_http_message *> to set when this operation completes */
 };
@@ -56,7 +56,7 @@ struct aws_s3_prepare_upload_part_async_ctx {
 struct aws_s3_prepare_complete_multipart_upload_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *skipping_future; /* aws_future<void> for skipping step */
+    struct aws_future *skipping_future; /* aws_future<bool> for skipping step */
     struct aws_future *my_future;       // aws_future<aws_http_message *> to set when this operation completes */
 };
 
@@ -793,7 +793,7 @@ struct aws_s3_skip_parts_from_stream_async_ctx {
  * that part). If checksum is set on the request and parts with checksums were uploaded before, checksum will be
  * verified.
  *
- * Returns an aws_future<void>
+ * Returns an aws_future<bool> indicating weather any parts were skipped.
  */
 static struct aws_future *s_skip_parts_from_stream(
     struct aws_s3_meta_request *meta_request,
@@ -806,10 +806,10 @@ static struct aws_future *s_skip_parts_from_stream(
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     AWS_PRECONDITION(skip_until_part_number <= auto_ranged_put->synced_data.total_num_parts);
 
-    struct aws_future *skip_future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
+    struct aws_future *skip_future = aws_future_new(meta_request->allocator, AWS_FUTURE_BOOL);
 
     if (num_parts_read_from_stream == skip_until_part_number) {
-        aws_future_set_valueless(skip_future);
+        aws_future_set_bool(skip_future, false);
         return skip_future;
     }
 
@@ -918,7 +918,7 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
 on_done:
     aws_byte_buf_clean_up(&skip_ctx->temp_body_buf);
     if (error_code == AWS_ERROR_SUCCESS) {
-        aws_future_set_valueless(skip_ctx->my_future);
+        aws_future_set_bool(skip_ctx->my_future, true);
     } else {
         aws_future_set_error(skip_ctx->my_future, error_code);
     }
@@ -1083,8 +1083,8 @@ struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
         } else {
             /* No need to skip parts if content_length is not available */
             ++auto_ranged_put->synced_data.total_num_parts;
-            part_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_VALUELESS);
-            aws_future_set_valueless(part_prep->skipping_future);
+            part_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_BOOL);
+            aws_future_set_bool(part_prep->skipping_future, false);
             s_s3_prepare_upload_part_on_skipping_done(part_prep);
         }
     } else {
@@ -1110,11 +1110,11 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
         s_s3_prepare_upload_part_finish(part_prep, error_code);
         return;
     }
-
-    // /* Skipping succeeded */
-    if (auto_ranged_put->has_content_length) {
+    if (aws_future_get_bool(part_prep->skipping_future)) {
+        /* Skipping succeeded */
         auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
     }
+
     /* Next async step: read body stream for this part into a buffer */
     size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
 
@@ -1159,7 +1159,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
 
             if (request->request_body.len == 0) {
                 request->is_noop = true;
-
                 ++auto_ranged_put->synced_data.num_parts_read;
                 auto_ranged_put->synced_data.is_body_stream_at_end = true;
 
@@ -1171,7 +1170,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
                     request->part_number,
                     aws_string_c_str(auto_ranged_put->upload_id));
             } else if (request->request_body.len < request->request_body.capacity) {
-
                 auto_ranged_put->synced_data.is_body_stream_at_end = true;
             }
             aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -1288,8 +1286,8 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
                 complete_mpu_prep);
         } else {
             /* No need to skip parts if content_length is not available */
-            complete_mpu_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_VALUELESS);
-            aws_future_set_valueless(complete_mpu_prep->skipping_future);
+            complete_mpu_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_BOOL);
+            aws_future_set_bool(complete_mpu_prep->skipping_future, false);
             s_s3_prepare_complete_multipart_upload_on_skipping_done(complete_mpu_prep);
         }
 
