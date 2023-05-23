@@ -1153,29 +1153,30 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     }
 
     if (!auto_ranged_put->has_content_length) {
-        if (request->request_body.len == 0) {
-            request->is_noop = true;
-            /* BEGIN CRITICAL SECTION */
-            {
-                aws_s3_meta_request_lock_synced_data(meta_request);
+        /* BEGIN CRITICAL SECTION */
+        {
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            if (request->request_body.len == 0) {
+                request->is_noop = true;
 
                 ++auto_ranged_put->synced_data.num_parts_read;
                 auto_ranged_put->synced_data.is_body_stream_at_end = true;
 
-                aws_s3_meta_request_unlock_synced_data(meta_request);
-            }
-            /* END CRITICAL SECTION */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p UploadPart with part num %u for Multi-part Upload, with ID:%s"
+                    "is noop due to encountering end of stream",
+                    (void *)meta_request,
+                    request->part_number,
+                    aws_string_c_str(auto_ranged_put->upload_id));
+            } else if (request->request_body.len < request->request_body.capacity) {
 
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p UploadPart with part num %u for Multi-part Upload, with ID:%s"
-                "is noop due to encountering end of stream",
-                (void *)meta_request,
-                request->part_number,
-                aws_string_c_str(auto_ranged_put->upload_id));
-        } else if (request->request_body.len < request->request_body.capacity) {
-            auto_ranged_put->synced_data.is_body_stream_at_end = true;
+                auto_ranged_put->synced_data.is_body_stream_at_end = true;
+            }
+            aws_s3_meta_request_unlock_synced_data(meta_request);
         }
+        /* END CRITICAL SECTION */
     }
 
     if (!request->is_noop) {
