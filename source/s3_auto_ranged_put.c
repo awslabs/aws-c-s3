@@ -793,7 +793,7 @@ struct aws_s3_skip_parts_from_stream_async_ctx {
  * that part). If checksum is set on the request and parts with checksums were uploaded before, checksum will be
  * verified.
  *
- * Returns an aws_future<bool> indicating weather any parts were skipped.
+ * Returns an aws_future<bool> indicating whether any parts were skipped.
  */
 static struct aws_future *s_skip_parts_from_stream(
     struct aws_s3_meta_request *meta_request,
@@ -1081,7 +1081,7 @@ struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
             aws_future_register_callback(
                 part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
         } else {
-            /* No need to skip parts if content_length is not available */
+            /* Skip skipping parts if content_length is not available as we don't support pause/resume for now */
             ++auto_ranged_put->synced_data.total_num_parts;
             part_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_BOOL);
             aws_future_set_bool(part_prep->skipping_future, false);
@@ -1285,7 +1285,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
                 s_s3_prepare_complete_multipart_upload_on_skipping_done,
                 complete_mpu_prep);
         } else {
-            /* No need to skip parts if content_length is not available */
+            /* Skip skipping parts if content_length is not available as we don't support pause/resume for now */
             complete_mpu_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_BOOL);
             aws_future_set_bool(complete_mpu_prep->skipping_future, false);
             s_s3_prepare_complete_multipart_upload_on_skipping_done(complete_mpu_prep);
