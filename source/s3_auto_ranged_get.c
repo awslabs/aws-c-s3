@@ -11,11 +11,6 @@
 #include <aws/common/string.h>
 #include <inttypes.h>
 
-#ifdef _MSC_VER
-/* sscanf warning (not currently scanning for strings) */
-#    pragma warning(disable : 4996)
-#endif
-
 const uint32_t s_conservative_max_requests_in_flight = 8;
 const struct aws_byte_cursor g_application_xml_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("application/xml");
 const struct aws_byte_cursor g_object_size_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ActualObjectSize");
@@ -157,7 +152,7 @@ static bool s_s3_auto_ranged_get_update(
                 /* auto-ranged-gets make use of body streaming, which will hold onto response bodies if parts earlier in
                  * the file haven't arrived yet. This can potentially create a lot of backed up requests, causing us to
                  * hit our global request limit. To help mitigate this, when the "conservative" flag is passed in, we
-                 * only allow the total amount of requests being sent/streamed to be inside of a set limit.  */
+                 * only allow the total amount of requests being sent/streamed to be inside a set limit.  */
                 if (num_requests_in_flight > s_conservative_max_requests_in_flight) {
                     goto has_work_remaining;
                 }
@@ -330,7 +325,7 @@ static bool s_s3_auto_ranged_get_update(
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
             if (auto_ranged_get->synced_data.num_parts_checksum_validated ==
                 auto_ranged_get->synced_data.num_parts_requested) {
-                /* If we have validated the checksum for every parts, we set the meta request level checksum validation
+                /* If we have validated the checksum for every part, we set the meta request level checksum validation
                  * result.*/
                 meta_request->synced_data.finish_result.did_validate = true;
                 meta_request->synced_data.finish_result.validation_algorithm = auto_ranged_get->validation_algorithm;
@@ -491,7 +486,7 @@ static int s_discover_object_range_and_content_length(
             }
 
             /* if the inital message had a ranged header, there should also be a Content-Range header that specifies the
-             * object range and total object size. Otherwise the size and range should be equal to the
+             * object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_range_end = total_content_length - 1;

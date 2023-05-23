@@ -9,7 +9,6 @@
 #include <aws/common/string.h>
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
-#include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
 #include <inttypes.h>
 
@@ -340,7 +339,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
 
-    const struct aws_byte_cursor space_delimeter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
+    const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
 
     const size_t user_agent_product_version_length =
@@ -356,16 +355,16 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     AWS_ZERO_STRUCT(user_agent_buffer);
 
     if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
-        /* If the header was found, then create a buffer with the total size we'll need, and append the curent user
+        /* If the header was found, then create a buffer with the total size we'll need, and append the current user
          * agent header with a trailing space. */
         aws_byte_buf_init(
             &user_agent_buffer,
             allocator,
-            current_user_agent_header.len + space_delimeter.len + user_agent_product_version_length);
+            current_user_agent_header.len + space_delimiter.len + user_agent_product_version_length);
 
         aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
 
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimeter);
+        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
 
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
