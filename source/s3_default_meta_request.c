@@ -6,12 +6,6 @@
 #include <aws/common/string.h>
 #include <inttypes.h>
 
-<<<<<<< HEAD
-#ifdef _MSC_VER
-/* sscanf warning (not currently scanning for strings) */
-#    pragma warning(disable : 4996)
-#endif
-
 /* Context for aws_s3_meta_request_default's vtable->prepare_request() operation */
 struct aws_s3_default_prepare_request_async_ctx {
     struct aws_allocator *allocator;
@@ -20,8 +14,6 @@ struct aws_s3_default_prepare_request_async_ctx {
     struct aws_future *my_future;   /* aws_future<void> to set when this whole operation completes */
 };
 
-=======
->>>>>>> main
 static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_request);
 
 static bool s_s3_meta_request_default_update(

@@ -803,13 +803,7 @@ static struct aws_future *s_skip_parts_from_stream(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(num_parts_read_from_stream <= skip_until_part_number);
 
-<<<<<<< HEAD
-    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    (void)auto_ranged_put;
-=======
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-
->>>>>>> main
     AWS_PRECONDITION(skip_until_part_number <= auto_ranged_put->synced_data.total_num_parts);
 
     struct aws_future *skip_future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
@@ -908,25 +902,15 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
         }
 
         struct aws_byte_buf checksum_buf;
-        aws_array_list_get_at(&auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, part_index);
+        aws_array_list_get_at(&auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, skip_ctx->part_index);
 
         // compare skipped checksum to previously uploaded checksum
-<<<<<<< HEAD
-        if (auto_ranged_put->encoded_checksum_list[skip_ctx->part_index].len > 0 &&
-            s_verify_part_matches_checksum(
-                meta_request->allocator,
-                *temp_body_buf,
-                meta_request->checksum_config.checksum_algorithm,
-                auto_ranged_put->encoded_checksum_list[skip_ctx->part_index])) {
-            error_code = aws_last_error_or_unknown();
-=======
         if (checksum_buf.len > 0 && s_verify_part_matches_checksum(
                                         meta_request->allocator,
-                                        temp_body_buf,
+                                        *temp_body_buf,
                                         meta_request->checksum_config.checksum_algorithm,
                                         checksum_buf)) {
-            return_status = AWS_OP_ERR;
->>>>>>> main
+            error_code = aws_last_error_or_unknown();
             goto on_done;
         }
     }
@@ -968,192 +952,11 @@ static struct aws_future *s_s3_auto_ranged_put_prepare_request(struct aws_s3_req
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
             request_prep->message_future = s_s3_prepare_create_multipart_upload(request);
             break;
-<<<<<<< HEAD
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART:
             request_prep->message_future = s_s3_prepare_upload_part(request);
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD:
             request_prep->message_future = s_s3_prepare_complete_multipart_upload(request);
-=======
-        }
-        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
-
-            size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
-
-            if (request->num_times_prepared == 0) {
-                if (auto_ranged_put->has_content_length) {
-                    if (s_skip_parts_from_stream(
-                            meta_request,
-                            auto_ranged_put->prepare_data.num_parts_read_from_stream,
-                            request->part_number - 1)) {
-                        goto message_create_failed;
-                    }
-                }
-
-                if (!auto_ranged_put->has_content_length) {
-                    ++auto_ranged_put->synced_data.total_num_parts;
-                }
-
-                /* Some streams might require additional read to realize that
-                 * there is no more data to read. So lets try to read and mark
-                 * part as no_op is we cannot read anymore. */
-                bool successfully_read_data_from_stream = false;
-                if (!aws_s3_meta_request_body_has_no_more_data(meta_request)) {
-                    aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
-                    if (aws_s3_meta_request_read_body(meta_request, &request->request_body)) {
-                        goto message_create_failed;
-                    }
-
-                    successfully_read_data_from_stream = request->request_body.len != 0;
-                }
-
-                if (successfully_read_data_from_stream) {
-
-                    auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number;
-
-                    /* BEGIN CRITICAL SECTION */
-                    {
-                        aws_s3_meta_request_lock_synced_data(meta_request);
-
-                        ++auto_ranged_put->synced_data.num_parts_read;
-
-                        auto_ranged_put->synced_data.is_body_stream_at_end =
-                            aws_s3_meta_request_body_has_no_more_data(meta_request);
-
-                        /* Reset values for corresponding checksum and etag.
-                         * Note: During resume flow this might cause the values to be
-                         * reset twice (if we are preparing part in between
-                         * previously completed parts). */
-                        struct aws_byte_buf checksum_buf = {0};
-                        aws_array_list_set_at(
-                            &auto_ranged_put->synced_data.encoded_checksum_list,
-                            &checksum_buf,
-                            request->part_number - 1);
-
-                        struct aws_string *null_etag = NULL;
-                        aws_array_list_set_at(
-                            &auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
-
-                        aws_s3_meta_request_unlock_synced_data(meta_request);
-                    }
-                    /* END CRITICAL SECTION */
-                } else {
-                    request->is_noop = true;
-
-                    /* BEGIN CRITICAL SECTION */
-                    {
-                        aws_s3_meta_request_lock_synced_data(meta_request);
-
-                        ++auto_ranged_put->synced_data.num_parts_read;
-                        auto_ranged_put->synced_data.is_body_stream_at_end = true;
-
-                        aws_s3_meta_request_unlock_synced_data(meta_request);
-                    }
-                    /* END CRITICAL SECTION */
-
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p UploadPart with part num %u for Multi-part Upload, with ID:%s"
-                        "is noop due to encountering end of stream",
-                        (void *)meta_request,
-                        request->part_number,
-                        aws_string_c_str(auto_ranged_put->upload_id));
-                }
-            }
-
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p UploadPart for Multi-part Upload, with ID:%s",
-                (void *)meta_request,
-                aws_string_c_str(auto_ranged_put->upload_id));
-
-            struct aws_byte_buf *checksum_buf = NULL;
-            if (!request->is_noop) {
-                aws_array_list_get_at_ptr(
-                    &auto_ranged_put->synced_data.encoded_checksum_list,
-                    (void **)&checksum_buf,
-                    request->part_number - 1);
-                /* Clean up the buffer in case of it's initialized before and retry happens. */
-                aws_byte_buf_clean_up(checksum_buf);
-            }
-
-            /* Create a new put-object message to upload a part. */
-            message = aws_s3_upload_part_message_new(
-                meta_request->allocator,
-                meta_request->initial_request_message,
-                &request->request_body,
-                request->part_number,
-                auto_ranged_put->upload_id,
-                meta_request->should_compute_content_md5,
-                &meta_request->checksum_config,
-                checksum_buf);
-
-            break;
-        }
-        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
-
-            /* Note: completeMPU fails if no parts are provided. We could
-             * workaround it by uploading an empty part at the cost of
-             * complicating flow logic for dealing with noop parts, but that
-             * arguably adds a lot of complexity for little benefit.
-             * Pre-buffering parts to determine whether mpu is needed will
-             * resolve this issue.
-             */
-            if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
-                    "Content-Length header to 0 to upload empty object",
-                    (void *)meta_request);
-
-                aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
-                goto message_create_failed;
-            }
-
-            if (request->num_times_prepared == 0) {
-
-                /* Corner case of last part being previously uploaded during resume.
-                 * Read it from input stream and potentially verify checksum */
-                if (auto_ranged_put->has_content_length) {
-                    if (s_skip_parts_from_stream(
-                            meta_request,
-                            auto_ranged_put->prepare_data.num_parts_read_from_stream,
-                            auto_ranged_put->synced_data.total_num_parts)) {
-                        goto message_create_failed;
-                    }
-                }
-                auto_ranged_put->prepare_data.num_parts_read_from_stream = auto_ranged_put->synced_data.total_num_parts;
-
-                aws_byte_buf_init(
-                    &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
-            } else {
-                aws_byte_buf_reset(&request->request_body, false);
-            }
-
-            /* BEGIN CRITICAL SECTION */
-            {
-                aws_s3_meta_request_lock_synced_data(meta_request);
-
-                AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
-                AWS_ASSERT(request->request_body.capacity > 0);
-                aws_byte_buf_reset(&request->request_body, false);
-
-                /* Build the message to complete our multipart upload, which includes a payload describing all of
-                 * our completed parts. */
-                message = aws_s3_complete_multipart_message_new(
-                    meta_request->allocator,
-                    meta_request->initial_request_message,
-                    &request->request_body,
-                    auto_ranged_put->upload_id,
-                    &auto_ranged_put->synced_data.etag_list,
-                    &auto_ranged_put->synced_data.encoded_checksum_list,
-                    meta_request->checksum_config.checksum_algorithm);
-
-                aws_s3_meta_request_unlock_synced_data(meta_request);
-            }
-            /* END CRITICAL SECTION */
-
->>>>>>> main
             break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
             request_prep->message_future = s_s3_prepare_abort_multipart_upload(request);
@@ -1272,9 +1075,18 @@ struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
-        part_prep->skipping_future = s_skip_parts_from_stream(
-            meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
-        aws_future_register_callback(part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
+        if (auto_ranged_put->has_content_length) {
+            part_prep->skipping_future = s_skip_parts_from_stream(
+                meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
+            aws_future_register_callback(
+                part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
+        } else {
+            /* No need to skip parts if content_length is not available */
+            ++auto_ranged_put->synced_data.total_num_parts;
+            part_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_VALUELESS);
+            aws_future_set_valueless(part_prep->skipping_future);
+            s_s3_prepare_upload_part_on_skipping_done(part_prep);
+        }
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */
@@ -1299,9 +1111,10 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
         return;
     }
 
-    /* Skipping succeeded */
-    auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
-
+    // /* Skipping succeeded */
+    if (auto_ranged_put->has_content_length) {
+        auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
+    }
     /* Next async step: read body stream for this part into a buffer */
     size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
 
@@ -1331,7 +1144,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     }
 
     /* TODO: support for unknown content length. move this check to read_body()? */
-    if (request->request_body.len < request->request_body.capacity) {
+    if (auto_ranged_put->has_content_length && request->request_body.len < request->request_body.capacity) {
         error_code = aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER);
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -1339,9 +1152,51 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             (void *)meta_request);
         goto on_done;
     }
+    // TODO: waqar simplify
+    if (request->request_body.len != 0) {
+        /* Reset values for corresponding checksum and etag.
+         * Note: During resume flow this might cause the values to be
+         * reset twice (if we are preparing part in between
+         * previously completed parts). */
+        struct aws_byte_buf checksum_buf = {0};
+        aws_array_list_set_at(
+            &auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, request->part_number - 1);
 
-    ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
+        struct aws_string *null_etag = NULL;
+        aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
 
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+
+    if (!auto_ranged_put->has_content_length) {
+        if (request->request_body.len == 0) {
+            request->is_noop = true;
+            /* BEGIN CRITICAL SECTION */
+            {
+                aws_s3_meta_request_lock_synced_data(meta_request);
+
+                ++auto_ranged_put->synced_data.num_parts_read;
+                auto_ranged_put->synced_data.is_body_stream_at_end = true;
+
+                aws_s3_meta_request_unlock_synced_data(meta_request);
+            }
+            /* END CRITICAL SECTION */
+
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p UploadPart with part num %u for Multi-part Upload, with ID:%s"
+                "is noop due to encountering end of stream",
+                (void *)meta_request,
+                request->part_number,
+                aws_string_c_str(auto_ranged_put->upload_id));
+        } else if (request->request_body.len < request->request_body.capacity) {
+            auto_ranged_put->synced_data.is_body_stream_at_end = true;
+        }
+    }
+
+    if (!request->is_noop) {
+        ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
+    }
 on_done:
     s_s3_prepare_upload_part_finish(part_prep, error_code);
 }
@@ -1357,8 +1212,13 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_as
         goto on_done;
     }
 
-    /* Clean up the buffer in case of it's initialized before and retry happens. */
-    aws_byte_buf_clean_up(&auto_ranged_put->encoded_checksum_list[request->part_number - 1]);
+    struct aws_byte_buf *checksum_buf = NULL;
+    if (!request->is_noop) {
+        aws_array_list_get_at_ptr(
+            &auto_ranged_put->synced_data.encoded_checksum_list, (void **)&checksum_buf, request->part_number - 1);
+        /* Clean up the buffer in case of it's initialized before and retry happens. */
+        aws_byte_buf_clean_up(checksum_buf);
+    }
     /* Create a new put-object message to upload a part. */
     struct aws_http_message *message = aws_s3_upload_part_message_new(
         meta_request->allocator,
@@ -1368,7 +1228,7 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_as
         auto_ranged_put->upload_id,
         meta_request->should_compute_content_md5,
         &meta_request->checksum_config,
-        &auto_ranged_put->encoded_checksum_list[request->part_number - 1]);
+        checksum_buf);
     if (message == NULL) {
         aws_future_set_error(part_prep->my_future, aws_last_error());
         goto on_done;
@@ -1392,7 +1252,22 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
     struct aws_allocator *allocator = request->allocator;
 
     struct aws_future *message_future = aws_future_new(allocator, AWS_FUTURE_POINTER);
-
+    /* Note: completeMPU fails if no parts are provided. We could
+     * workaround it by uploading an empty part at the cost of
+     * complicating flow logic for dealing with noop parts, but that
+     * arguably adds a lot of complexity for little benefit.
+     * Pre-buffering parts to determine whether mpu is needed will
+     * resolve this issue.
+     */
+    if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
+            "Content-Length header to 0 to upload empty object",
+            (void *)meta_request);
+        aws_future_set_error(message_future, AWS_ERROR_UNSUPPORTED_OPERATION);
+        return message_future;
+    }
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_complete_multipart_upload_async_ctx));
     complete_mpu_prep->allocator = allocator;
@@ -1403,15 +1278,23 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
 
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
-        complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
-            meta_request,
-            auto_ranged_put->prepare_data.num_parts_read_from_stream,
-            auto_ranged_put->synced_data.total_num_parts);
 
-        aws_future_register_callback(
-            complete_mpu_prep->skipping_future,
-            s_s3_prepare_complete_multipart_upload_on_skipping_done,
-            complete_mpu_prep);
+        if (auto_ranged_put->has_content_length) {
+            complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
+                meta_request,
+                auto_ranged_put->prepare_data.num_parts_read_from_stream,
+                auto_ranged_put->synced_data.total_num_parts);
+            aws_future_register_callback(
+                complete_mpu_prep->skipping_future,
+                s_s3_prepare_complete_multipart_upload_on_skipping_done,
+                complete_mpu_prep);
+        } else {
+            /* No need to skip parts if content_length is not available */
+            complete_mpu_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_VALUELESS);
+            aws_future_set_valueless(complete_mpu_prep->skipping_future);
+            s_s3_prepare_complete_multipart_upload_on_skipping_done(complete_mpu_prep);
+        }
+
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps. */
@@ -1474,7 +1357,7 @@ static void s_s3_prepare_complete_multipart_upload_finish(
         &request->request_body,
         auto_ranged_put->upload_id,
         &auto_ranged_put->synced_data.etag_list,
-        auto_ranged_put->encoded_checksum_list,
+        &auto_ranged_put->synced_data.encoded_checksum_list,
         meta_request->checksum_config.checksum_algorithm);
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
