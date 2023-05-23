@@ -1143,7 +1143,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         goto on_done;
     }
 
-    /* TODO: support for unknown content length. move this check to read_body()? */
     if (auto_ranged_put->has_content_length && request->request_body.len < request->request_body.capacity) {
         error_code = aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER);
         AWS_LOGF_ERROR(
@@ -1151,21 +1150,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             "id=%p: Request body is smaller than 'Content-Length' header said it would be",
             (void *)meta_request);
         goto on_done;
-    }
-    // TODO: waqar simplify
-    if (request->request_body.len != 0) {
-        /* Reset values for corresponding checksum and etag.
-         * Note: During resume flow this might cause the values to be
-         * reset twice (if we are preparing part in between
-         * previously completed parts). */
-        struct aws_byte_buf checksum_buf = {0};
-        aws_array_list_set_at(
-            &auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, request->part_number - 1);
-
-        struct aws_string *null_etag = NULL;
-        aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
-
-        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
 
     if (!auto_ranged_put->has_content_length) {
@@ -1195,8 +1179,21 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     }
 
     if (!request->is_noop) {
+        /* Reset values for corresponding checksum and etag.
+         * Note: During resume flow this might cause the values to be
+         * reset twice (if we are preparing part in between
+         * previously completed parts). */
+        struct aws_byte_buf checksum_buf = {0};
+        aws_array_list_set_at(
+            &auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, request->part_number - 1);
+
+        struct aws_string *null_etag = NULL;
+        aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
+
+        aws_s3_meta_request_unlock_synced_data(meta_request);
         ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
     }
+
 on_done:
     s_s3_prepare_upload_part_finish(part_prep, error_code);
 }
