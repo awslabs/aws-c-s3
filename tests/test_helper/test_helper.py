@@ -43,14 +43,14 @@ elif "CRT_S3_TEST_BUCKET_NAME" in os.environ:
 else:
     # Generate a random bucket name
     BUCKET_NAME = "aws-c-s3-test-bucket-" + str(random.random())[2:8]
-if args.presigned_url is not None:
-    PRESIGNED_URL = args.presigned_url
-elif "CRT_S3_TEST_PRESIGNED_URL" in os.environ:
-    PRESIGNED_URL = os.environ["CRT_S3_TEST_PRESIGNED_URL"]
-else:
-    raise Exception(
-        "Please setup the presigned url in env or pass in a valid presigned url."
-    )
+# if args.presigned_url is not None:
+#     PRESIGNED_URL = args.presigned_url
+# elif "CRT_S3_TEST_PRESIGNED_URL" in os.environ:
+#     PRESIGNED_URL = os.environ["CRT_S3_TEST_PRESIGNED_URL"]
+# else:
+#     raise Exception(
+#         "Please setup the presigned url in env or pass in a valid presigned url."
+#     )
 
 PUBLIC_BUCKET_NAME = BUCKET_NAME + "-public"
 
