@@ -244,6 +244,23 @@ static int s_try_init_resume_state_from_persisted_data(
     return AWS_OP_SUCCESS;
 }
 
+static int s_s3_auto_ranged_put_request_type(struct aws_s3_request *request) {
+    switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS:
+            return AWS_S3_REQUEST_TYPE_LIST_PARTS;
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD;
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART:
+            return AWS_S3_REQUEST_TYPE_UPLOAD_PART;
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD;
+        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD;
+    }
+    AWS_ASSERT(false);
+    return AWS_S3_REQUEST_TYPE_MAX;
+}
+
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
     .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
@@ -254,6 +271,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
     .pause = s_s3_auto_ranged_put_pause,
+    .get_request_type = s_s3_auto_ranged_put_request_type,
 };
 
 /* Allocate a new auto-ranged put meta request */

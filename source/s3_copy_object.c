@@ -37,6 +37,27 @@ static void s_s3_copy_object_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static int s_s3_copy_object_request_type(struct aws_s3_request *request) {
+    switch (request->request_tag) {
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE:
+            /* It's a HEAD request of GetObject call */
+            return AWS_S3_REQUEST_TYPE_HEAD_OBJECT;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS:
+            /* A single copy object request, same as default */
+            return AWS_S3_REQUEST_TYPE_DEFAULT;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY:
+            return AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD;
+    }
+    AWS_ASSERT(false);
+    return AWS_S3_REQUEST_TYPE_MAX;
+}
+
 static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .update = s_s3_copy_object_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_handle_async_error,
@@ -46,6 +67,7 @@ static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .finished_request = s_s3_copy_object_request_finished,
     .destroy = s_s3_meta_request_copy_object_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .get_request_type = s_s3_copy_object_request_type,
 };
 
 /* Allocate a new copy object meta request */
