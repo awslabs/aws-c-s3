@@ -13,6 +13,7 @@
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
 #include <aws/auth/signing_result.h>
+#include <aws/common/async_stream.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -229,17 +230,16 @@ int aws_s3_meta_request_init_base(
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
 
-    /* Set initial_meta_request */
-    if (options->send_filepath.len > 0) {
-        /* Create copy of original message, but with body-stream that reads directly from file */
-        meta_request->initial_request_message = aws_s3_message_util_copy_http_message_filepath_body_all_headers(
-            allocator, options->message, options->send_filepath);
-        if (meta_request->initial_request_message == NULL) {
-            goto error;
-        }
-    } else {
-        /* Keep a reference to the original message structure passed in. */
-        meta_request->initial_request_message = aws_http_message_acquire(options->message);
+    /* Keep a reference to the original message structure passed in. */
+    meta_request->initial_request_message = aws_http_message_acquire(options->message);
+
+    /* There are several ways for the user to pass in the request's body.
+     * If something besides an aws_async_stream was passed in, create an
+     * async wrapper around it */
+    meta_request->send_async_body = aws_s3_message_util_acquire_async_body_stream(
+        allocator, meta_request->initial_request_message, options->send_filepath, options->send_async_stream);
+    if (meta_request->send_async_body == NULL) {
+        goto error;
     }
 
     /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
@@ -425,10 +425,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Cleaning up meta request", (void *)meta_request);
 
     /* Clean up our initial http message */
-    if (meta_request->initial_request_message != NULL) {
-        aws_http_message_release(meta_request->initial_request_message);
-        meta_request->initial_request_message = NULL;
-    }
+    meta_request->send_async_body = aws_async_stream_release(meta_request->send_async_body);
+    meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
     void *meta_request_user_data = meta_request->user_data;
     aws_s3_meta_request_shutdown_fn *shutdown_callback = meta_request->shutdown_callback;
@@ -506,7 +504,10 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
 }
 
 static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+static void s_s3_meta_request_on_request_prepared(void *user_data);
 
+/* TODO: document how this is final step in prepare-request sequence.
+ * Could be invoked on any thread. */
 static void s_s3_prepare_request_payload_callback_and_destroy(
     struct aws_s3_prepare_request_payload *payload,
     int error_code) {
@@ -516,18 +517,30 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
     struct aws_s3_meta_request *meta_request = payload->request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    AWS_PRECONDITION(meta_request->client);
-    struct aws_s3_client *client = aws_s3_client_acquire(meta_request->client);
+    ++payload->request->num_times_prepared;
 
-    struct aws_allocator *allocator = client->allocator;
-    AWS_PRECONDITION(allocator);
+    if (error_code) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not prepare request %p due to error %d (%s).",
+            (void *)meta_request,
+            (void *)payload->request,
+            error_code,
+            aws_error_str(error_code));
+
+        /* BEGIN CRITICAL SECTION */
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_set_fail_synced(meta_request, payload->request, error_code);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* END CRITICAL SECTION */
+    }
 
     if (payload->callback != NULL) {
         payload->callback(meta_request, payload->request, error_code, payload->user_data);
     }
 
-    aws_mem_release(allocator, payload);
-    aws_s3_client_release(client);
+    aws_future_release(payload->preparation_future);
+    aws_mem_release(payload->allocator, payload);
 }
 
 static void s_s3_meta_request_schedule_prepare_request_default(
@@ -568,6 +581,7 @@ static void s_s3_meta_request_schedule_prepare_request_default(
     struct aws_s3_prepare_request_payload *payload =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_request_payload));
 
+    payload->allocator = allocator;
     payload->request = request;
     payload->callback = callback;
     payload->user_data = user_data;
@@ -596,48 +610,34 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
-    int error_code = AWS_ERROR_SUCCESS;
-
     if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
-        aws_raise_error(AWS_ERROR_S3_CANCELED);
-        goto dont_send_clean_up;
+        s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_CANCELED);
+        return;
     }
 
-    if (vtable->prepare_request(meta_request, request)) {
-        ++request->num_times_prepared;
-        goto dont_send_clean_up;
-    }
+    /* Kick off the async vtable->prepare_request()
+     * Each subclass has its own implementation of this. */
+    payload->preparation_future = vtable->prepare_request(request);
+    aws_future_register_callback(payload->preparation_future, s_s3_meta_request_on_request_prepared, payload);
+    return;
+}
 
-    ++request->num_times_prepared;
+/* Called after vtable->prepare_request has succeeded or failed. */
+static void s_s3_meta_request_on_request_prepared(void *user_data) {
+    struct aws_s3_prepare_request_payload *payload = user_data;
+    struct aws_s3_request *request = payload->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    int error_code = aws_future_get_error(payload->preparation_future);
+    if (error_code) {
+        s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
+        return;
+    }
 
     aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message);
 
-    /* Sign the newly created message. */
+    /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);
-
-    return;
-
-dont_send_clean_up:
-
-    error_code = aws_last_error_or_unknown();
-
-    AWS_LOGF_ERROR(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Could not prepare request %p due to error %d (%s).",
-        (void *)meta_request,
-        (void *)request,
-        error_code,
-        aws_error_str(error_code));
-
-    /* BEGIN CRITICAL SECTION */
-    {
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-    }
-    /* END CRITICAL SECTION */
-
-    s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
 static void s_s3_meta_request_init_signing_date_time(
@@ -754,7 +754,7 @@ void aws_s3_meta_request_sign_request_default(
     }
 }
 
-/* Handle the signing result, getting an HTTP connection for the request if signing succeeded. */
+/* Handle the signing result */
 static void s_s3_meta_request_request_on_signed(
     struct aws_signing_result *signing_result,
     int error_code,
@@ -787,18 +787,10 @@ finish:
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Meta request could not sign TTP request due to error code %d (%s)",
+            "id=%p Meta request could not sign HTTP request due to error code %d (%s)",
             (void *)meta_request,
             error_code,
             aws_error_str(error_code));
-
-        /* BEGIN CRITICAL SECTION */
-        {
-            aws_s3_meta_request_lock_synced_data(meta_request);
-            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-            aws_s3_meta_request_unlock_synced_data(meta_request);
-        }
-        /* END CRITICAL SECTION */
     }
 
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
@@ -1573,10 +1565,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     /* As the meta request has been finished with any HTTP message, we can safely release the http message that hold. So
      * that, the downstream high level language doesn't need to wait for shutdown to clean related resource (eg: input
      * stream) */
-    if (meta_request->initial_request_message) {
-        aws_http_message_release(meta_request->initial_request_message);
-        meta_request->initial_request_message = NULL;
-    }
+    meta_request->send_async_body = aws_async_stream_release(meta_request->send_async_body);
+    meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
     if (meta_request->finish_callback != NULL) {
         meta_request->finish_callback(meta_request, &finish_result, meta_request->user_data);
@@ -1590,21 +1580,14 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     meta_request->io_event_loop = NULL;
 }
 
-int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer) {
+struct aws_future *aws_s3_meta_request_read_body(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer) {
+
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
 
-    struct aws_input_stream *initial_body_stream =
-        aws_http_message_get_body_stream(meta_request->initial_request_message);
-    AWS_FATAL_ASSERT(initial_body_stream);
-
-    /* Copy it into our buffer. */
-    if (aws_input_stream_read(initial_body_stream, buffer)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Could not read from body stream.", (void *)meta_request);
-        return AWS_OP_ERR;
-    }
-
-    return AWS_OP_SUCCESS;
+    return aws_async_stream_read_to_fill(meta_request->send_async_body, buffer);
 }
 
 void aws_s3_meta_request_result_setup(

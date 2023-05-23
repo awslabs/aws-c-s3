@@ -30,7 +30,7 @@ static bool s_s3_copy_object_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+static struct aws_future *s_s3_copy_object_prepare_request(struct aws_s3_request *request);
 
 static void s_s3_copy_object_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -333,7 +333,8 @@ no_work_remaining:
 }
 
 /* Given a request, prepare it for sending based on its description. */
-static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+static struct aws_future *s_s3_copy_object_prepare_request(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_copy_object *copy_object = meta_request->impl;
@@ -342,6 +343,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
     aws_s3_meta_request_lock_synced_data(meta_request);
 
     struct aws_http_message *message = NULL;
+    bool success = false;
 
     switch (request->request_tag) {
 
@@ -372,7 +374,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                     part_size_uint64);
 
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return AWS_OP_ERR;
+                goto finish;
             }
 
             size_t part_size = (size_t)part_size_uint64;
@@ -498,13 +500,14 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
             "id=%p Could not allocate message for request with tag %d for CopyObject meta request.",
             (void *)meta_request,
             request->request_tag);
-        goto message_create_failed;
+        goto finish;
     }
 
     aws_s3_request_setup_send_data(request, message);
 
     aws_http_message_release(message);
 
+    /* Success! */
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Prepared request %p for part %d",
@@ -512,11 +515,16 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
         (void *)request,
         request->part_number);
 
-    return AWS_OP_SUCCESS;
+    success = true;
 
-message_create_failed:
-
-    return AWS_OP_ERR;
+finish:;
+    struct aws_future *future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
+    if (success) {
+        aws_future_set_valueless(future);
+    } else {
+        aws_future_set_error(future, aws_last_error_or_unknown());
+    }
+    return future;
 }
 
 /* For UploadPartCopy requests, etag is sent in the request body, within XML entity quotes */

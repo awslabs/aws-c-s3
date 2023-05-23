@@ -956,6 +956,26 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         content_length_header_found = true;
     }
 
+    /* There are multiple ways to pass the body in, ensure only 1 was used */
+    int body_source_count = 0;
+    if (aws_http_message_get_body_stream(options->message) != NULL) {
+        ++body_source_count;
+    }
+    if (options->send_filepath.len > 0) {
+        ++body_source_count;
+    }
+    if (options->send_async_stream != NULL) {
+        ++body_source_count;
+    }
+    if (body_source_count > 1) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create auto-ranged-put meta request."
+            " More than one data source is set (filepath, async stream, body stream).");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     /* Call the appropriate meta-request new function. */
     switch (options->type) {
         case AWS_S3_META_REQUEST_TYPE_GET_OBJECT: {
@@ -979,12 +999,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 return NULL;
             }
 
-            struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
-
-            if ((input_stream == NULL) && (options->send_filepath.len == 0)) {
+            if (body_source_count == 0) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "Could not create auto-ranged-put meta request; filepath or body stream must be set.");
+                    "Could not create auto-ranged-put meta request."
+                    " Body must be set via filepath, async stream, or body stream.");
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
