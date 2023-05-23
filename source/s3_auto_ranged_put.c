@@ -804,6 +804,7 @@ static struct aws_future *s_skip_parts_from_stream(
     AWS_PRECONDITION(num_parts_read_from_stream <= skip_until_part_number);
 
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    (void)auto_ranged_put;
     AWS_PRECONDITION(skip_until_part_number <= auto_ranged_put->synced_data.total_num_parts);
 
     struct aws_future *skip_future = aws_future_new(meta_request->allocator, AWS_FUTURE_BOOL);
@@ -1110,6 +1111,7 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
         s_s3_prepare_upload_part_finish(part_prep, error_code);
         return;
     }
+
     if (aws_future_get_bool(part_prep->skipping_future)) {
         /* Skipping succeeded */
         auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
@@ -1152,15 +1154,15 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         goto on_done;
     }
 
-    if (!auto_ranged_put->has_content_length) {
+    if (!auto_ranged_put->has_content_length && request->request_body.len < request->request_body.capacity) {
         /* BEGIN CRITICAL SECTION */
         {
             aws_s3_meta_request_lock_synced_data(meta_request);
+            auto_ranged_put->synced_data.is_body_stream_at_end = true;
 
             if (request->request_body.len == 0) {
                 request->is_noop = true;
                 ++auto_ranged_put->synced_data.num_parts_read;
-                auto_ranged_put->synced_data.is_body_stream_at_end = true;
 
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,
@@ -1169,8 +1171,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
                     (void *)meta_request,
                     request->part_number,
                     aws_string_c_str(auto_ranged_put->upload_id));
-            } else if (request->request_body.len < request->request_body.capacity) {
-                auto_ranged_put->synced_data.is_body_stream_at_end = true;
             }
             aws_s3_meta_request_unlock_synced_data(meta_request);
         }
