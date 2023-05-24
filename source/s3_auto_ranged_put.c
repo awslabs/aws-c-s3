@@ -920,7 +920,7 @@ static struct aws_future *s_s3_prepare_list_parts(struct aws_s3_request *request
     }
     /* END CRITICAL SECTION */
     /* ListPart will not fail to create the next message `s_construct_next_request_http_message` */
-    AWS_ASSERT(message_creation_result == AWS_OP_SUCCESS);
+    AWS_FATAL_ASSERT(message_creation_result == AWS_OP_SUCCESS);
     if (meta_request->checksum_config.checksum_algorithm == AWS_SCA_NONE) {
         /* We don't need to worry about the pre-calculated checksum from user as for multipart upload, only way
          * to calculate checksum for multipart upload is from client. */
