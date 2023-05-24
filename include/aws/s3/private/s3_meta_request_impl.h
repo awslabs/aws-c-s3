@@ -23,7 +23,6 @@ struct aws_s3_client;
 struct aws_s3_connection;
 struct aws_s3_meta_request;
 struct aws_s3_request;
-struct aws_s3_request_options;
 struct aws_http_headers;
 struct aws_http_make_request_options;
 struct aws_retry_strategy;
@@ -128,7 +127,7 @@ struct aws_s3_meta_request {
 
     struct aws_s3_endpoint *endpoint;
 
-    /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc..
+    /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc...
      * After the meta request is finished, this will be reset along with the client reference.*/
     struct aws_event_loop *io_event_loop;
 
@@ -164,8 +163,8 @@ struct aws_s3_meta_request {
         /* The sum of initial_read_window, plus all window_increment() calls. This number never goes down. */
         uint64_t read_window_running_total;
 
-        /* The next expected streaming part number needed to continue streaming part bodies.  (For example, this will
-         * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. */
+        /* The next expected streaming part number needed to continue streaming part bodies. (For example, this will
+         * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. )*/
         uint32_t next_streaming_part;
 
         /* Number of parts scheduled for delivery. */
@@ -209,7 +208,7 @@ struct aws_s3_meta_request {
     /* checksum found in either a default get request, or in the initial head request of a multipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
 
-    /* running checksum of all of the parts of a default get, or ranged get meta request*/
+    /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
 };
 
@@ -299,7 +298,7 @@ void aws_s3_meta_request_finished_request(
 
 /* Called to place the request in the meta request's priority queue for streaming back to the caller.  Once all requests
  * with a part number less than the given request has been received, the given request and the previous requests will
- * scheduled for streaming.  */
+ * be scheduled for streaming.  */
 AWS_S3_API
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
@@ -314,6 +313,8 @@ void aws_s3_meta_request_stream_response_body_synced(
  */
 AWS_S3_API
 struct aws_future *aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
+
+bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request);
 
 /* Set the meta request finish result as failed. This is meant to be called sometime before aws_s3_meta_request_finish.
  * Subsequent calls to this function or to aws_s3_meta_request_set_success_synced will not overwrite the end result of

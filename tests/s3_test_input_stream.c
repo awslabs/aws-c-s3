@@ -31,18 +31,18 @@ static int s_aws_s3_test_input_stream_read(
     struct aws_s3_test_input_stream_impl *test_input_stream =
         AWS_CONTAINER_OF(stream, struct aws_s3_test_input_stream_impl, base);
 
-    if (dest->capacity > (test_input_stream->length - test_input_stream->position)) {
-        aws_raise_error(AWS_IO_STREAM_READ_FAILED);
-        return AWS_OP_ERR;
-    }
-
-    while (dest->len < dest->capacity) {
+    while (dest->len < dest->capacity && test_input_stream->position < test_input_stream->length) {
         size_t buffer_pos = test_input_stream->position % test_string->len;
 
         struct aws_byte_cursor source_byte_cursor = {
             .len = test_string->len - buffer_pos,
             .ptr = test_string->ptr + buffer_pos,
         };
+
+        size_t remaining_in_stream = test_input_stream->length - test_input_stream->position;
+        if (remaining_in_stream < source_byte_cursor.len) {
+            source_byte_cursor.len = remaining_in_stream;
+        }
 
         size_t remaining_in_buffer = dest->capacity - dest->len;
 
@@ -51,7 +51,6 @@ static int s_aws_s3_test_input_stream_read(
         }
 
         aws_byte_buf_append(dest, &source_byte_cursor);
-        buffer_pos += source_byte_cursor.len;
 
         test_input_stream->position += source_byte_cursor.len;
     }
