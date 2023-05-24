@@ -47,7 +47,7 @@ struct aws_s3_auto_ranged_put_prepare_request_async_ctx {
 struct aws_s3_prepare_upload_part_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *skipping_future;  /* aws_future<bool> for skipping step */
+    struct aws_future *skipping_future;  /* aws_future<void> for skipping step */
     struct aws_future *read_part_future; /* aws_future<void> for reading step */
     struct aws_future *my_future;        /* aws_future<aws_http_message *> to set when this operation completes */
 };
@@ -56,7 +56,7 @@ struct aws_s3_prepare_upload_part_async_ctx {
 struct aws_s3_prepare_complete_multipart_upload_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *skipping_future; /* aws_future<bool> for skipping step */
+    struct aws_future *skipping_future; /* aws_future<void> for skipping step */
     struct aws_future *my_future;       // aws_future<aws_http_message *> to set when this operation completes */
 };
 
@@ -807,10 +807,10 @@ static struct aws_future *s_skip_parts_from_stream(
     (void)auto_ranged_put;
     AWS_PRECONDITION(skip_until_part_number <= auto_ranged_put->synced_data.total_num_parts);
 
-    struct aws_future *skip_future = aws_future_new(meta_request->allocator, AWS_FUTURE_BOOL);
+    struct aws_future *skip_future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
 
     if (num_parts_read_from_stream == skip_until_part_number) {
-        aws_future_set_bool(skip_future, false);
+        aws_future_set_valueless(skip_future);
         return skip_future;
     }
 
@@ -919,7 +919,7 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
 on_done:
     aws_byte_buf_clean_up(&skip_ctx->temp_body_buf);
     if (error_code == AWS_ERROR_SUCCESS) {
-        aws_future_set_bool(skip_ctx->my_future, true);
+        aws_future_set_valueless(skip_ctx->my_future);
     } else {
         aws_future_set_error(skip_ctx->my_future, error_code);
     }
@@ -1076,18 +1076,9 @@ struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
-        if (auto_ranged_put->has_content_length) {
-            part_prep->skipping_future = s_skip_parts_from_stream(
-                meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
-            aws_future_register_callback(
-                part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
-        } else {
-            /* Skip skipping parts if content_length is not available as we don't support pause/resume for now */
-            ++auto_ranged_put->synced_data.total_num_parts;
-            part_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_BOOL);
-            aws_future_set_bool(part_prep->skipping_future, false);
-            s_s3_prepare_upload_part_on_skipping_done(part_prep);
-        }
+        part_prep->skipping_future = s_skip_parts_from_stream(
+            meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
+        aws_future_register_callback(part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */
@@ -1112,10 +1103,8 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
         return;
     }
 
-    if (aws_future_get_bool(part_prep->skipping_future)) {
-        /* Skipping succeeded */
-        auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
-    }
+    /* Skipping succeeded */
+    auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number;
 
     /* Next async step: read body stream for this part into a buffer */
     size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
@@ -1154,11 +1143,13 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         goto on_done;
     }
 
-    if (!auto_ranged_put->has_content_length && request->request_body.len < request->request_body.capacity) {
+    if (!auto_ranged_put->has_content_length) {
         /* BEGIN CRITICAL SECTION */
         {
             aws_s3_meta_request_lock_synced_data(meta_request);
-            auto_ranged_put->synced_data.is_body_stream_at_end = true;
+            auto_ranged_put->synced_data.is_body_stream_at_end =
+                request->request_body.len < request->request_body.capacity;
+            ++auto_ranged_put->synced_data.total_num_parts;
 
             if (request->request_body.len == 0) {
                 request->is_noop = true;
@@ -1178,6 +1169,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     }
 
     if (!request->is_noop) {
+
         /* Reset values for corresponding checksum and etag.
          * Note: During resume flow this might cause the values to be
          * reset twice (if we are preparing part in between
@@ -1193,8 +1185,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             struct aws_string *null_etag = NULL;
             aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
 
-            // TODO: why remove this?
-            ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
             ++auto_ranged_put->synced_data.num_parts_read;
 
             aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -1257,22 +1247,31 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
     struct aws_allocator *allocator = request->allocator;
 
     struct aws_future *message_future = aws_future_new(allocator, AWS_FUTURE_POINTER);
-    /* Note: completeMPU fails if no parts are provided. We could
-     * workaround it by uploading an empty part at the cost of
-     * complicating flow logic for dealing with noop parts, but that
-     * arguably adds a lot of complexity for little benefit.
-     * Pre-buffering parts to determine whether mpu is needed will
-     * resolve this issue.
-     */
-    if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
-            "Content-Length header to 0 to upload empty object",
-            (void *)meta_request);
-        aws_future_set_error(message_future, AWS_ERROR_UNSUPPORTED_OPERATION);
-        return message_future;
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        /* Note: completeMPU fails if no parts are provided. We could
+         * workaround it by uploading an empty part at the cost of
+         * complicating flow logic for dealing with noop parts, but that
+         * arguably adds a lot of complexity for little benefit.
+         * Pre-buffering parts to determine whether mpu is needed will
+         * resolve this issue.
+         */
+        if (!auto_ranged_put->has_content_length &&
+            auto_ranged_put->synced_data.num_parts_noop == auto_ranged_put->synced_data.total_num_parts) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
+                "Content-Length header to 0 to upload empty object",
+                (void *)meta_request);
+            aws_future_set_error(message_future, AWS_ERROR_UNSUPPORTED_OPERATION);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            return message_future;
+        }
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
+
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_complete_multipart_upload_async_ctx));
     complete_mpu_prep->allocator = allocator;
@@ -1283,23 +1282,17 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
 
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
+            meta_request,
+            auto_ranged_put->prepare_data.num_parts_read_from_stream,
+            auto_ranged_put->synced_data.total_num_parts);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
 
-        if (auto_ranged_put->has_content_length) {
-            complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
-                meta_request,
-                auto_ranged_put->prepare_data.num_parts_read_from_stream,
-                auto_ranged_put->synced_data.total_num_parts);
-            aws_future_register_callback(
-                complete_mpu_prep->skipping_future,
-                s_s3_prepare_complete_multipart_upload_on_skipping_done,
-                complete_mpu_prep);
-        } else {
-            /* Skip skipping parts if content_length is not available as we don't support pause/resume for now */
-            complete_mpu_prep->skipping_future = aws_future_new(allocator, AWS_FUTURE_BOOL);
-            aws_future_set_bool(complete_mpu_prep->skipping_future, false);
-            s_s3_prepare_complete_multipart_upload_on_skipping_done(complete_mpu_prep);
-        }
-
+        aws_future_register_callback(
+            complete_mpu_prep->skipping_future,
+            s_s3_prepare_complete_multipart_upload_on_skipping_done,
+            complete_mpu_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps. */
@@ -1323,6 +1316,7 @@ static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_d
         return;
     }
 
+    // TODO: Lock?
     /* Skipping was successful */
     auto_ranged_put->prepare_data.num_parts_read_from_stream = auto_ranged_put->synced_data.total_num_parts;
 
