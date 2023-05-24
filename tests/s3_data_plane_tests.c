@@ -5541,6 +5541,7 @@ struct put_object_pause_resume_test_data {
     int meta_request_error_code;
     int response_status_code;
 
+    /* (Optional) content_length to send. If not set, use the length of the input stream. */
     uint64_t content_length;
 };
 
