@@ -4366,7 +4366,7 @@ static int s_test_s3_put_fail_object_inputstream_mismatch_content_length(struct 
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
 
-    ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER);
+    ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
