@@ -1104,7 +1104,7 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
     }
 
     /* Skipping succeeded */
-    auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number;
+    auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number - 1;
 
     /* Next async step: read body stream for this part into a buffer */
     size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
@@ -1142,6 +1142,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             (void *)meta_request);
         goto on_done;
     }
+    ++auto_ranged_put->prepare_data.num_parts_read_from_stream;
 
     if (!auto_ranged_put->has_content_length) {
         /* BEGIN CRITICAL SECTION */
