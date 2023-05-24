@@ -1455,6 +1455,11 @@ int aws_s3_tester_send_meta_request_with_options(
                     headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
             }
 
+            if (options->put_options.skip_content_length) {
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                aws_http_headers_erase(headers, g_content_length_header_name);
+            }
+
             if (options->put_options.invalid_request) {
                 /* make a invalid request */
                 aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("invalid_path"));
