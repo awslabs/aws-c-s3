@@ -267,9 +267,8 @@ static void s_s3_default_prepare_request_on_read_done(void *user_data) {
         goto finish;
     }
 
-    /* TODO: support for unknown content length. move this check to read_body()? */
     if (request->request_body.len < request->request_body.capacity) {
-        error_code = aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER);
+        error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER;
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Request body is smaller than 'Content-Length' header said it would be",
