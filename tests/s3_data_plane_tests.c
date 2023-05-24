@@ -4270,7 +4270,6 @@ static int s_test_s3_put_single_part_fail_object_inputstream_fail_reading(struct
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
-                .ensure_multipart = true,
                 .invalid_input_stream = true,
                 .content_length = 10,
             },
@@ -4302,9 +4301,8 @@ static int s_test_s3_put_single_part_fail_object_inputstream_mismatch_content_le
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
-                .ensure_multipart = true,
-                .fix_short_len_input_stream = true,
-                .content_length = 10,
+                .object_size_mb = 1,
+                .content_length = MB_TO_BYTES(2),
             },
     };
 
@@ -4360,8 +4358,8 @@ static int s_test_s3_put_fail_object_inputstream_mismatch_content_length(struct 
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
-                .ensure_multipart = true,
-                .fix_short_len_input_stream = true,
+                .ensure_multipart = false,
+                .object_size_mb = 1,
                 .content_length = 10 * 1024 * 1024,
             },
     };
@@ -6139,7 +6137,7 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
     aws_input_stream_release(initial_upload_stream);
 
     /* a small input stream to resume with */
-    struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new_fix_length(allocator, 8 * 1024 * 1024);
+    struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new(allocator, 8 * 1024 * 1024);
 
     struct aws_s3_meta_request_resume_token *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 
