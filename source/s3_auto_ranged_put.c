@@ -1141,7 +1141,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
 
     /* If Content-Length is defined, check that we read the expected amount */
     if (has_content_length && (request->request_body.len < request->request_body.capacity)) {
-        error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER;
+        error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Request body is smaller than 'Content-Length' header said it would be",
