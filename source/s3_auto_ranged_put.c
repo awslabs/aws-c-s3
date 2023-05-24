@@ -1314,7 +1314,6 @@ static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_d
         return;
     }
 
-    // TODO: Lock?
     /* Skipping was successful */
     auto_ranged_put->prepare_data.num_parts_read_from_stream = auto_ranged_put->synced_data.total_num_parts;
 
