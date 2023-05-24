@@ -1253,6 +1253,10 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
     struct aws_future *message_future = aws_future_new(allocator, AWS_FUTURE_POINTER);
 
     aws_s3_meta_request_lock_synced_data(meta_request);
+    int total_num_parts = auto_ranged_put->synced_data.total_num_parts;
+    int num_parts_noop = auto_ranged_put->synced_data.num_parts_noop;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
     /* Note: completeMPU fails if no parts are provided. We could
      * workaround it by uploading an empty part at the cost of
      * complicating flow logic for dealing with noop parts, but that
@@ -1260,18 +1264,15 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
      * Pre-buffering parts to determine whether mpu is needed will
      * resolve this issue.
      */
-    if (!auto_ranged_put->has_content_length &&
-        auto_ranged_put->synced_data.num_parts_noop == auto_ranged_put->synced_data.total_num_parts) {
+    if (!auto_ranged_put->has_content_length && num_parts_noop == total_num_parts) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
             "Content-Length header to 0 to upload empty object",
             (void *)meta_request);
         aws_future_set_error(message_future, AWS_ERROR_UNSUPPORTED_OPERATION);
-        aws_s3_meta_request_unlock_synced_data(meta_request);
         return message_future;
     }
-    aws_s3_meta_request_unlock_synced_data(meta_request);
 
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_complete_multipart_upload_async_ctx));
@@ -1283,12 +1284,8 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
 
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
-        aws_s3_meta_request_lock_synced_data(meta_request);
         complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
-            meta_request,
-            auto_ranged_put->prepare_data.num_parts_read_from_stream,
-            auto_ranged_put->synced_data.total_num_parts);
-        aws_s3_meta_request_unlock_synced_data(meta_request);
+            meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, total_num_parts);
 
         aws_future_register_callback(
             complete_mpu_prep->skipping_future,
