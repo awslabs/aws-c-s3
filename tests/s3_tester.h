@@ -188,6 +188,8 @@ struct aws_s3_tester_meta_request_options {
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
         struct aws_byte_cursor content_encoding;
+        /* Create a 5 bytes input stream with fixed length */
+        bool fix_short_len_input_stream;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
@@ -412,12 +414,16 @@ enum aws_s3_test_stream_value {
 
 struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
+/* Will always fill the buffer for required length, if the length cannot match the buffer, error will be raised */
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     struct aws_allocator *allocator,
     size_t length,
     enum aws_s3_test_stream_value stream_value);
+
+/* Will only fill the buffer with the fixed length without error out, if the buffer is larger than what we have. */
+struct aws_input_stream *aws_s3_test_input_stream_new_fix_length(struct aws_allocator *allocator, size_t length);
 
 /* Add g_upload_folder to the file path to make sure we get all the non-pre-exist files in the same folder. */
 int aws_s3_tester_upload_file_path_init(

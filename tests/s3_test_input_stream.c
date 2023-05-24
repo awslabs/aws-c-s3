@@ -69,6 +69,35 @@ static int s_aws_s3_test_input_stream_read_2(struct aws_input_stream *stream, st
     return s_aws_s3_test_input_stream_read(stream, dest, &test_string);
 }
 
+static int s_aws_s3_test_input_stream_read_3(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
+    struct aws_byte_cursor test_string = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("This is an S3 test.");
+    struct aws_s3_test_input_stream_impl *test_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_test_input_stream_impl, base);
+
+    while (dest->len < dest->capacity && test_input_stream->position < test_input_stream->length) {
+        size_t buffer_pos = test_input_stream->position % test_string.len;
+
+        struct aws_byte_cursor source_byte_cursor = {
+            .len = test_string.len - buffer_pos,
+            .ptr = test_string.ptr + buffer_pos,
+        };
+
+        size_t to_fit =
+            aws_min_size(dest->capacity - dest->len, test_input_stream->length - test_input_stream->position);
+
+        if (to_fit < source_byte_cursor.len) {
+            source_byte_cursor.len = to_fit;
+        }
+
+        aws_byte_buf_append(dest, &source_byte_cursor);
+        buffer_pos += source_byte_cursor.len;
+
+        test_input_stream->position += source_byte_cursor.len;
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 static int s_aws_s3_test_input_stream_get_status(struct aws_input_stream *stream, struct aws_stream_status *status) {
     (void)stream;
     (void)status;
@@ -108,6 +137,13 @@ static struct aws_input_stream_vtable s_aws_s3_test_input_stream_vtable_2 = {
     .get_length = s_aws_s3_test_input_stream_get_length,
 };
 
+static struct aws_input_stream_vtable s_aws_s3_test_input_stream_vtable_3 = {
+    .seek = s_aws_s3_test_input_stream_seek,
+    .read = s_aws_s3_test_input_stream_read_3,
+    .get_status = s_aws_s3_test_input_stream_get_status,
+    .get_length = s_aws_s3_test_input_stream_get_length,
+};
+
 struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     struct aws_allocator *allocator,
     size_t stream_length,
@@ -135,4 +171,27 @@ struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t stream_length) {
     return aws_s3_test_input_stream_new_with_value_type(allocator, stream_length, TEST_STREAM_VALUE_1);
+}
+
+struct aws_input_stream *aws_s3_test_input_stream_new_fix_length(
+    struct aws_allocator *allocator,
+    size_t stream_length) {
+
+    struct aws_s3_test_input_stream_impl *test_input_stream =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_test_input_stream_impl));
+
+    test_input_stream->base.vtable = &s_aws_s3_test_input_stream_vtable_3;
+
+    aws_ref_count_init(
+        &test_input_stream->base.ref_count,
+        test_input_stream,
+        (aws_simple_completion_callback *)s_aws_s3_test_input_stream_destroy);
+
+    struct aws_input_stream *input_stream = &test_input_stream->base;
+
+    test_input_stream->position = 0;
+    test_input_stream->length = stream_length;
+    test_input_stream->allocator = allocator;
+
+    return input_stream;
 }

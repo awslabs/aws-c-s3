@@ -4158,6 +4158,38 @@ static int s_test_s3_put_single_part_fail_object_inputstream_fail_reading(struct
     return 0;
 }
 
+AWS_TEST_CASE(
+    test_s3_put_single_part_fail_object_inputstream_mismatch_content_length,
+    s_test_s3_put_single_part_fail_object_inputstream_mismatch_content_length)
+static int s_test_s3_put_single_part_fail_object_inputstream_mismatch_content_length(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .ensure_multipart = true,
+                .fix_short_len_input_stream = true,
+                .content_length = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+
+    ASSERT_TRUE(meta_request_test_results.finished_error_code != AWS_ERROR_SUCCESS);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_fail_object_inputstream_fail_reading, s_test_s3_put_fail_object_inputstream_fail_reading)
 static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -4180,6 +4212,36 @@ static int s_test_s3_put_fail_object_inputstream_fail_reading(struct aws_allocat
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
 
     ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_IO_STREAM_READ_FAILED);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_put_fail_object_inputstream_mismatch_content_length,
+    s_test_s3_put_fail_object_inputstream_mismatch_content_length)
+static int s_test_s3_put_fail_object_inputstream_mismatch_content_length(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .ensure_multipart = true,
+                .fix_short_len_input_stream = true,
+                .content_length = 10 * 1024 * 1024,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+
+    ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH_HEADER);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -5924,7 +5986,7 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
 
     /* offset of the upload where pause should be requested by test client */
     aws_atomic_store_int(&test_data.request_pause_offset, 8 * 1024 * 1024);
-    test_data.content_length = s_pause_resume_object_length_128MB * 2;
+    test_data.content_length = s_pause_resume_object_length_128MB;
 
     /* stream used to initiate upload */
     struct aws_input_stream *initial_upload_stream =
@@ -5950,7 +6012,7 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
     aws_input_stream_release(initial_upload_stream);
 
     /* a small input stream to resume with */
-    struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new(allocator, 100);
+    struct aws_input_stream *resume_upload_stream = aws_s3_test_input_stream_new_fix_length(allocator, 8 * 1024 * 1024);
 
     struct aws_s3_meta_request_resume_token *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 

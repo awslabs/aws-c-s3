@@ -1384,6 +1384,9 @@ int aws_s3_tester_send_meta_request_with_options(
 
             if (options->put_options.invalid_input_stream) {
                 input_stream = aws_s3_bad_input_stream_new(allocator, object_size_bytes);
+            } else if (options->put_options.fix_short_len_input_stream) {
+                /* Create a 5 byte fix length stream */
+                input_stream = aws_s3_test_input_stream_new_fix_length(allocator, 5);
             } else {
                 input_stream = aws_s3_test_input_stream_new(allocator, object_size_bytes);
             }
