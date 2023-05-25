@@ -1291,12 +1291,19 @@ static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_d
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep = user_data;
     struct aws_s3_request *request = complete_mpu_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     int error_code = aws_future_get_error(complete_mpu_prep->skipping_future);
     if (error_code != AWS_ERROR_SUCCESS) {
         s_s3_prepare_complete_multipart_upload_finish(complete_mpu_prep, error_code);
         return;
     }
+
+    /* Skipping was successful */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    auto_ranged_put->prepare_data.num_parts_read_from_stream =
+        aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 
     aws_byte_buf_init(
         &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
