@@ -1005,10 +1005,8 @@ static struct aws_future *s_s3_prepare_list_parts(struct aws_s3_request *request
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
-
-    if (message_creation_result) {
-        goto on_done;
-    }
+    /* ListPart will not fail to create the next message `s_construct_next_request_http_message` */
+    AWS_FATAL_ASSERT(message_creation_result == AWS_OP_SUCCESS);
     if (meta_request->checksum_config.checksum_algorithm == AWS_SCA_NONE) {
         /* We don't need to worry about the pre-calculated checksum from user as for multipart upload, only way
          * to calculate checksum for multipart upload is from client. */
@@ -1026,14 +1024,10 @@ static struct aws_future *s_s3_prepare_list_parts(struct aws_s3_request *request
             g_s3_list_parts_with_checksum_excluded_headers_count,
             true);
     }
-
-on_done:;
+    AWS_ASSERT(message);
     struct aws_future *future = aws_future_new(request->allocator, AWS_FUTURE_POINTER);
-    if (message == NULL) {
-        aws_future_set_error(future, aws_last_error_or_unknown());
-    } else {
-        aws_future_set_pointer(future, message, s_destroy_message_pointer);
-    }
+    aws_future_set_pointer(future, message, s_destroy_message_pointer);
+
     return future;
 }
 
