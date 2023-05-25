@@ -31,6 +31,10 @@ struct aws_s3_auto_ranged_put {
     uint64_t content_length;
     bool has_content_length;
 
+    /* Note: total num parts is known only if content-length is known,
+    otherwise it will be 0. */
+    uint32_t total_num_parts;
+
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
         /*
@@ -66,9 +70,6 @@ struct aws_s3_auto_ranged_put {
         struct aws_s3_paginated_operation *list_parts_operation;
         struct aws_string *list_parts_continuation_token;
 
-        /* Note: total num parts is known only if content-length is known,
-        otherwise it is running total of number of parts read from stream. */
-        uint32_t total_num_parts;
         /* Number of parts we've started work on */
         uint32_t num_parts_sent;
         /* Number of "sent" parts we've finished reading the body for
