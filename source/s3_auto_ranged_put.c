@@ -1289,6 +1289,8 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
 static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_data) {
 
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep = user_data;
+    struct aws_s3_request *request = complete_mpu_prep->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
 
     int error_code = aws_future_get_error(complete_mpu_prep->skipping_future);
     if (error_code != AWS_ERROR_SUCCESS) {
