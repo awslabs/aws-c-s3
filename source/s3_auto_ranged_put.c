@@ -1302,7 +1302,7 @@ static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_d
     /* Skipping was successful */
     aws_s3_meta_request_lock_synced_data(meta_request);
     auto_ranged_put->prepare_data.num_parts_read_from_stream =
-        aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
+        (uint32_t)aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     aws_byte_buf_init(
