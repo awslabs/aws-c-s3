@@ -338,14 +338,14 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
 
     auto_ranged_put->has_content_length = has_content_length;
     auto_ranged_put->content_length = has_content_length ? content_length : 0;
-    auto_ranged_put->synced_data.total_num_parts = has_content_length ? num_parts : 0;
+    auto_ranged_put->total_num_parts_from_content_length = has_content_length ? num_parts : 0;
     auto_ranged_put->upload_id = NULL;
     auto_ranged_put->resume_token = options->resume_token;
 
     aws_s3_meta_request_resume_token_acquire(auto_ranged_put->resume_token);
 
     auto_ranged_put->threaded_update_data.next_part_number = 1;
-    auto_ranged_put->prepare_data.num_parts_read_from_stream = 0;
+    auto_ranged_put->prepare_data.part_index_for_skipping = 0;
     auto_ranged_put->synced_data.is_body_stream_at_end = false;
 
     uint32_t initial_num_parts = auto_ranged_put->has_content_length ? num_parts : s_unknown_length_default_num_parts;
@@ -493,7 +493,7 @@ static bool s_s3_auto_ranged_put_update(
 
             bool should_create_next_part_request = false;
             if (auto_ranged_put->has_content_length &&
-                (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->synced_data.total_num_parts)) {
+                (auto_ranged_put->synced_data.num_parts_sent < auto_ranged_put->total_num_parts_from_content_length)) {
 
                 /* Check if the etag/checksum list has the result already */
                 int part_index = auto_ranged_put->threaded_update_data.next_part_number - 1;
@@ -516,7 +516,7 @@ static bool s_s3_auto_ranged_put_update(
                 // Something went really wrong. we still have parts to send, but have etags for all parts
                 AWS_FATAL_ASSERT(
                     auto_ranged_put->threaded_update_data.next_part_number <=
-                    auto_ranged_put->synced_data.total_num_parts);
+                    auto_ranged_put->total_num_parts_from_content_length);
 
                 if (s_should_skip_scheduling_more_parts_based_on_flags(auto_ranged_put, flags)) {
                     goto has_work_remaining;
@@ -569,7 +569,8 @@ static bool s_s3_auto_ranged_put_update(
             /* There is one more request to send after all the parts (the complete-multipart-upload) but it can't be
              * done until all the parts have been completed.*/
             if (auto_ranged_put->has_content_length) {
-                if (auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->synced_data.total_num_parts) {
+                if (auto_ranged_put->synced_data.num_parts_completed !=
+                    auto_ranged_put->total_num_parts_from_content_length) {
                     goto has_work_remaining;
                 }
             } else {
@@ -701,7 +702,7 @@ static size_t s_compute_request_body_size(const struct aws_s3_meta_request *meta
 
     size_t request_body_size = meta_request->part_size;
     /* Last part--adjust size to match remaining content length. */
-    if (auto_ranged_put->has_content_length && part_number == auto_ranged_put->synced_data.total_num_parts) {
+    if (auto_ranged_put->has_content_length && part_number == auto_ranged_put->total_num_parts_from_content_length) {
         size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
 
         if (content_remainder > 0) {
@@ -788,10 +789,12 @@ struct aws_s3_skip_parts_from_stream_async_ctx {
 
 /**
  * Async operation that skips parts from input stream that were previously uploaded.
- * Assumes input stream has num_parts_read_from_stream specifying which part stream is on
+ * Assumes input stream has part_index_for_skipping specifying which part stream is on
  * and will read into temp buffer until it gets to skip_until_part_number (i.e. skipping does include
  * that part). If checksum is set on the request and parts with checksums were uploaded before, checksum will be
  * verified.
+ *
+ * Note: If there's no content_length, pause/resume is not supported, so skipping parts will be noop.
  *
  * Returns an aws_future<void>
  */
@@ -801,18 +804,18 @@ static struct aws_future *s_skip_parts_from_stream(
     uint32_t skip_until_part_number) {
 
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(num_parts_read_from_stream <= skip_until_part_number);
 
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     (void)auto_ranged_put;
-    AWS_PRECONDITION(skip_until_part_number <= auto_ranged_put->synced_data.total_num_parts);
 
     struct aws_future *skip_future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
-
-    if (num_parts_read_from_stream == skip_until_part_number) {
+    if (num_parts_read_from_stream == skip_until_part_number || !auto_ranged_put->has_content_length) {
         aws_future_set_valueless(skip_future);
         return skip_future;
     }
+
+    AWS_PRECONDITION(num_parts_read_from_stream <= skip_until_part_number);
+    AWS_PRECONDITION(skip_until_part_number <= auto_ranged_put->total_num_parts_from_content_length);
 
     /* Store context for async operation */
     struct aws_s3_skip_parts_from_stream_async_ctx *skip_ctx =
@@ -1070,7 +1073,7 @@ struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
         part_prep->skipping_future = s_skip_parts_from_stream(
-            meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
+            meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
         aws_future_register_callback(part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
@@ -1127,9 +1130,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     }
 
     /* Reading succeeded. */
-
-    auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number;
-
     bool is_body_stream_at_end = aws_future_get_bool(part_prep->read_part_future);
     request->is_noop = request->request_body.len == 0;
 
@@ -1147,10 +1147,6 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
 
-        if (!auto_ranged_put->has_content_length) {
-            ++auto_ranged_put->synced_data.total_num_parts;
-        }
-
         /* TODO: should we signal the client to run update again?
          * since we just bumped up this number we use to throttle work? */
         ++auto_ranged_put->synced_data.num_parts_read;
@@ -1158,6 +1154,8 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
 
         if (!request->is_noop) {
+            auto_ranged_put->prepare_data.part_index_for_skipping = request->part_number;
+
             /* Reset values for corresponding checksum and etag.
              * Note: During resume flow this might cause the values to be
              * reset twice (if we are preparing part in between
@@ -1247,8 +1245,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
     struct aws_future *message_future = aws_future_new(allocator, AWS_FUTURE_POINTER);
 
     aws_s3_meta_request_lock_synced_data(meta_request);
-    int total_num_parts = auto_ranged_put->synced_data.total_num_parts;
-    int num_parts_noop = auto_ranged_put->synced_data.num_parts_noop;
+    size_t etag_list_length = aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     /* Note: completeMPU fails if no parts are provided. We could
@@ -1258,7 +1255,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
      * Pre-buffering parts to determine whether mpu is needed will
      * resolve this issue.
      */
-    if (!auto_ranged_put->has_content_length && num_parts_noop == total_num_parts) {
+    if (!auto_ranged_put->has_content_length && etag_list_length == 0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
@@ -1279,7 +1276,9 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
         complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
-            meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, total_num_parts);
+            meta_request,
+            auto_ranged_put->prepare_data.part_index_for_skipping,
+            auto_ranged_put->total_num_parts_from_content_length);
 
         aws_future_register_callback(
             complete_mpu_prep->skipping_future,
@@ -1300,16 +1299,12 @@ static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_d
     struct aws_s3_prepare_complete_multipart_upload_async_ctx *complete_mpu_prep = user_data;
     struct aws_s3_request *request = complete_mpu_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     int error_code = aws_future_get_error(complete_mpu_prep->skipping_future);
     if (error_code != AWS_ERROR_SUCCESS) {
         s_s3_prepare_complete_multipart_upload_finish(complete_mpu_prep, error_code);
         return;
     }
-
-    /* Skipping was successful */
-    auto_ranged_put->prepare_data.num_parts_read_from_stream = auto_ranged_put->synced_data.total_num_parts;
 
     aws_byte_buf_init(
         &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
@@ -1519,7 +1514,7 @@ static void s_s3_auto_ranged_put_request_finished(
                             "id=%p: Resuming PutObject. %d out of %d parts have completed during previous request.",
                             (void *)meta_request,
                             auto_ranged_put->synced_data.num_parts_completed,
-                            auto_ranged_put->synced_data.total_num_parts);
+                            auto_ranged_put->total_num_parts_from_content_length);
                     }
                 }
 
@@ -1664,12 +1659,20 @@ static void s_s3_auto_ranged_put_request_finished(
                     ++auto_ranged_put->synced_data.num_parts_noop;
                 }
 
-                AWS_LOGF_DEBUG(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: %d out of %d parts have completed.",
-                    (void *)meta_request,
-                    auto_ranged_put->synced_data.num_parts_completed,
-                    auto_ranged_put->synced_data.total_num_parts);
+                if (auto_ranged_put->has_content_length) {
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: %d out of %d parts have completed.",
+                        (void *)meta_request,
+                        auto_ranged_put->synced_data.num_parts_completed,
+                        auto_ranged_put->total_num_parts_from_content_length);
+                } else {
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: %d parts have completed.",
+                        (void *)meta_request,
+                        auto_ranged_put->synced_data.num_parts_completed);
+                }
 
                 if (!request_is_noop) {
                     if (error_code == AWS_ERROR_SUCCESS) {
@@ -1806,7 +1809,7 @@ static int s_s3_auto_ranged_put_pause(
         "id=%p: Pausing request with %u out of %u parts have completed.",
         (void *)meta_request,
         auto_ranged_put->synced_data.num_parts_completed,
-        auto_ranged_put->synced_data.total_num_parts);
+        auto_ranged_put->total_num_parts_from_content_length);
 
     /* upload can be in one of several states:
      * - not started, i.e. we didn't even call crete mpu yet - return success,
@@ -1824,7 +1827,7 @@ static int s_s3_auto_ranged_put_pause(
         (*out_resume_token)->multipart_upload_id =
             aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
         (*out_resume_token)->part_size = meta_request->part_size;
-        (*out_resume_token)->total_num_parts = auto_ranged_put->synced_data.total_num_parts;
+        (*out_resume_token)->total_num_parts = auto_ranged_put->total_num_parts_from_content_length;
         (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
     }
 

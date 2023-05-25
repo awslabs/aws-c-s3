@@ -65,8 +65,8 @@ static bool s_s3_meta_request_update_cancel_test(
             block_update = !call_cancel && auto_ranged_put->synced_data.num_parts_sent == 1;
             break;
         case S3_UPDATE_CANCEL_TYPE_MPU_ALL_PARTS_COMPLETED:
-            call_cancel =
-                auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.total_num_parts;
+            call_cancel = auto_ranged_put->synced_data.num_parts_completed ==
+                          auto_ranged_put->total_num_parts_from_content_length;
             break;
 
         case S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES:

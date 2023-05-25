@@ -31,6 +31,12 @@ struct aws_s3_auto_ranged_put {
     uint64_t content_length;
     bool has_content_length;
 
+    /*
+     * total_num_parts_from_content_length is calculated by content_length / part_size.
+     * It will be 0 if there is no content_length.
+     */
+    uint32_t total_num_parts_from_content_length;
+
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
         /*
@@ -47,11 +53,11 @@ struct aws_s3_auto_ranged_put {
      */
     struct {
         /*
-         * How many parts have been read from input steam.
-         * Since reads are always sequential, this is essentially the number of how many parts were read from start of
-         * stream.
+         * Start index of skipping parts.
+         * This is used to keep track of how many parts have been read from input steam and where to try to start
+         * skipping parts from.
          */
-        uint32_t num_parts_read_from_stream;
+        uint32_t part_index_for_skipping;
     } prepare_data;
 
     /* Members to only be used when the mutex in the base type is locked. */
@@ -66,9 +72,6 @@ struct aws_s3_auto_ranged_put {
         struct aws_s3_paginated_operation *list_parts_operation;
         struct aws_string *list_parts_continuation_token;
 
-        /* Note: total num parts is known only if content-length is known,
-        otherwise it is running total of number of parts read from stream. */
-        uint32_t total_num_parts;
         /* Number of parts we've started work on */
         uint32_t num_parts_sent;
         /* Number of "sent" parts we've finished reading the body for
