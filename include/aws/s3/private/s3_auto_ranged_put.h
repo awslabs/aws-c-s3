@@ -52,7 +52,8 @@ struct aws_s3_auto_ranged_put {
     struct {
         /*
          * Start index of skipping parts.
-         * This is used to keep track of how many parts have been read from input steam and where to try to start skipping parts from.
+         * This is used to keep track of how many parts have been read from input steam and where to try to start
+         * skipping parts from.
          */
         uint32_t part_index_for_skipping;
     } prepare_data;
