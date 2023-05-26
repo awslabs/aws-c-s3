@@ -345,7 +345,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     aws_s3_meta_request_resume_token_acquire(auto_ranged_put->resume_token);
 
     auto_ranged_put->threaded_update_data.next_part_number = 1;
-    auto_ranged_put->prepare_data.num_parts_read_from_stream = 0;
+    auto_ranged_put->prepare_data.part_index_for_skipping = 0;
     auto_ranged_put->synced_data.is_body_stream_at_end = false;
 
     uint32_t initial_num_parts = auto_ranged_put->has_content_length ? num_parts : s_unknown_length_default_num_parts;
@@ -787,7 +787,7 @@ struct aws_s3_skip_parts_from_stream_async_ctx {
 
 /**
  * Async operation that skips parts from input stream that were previously uploaded.
- * Assumes input stream has num_parts_read_from_stream specifying which part stream is on
+ * Assumes input stream has part_index_for_skipping specifying which part stream is on
  * and will read into temp buffer until it gets to skip_until_part_number (i.e. skipping does include
  * that part). If checksum is set on the request and parts with checksums were uploaded before, checksum will be
  * verified.
@@ -1071,7 +1071,7 @@ struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
         part_prep->skipping_future = s_skip_parts_from_stream(
-            meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, request->part_number - 1);
+                meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
         aws_future_register_callback(part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
@@ -1152,7 +1152,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
 
         if (!request->is_noop) {
-            auto_ranged_put->prepare_data.num_parts_read_from_stream = request->part_number;
+            auto_ranged_put->prepare_data.part_index_for_skipping = request->part_number;
 
             /* Reset values for corresponding checksum and etag.
              * Note: During resume flow this might cause the values to be
@@ -1249,7 +1249,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
      * Pre-buffering parts to determine whether mpu is needed will
      * resolve this issue.
      */
-    if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.num_parts_read_from_stream == 0) {
+    if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.part_index_for_skipping == 0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
@@ -1270,7 +1270,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
         complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
-            meta_request, auto_ranged_put->prepare_data.num_parts_read_from_stream, auto_ranged_put->total_num_parts_from_content_length);
+                meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, auto_ranged_put->total_num_parts_from_content_length);
 
         aws_future_register_callback(
             complete_mpu_prep->skipping_future,
