@@ -515,7 +515,8 @@ static bool s_s3_auto_ranged_put_update(
 
                 // Something went really wrong. we still have parts to send, but have etags for all parts
                 AWS_FATAL_ASSERT(
-                    auto_ranged_put->threaded_update_data.next_part_number <= auto_ranged_put->total_num_parts_from_content_length);
+                    auto_ranged_put->threaded_update_data.next_part_number <=
+                    auto_ranged_put->total_num_parts_from_content_length);
 
                 if (s_should_skip_scheduling_more_parts_based_on_flags(auto_ranged_put, flags)) {
                     goto has_work_remaining;
@@ -568,7 +569,8 @@ static bool s_s3_auto_ranged_put_update(
             /* There is one more request to send after all the parts (the complete-multipart-upload) but it can't be
              * done until all the parts have been completed.*/
             if (auto_ranged_put->has_content_length) {
-                if (auto_ranged_put->synced_data.num_parts_completed != auto_ranged_put->total_num_parts_from_content_length) {
+                if (auto_ranged_put->synced_data.num_parts_completed !=
+                    auto_ranged_put->total_num_parts_from_content_length) {
                     goto has_work_remaining;
                 }
             } else {
@@ -1071,7 +1073,7 @@ struct aws_future *s_s3_prepare_upload_part(struct aws_s3_request *request) {
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
         part_prep->skipping_future = s_skip_parts_from_stream(
-                meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
+            meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
         aws_future_register_callback(part_prep->skipping_future, s_s3_prepare_upload_part_on_skipping_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
@@ -1245,6 +1247,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
     aws_s3_meta_request_lock_synced_data(meta_request);
     size_t etag_list_length = aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
     aws_s3_meta_request_unlock_synced_data(meta_request);
+
     /* Note: completeMPU fails if no parts are provided. We could
      * workaround it by uploading an empty part at the cost of
      * complicating flow logic for dealing with noop parts, but that
@@ -1273,7 +1276,9 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
         /* Corner case of last part being previously uploaded during resume.
          * Read it from input stream and potentially verify checksum */
         complete_mpu_prep->skipping_future = s_skip_parts_from_stream(
-                meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, auto_ranged_put->total_num_parts_from_content_length);
+            meta_request,
+            auto_ranged_put->prepare_data.part_index_for_skipping,
+            auto_ranged_put->total_num_parts_from_content_length);
 
         aws_future_register_callback(
             complete_mpu_prep->skipping_future,
