@@ -1242,6 +1242,9 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
 
     struct aws_future *message_future = aws_future_new(allocator, AWS_FUTURE_POINTER);
 
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    size_t etag_list_length = aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
     /* Note: completeMPU fails if no parts are provided. We could
      * workaround it by uploading an empty part at the cost of
      * complicating flow logic for dealing with noop parts, but that
@@ -1249,7 +1252,7 @@ static struct aws_future *s_s3_prepare_complete_multipart_upload(struct aws_s3_r
      * Pre-buffering parts to determine whether mpu is needed will
      * resolve this issue.
      */
-    if (!auto_ranged_put->has_content_length && auto_ranged_put->prepare_data.part_index_for_skipping == 0) {
+    if (!auto_ranged_put->has_content_length && etag_list_length == 0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p 0 byte meta requests without Content-Length header are currently not supported. Set "
