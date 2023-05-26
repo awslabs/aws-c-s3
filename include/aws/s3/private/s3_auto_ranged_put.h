@@ -33,7 +33,7 @@ struct aws_s3_auto_ranged_put {
 
     /* Note: total num parts is known only if content-length is known,
     otherwise it will be 0. */
-    uint32_t total_num_parts;
+    uint32_t total_num_parts_from_content_length;
 
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
