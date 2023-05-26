@@ -31,8 +31,10 @@ struct aws_s3_auto_ranged_put {
     uint64_t content_length;
     bool has_content_length;
 
-    /* Note: total num parts is known only if content-length is known,
-    otherwise it will be 0. */
+    /*
+     * total_num_parts_from_content_length is calculated by content_length / part_size.
+     * It will be 0 if there is no content_length.
+     */
     uint32_t total_num_parts_from_content_length;
 
     /* Only meant for use in the update function, which is never called concurrently. */
