@@ -2,7 +2,6 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
 #include <aws/checksums/crc.h>
-#include <aws/io/stream.h>
 
 #define AWS_CRC32_LEN 4
 #define AWS_CRC32C_LEN 4

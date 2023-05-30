@@ -111,7 +111,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
     }
 }
 
-/* warning this might get screwed up with retrys/restarts */
+/* warning this might get screwed up with retries/restarts */
 static int s_meta_request_get_response_body_checksum_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -459,11 +459,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
 }
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
-    const struct aws_s3_request **request_a = (const struct aws_s3_request **)a;
+    const struct aws_s3_request *const *request_a = a;
     AWS_PRECONDITION(request_a);
     AWS_PRECONDITION(*request_a);
 
-    const struct aws_s3_request **request_b = (const struct aws_s3_request **)b;
+    const struct aws_s3_request *const *request_b = b;
     AWS_PRECONDITION(request_b);
     AWS_PRECONDITION(*request_b);
 
@@ -590,7 +590,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    const struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
     /* Client owns this event loop group. A cancel should not be possible. */
@@ -930,7 +930,7 @@ static void s_get_part_response_headers_checksum_helper(
     }
 }
 
-/* warning this might get screwed up with retrys/restarts */
+/* warning this might get screwed up with retries/restarts */
 static void s_get_part_response_body_checksum_helper(
     struct aws_s3_checksum *running_response_sum,
     const struct aws_byte_cursor *body) {
@@ -1618,6 +1618,21 @@ int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, stru
     }
 
     return AWS_OP_SUCCESS;
+}
+
+bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_input_stream *initial_body_stream =
+        aws_http_message_get_body_stream(meta_request->initial_request_message);
+    AWS_FATAL_ASSERT(initial_body_stream);
+
+    struct aws_stream_status status;
+    if (aws_input_stream_get_status(initial_body_stream, &status)) {
+        return true;
+    }
+
+    return status.is_end_of_stream;
 }
 
 void aws_s3_meta_request_result_setup(

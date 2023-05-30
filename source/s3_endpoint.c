@@ -3,35 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_auto_ranged_get.h"
-#include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_client_impl.h"
-#include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 
 #include <aws/auth/credentials.h>
 #include <aws/common/assert.h>
-#include <aws/common/atomics.h>
-#include <aws/common/clock.h>
 #include <aws/common/device_random.h>
-#include <aws/common/environment.h>
 #include <aws/common/string.h>
-#include <aws/common/system_info.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
-#include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
-#include <aws/io/retry_strategy.h>
 #include <aws/io/socket.h>
-#include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
 
 #include <inttypes.h>
-#include <math.h>
 
 static const uint32_t s_connection_timeout_ms = 3000;
 static const uint16_t s_http_port = 80;

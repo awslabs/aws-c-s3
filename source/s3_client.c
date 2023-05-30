@@ -16,7 +16,6 @@
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
-#include <aws/common/environment.h>
 #include <aws/common/json.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -33,7 +32,6 @@
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
 
-#include <aws/s3/private/s3_copy_object.h>
 #include <inttypes.h>
 #include <math.h>
 
@@ -937,12 +935,12 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
 
-    struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
+    const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
     AWS_ASSERT(initial_message_headers);
 
     uint64_t content_length = 0;
     struct aws_byte_cursor content_length_cursor;
-    bool content_length_header_found = false;
+    bool content_length_found = false;
 
     if (!aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor)) {
         if (aws_byte_cursor_utf8_parse_u64(content_length_cursor, &content_length)) {
@@ -953,7 +951,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
             return NULL;
         }
-        content_length_header_found = true;
+        content_length_found = true;
     }
 
     /* Call the appropriate meta-request new function. */
@@ -971,15 +969,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
 
-            if (!content_length_header_found) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "Could not create auto-ranged-put meta request; there is no Content-Length header present.");
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-
-            struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
+            const struct aws_input_stream *input_stream = aws_http_message_get_body_stream(options->message);
 
             if ((input_stream == NULL) && (options->send_filepath.len == 0)) {
                 AWS_LOGF_ERROR(
@@ -1018,7 +1008,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 }
                 uint64_t multipart_upload_threshold =
                     client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
-                if (content_length <= multipart_upload_threshold) {
+
+                if (content_length_found && content_length <= multipart_upload_threshold) {
                     return aws_s3_meta_request_default_new(
                         client->allocator,
                         client,
@@ -1028,31 +1019,40 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         options);
                 } else {
                     if (aws_s3_message_util_check_checksum_header(options->message)) {
-                        /* The checksum header has been set and the request will be splitted. We fail the request */
+                        /* The checksum header has been set and the request will be split. We fail the request */
                         AWS_LOGF_ERROR(
                             AWS_LS_S3_META_REQUEST,
                             "Could not create auto-ranged-put meta request; checksum headers has been set for "
                             "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
-                            "single "
-                            "part upload.");
+                            "single part upload.");
                         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                         return NULL;
                     }
                 }
 
-                size_t part_size;
-                uint32_t num_parts;
-                if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
-                        content_length, client_part_size, client_max_part_size, &part_size, &num_parts)) {
-                    return NULL;
+                size_t part_size = client_part_size;
+                uint32_t num_parts = 0;
+                if (content_length_found) {
+                    if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+                            content_length, client_part_size, client_max_part_size, &part_size, &num_parts)) {
+                        return NULL;
+                    }
                 }
 
                 return aws_s3_meta_request_auto_ranged_put_new(
-                    client->allocator, client, part_size, content_length, num_parts, options);
-            } else {
-                /* dont pass part size and total num parts. constructor will pick it up from token */
+                    client->allocator, client, part_size, content_length_found, content_length, num_parts, options);
+            } else { /* else using resume token */
+                if (!content_length_found) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "Could not create auto-ranged-put resume meta request; content_length must be specified.");
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
+
+                /* don't pass part size and total num parts. constructor will pick it up from token */
                 return aws_s3_meta_request_auto_ranged_put_new(
-                    client->allocator, client, 0, content_length, 0, options);
+                    client->allocator, client, 0, true, content_length, 0, options);
             }
         }
         case AWS_S3_META_REQUEST_TYPE_COPY_OBJECT: {
@@ -1460,7 +1460,10 @@ static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    if (error_code != AWS_ERROR_SUCCESS) {
+    bool request_is_noop = false;
+
+    if (error_code != AWS_ERROR_SUCCESS || request->is_noop) {
+        request_is_noop = request->is_noop != 0;
         s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
 
         aws_s3_request_release(request);
@@ -1472,7 +1475,9 @@ static void s_s3_client_prepare_callback_queue_request(
         aws_s3_client_lock_synced_data(client);
 
         if (error_code == AWS_ERROR_SUCCESS) {
-            aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+            if (!request_is_noop) {
+                aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+            }
         } else {
             ++client->synced_data.num_failed_prepare_requests;
         }
@@ -1720,7 +1725,7 @@ void aws_s3_client_notify_connection_finished(
         request->send_data.metrics->crt_info_metrics.error_code = error_code;
     }
 
-    /* If we're trying to setup a retry... */
+    /* If we're trying to set up a retry... */
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
 
         if (connection->retry_token == NULL) {
