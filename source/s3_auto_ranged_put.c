@@ -1410,6 +1410,7 @@ static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data) {
     /* Success! Apply aws_http_message to aws_s3_request */
     struct aws_http_message *message = aws_future_http_message_get_result_by_move(request_prep->message_future);
     aws_s3_request_setup_send_data(request, message);
+    aws_http_message_release(message);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
