@@ -7,7 +7,6 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
-#include <aws/io/stream.h>
 
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
 static const size_t s_multipart_copy_minimum_object_size = 1L * 1024L * 1024L * 1024L;
@@ -30,7 +29,7 @@ static bool s_s3_copy_object_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static struct aws_future *s_s3_copy_object_prepare_request(struct aws_s3_request *request);
+static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_request *request);
 
 static void s_s3_copy_object_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -333,7 +332,7 @@ no_work_remaining:
 }
 
 /* Given a request, prepare it for sending based on its description. */
-static struct aws_future *s_s3_copy_object_prepare_request(struct aws_s3_request *request) {
+static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
@@ -518,11 +517,11 @@ static struct aws_future *s_s3_copy_object_prepare_request(struct aws_s3_request
     success = true;
 
 finish:;
-    struct aws_future *future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
+    struct aws_future_void *future = aws_future_void_new(meta_request->allocator);
     if (success) {
-        aws_future_set_valueless(future);
+        aws_future_void_set_result(future);
     } else {
-        aws_future_set_error(future, aws_last_error_or_unknown());
+        aws_future_void_set_error(future, aws_last_error_or_unknown());
     }
     return future;
 }
