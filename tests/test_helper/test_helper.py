@@ -28,11 +28,6 @@ parser.add_argument(
     nargs="?",
     help="The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.",
 )
-parser.add_argument(
-    "presigned_url",
-    nargs="?",
-    help="The presigned url to use for the test. If not specific, the $CRT_S3_TEST_PRESIGNED_URL need to be set for test.",
-)
 
 args = parser.parse_args()
 
@@ -93,9 +88,6 @@ def put_pre_existing_objects(
     print(f"Object {key_name} uploaded")
 
 
-d = {1: 2, 2: 3}
-
-
 def create_presigned_url(bucket_name, object_name, expiration=3600):
     """
     Creates a presigned url for the test
@@ -152,9 +144,7 @@ def create_bucket_with_lifecycle():
         put_pre_existing_objects(10 * MB, "pre-existing-10MB")
         put_pre_existing_objects(1 * MB, "pre-existing-1MB")
         put_pre_existing_objects(0, "pre-existing-empty")
-        presigned_url = create_presigned_url(BUCKET_NAME, "pre-existing-1MB")
-        os.environ["CRT_S3_TEST_PRESIGNED_URL"] = presigned_url
-        print(f"environ presigned {os.environ['CRT_S3_TEST_PRESIGNED_URL']}")
+
     except botocore.exceptions.ClientError as e:
         # The bucket already exists. That's fine.
         if (
@@ -208,13 +198,16 @@ def cleanup(bucket_name):
 
 if args.action == "init":
     try:
-        print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
-        create_bucket_with_lifecycle()
-        create_bucket_with_public_object()
         if os.environ.get("CRT_S3_TEST_BUCKET_NAME") != BUCKET_NAME:
             print(
                 f"* Please set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME} before running the tests."
             )
+        print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
+        create_bucket_with_lifecycle()
+        presigned_url = create_presigned_url(BUCKET_NAME, "pre-existing-1MB")
+        create_bucket_with_public_object()
+        print(f"{presigned_url}")
+
     except Exception as e:
         print(e)
         try:

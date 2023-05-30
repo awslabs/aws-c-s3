@@ -1,5 +1,28 @@
 include(AwsTestHarness)
 enable_testing()
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+message(${Python3_EXECUTABLE})
+message("${CMAKE_CURRENT_SOURCE_DIR}/test_helper/test_helper.py")
+set(ENV{CRT_S3_TEST_BUCKET_NAME} "crt-test-bucket")
+execute_process(
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_helper/test_helper.py init
+        OUTPUT_VARIABLE OUTPUT
+        ERROR_VARIABLE STDERROR
+        RESULT_VARIABLE RETURNCODE
+        ECHO_OUTPUT_VARIABLE
+        ECHO_ERROR_VARIABLE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(RETURNCODE)
+    message(FATAL_ERROR "The script ran into trouble!\n${STDERROR}")
+else()
+    string(REPLACE "\n" ";" OUTPUT_LIST "${OUTPUT}")
+    list(GET OUTPUT_LIST -1 PRESIGNED_URL)
+    message("The presigned url is " ${PRESIGNED_URL})
+    set(ENV{CRT_S3_TEST_PRESIGNED_URL} ${PRESIGNED_URL})
+    message("Set the generated presigned url to env var for test usages.")
+endif()
 
 option(BYO_CRYPTO "Don't build a tls implementation or link against a crypto interface. This feature is only for unix builds currently." OFF)
 
