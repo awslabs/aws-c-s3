@@ -236,9 +236,9 @@ int aws_s3_meta_request_init_base(
     /* There are several ways for the user to pass in the request's body.
      * If something besides an aws_async_input_stream was passed in, create an
      * async wrapper around it */
-    meta_request->send_async_body = aws_s3_message_util_acquire_async_body_stream(
+    meta_request->request_body_async_stream = aws_s3_message_util_acquire_async_body_stream(
         allocator, meta_request->initial_request_message, options->send_filepath, options->send_async_stream);
-    if (meta_request->send_async_body == NULL) {
+    if (meta_request->request_body_async_stream == NULL) {
         goto error;
     }
 
@@ -425,7 +425,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Cleaning up meta request", (void *)meta_request);
 
     /* Clean up our initial http message */
-    meta_request->send_async_body = aws_async_input_stream_release(meta_request->send_async_body);
+    meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
     void *meta_request_user_data = meta_request->user_data;
@@ -1565,7 +1565,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     /* As the meta request has been finished with any HTTP message, we can safely release the http message that hold. So
      * that, the downstream high level language doesn't need to wait for shutdown to clean related resource (eg: input
      * stream) */
-    meta_request->send_async_body = aws_async_input_stream_release(meta_request->send_async_body);
+    meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
     if (meta_request->finish_callback != NULL) {
@@ -1587,7 +1587,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
 
-    return aws_async_input_stream_read_to_fill(meta_request->send_async_body, buffer);
+    return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
 }
 
 bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request) {

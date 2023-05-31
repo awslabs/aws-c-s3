@@ -49,7 +49,7 @@ struct aws_s3_prepare_request_payload {
     aws_s3_meta_request_prepare_request_callback_fn *callback;
     void *user_data;
     struct aws_task task;
-    struct aws_future_void *preparation_future; /* Future this operation is waiting on */
+    struct aws_future_void *preparation_future; /* future from async vtable->prepare_request() call */
 };
 
 struct aws_s3_meta_request_vtable {
@@ -113,7 +113,7 @@ struct aws_s3_meta_request {
     struct aws_http_message *initial_request_message;
 
     /* Async stream for meta request's body */
-    struct aws_async_input_stream *send_async_body;
+    struct aws_async_input_stream *request_body_async_stream;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
