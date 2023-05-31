@@ -416,6 +416,7 @@ error_clean_up:
     return NULL;
 }
 
+static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL('/');
 /**
  * For the CopyObject operation, create the initial HEAD message to retrieve the size of the copy source.
  */
@@ -435,31 +436,32 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         return NULL;
     }
 
-    struct aws_byte_cursor source_bucket;
+    struct aws_byte_cursor source_header;
     const struct aws_byte_cursor copy_source_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
-    if (aws_http_headers_get(headers, copy_source_header, &source_bucket) != AWS_OP_SUCCESS) {
+    if (aws_http_headers_get(headers, copy_source_header, &source_header) != AWS_OP_SUCCESS) {
         AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the x-amz-copy-source header");
         return NULL;
     }
-
     struct aws_byte_cursor host;
     if (aws_http_headers_get(headers, g_host_header_name, &host) != AWS_OP_SUCCESS) {
         AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the Host header");
         return NULL;
     }
 
+    struct aws_byte_cursor request_path = source_header;
     /* Skip optional leading slash. */
-    if (source_bucket.len > 1 && source_bucket.ptr[0] == '/') {
-        aws_byte_cursor_advance(&source_bucket, 1);
+    
+    if (aws_byte_cursor_starts_with(&request_path, &s_slash_char)) {
+        aws_byte_cursor_advance(&request_path, 1);
     }
 
-    /* From this point forward, the format is {bucket}/{key} - split components. */
-    struct aws_byte_cursor request_path = source_bucket;
-    for( ; request_path.len > 0; aws_byte_cursor_advance(&request_path, 1)) {
-        if (*request_path.ptr == '/') {
-            source_bucket.len = request_path.ptr - source_bucket.ptr;
-            break;
-        }
+    /* From this point forward, the format is {bucket}/{key} - split
+    components.*/
+    
+    struct aws_byte_cursor source_bucket = {0};
+
+    if (aws_byte_cursor_next_split(&request_path, '/', &source_bucket)) {
+        aws_byte_cursor_advance(&request_path, source_bucket.len + 1);
     }
 
     if (source_bucket.len == 0 || request_path.len == 0) {
