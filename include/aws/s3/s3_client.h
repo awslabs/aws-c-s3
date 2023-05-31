@@ -54,6 +54,16 @@ enum aws_s3_meta_request_type {
     /**
      * The PutObject request will be split into MultiPart uploads that are executed in parallel
      * to improve throughput, when possible.
+     * Note: put object supports both known and unknown body length. The client
+     * relies on Content-Length header to determine length of the body.
+     * Request with unknown content length are always sent using multipart
+     * upload regardless of final number of parts and do have the following limitations:
+     * - multipart threshold is ignored and all request are made through mpu,
+     *   even if they only need one part
+     * - pause/resume is not supported
+     * - meta request will throw error if checksum header is provider (due to
+     *   general limitation of checksum not being usable if meta request is
+     *   getting split)
      */
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
 
@@ -66,6 +76,26 @@ enum aws_s3_meta_request_type {
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
     AWS_S3_META_REQUEST_TYPE_MAX,
+};
+
+/**
+ * The type of S3 request made. Used by metrics.
+ */
+enum aws_s3_request_type {
+    /* Same as the original HTTP request passed to aws_s3_meta_request_options */
+    AWS_S3_REQUEST_TYPE_DEFAULT,
+
+    /* S3 APIs */
+    AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+    AWS_S3_REQUEST_TYPE_GET_OBJECT,
+    AWS_S3_REQUEST_TYPE_LIST_PARTS,
+    AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_UPLOAD_PART,
+    AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
+
+    AWS_S3_REQUEST_TYPE_MAX,
 };
 
 /**
@@ -421,9 +451,6 @@ struct aws_s3_meta_request_options {
 
     /**
      * Invoked to report progress of the meta request execution.
-     * Currently, the progress callback is invoked only for the CopyObject meta request type.
-     * TODO: support this callback for all the types of meta requests
-     * See `aws_s3_meta_request_progress_fn`
      */
     aws_s3_meta_request_progress_fn *progress_callback;
 
@@ -491,7 +518,7 @@ struct aws_s3_meta_request_result {
      * uploaded as a multipart object.
      *
      * If the object to get is multipart object, the part checksum MAY be validated if the part size to get matches the
-     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will failed with
+     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will fail with
      * checksum mismatch. However, even if the parts checksum were validated, this will NOT be set to true, as the
      * checksum for the whole meta request was NOT validated.
      **/
@@ -848,9 +875,15 @@ int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *me
 AWS_S3_API
 int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, uint32_t *out_stream_id);
 
+/* Get the request type from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_type(
+    const struct aws_s3_request_metrics *metrics,
+    enum aws_s3_request_type *out_request_type);
+
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API
-int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *out_metrics);
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

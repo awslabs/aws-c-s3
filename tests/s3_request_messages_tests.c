@@ -241,12 +241,12 @@ static int s_test_http_headers_match(
     for (size_t i = 0; i < excluded_message0_headers_count; ++i) {
         const struct aws_byte_cursor *excluded_header_name = &excluded_message0_headers[i];
 
-        bool header_existance_is_valid = false;
+        bool header_existence_is_valid = false;
 
-        /* If the heaer is in the exception list, it's okay for message1 to have. (It may have been re-added.) */
+        /* If the header is in the exception list, it's okay for message1 to have. (It may have been re-added.) */
         for (size_t j = 0; j < message1_header_exceptions_count; ++j) {
             if (aws_byte_cursor_eq(excluded_header_name, &message1_header_exceptions[j])) {
-                header_existance_is_valid = true;
+                header_existence_is_valid = true;
                 break;
             }
         }
@@ -256,10 +256,10 @@ static int s_test_http_headers_match(
         AWS_ZERO_STRUCT(message1_header_value);
         int result = aws_http_headers_get(message1_headers, *excluded_header_name, &message1_header_value);
 
-        if (header_existance_is_valid) {
+        if (header_existence_is_valid) {
 
-            /* If this header is allowed to exist in message1, then we don't need to assert on its existance or
-             * non-existance.  But we do want to erase it from the expected_message0_headers, since its value may be
+            /* If this header is allowed to exist in message1, then we don't need to assert on its existence or
+             * non-existence.  But we do want to erase it from the expected_message0_headers, since its value may be
              * different from that in message0. */
             if (result == AWS_OP_SUCCESS) {
                 ASSERT_SUCCESS(aws_http_headers_erase(expected_message0_headers, *excluded_header_name));

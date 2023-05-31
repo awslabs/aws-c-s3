@@ -73,6 +73,8 @@ struct aws_s3_request_metrics {
         struct aws_string *host_address;
         /* The the request ID header value. */
         struct aws_string *request_id;
+        /* The type of request made */
+        enum aws_s3_request_type request_type;
     } req_resp_info_metrics;
 
     struct {
@@ -143,7 +145,7 @@ struct aws_s3_request {
     bool checksum_match;
 
     /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
-     * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests.  For example, they can
+     * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests. (For example, they can
      * be more contextual, like "first part" instead of just "part".) */
 
     /* TODO: this should be a union type to make it clear that this could be one of two enums for puts, and gets. */
@@ -190,6 +192,16 @@ struct aws_s3_request {
     /* When true, this request is intended to find out the object size. This is currently only used by auto_range_get.
      */
     uint32_t discovers_object_size : 1;
+
+    /* When true, this request does not represent a useful http request and
+     * must not be sent, however client must still call corresponding finished
+     * callback for the request. Those requests can occur when request is
+     * optimistically created during update, but cannot be prepared. ex. when
+     * put has no content length, requests will be scheduled as regular to
+     * ensure fair distribution against other requests, but can also result in
+     * requests for uploading data after the end of the stream (those requests
+     * will use below flag to indicate that they should not be sent). */
+    uint32_t is_noop : 1;
 };
 
 AWS_EXTERN_C_BEGIN
