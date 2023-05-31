@@ -416,7 +416,7 @@ error_clean_up:
     return NULL;
 }
 
-static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL('/');
+static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
 /**
  * For the CopyObject operation, create the initial HEAD message to retrieve the size of the copy source.
  */
@@ -449,8 +449,8 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     }
 
     struct aws_byte_cursor request_path = source_header;
-    /* Skip optional leading slash. */
 
+    /* Skip optional leading slash. */
     if (aws_byte_cursor_starts_with(&request_path, &s_slash_char)) {
         aws_byte_cursor_advance(&request_path, 1);
     }

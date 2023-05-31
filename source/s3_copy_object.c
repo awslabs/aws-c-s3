@@ -17,6 +17,8 @@ static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 
+const size_t s_min_copy_part_size = MB_TO_BYTES(64);
+
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-MD5"),
@@ -396,13 +398,15 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                 return AWS_OP_ERR;
             }
 
-            const size_t MIN_PART_SIZE = MB_TO_BYTES(64);
-            const size_t MAX_PART_SIZE = GB_TO_BYTES(5);
+            uint64_t max_part_size = GB_TO_BYTES(5);
+            if (max_part_size > SIZE_MAX) {
+                max_part_size = SIZE_MAX;
+            }
             uint32_t num_parts = 0;
             size_t part_size = 0;
 
             aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
-                copy_object->synced_data.content_length, MIN_PART_SIZE, MAX_PART_SIZE, &part_size, &num_parts);
+                copy_object->synced_data.content_length, s_min_copy_part_size, max_part_size, &part_size, &num_parts);
 
             copy_object->synced_data.total_num_parts = num_parts;
             copy_object->synced_data.part_size = part_size;
