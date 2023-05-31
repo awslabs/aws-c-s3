@@ -17,6 +17,7 @@ static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 
+/* TODO: make this configurable or at least expose it. */
 const size_t s_min_copy_part_size = MB_TO_BYTES(64);
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
