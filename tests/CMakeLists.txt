@@ -3,8 +3,6 @@ enable_testing()
 set(CTEST_CUSTOM_PRE_TEST "export CRT_S3_TEST_BUCKET_NAME=crt-test-bucket")
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 message(${Python3_EXECUTABLE})
-message("${CMAKE_CURRENT_SOURCE_DIR}/test_helper/test_helper.py")
-set(ENV{CRT_S3_TEST_BUCKET_NAME} "crt-test-bucket")
 execute_process(
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_helper/test_helper.py init
         OUTPUT_VARIABLE OUTPUT
