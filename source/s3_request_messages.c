@@ -461,7 +461,7 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_byte_cursor source_bucket = {0};
 
     if (aws_byte_cursor_next_split(&request_path, '/', &source_bucket)) {
-        aws_byte_cursor_advance(&request_path, source_bucket.len + 1);
+        aws_byte_cursor_advance(&request_path, source_bucket.len);
     }
 
     if (source_bucket.len == 0 || request_path.len == 0) {
