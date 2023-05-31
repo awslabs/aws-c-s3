@@ -1297,18 +1297,18 @@ static int s_test_s3_put_object_with_part_remainder(struct aws_allocator *alloca
 AWS_TEST_CASE(test_s3_get_object_presigned_url, s_test_s3_get_object_presigned_url)
 static int s_test_s3_get_object_presigned_url(struct aws_allocator *allocator,void *ctx) {
     (void)ctx;
-//    AWS_STATIC_STRING_FROM_LITERAL(s_presigned_url_env_var, "CRT_S3_TEST_PRESIGNED_URL");
-
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_GENERAL, "FOO is %s", getenv("FOO"));
-//    if (aws_get_environment_value(allocator, s_presigned_url_env_var, &tester.presigned_url) == AWS_OP_SUCCESS &&
-//        tester.presigned_url != NULL) {
-//        AWS_LOGF_DEBUG(
-//            AWS_LS_S3_GENERAL, "get env is %s", aws_string_c_str(tester.presigned_url));
-//    }
+    struct aws_string *presigned_url_string = aws_string_new_from_cursor(allocator, &g_test_presigned_url);
+
+    if (presigned_url_string->len == 0) {
+        AWS_LOGF_INFO(
+            AWS_LS_S3_GENERAL, "The presigned url environment variable was not set. Skip this test.");
+        aws_string_destroy(presigned_url_string);
+        aws_s3_tester_clean_up(&tester);
+        return 0;
+    }
     struct aws_s3_client_config client_config = {
         .part_size = 64 * 1024,
     };
@@ -1318,10 +1318,19 @@ static int s_test_s3_get_object_presigned_url(struct aws_allocator *allocator,vo
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
     ASSERT_TRUE(message != NULL);
+
+    char host_header_value[1024];
+    snprintf(
+        host_header_value,
+        sizeof(host_header_value),
+        "%.*s.s3.us-west-2.amazonaws.com",
+        (int)g_test_bucket_name.len,
+        g_test_bucket_name.ptr);
+
     struct aws_http_header host_header =
         {
             .name = g_host_header_name,
-            .value = aws_byte_cursor_from_c_str("crt-test-bucket.s3.us-west-2.amazonaws.com"),
+            .value = aws_byte_cursor_from_c_str(host_header_value),
         };
 
     ASSERT_SUCCESS(aws_http_message_add_header(message, host_header));
@@ -1332,10 +1341,7 @@ static int s_test_s3_get_object_presigned_url(struct aws_allocator *allocator,vo
     AWS_ZERO_STRUCT(options);
     options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
     options.message = message;
-    struct aws_string *presigned_url_string = aws_string_new_from_cursor(allocator, &g_test_presigned_url);
     options.presigned_url = aws_string_c_str(presigned_url_string);
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_GENERAL, "presigned url is %s", options.presigned_url);
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);

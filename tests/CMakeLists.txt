@@ -1,5 +1,6 @@
 include(AwsTestHarness)
 enable_testing()
+set(CTEST_CUSTOM_PRE_TEST "export CRT_S3_TEST_BUCKET_NAME=crt-test-bucket")
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 message(${Python3_EXECUTABLE})
 message("${CMAKE_CURRENT_SOURCE_DIR}/test_helper/test_helper.py")
@@ -282,4 +283,4 @@ add_net_test_case(make_meta_request_error_handling)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
-set_property(TEST test_s3_get_object_presigned_url APPEND PROPERTY ENVIRONMENT FOO=1)
+set_property(TEST test_s3_get_object_presigned_url PROPERTY ENVIRONMENT CRT_S3_TEST_PRESIGNED_URL=${PRESIGNED_URL})
