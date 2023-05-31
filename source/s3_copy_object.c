@@ -398,7 +398,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                 return AWS_OP_ERR;
             }
 
-            uint64_t max_part_size = GB_TO_BYTES(5);
+            uint64_t max_part_size = GB_TO_BYTES((uint64_t)5);
             if (max_part_size > SIZE_MAX) {
                 max_part_size = SIZE_MAX;
             }
