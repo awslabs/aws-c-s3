@@ -1297,10 +1297,18 @@ static int s_test_s3_put_object_with_part_remainder(struct aws_allocator *alloca
 AWS_TEST_CASE(test_s3_get_object_presigned_url, s_test_s3_get_object_presigned_url)
 static int s_test_s3_get_object_presigned_url(struct aws_allocator *allocator,void *ctx) {
     (void)ctx;
+//    AWS_STATIC_STRING_FROM_LITERAL(s_presigned_url_env_var, "CRT_S3_TEST_PRESIGNED_URL");
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_GENERAL, "FOO is %s", getenv("FOO"));
+//    if (aws_get_environment_value(allocator, s_presigned_url_env_var, &tester.presigned_url) == AWS_OP_SUCCESS &&
+//        tester.presigned_url != NULL) {
+//        AWS_LOGF_DEBUG(
+//            AWS_LS_S3_GENERAL, "get env is %s", aws_string_c_str(tester.presigned_url));
+//    }
     struct aws_s3_client_config client_config = {
         .part_size = 64 * 1024,
     };
@@ -1326,7 +1334,7 @@ static int s_test_s3_get_object_presigned_url(struct aws_allocator *allocator,vo
     options.message = message;
     struct aws_string *presigned_url_string = aws_string_new_from_cursor(allocator, &g_test_presigned_url);
     options.presigned_url = aws_string_c_str(presigned_url_string);
-    AWS_LOGF_INFO(
+    AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL, "presigned url is %s", options.presigned_url);
 
     struct aws_s3_meta_request_test_results meta_request_test_results;

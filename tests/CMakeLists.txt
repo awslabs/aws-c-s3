@@ -20,8 +20,6 @@ else()
     string(REPLACE "\n" ";" OUTPUT_LIST "${OUTPUT}")
     list(GET OUTPUT_LIST -1 PRESIGNED_URL)
     message("The presigned url is " ${PRESIGNED_URL})
-    set(ENV{CRT_S3_TEST_PRESIGNED_URL} ${PRESIGNED_URL})
-    message("Set the generated presigned url to env var for test usages.")
 endif()
 
 option(BYO_CRYPTO "Don't build a tls implementation or link against a crypto interface. This feature is only for unix builds currently." OFF)
@@ -284,3 +282,4 @@ add_net_test_case(make_meta_request_error_handling)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
+set_property(TEST test_s3_get_object_presigned_url APPEND PROPERTY ENVIRONMENT FOO=1)
