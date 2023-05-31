@@ -450,14 +450,14 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
 
     struct aws_byte_cursor request_path = source_header;
     /* Skip optional leading slash. */
-    
+
     if (aws_byte_cursor_starts_with(&request_path, &s_slash_char)) {
         aws_byte_cursor_advance(&request_path, 1);
     }
 
     /* From this point forward, the format is {bucket}/{key} - split
     components.*/
-    
+
     struct aws_byte_cursor source_bucket = {0};
 
     if (aws_byte_cursor_next_split(&request_path, '/', &source_bucket)) {

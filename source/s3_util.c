@@ -300,7 +300,8 @@ void aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_stri
         size_t chars_remaining = str->len - i;
 
         if (chars_remaining >= s_quote_entity_literal.len &&
-            !strncmp((const char *)&str->bytes[i], (const char *)s_quote_entity_literal.ptr, s_quote_entity_literal.len)) {
+            !strncmp(
+                (const char *)&str->bytes[i], (const char *)s_quote_entity_literal.ptr, s_quote_entity_literal.len)) {
             /* Append quote */
             aws_byte_buf_append(out_buf, &s_quote_literal);
             i += s_quote_entity_literal.len - 1;
@@ -562,8 +563,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     if (part_size_uint64 > SIZE_MAX) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create meta request; required part size of %" PRIu64
-            " bytes is too large for platform.",
+            "Could not create meta request; required part size of %" PRIu64 " bytes is too large for platform.",
             part_size_uint64);
 
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);

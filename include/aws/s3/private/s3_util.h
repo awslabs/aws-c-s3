@@ -22,9 +22,9 @@
 #else
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
 #endif
-#define KB_TO_BYTES(kb) ((size_t)(kb) * 1024)
-#define MB_TO_BYTES(mb) ((size_t)(mb) * 1024 * 1024)
-#define GB_TO_BYTES(gb) ((size_t)(gb) * 1024 * 1024 * 1024)
+#define KB_TO_BYTES(kb) ((size_t)(kb)*1024)
+#define MB_TO_BYTES(mb) ((size_t)(mb)*1024 * 1024)
+#define GB_TO_BYTES(gb) ((size_t)(gb)*1024 * 1024 * 1024)
 
 struct aws_allocator;
 struct aws_http_stream;

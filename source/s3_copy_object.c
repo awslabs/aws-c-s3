@@ -395,14 +395,14 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return AWS_OP_ERR;
             }
-        
+
             const size_t MIN_PART_SIZE = MB_TO_BYTES(64);
             const size_t MAX_PART_SIZE = GB_TO_BYTES(5);
             uint32_t num_parts = 0;
             size_t part_size = 0;
 
-            aws_s3_calculate_optimal_mpu_part_size_and_num_parts(copy_object->synced_data.content_length,
-                MIN_PART_SIZE, MAX_PART_SIZE, &part_size, &num_parts);
+            aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+                copy_object->synced_data.content_length, MIN_PART_SIZE, MAX_PART_SIZE, &part_size, &num_parts);
 
             copy_object->synced_data.total_num_parts = num_parts;
             copy_object->synced_data.part_size = part_size;
@@ -548,8 +548,8 @@ static struct aws_string *s_etag_new_from_upload_part_copy_response(
     struct aws_byte_buf etag_within_quotes_byte_buf = {0};
     aws_replace_quote_entities(allocator, etag_within_xml_quotes, &etag_within_quotes_byte_buf);
 
-    struct aws_string *stripped_etag = aws_strip_quotes(allocator,
-        aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf));
+    struct aws_string *stripped_etag =
+        aws_strip_quotes(allocator, aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf));
 
     aws_byte_buf_clean_up(&etag_within_quotes_byte_buf);
     aws_string_destroy(etag_within_xml_quotes);
