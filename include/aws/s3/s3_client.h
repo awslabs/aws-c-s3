@@ -408,7 +408,7 @@ struct aws_s3_meta_request_options {
      * Use this when outgoing data will be produced in asynchronous chunks.
      * Do not set if the body is being passed by other means (see note above).
      */
-    struct aws_async_stream *send_async_stream;
+    struct aws_async_input_stream *send_async_stream;
 
     /**
      * Optional.

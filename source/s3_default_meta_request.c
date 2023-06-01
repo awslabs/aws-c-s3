@@ -10,8 +10,8 @@
 struct aws_s3_default_prepare_request_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *read_future; /* aws_future<bool> for read step */
-    struct aws_future *my_future;   /* aws_future<void> to set when this whole operation completes */
+    struct aws_future_bool *read_future; /* future for for read step */
+    struct aws_future_void *my_future;   /* future to set when this whole operation completes */
 };
 
 static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_request);
@@ -21,7 +21,7 @@ static bool s_s3_meta_request_default_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static struct aws_future *s_s3_default_prepare_request(struct aws_s3_request *request);
+static struct aws_future_void *s_s3_default_prepare_request(struct aws_s3_request *request);
 
 static void s_s3_default_prepare_request_on_read_done(void *user_data);
 
@@ -215,7 +215,7 @@ static bool s_s3_meta_request_default_update(
 }
 
 /* Given a request, prepare it for sending based on its description. */
-static struct aws_future *s_s3_default_prepare_request(struct aws_s3_request *request) {
+static struct aws_future_void *s_s3_default_prepare_request(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -224,21 +224,21 @@ static struct aws_future *s_s3_default_prepare_request(struct aws_s3_request *re
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
-    struct aws_future *preparation_future = aws_future_new(request->allocator, AWS_FUTURE_VALUELESS);
+    struct aws_future_void *preparation_future = aws_future_void_new(request->allocator);
 
     /* Store context for async operation */
     struct aws_s3_default_prepare_request_async_ctx *request_prep =
         aws_mem_calloc(request->allocator, 1, sizeof(struct aws_s3_default_prepare_request_async_ctx));
     request_prep->allocator = request->allocator;
     request_prep->request = request;
-    request_prep->my_future = aws_future_acquire(preparation_future);
+    request_prep->my_future = aws_future_void_acquire(preparation_future);
 
     if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
         /* Kick off the async read */
         request_prep->read_future = aws_s3_meta_request_read_body(meta_request, &request->request_body);
-        aws_future_register_callback(
+        aws_future_bool_register_callback(
             request_prep->read_future, s_s3_default_prepare_request_on_read_done, request_prep);
     } else {
         /* Don't need to read body, jump directly to the last step */
@@ -255,7 +255,7 @@ static void s_s3_default_prepare_request_on_read_done(void *user_data) {
     struct aws_s3_request *request = request_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
-    int error_code = aws_future_get_error(request_prep->read_future);
+    int error_code = aws_future_bool_get_error(request_prep->read_future);
 
     if (error_code != AWS_OP_SUCCESS) {
         AWS_LOGF_ERROR(
@@ -321,13 +321,13 @@ static void s_s3_default_prepare_request_finish(
 
 finish:
     if (error_code == AWS_ERROR_SUCCESS) {
-        aws_future_set_valueless(request_prep->my_future);
+        aws_future_void_set_result(request_prep->my_future);
     } else {
-        aws_future_set_error(request_prep->my_future, error_code);
+        aws_future_void_set_error(request_prep->my_future, error_code);
     }
 
-    aws_future_release(request_prep->read_future);
-    aws_future_release(request_prep->my_future);
+    aws_future_bool_release(request_prep->read_future);
+    aws_future_void_release(request_prep->my_future);
     aws_mem_release(request_prep->allocator, request_prep);
 }
 

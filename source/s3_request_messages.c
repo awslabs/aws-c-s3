@@ -7,11 +7,11 @@
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
-#include <aws/common/async_stream.h>
 #include <aws/common/byte_buf.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/http/request_response.h>
+#include <aws/io/async_stream.h>
 #include <aws/io/stream.h>
 #include <inttypes.h>
 
@@ -838,17 +838,17 @@ error_clean_up:
 }
 
 /* Given all possible ways to send a request body, always return an async-stream */
-struct aws_async_stream *aws_s3_message_util_acquire_async_body_stream(
+struct aws_async_input_stream *aws_s3_message_util_acquire_async_body_stream(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
     struct aws_byte_cursor send_filepath,
-    struct aws_async_stream *send_async_stream) {
+    struct aws_async_input_stream *send_async_stream) {
 
     AWS_PRECONDITION(message);
 
     /* If user provides async-stream, use it */
     if (send_async_stream != NULL) {
-        return aws_async_stream_acquire(send_async_stream);
+        return aws_async_input_stream_acquire(send_async_stream);
     }
 
     /* If user provides filepath, create aws_input_stream to read it, and wrap that in an async-stream */
@@ -860,7 +860,7 @@ struct aws_async_stream *aws_s3_message_util_acquire_async_body_stream(
         if (body_stream == NULL) {
             return NULL;
         }
-        send_async_stream = aws_async_stream_new_from_input_stream(allocator, body_stream);
+        send_async_stream = aws_async_input_stream_new_from_synchronous(allocator, body_stream);
         aws_input_stream_release(body_stream);
         return send_async_stream;
     }
@@ -868,14 +868,14 @@ struct aws_async_stream *aws_s3_message_util_acquire_async_body_stream(
     /* If user provides HTTP message with aws_input_stream body, wrap that in an async stream */
     struct aws_input_stream *request_body = aws_http_message_get_body_stream(message);
     if (request_body) {
-        return aws_async_stream_new_from_input_stream(allocator, request_body);
+        return aws_async_input_stream_new_from_synchronous(allocator, request_body);
     }
 
     /* Otherwise, no body provided, just create empty async-stream */
     struct aws_byte_cursor empty_cursor = {.len = 0};
     struct aws_input_stream *empty_stream = aws_input_stream_new_from_cursor(allocator, &empty_cursor);
     AWS_ASSERT(empty_stream);
-    send_async_stream = aws_async_stream_new_from_input_stream(allocator, empty_stream);
+    send_async_stream = aws_async_input_stream_new_from_synchronous(allocator, empty_stream);
     aws_input_stream_release(empty_stream);
     return send_async_stream;
 }

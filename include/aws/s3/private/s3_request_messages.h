@@ -57,11 +57,11 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
 
 /* Given all possible ways to send a request body, always return an async-stream.
  * Returns NULL on failure */
-struct aws_async_stream *aws_s3_message_util_acquire_async_body_stream(
+struct aws_async_input_stream *aws_s3_message_util_acquire_async_body_stream(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
     struct aws_byte_cursor send_filepath,
-    struct aws_async_stream *send_async_stream);
+    struct aws_async_input_stream *send_async_stream);
 
 /* Return true if checksum headers has been set. */
 AWS_S3_API

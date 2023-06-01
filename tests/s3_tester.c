@@ -793,9 +793,9 @@ static void s_s3_meta_request_schedule_prepare_request_empty(
     (void)user_data;
 }
 
-static struct aws_future *s_s3_meta_request_prepare_request_async_empty(struct aws_s3_request *request) {
-    struct aws_future *future = aws_future_new(request->allocator, AWS_FUTURE_VALUELESS);
-    aws_future_set_error(future, AWS_ERROR_UNKNOWN);
+static struct aws_future_void *s_s3_meta_request_prepare_request_async_empty(struct aws_s3_request *request) {
+    struct aws_future_void *future = aws_future_void_new(request->allocator);
+    aws_future_void_set_error(future, AWS_ERROR_UNKNOWN);
     return future;
 }
 

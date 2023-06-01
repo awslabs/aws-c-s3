@@ -22,7 +22,7 @@ static bool s_s3_auto_ranged_get_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static struct aws_future *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request);
+static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request);
 
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
@@ -331,7 +331,7 @@ static bool s_s3_auto_ranged_get_update(
 
 /* Given a request, prepare it for sending based on its description.
  * Currently, this is actually synchronous. */
-static struct aws_future *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request) {
+static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
@@ -402,11 +402,11 @@ static struct aws_future *s_s3_auto_ranged_get_prepare_request(struct aws_s3_req
     success = true;
 
 finish:;
-    struct aws_future *future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
+    struct aws_future_void *future = aws_future_void_new(meta_request->allocator);
     if (success) {
-        aws_future_set_valueless(future);
+        aws_future_void_set_result(future);
     } else {
-        aws_future_set_error(future, aws_last_error_or_unknown());
+        aws_future_void_set_error(future, aws_last_error_or_unknown());
     }
     return future;
 }

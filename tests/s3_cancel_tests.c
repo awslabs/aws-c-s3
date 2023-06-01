@@ -534,13 +534,13 @@ struct test_s3_cancel_prepare_user_data {
 struct test_s3_cancel_prepare_meta_request_prepare_request_async_ctx {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_future *original_future; /* original future that we're intercepting and patching */
-    struct aws_future *my_future;       /* patched future to set when this operation completes */
+    struct aws_future_void *original_future; /* original future that we're intercepting and patching */
+    struct aws_future_void *my_future;       /* patched future to set when this operation completes */
 };
 
 static void s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_done(void *user_data);
 
-static struct aws_future *s_test_s3_cancel_prepare_meta_request_prepare_request(struct aws_s3_request *request) {
+static struct aws_future_void *s_test_s3_cancel_prepare_meta_request_prepare_request(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_ASSERT(meta_request != NULL);
 
@@ -550,19 +550,19 @@ static struct aws_future *s_test_s3_cancel_prepare_meta_request_prepare_request(
     struct aws_s3_tester *tester = results->tester;
     AWS_ASSERT(tester != NULL);
 
-    struct aws_future *patched_future = aws_future_new(meta_request->allocator, AWS_FUTURE_VALUELESS);
+    struct aws_future_void *patched_future = aws_future_void_new(meta_request->allocator);
 
     struct test_s3_cancel_prepare_meta_request_prepare_request_async_ctx *patched_prep = aws_mem_calloc(
         meta_request->allocator, 1, sizeof(struct test_s3_cancel_prepare_meta_request_prepare_request_async_ctx));
     patched_prep->allocator = meta_request->allocator;
     patched_prep->request = request;
-    patched_prep->my_future = aws_future_acquire(patched_future);
+    patched_prep->my_future = aws_future_void_acquire(patched_future);
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
     patched_prep->original_future = original_meta_request_vtable->prepare_request(request);
-    aws_future_register_callback(
+    aws_future_void_register_callback(
         patched_prep->original_future,
         s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_done,
         patched_prep);
@@ -579,9 +579,9 @@ static void s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_do
     struct aws_s3_tester *tester = results->tester;
     struct test_s3_cancel_prepare_user_data *test_user_data = tester->user_data;
 
-    int error_code = aws_future_get_error(patched_prep->original_future);
+    int error_code = aws_future_void_get_error(patched_prep->original_future);
     if (error_code != AWS_ERROR_SUCCESS) {
-        aws_future_set_error(patched_prep->my_future, error_code);
+        aws_future_void_set_error(patched_prep->my_future, error_code);
         goto finish;
     }
 
@@ -593,10 +593,10 @@ static void s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_do
         aws_s3_meta_request_cancel(meta_request);
     }
 
-    aws_future_set_valueless(patched_prep->my_future);
+    aws_future_void_set_result(patched_prep->my_future);
 finish:
-    aws_future_release(patched_prep->original_future);
-    aws_future_release(patched_prep->my_future);
+    aws_future_void_release(patched_prep->original_future);
+    aws_future_void_release(patched_prep->my_future);
     aws_mem_release(patched_prep->allocator, patched_prep);
 }
 
