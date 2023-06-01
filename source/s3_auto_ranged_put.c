@@ -1417,7 +1417,7 @@ static void s_s3_auto_ranged_put_request_finished(
                     struct aws_byte_buf etag_header_value_byte_buf;
                     AWS_ZERO_STRUCT(etag_header_value_byte_buf);
 
-                    replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
+                    aws_replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
 
                     aws_http_headers_set(
                         final_response_headers,

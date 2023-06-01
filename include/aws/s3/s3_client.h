@@ -72,6 +72,12 @@ enum aws_s3_meta_request_type {
      * using multiple S3 UploadPartCopy requests in parallel, or bypasses
      * a CopyObject request to S3 if the object size is not large enough for
      * a multipart upload.
+     * Note: copy support is still in development and has following limitations:
+     * - host header must use virtual host addressing style (path style is not
+     *   supported) and both source and dest buckets must have dns compliant name
+     * - only {bucket}/{key} format is supported for source and passing arn as
+     *   source will not work
+     * - source bucket is assumed to be in the same region as dest
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 

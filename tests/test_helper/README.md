@@ -24,7 +24,7 @@ python3 test_helper.py clean
 ### `init` action
 
 * Create `<BUCKET_NAME>` in us-west-2.
-* Add the lifecyle to automatic clean up the `upload/` after one day
+* Add the lifecycle to automatic clean up the `upload/` after one day
 * Upload files:
   + `pre-existing-10MB-aes256-c` [SSE-C](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html#sse-c-highlights) encrypted fille
   + `pre-existing-10MB-aes256` [SSE-S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/specifying-s3-encryption.html) encrypted fille

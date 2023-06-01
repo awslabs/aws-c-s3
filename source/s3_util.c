@@ -288,29 +288,27 @@ void aws_s3_init_default_signing_config(
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
 }
 
-void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf) {
+static struct aws_byte_cursor s_quote_entity_literal = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&quot;");
+static struct aws_byte_cursor s_quote_literal = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"");
+
+void aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf) {
     AWS_PRECONDITION(str);
 
     aws_byte_buf_init(out_buf, allocator, str->len);
 
-    struct aws_byte_cursor quote_entity = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&quot;");
-    struct aws_byte_cursor quote = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"");
-
-    size_t i = 0;
-
-    while (i < str->len) {
+    for (size_t i = 0; i < str->len; ++i) {
         size_t chars_remaining = str->len - i;
 
-        if (chars_remaining >= quote_entity.len &&
-            !strncmp((const char *)&str->bytes[i], (const char *)quote_entity.ptr, quote_entity.len)) {
+        if (chars_remaining >= s_quote_entity_literal.len &&
+            !strncmp(
+                (const char *)&str->bytes[i], (const char *)s_quote_entity_literal.ptr, s_quote_entity_literal.len)) {
             /* Append quote */
-            aws_byte_buf_append(out_buf, &quote);
-            i += quote_entity.len;
+            aws_byte_buf_append(out_buf, &s_quote_literal);
+            i += s_quote_entity_literal.len - 1;
         } else {
             /* Append character */
             struct aws_byte_cursor character_cursor = aws_byte_cursor_from_array(&str->bytes[i], 1);
             aws_byte_buf_append(out_buf, &character_cursor);
-            ++i;
         }
     }
 }
@@ -565,8 +563,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     if (part_size_uint64 > SIZE_MAX) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create auto-ranged-put meta request; required part size of %" PRIu64
-            " bytes is too large for platform.",
+            "Could not create meta request; required part size of %" PRIu64 " bytes is too large for platform.",
             part_size_uint64);
 
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -577,7 +574,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     if (part_size > client_max_part_size) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create auto-ranged-put meta request; required part size for put request is %" PRIu64
+            "Could not create meta request; required part size for request is %" PRIu64
             ", but current maximum part size is %" PRIu64,
             (uint64_t)part_size,
             (uint64_t)client_max_part_size);

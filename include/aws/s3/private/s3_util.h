@@ -24,6 +24,7 @@
 #endif
 #define KB_TO_BYTES(kb) ((kb)*1024)
 #define MB_TO_BYTES(mb) ((mb)*1024 * 1024)
+#define GB_TO_BYTES(gb) ((gb)*1024 * 1024 * 1024)
 
 struct aws_allocator;
 struct aws_http_stream;
@@ -198,7 +199,7 @@ struct aws_string *aws_xml_get_top_level_tag_with_root_name(
 
 /* replace &quot; with escaped /" */
 AWS_S3_API
-void replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf);
+void aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf);
 
 /* strip quotes if string is enclosed in quotes. does not remove quotes if they only appear on either side of the string
  */
