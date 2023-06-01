@@ -44,10 +44,14 @@ typedef void(aws_s3_meta_request_prepare_request_callback_fn)(
     void *user_data);
 
 struct aws_s3_prepare_request_payload {
+    struct aws_allocator *allocator;
     struct aws_s3_request *request;
+    struct aws_task task;
+    /* async step: wait for vtable->prepare_request() call to complete */
+    struct aws_future_void *asyncstep_prepare_request;
+    /* callback to invoke when all request preparation work is complete */
     aws_s3_meta_request_prepare_request_callback_fn *callback;
     void *user_data;
-    struct aws_task task;
 };
 
 struct aws_s3_meta_request_vtable {
@@ -55,15 +59,19 @@ struct aws_s3_meta_request_vtable {
      * progress, false if there is not. */
     bool (*update)(struct aws_s3_meta_request *meta_request, uint32_t flags, struct aws_s3_request **out_request);
 
+    /* Run vtable->prepare_request() on the meta-request's event loop.
+     * We do this because body streaming is slow, and we don't want it on our networking threads.
+     * The callback may fire on any thread (an async sub-step may run on another thread). */
     void (*schedule_prepare_request)(
         struct aws_s3_meta_request *meta_request,
         struct aws_s3_request *request,
         aws_s3_meta_request_prepare_request_callback_fn *callback,
         void *user_data);
 
-    /* Given a request, prepare it for sending (ie: creating the correct HTTP message, reading from a stream (if
-     * necessary), signing it, computing hashes, etc.) */
-    int (*prepare_request)(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+    /* Given a request, asynchronously prepare it for sending
+     * (creating the correct HTTP message, reading from a stream (if necessary), computing hashes, etc.).
+     * Returns a future, which may complete on any thread (and may complete synchronously). */
+    struct aws_future_void *(*prepare_request)(struct aws_s3_request *request);
 
     void (*init_signing_date_time)(struct aws_s3_meta_request *meta_request, struct aws_date_time *date_time);
 
@@ -108,6 +116,9 @@ struct aws_s3_meta_request {
 
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
+
+    /* Async stream for meta request's body */
+    struct aws_async_input_stream *request_body_async_stream;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
@@ -297,10 +308,17 @@ void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
 
-/* Read from the meta request's input stream. Should always be done outside of any mutex, as reading from the stream
- * could cause user code to call back into aws-c-s3.*/
+/* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
+ * as reading from the stream could cause user code to call back into aws-c-s3.
+ * This will fill the buffer to capacity, unless end of stream is reached.
+ * It may read from the underlying stream multiple times, if that's what it takes to fill the buffer.
+ * Returns a future whose result bool indicates whether end of stream was reached.
+ * This future may complete on any thread, and may complete synchronously.
+ */
 AWS_S3_API
-int aws_s3_meta_request_read_body(struct aws_s3_meta_request *meta_request, struct aws_byte_buf *buffer);
+struct aws_future_bool *aws_s3_meta_request_read_body(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer);
 
 bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request);
 

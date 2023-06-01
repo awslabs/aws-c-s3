@@ -398,7 +398,14 @@ struct aws_s3_checksum_config {
     struct aws_array_list *validate_checksum_algorithms;
 };
 
-/* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
+/**
+ * Options for a new meta request, ie, file transfer that will be handled by the high performance client.
+ *
+ * There are several ways to pass the request's body data:
+ * 1) If the data is already in memory, set the body-stream on `message`.
+ * 2) If the data is on disk, set `send_filepath` for best performance.
+ * 3) If the data will be be produced in asynchronous chunks, set `send_async_stream`.
+ */
 struct aws_s3_meta_request_options {
     /* TODO: The meta request options cannot control the request to be split or not. Should consider to add one */
 
@@ -410,16 +417,24 @@ struct aws_s3_meta_request_options {
     const struct aws_signing_config_aws *signing_config;
 
     /* Initial HTTP message that defines what operation we are doing.
-     * When uploading a file, you should set `send_filepath` (instead of the message's body-stream)
-     * for better performance. */
+     * Do not set the message's body-stream if the body is being passed by other means (see note above) */
     struct aws_http_message *message;
 
     /**
      * Optional.
-     * If set, this file is sent as the request body, and the `message` body-stream is ignored.
-     * This can give better performance than sending data using the body-stream.
+     * If set, this file is sent as the request body.
+     * This gives the best performance when sending data from a file.
+     * Do not set if the body is being passed by other means (see note above).
      */
     struct aws_byte_cursor send_filepath;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * If set, the request body comes from this async stream.
+     * Use this when outgoing data will be produced in asynchronous chunks.
+     * Do not set if the body is being passed by other means (see note above).
+     */
+    struct aws_async_input_stream *send_async_stream;
 
     /**
      * Optional.
