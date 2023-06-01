@@ -226,14 +226,14 @@ static struct aws_future_void *s_s3_default_prepare_request(struct aws_s3_reques
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
-    struct aws_future_void *preparation_future = aws_future_void_new(request->allocator);
+    struct aws_future_void *asyncstep_prepare_request = aws_future_void_new(request->allocator);
 
     /* Store data for async job */
     struct aws_s3_default_prepare_request_job *request_prep =
         aws_mem_calloc(request->allocator, 1, sizeof(struct aws_s3_default_prepare_request_job));
     request_prep->allocator = request->allocator;
     request_prep->request = request;
-    request_prep->on_complete = aws_future_void_acquire(preparation_future);
+    request_prep->on_complete = aws_future_void_acquire(asyncstep_prepare_request);
 
     if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
@@ -247,7 +247,7 @@ static struct aws_future_void *s_s3_default_prepare_request(struct aws_s3_reques
         s_s3_default_prepare_request_finish(request_prep, AWS_ERROR_SUCCESS);
     }
 
-    return preparation_future;
+    return asyncstep_prepare_request;
 }
 
 /* Completion callback for reading the body stream */

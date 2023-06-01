@@ -539,7 +539,7 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
         payload->callback(meta_request, payload->request, error_code, payload->user_data);
     }
 
-    aws_future_void_release(payload->preparation_future);
+    aws_future_void_release(payload->asyncstep_prepare_request);
     aws_mem_release(payload->allocator, payload);
 }
 
@@ -617,8 +617,9 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
     /* Kick off the async vtable->prepare_request()
      * Each subclass has its own implementation of this. */
-    payload->preparation_future = vtable->prepare_request(request);
-    aws_future_void_register_callback(payload->preparation_future, s_s3_meta_request_on_request_prepared, payload);
+    payload->asyncstep_prepare_request = vtable->prepare_request(request);
+    aws_future_void_register_callback(
+        payload->asyncstep_prepare_request, s_s3_meta_request_on_request_prepared, payload);
     return;
 }
 
@@ -628,7 +629,7 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     struct aws_s3_request *request = payload->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
-    int error_code = aws_future_void_get_error(payload->preparation_future);
+    int error_code = aws_future_void_get_error(payload->asyncstep_prepare_request);
     if (error_code) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
         return;
