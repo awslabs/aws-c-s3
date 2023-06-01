@@ -72,10 +72,36 @@ enum aws_s3_meta_request_type {
      * using multiple S3 UploadPartCopy requests in parallel, or bypasses
      * a CopyObject request to S3 if the object size is not large enough for
      * a multipart upload.
+     * Note: copy support is still in development and has following limitations:
+     * - host header must use virtual host addressing style (path style is not
+     *   supported) and both source and dest buckets must have dns compliant name
+     * - only {bucket}/{key} format is supported for source and passing arn as
+     *   source will not work
+     * - source bucket is assumed to be in the same region as dest
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
     AWS_S3_META_REQUEST_TYPE_MAX,
+};
+
+/**
+ * The type of S3 request made. Used by metrics.
+ */
+enum aws_s3_request_type {
+    /* Same as the original HTTP request passed to aws_s3_meta_request_options */
+    AWS_S3_REQUEST_TYPE_DEFAULT,
+
+    /* S3 APIs */
+    AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+    AWS_S3_REQUEST_TYPE_GET_OBJECT,
+    AWS_S3_REQUEST_TYPE_LIST_PARTS,
+    AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_UPLOAD_PART,
+    AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
+
+    AWS_S3_REQUEST_TYPE_MAX,
 };
 
 /**
@@ -870,9 +896,15 @@ int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *me
 AWS_S3_API
 int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, uint32_t *out_stream_id);
 
+/* Get the request type from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_type(
+    const struct aws_s3_request_metrics *metrics,
+    enum aws_s3_request_type *out_request_type);
+
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API
-int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *out_metrics);
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

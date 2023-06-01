@@ -6,6 +6,7 @@
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_copy_object.h"
 #include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
@@ -1074,10 +1075,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             }
         }
         case AWS_S3_META_REQUEST_TYPE_COPY_OBJECT: {
-            /* TODO: support copy object correctly. */
-            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "CopyObject is not currently supported");
-            aws_raise_error(AWS_ERROR_UNIMPLEMENTED);
-            return NULL;
+            return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
         }
         case AWS_S3_META_REQUEST_TYPE_DEFAULT:
             return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);

@@ -136,7 +136,7 @@ static bool s_on_list_bucket_result_node_encountered(
         if (fs_wrapper.fs_info.e_tag.len) {
             struct aws_string *quoted_etag_str =
                 aws_string_new_from_cursor(fs_wrapper.allocator, &fs_wrapper.fs_info.e_tag);
-            replace_quote_entities(fs_wrapper.allocator, quoted_etag_str, &trimmed_etag);
+            aws_replace_quote_entities(fs_wrapper.allocator, quoted_etag_str, &trimmed_etag);
             fs_wrapper.fs_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
             aws_string_destroy(quoted_etag_str);
         }

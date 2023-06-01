@@ -22,78 +22,68 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-struct replace_quote_entities_test_case {
-    struct aws_string *test_string;
-    struct aws_byte_cursor expected_result;
-};
-
 AWS_TEST_CASE(test_s3_replace_quote_entities, s_test_s3_replace_quote_entities)
 static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct test_case {
+        struct aws_string *test_string;
+        const char *expected_result;
+    };
 
-    struct replace_quote_entities_test_case test_cases[] = {
+    struct test_case test_cases[] = {
         {
             .test_string = aws_string_new_from_c_str(allocator, "&quot;testtest"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"testtest"),
+            .expected_result = "\"testtest",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, "testtest&quot;"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest\""),
+            .expected_result = "testtest\"",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, "&quot;&quot;"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"\""),
+            .expected_result = "\"\"",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, "testtest"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest"),
+            .expected_result = "testtest",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, ""),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(""),
+            .expected_result = "",
         },
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
-        struct replace_quote_entities_test_case *test_case = &test_cases[i];
+        struct test_case *test_case = &test_cases[i];
 
         struct aws_byte_buf result_byte_buf;
         AWS_ZERO_STRUCT(result_byte_buf);
 
-        replace_quote_entities(allocator, test_case->test_string, &result_byte_buf);
+        aws_replace_quote_entities(allocator, test_case->test_string, &result_byte_buf);
 
         struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_buf(&result_byte_buf);
 
-        ASSERT_TRUE(aws_byte_cursor_eq(&test_case->expected_result, &result_byte_cursor));
+        ASSERT_CURSOR_VALUE_CSTRING_EQUALS(result_byte_cursor, test_case->expected_result);
 
         aws_byte_buf_clean_up(&result_byte_buf);
         aws_string_destroy(test_case->test_string);
         test_case->test_string = NULL;
     }
 
-    aws_s3_tester_clean_up(&tester);
-
     return 0;
 }
-
-struct strip_quotes_test_case {
-    struct aws_byte_cursor test_cursor;
-    struct aws_byte_cursor expected_result;
-};
 
 AWS_TEST_CASE(test_s3_strip_quotes, s_test_s3_strip_quotes)
 static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct test_case {
+        struct aws_byte_cursor test_cursor;
+        struct aws_byte_cursor expected_result;
+    };
 
-    struct strip_quotes_test_case test_cases[] = {
+    struct test_case test_cases[] = {
         {
             .test_cursor = aws_byte_cursor_from_c_str("\"test\""),
             .expected_result = aws_byte_cursor_from_c_str("test"),
@@ -117,7 +107,7 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
-        struct strip_quotes_test_case *test_case = &test_cases[i];
+        struct test_case *test_case = &test_cases[i];
 
         struct aws_byte_buf result_byte_buf;
         AWS_ZERO_STRUCT(result_byte_buf);
@@ -131,8 +121,6 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
         aws_byte_buf_clean_up(&result_byte_buf);
         aws_string_destroy(result);
     }
-
-    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }

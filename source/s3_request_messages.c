@@ -417,111 +417,112 @@ error_clean_up:
     return NULL;
 }
 
-/* Creates a HEAD GetObject request to get the size of the specified object. */
-struct aws_http_message *aws_s3_get_object_size_message_new(
-    struct aws_allocator *allocator,
-    struct aws_http_message *base_message,
-    struct aws_byte_cursor source_bucket,
-    struct aws_byte_cursor source_key) {
-
-    (void)base_message;
-
-    AWS_PRECONDITION(allocator);
-
-    struct aws_http_message *message = aws_http_message_new_request(allocator);
-
-    if (message == NULL) {
-        return NULL;
-    }
-
-    const struct aws_byte_cursor head_operation = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("HEAD");
-    if (aws_http_message_set_request_method(message, head_operation)) {
-        goto error_clean_up;
-    }
-
-    char destination_path[1024];
-    snprintf(destination_path, sizeof(destination_path), "/%.*s", (int)source_key.len, source_key.ptr);
-    /* TODO: url encode */
-
-    if (aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str(destination_path))) {
-        goto error_clean_up;
-    }
-
-    char host_header_value[1024];
-    /* TODO: Fix the hard-coded host name. */
-    snprintf(
-        host_header_value,
-        sizeof(host_header_value),
-        "%.*s.s3.us-west-2.amazonaws.com",
-        (int)source_bucket.len,
-        source_bucket.ptr);
-    struct aws_http_header host_header = {
-        .name = g_host_header_name,
-        .value = aws_byte_cursor_from_c_str(host_header_value),
-    };
-    aws_http_message_add_header(message, host_header);
-
-    aws_http_message_set_body_stream(message, NULL);
-
-    return message;
-
-error_clean_up:
-
-    if (message != NULL) {
-        aws_http_message_release(message);
-        message = NULL;
-    }
-
-    return NULL;
-}
-
-/* Creates a HEAD GetObject sub-request to get the size of the source object of a Copy meta request. */
+static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+/**
+ * For the CopyObject operation, create the initial HEAD message to retrieve the size of the copy source.
+ */
 struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
+    struct aws_http_message *message = NULL;
+    struct aws_byte_buf head_object_host_header;
+    AWS_ZERO_STRUCT(head_object_host_header);
+
     AWS_PRECONDITION(allocator);
 
-    struct aws_http_message *message = NULL;
-
-    /* find the x-amz-copy-source header */
+    /* Find the x-amz-copy-source header, to extract source bucket/key information. */
     struct aws_http_headers *headers = aws_http_message_get_headers(base_message);
-
-    struct aws_byte_cursor source_bucket;
-    AWS_ZERO_STRUCT(source_bucket);
-
-    const struct aws_byte_cursor copy_source_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
-    if (aws_http_headers_get(headers, copy_source_header, &source_bucket) != AWS_OP_SUCCESS) {
-        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the x-amz-copy-source header");
+    if (!headers) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing headers");
         return NULL;
     }
 
-    if (source_bucket.len > 1 && source_bucket.ptr[0] == '/') {
-        /* skip the leading slash */
-        aws_byte_cursor_advance(&source_bucket, 1);
+    struct aws_byte_cursor source_header;
+    const struct aws_byte_cursor copy_source_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
+    if (aws_http_headers_get(headers, copy_source_header, &source_header) != AWS_OP_SUCCESS) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the x-amz-copy-source header");
+        return NULL;
     }
-    /* as we skipped the optional leading slash, from this point source format is always {bucket}/{key}. split them.
-     */
-    struct aws_byte_cursor source_key = source_bucket;
-
-    while (source_key.len > 0) {
-        if (*source_key.ptr == '/') {
-            source_bucket.len = source_key.ptr - source_bucket.ptr;
-            aws_byte_cursor_advance(&source_key, 1); /* skip the / between bucket and key */
-            break;
-        }
-        aws_byte_cursor_advance(&source_key, 1);
+    struct aws_byte_cursor host;
+    if (aws_http_headers_get(headers, g_host_header_name, &host) != AWS_OP_SUCCESS) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the Host header");
+        return NULL;
     }
 
-    if (source_bucket.len == 0 || source_key.len == 0) {
+    struct aws_byte_cursor request_path = source_header;
+
+    /* Skip optional leading slash. */
+    if (aws_byte_cursor_starts_with(&request_path, &s_slash_char)) {
+        aws_byte_cursor_advance(&request_path, 1);
+    }
+
+    /* From this point forward, the format is {bucket}/{key} - split
+    components.*/
+
+    struct aws_byte_cursor source_bucket = {0};
+
+    if (aws_byte_cursor_next_split(&request_path, '/', &source_bucket)) {
+        aws_byte_cursor_advance(&request_path, source_bucket.len);
+    }
+
+    if (source_bucket.len == 0 || request_path.len == 0) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
-            "The CopyRequest x-amz-copy-source header must contain the bucket and object key separated by a slash");
+            "CopyRequest x-amz-copy-source header does not follow expected bucket/key format: " PRInSTR,
+            AWS_BYTE_CURSOR_PRI(source_header));
         goto error_cleanup;
     }
-    message = aws_s3_get_object_size_message_new(allocator, base_message, source_bucket, source_key);
+
+    if (aws_byte_buf_init_copy_from_cursor(&head_object_host_header, allocator, source_bucket)) {
+        goto error_cleanup;
+    }
+
+    /* Reuse the domain name from the original Host header for the HEAD request.
+     * TODO: following code works by replacing bucket name in the host with the
+     * source bucket name. this only works for virtual host endpoints and has a
+     * slew of other issues, like not supporting source in a different region.
+     * This covers common case, but we need to rethink how we can support all
+     * cases in general.
+     */
+    struct aws_byte_cursor domain_name;
+    const struct aws_byte_cursor dot = aws_byte_cursor_from_c_str(".");
+    if (aws_byte_cursor_find_exact(&host, &dot, &domain_name)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest Host header not in FQDN format");
+        goto error_cleanup;
+    }
+
+    if (aws_byte_buf_append_dynamic(&head_object_host_header, &domain_name)) {
+        goto error_cleanup;
+    }
+
+    message = aws_http_message_new_request(allocator);
+    if (message == NULL) {
+        goto error_cleanup;
+    }
+
+    if (aws_http_message_set_request_method(message, g_head_method)) {
+        goto error_cleanup;
+    }
+
+    struct aws_http_header host_header = {
+        .name = g_host_header_name,
+        .value = aws_byte_cursor_from_buf(&head_object_host_header),
+    };
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_cleanup;
+    }
+
+    if (aws_http_message_set_request_path(message, request_path)) {
+        goto error_cleanup;
+    }
+
+    aws_byte_buf_clean_up(&head_object_host_header);
+    return message;
 
 error_cleanup:
-    return message;
+    aws_byte_buf_clean_up(&head_object_host_header);
+    aws_http_message_release(message);
+    return NULL;
 }
 
 static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(

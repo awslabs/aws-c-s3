@@ -116,8 +116,11 @@ def create_bucket_with_lifecycle():
             10*MB, 'pre-existing-10MB-aes256', sse='aes256')
         put_pre_existing_objects(
             10*MB, 'pre-existing-10MB-kms', sse='kms')
+        put_pre_existing_objects(128*MB, 'pre-existing-256MB')
+        put_pre_existing_objects(128*MB, 'pre-existing-256MB-@')
         put_pre_existing_objects(10*MB, 'pre-existing-10MB')
         put_pre_existing_objects(1*MB, 'pre-existing-1MB')
+        put_pre_existing_objects(1*MB, 'pre-existing-1MB-@')
         put_pre_existing_objects(0, 'pre-existing-empty')
 
     except botocore.exceptions.ClientError as e:
