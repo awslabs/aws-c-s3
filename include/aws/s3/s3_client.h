@@ -429,7 +429,7 @@ struct aws_s3_meta_request_options {
     struct aws_byte_cursor send_filepath;
 
     /**
-     * Optional
+     * Optional - EXPERIMENTAL/UNSTABLE
      * If set, the request body comes from this async stream.
      * Use this when outgoing data will be produced in asynchronous chunks.
      * Do not set if the body is being passed by other means (see note above).
