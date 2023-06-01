@@ -51,9 +51,9 @@ struct aws_s3_auto_ranged_put_prepare_request_job {
 struct aws_s3_prepare_upload_part_job {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    /* async step: skip over any parts before this one that aren't going to be sent */
+    /* async step: skip parts from input stream that were previously uploaded */
     struct aws_future_void *step1_skip_prev_parts;
-    /* async step: read this part */
+    /* async step: read this part from input stream */
     struct aws_future_bool *step2_read_part;
     /* future to set when this job completes */
     struct aws_future_http_message *on_complete;
@@ -63,7 +63,7 @@ struct aws_s3_prepare_upload_part_job {
 struct aws_s3_prepare_complete_multipart_upload_job {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    /* async step: skip over any remaining parts that aren't going to be sent */
+    /* async step: skip remaining parts from input stream that were previously uploaded */
     struct aws_future_void *step1_skip_remaining_parts;
     /* future to set when this job completes */
     struct aws_future_http_message *on_complete;
@@ -792,8 +792,8 @@ struct aws_s3_skip_parts_from_stream_job {
     uint32_t part_index;
     uint32_t skip_until_part_number;
     struct aws_byte_buf temp_body_buf;
-    /* async step: read each part */
-    struct aws_future_bool *read_part_step_future;
+    /* repeated async step: read each part we're skipping */
+    struct aws_future_bool *repeated_step_read_part;
     /* future to set when this job completes */
     struct aws_future_void *on_complete;
 };
@@ -867,7 +867,7 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
     for (; skip_job->part_index < skip_job->skip_until_part_number; ++skip_job->part_index) {
 
         /* unless we just re-entered loop due to async read completion, kick off a new async read */
-        if (skip_job->read_part_step_future == NULL) {
+        if (skip_job->repeated_step_read_part == NULL) {
             size_t request_body_size = s_compute_request_body_size(meta_request, skip_job->part_index + 1);
 
             if (temp_body_buf->capacity != request_body_size) {
@@ -879,11 +879,11 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
                 aws_byte_buf_reset(temp_body_buf, false);
             }
 
-            skip_job->read_part_step_future = aws_s3_meta_request_read_body(skip_job->meta_request, temp_body_buf);
+            skip_job->repeated_step_read_part = aws_s3_meta_request_read_body(skip_job->meta_request, temp_body_buf);
 
             /* the read may or may not complete immediately */
             if (aws_future_bool_register_callback_if_not_done(
-                    skip_job->read_part_step_future, s_skip_parts_from_stream_loop, skip_job)) {
+                    skip_job->repeated_step_read_part, s_skip_parts_from_stream_loop, skip_job)) {
 
                 /* read is pending, we'll resume this loop when callback fires */
                 return;
@@ -891,9 +891,9 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
         }
 
         /* read is complete, check results */
-        error_code = aws_future_bool_get_error(skip_job->read_part_step_future);
-        skip_job->read_part_step_future =
-            aws_future_bool_release(skip_job->read_part_step_future); /* release and set NULL */
+        error_code = aws_future_bool_get_error(skip_job->repeated_step_read_part);
+        skip_job->repeated_step_read_part =
+            aws_future_bool_release(skip_job->repeated_step_read_part); /* release and set NULL */
 
         if (error_code != AWS_ERROR_SUCCESS) {
             AWS_LOGF_ERROR(
