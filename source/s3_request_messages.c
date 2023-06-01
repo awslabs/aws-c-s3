@@ -465,7 +465,9 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     }
 
     if (source_bucket.len == 0 || request_path.len == 0) {
-        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest x-amz-copy-source header does not follow expected bucket/key format: " PRInSTR,
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "CopyRequest x-amz-copy-source header does not follow expected bucket/key format: " PRInSTR,
             AWS_BYTE_CURSOR_PRI(source_header));
         goto error_cleanup;
     }
@@ -475,12 +477,12 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     }
 
     /* Reuse the domain name from the original Host header for the HEAD request.
-    * TODO: following code works by replacing bucket name in the host with the
-    * source bucket name. this only works for virtual host endpoints and has a
-    * slew of other issues, like not supporting source in a different region.
-    * This covers common case, but we need to rethink how we can support all
-    * cases in general.
-    */
+     * TODO: following code works by replacing bucket name in the host with the
+     * source bucket name. this only works for virtual host endpoints and has a
+     * slew of other issues, like not supporting source in a different region.
+     * This covers common case, but we need to rethink how we can support all
+     * cases in general.
+     */
     struct aws_byte_cursor domain_name;
     const struct aws_byte_cursor dot = aws_byte_cursor_from_c_str(".");
     if (aws_byte_cursor_find_exact(&host, &dot, &domain_name)) {
