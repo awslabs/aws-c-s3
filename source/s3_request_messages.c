@@ -872,7 +872,7 @@ struct aws_async_input_stream *aws_s3_message_util_acquire_async_body_stream(
     }
 
     /* Otherwise, no body provided, just create empty async-stream */
-    struct aws_byte_cursor empty_cursor = {.len = 0};
+    struct aws_byte_cursor empty_cursor = {0};
     struct aws_input_stream *empty_stream = aws_input_stream_new_from_cursor(allocator, &empty_cursor);
     AWS_ASSERT(empty_stream);
     send_async_stream = aws_async_input_stream_new_from_synchronous(allocator, empty_stream);
