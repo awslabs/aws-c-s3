@@ -23,7 +23,6 @@ struct aws_s3_endpoint_resolver *aws_s3_endpoint_resolver_new(struct aws_allocat
 
 /**
  * Increments the reference count on the aws_s3_endpoint_resolver, allowing the caller to take a reference to it.
- *
  * Returns the same aws_s3_endpoint_resolver passed in.
  */
 AWS_S3_API
