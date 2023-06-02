@@ -20,7 +20,10 @@ static void s_aws_s3_endpoint_resolver_clean_up(struct aws_s3_endpoint_resolver 
 }
 
 struct aws_s3_endpoint_resolver *aws_s3_endpoint_resolver_new(struct aws_allocator *allocator) {
+    struct aws_endpoints_ruleset *ruleset = NULL;
+    struct aws_partitions_config *partitions = NULL;
     struct aws_s3_endpoint_resolver *resolver = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_endpoint_resolver));
+    bool success = false;
 
     resolver->allocator = allocator;
     aws_ref_count_init(
@@ -28,14 +31,30 @@ struct aws_s3_endpoint_resolver *aws_s3_endpoint_resolver_new(struct aws_allocat
 
     struct aws_byte_cursor ruleset_cursor = aws_byte_cursor_from_c_str(aws_s3_endpoint_rule_set);
     struct aws_byte_cursor partitions_cursor = aws_byte_cursor_from_c_str(aws_s3_endpoint_resolver_partitions);
-    struct aws_endpoints_ruleset *ruleset = aws_endpoints_ruleset_new_from_string(allocator, ruleset_cursor);
-    struct aws_partitions_config *partitions = aws_partitions_config_new_from_string(allocator, partitions_cursor);
+
+    ruleset = aws_endpoints_ruleset_new_from_string(allocator, ruleset_cursor);
+    if (!ruleset) {
+        goto cleanup;
+    }
+
+    partitions = aws_partitions_config_new_from_string(allocator, partitions_cursor);
+    if (!partitions) {
+        goto cleanup;
+    }
 
     resolver->rule_engine = aws_endpoints_rule_engine_new(allocator, ruleset, partitions);
+    if (!resolver->rule_engine) {
+        goto cleanup;
+    }
 
+    success = true;
+cleanup:
     aws_endpoints_ruleset_release(ruleset);
     aws_partitions_config_release(partitions);
-
+    if (!success) {
+        s_aws_s3_endpoint_resolver_clean_up(resolver);
+        resolver = NULL;
+    }
     return resolver;
 }
 
