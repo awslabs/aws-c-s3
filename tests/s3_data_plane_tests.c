@@ -3498,6 +3498,9 @@ static int s_test_s3_round_trip_with_filepath(struct aws_allocator *allocator, v
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
     /*** PUT FILE ***/
 
     struct aws_byte_buf path_buf;
@@ -3523,6 +3526,8 @@ static int s_test_s3_round_trip_with_filepath(struct aws_allocator *allocator, v
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /*** GET FILE ***/
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -3534,9 +3539,11 @@ static int s_test_s3_round_trip_with_filepath(struct aws_allocator *allocator, v
                 .object_path = object_path,
             },
     };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(put_options.put_options.object_size_mb), test_results.received_body_size);
 
+    aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_byte_buf_clean_up(&path_buf);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);

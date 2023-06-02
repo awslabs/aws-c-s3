@@ -1405,31 +1405,6 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_TRUE(object_size_bytes > client->part_size);
             }
 
-            if (options->put_options.async_input_stream) {
-                struct aws_async_input_stream_tester_options async_options = {
-                    .autogen_length = object_size_bytes,
-                    .completion_strategy = AWS_ASYNC_READ_COMPLETES_ON_ANOTHER_THREAD,
-                };
-                if (options->put_options.invalid_input_stream) {
-                    async_options.fail_on_nth_read = 1;
-                    async_options.fail_with_error_code = AWS_IO_STREAM_READ_FAILED;
-                }
-                async_stream = aws_async_input_stream_new_tester(allocator, &async_options);
-                ASSERT_NOT_NULL(async_stream);
-                meta_request_options.send_async_stream = async_stream;
-            } else {
-                struct aws_input_stream_tester_options stream_options = {
-                    .autogen_length = object_size_bytes,
-                };
-
-                if (options->put_options.invalid_input_stream) {
-                    stream_options.fail_on_nth_read = 1;
-                    stream_options.fail_with_error_code = AWS_IO_STREAM_READ_FAILED;
-                }
-                input_stream = aws_input_stream_new_tester(allocator, &stream_options);
-                ASSERT_NOT_NULL(input_stream);
-            }
-
             struct aws_byte_buf object_path_buffer;
             aws_byte_buf_init(&object_path_buffer, allocator, 128);
 
@@ -1482,6 +1457,66 @@ int aws_s3_tester_send_meta_request_with_options(
 
             struct aws_byte_cursor test_object_path = aws_byte_cursor_from_buf(&object_path_buffer);
             struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
+
+            /* Create "tester" stream with appropriate options */
+            struct aws_async_input_stream_tester_options stream_options = {
+                .base =
+                    {
+                        .autogen_length = object_size_bytes,
+                    },
+            };
+            if (options->put_options.invalid_input_stream) {
+                stream_options.base.fail_on_nth_read = 1;
+                stream_options.base.fail_with_error_code = AWS_IO_STREAM_READ_FAILED;
+            }
+
+            if (options->put_options.async_input_stream) {
+                stream_options.completion_strategy = AWS_ASYNC_READ_COMPLETES_ON_ANOTHER_THREAD;
+
+                async_stream = aws_async_input_stream_new_tester(allocator, &stream_options);
+                ASSERT_NOT_NULL(async_stream);
+                meta_request_options.send_async_stream = async_stream;
+            } else {
+                input_stream = aws_input_stream_new_tester(allocator, &stream_options.base);
+                ASSERT_NOT_NULL(input_stream);
+            }
+
+            /* if uploading via filepath, write input_stream out as tmp file on disk, and then upload that */
+            if (options->put_options.file_on_disk) {
+                ASSERT_NOT_NULL(input_stream);
+                struct aws_byte_buf filepath_buf;
+                aws_byte_buf_init(&filepath_buf, allocator, 128);
+                struct aws_byte_cursor filepath_prefix = aws_byte_cursor_from_c_str("tmp");
+                aws_byte_buf_append_dynamic(&filepath_buf, &filepath_prefix);
+                aws_byte_buf_append_dynamic(&filepath_buf, &test_object_path);
+                for (size_t i = 0; i < filepath_buf.len; ++i) {
+                    if (!isalnum(filepath_buf.buffer[i])) {
+                        filepath_buf.buffer[i] = '_'; /* sanitize filename */
+                    }
+                }
+                filepath_str = aws_string_new_from_buf(allocator, &filepath_buf);
+                aws_byte_buf_clean_up(&filepath_buf);
+
+                FILE *file = aws_fopen(aws_string_c_str(filepath_str), "wb");
+                ASSERT_NOT_NULL(file, "Cannot open file for write: %s", aws_string_c_str(filepath_str));
+
+                int64_t stream_length = 0;
+                ASSERT_SUCCESS(aws_input_stream_get_length(input_stream, &stream_length));
+
+                struct aws_byte_buf data_buf;
+                ASSERT_SUCCESS(aws_byte_buf_init(&data_buf, allocator, (size_t)stream_length));
+                ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data_buf));
+                ASSERT_UINT_EQUALS((size_t)stream_length, data_buf.len);
+
+                ASSERT_UINT_EQUALS(data_buf.len, fwrite(data_buf.buffer, 1, data_buf.len, file));
+                fclose(file);
+                aws_byte_buf_clean_up(&data_buf);
+
+                /* use filepath instead of input_stream */
+                meta_request_options.send_filepath = aws_byte_cursor_from_string(filepath_str);
+                input_stream = aws_input_stream_release(input_stream);
+            }
+
             /* Put together a simple S3 Put Object request. */
             struct aws_http_message *message;
             if (input_stream != NULL) {
@@ -1516,42 +1551,6 @@ int aws_s3_tester_send_meta_request_with_options(
             if (options->put_options.invalid_request) {
                 /* make a invalid request */
                 aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("invalid_path"));
-            }
-
-            /* TODO: move this block up with the async-stream stuff */
-            if (options->put_options.file_on_disk) {
-                /* write input_stream to a tmp file on disk */
-                struct aws_byte_buf filepath_buf;
-                aws_byte_buf_init(&filepath_buf, allocator, 128);
-                struct aws_byte_cursor filepath_prefix = aws_byte_cursor_from_c_str("tmp");
-                aws_byte_buf_append_dynamic(&filepath_buf, &filepath_prefix);
-                aws_byte_buf_append_dynamic(&filepath_buf, &test_object_path);
-                for (size_t i = 0; i < filepath_buf.len; ++i) {
-                    if (!isalnum(filepath_buf.buffer[i])) {
-                        filepath_buf.buffer[i] = '_'; /* sanitize filename */
-                    }
-                }
-                filepath_str = aws_string_new_from_buf(allocator, &filepath_buf);
-                aws_byte_buf_clean_up(&filepath_buf);
-
-                FILE *file = aws_fopen(aws_string_c_str(filepath_str), "wb");
-                ASSERT_NOT_NULL(file, "Cannot open file for write: %s", aws_string_c_str(filepath_str));
-
-                int64_t stream_length = 0;
-                ASSERT_SUCCESS(aws_input_stream_get_length(input_stream, &stream_length));
-
-                struct aws_byte_buf data_buf;
-                ASSERT_SUCCESS(aws_byte_buf_init(&data_buf, allocator, (size_t)stream_length));
-                ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data_buf));
-                ASSERT_UINT_EQUALS((size_t)stream_length, data_buf.len);
-
-                ASSERT_UINT_EQUALS(data_buf.len, fwrite(data_buf.buffer, 1, data_buf.len, file));
-                fclose(file);
-                aws_byte_buf_clean_up(&data_buf);
-
-                /* use filepath instead of input_stream */
-                meta_request_options.send_filepath = aws_byte_cursor_from_string(filepath_str);
-                aws_http_message_set_body_stream(message, NULL);
             }
 
             if (options->put_options.content_encoding.ptr != NULL) {

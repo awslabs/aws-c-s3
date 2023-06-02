@@ -230,7 +230,8 @@ int aws_s3_meta_request_init_base(
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
 
-    /* Set initial_meta_request */
+    /* Set initial_meta_request, based on how the request's body is being passed in
+     * (we checked earlier that it's not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
         /* Create copy of original message, but with body-stream that reads directly from file */
         meta_request->initial_request_message = aws_s3_message_util_copy_http_message_filepath_body_all_headers(
@@ -238,14 +239,15 @@ int aws_s3_meta_request_init_base(
         if (meta_request->initial_request_message == NULL) {
             goto error;
         }
-    } else {
-        /* Keep a reference to the original message structure passed in. */
-        meta_request->initial_request_message = aws_http_message_acquire(options->message);
-    }
 
-    /* Set async stream (if any) */
-    if (options->send_async_stream != NULL) {
+    } else if (options->send_async_stream != NULL) {
+        /* Read from async body-stream, but keep original message around for headers, method, etc */
         meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);
+        meta_request->initial_request_message = aws_http_message_acquire(options->message);
+
+    } else {
+        /* Keep original message around, we'll read from its synchronous body-stream */
+        meta_request->initial_request_message = aws_http_message_acquire(options->message);
     }
 
     /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
