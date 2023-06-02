@@ -6,9 +6,9 @@
  * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/s3.h>
+#include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
 
-static char aws_s3_endpoint_resolver_partitions[] = {
+const char aws_s3_endpoint_resolver_partitions[] = {
     '{',  '"',  'v',  'e',  'r',  's',  'i',  'o',  'n',  '"',  ':',  '"',  '1',  '.',  '1',  '"',  ',',  '"',  'p',
     'a',  'r',  't',  'i',  't',  'i',  'o',  'n',  's',  '"',  ':',  '[',  '{',  '"',  'i',  'd',  '"',  ':',  '"',
     'a',  'w',  's',  '"',  ',',  '"',  'r',  'e',  'g',  'i',  'o',  'n',  'R',  'e',  'g',  'e',  'x',  '"',  ':',

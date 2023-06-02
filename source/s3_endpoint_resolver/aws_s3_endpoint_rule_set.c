@@ -4,10 +4,9 @@
  * Copyright Amazon.com, Inc. or its affiliates.
  * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
  */
+#include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
 
-#include <aws/s3/s3.h>
-
-static char aws_s3_endpoint_rule_set[] = {
+const char aws_s3_endpoint_rule_set[] = {
     '{', '"', 'v', 'e', 'r',  's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '0', '"', ',',  '"',  'p', 'a', 'r', 'a',
     'm', 'e', 't', 'e', 'r',  's', '"', ':', '{', '"', 'B', 'u', 'c', 'k', 'e', 't', '"',  ':',  '{', '"', 'r', 'e',
     'q', 'u', 'i', 'r', 'e',  'd', '"', ':', 'f', 'a', 'l', 's', 'e', ',', '"', 'd', 'o',  'c',  'u', 'm', 'e', 'n',

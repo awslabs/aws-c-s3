@@ -2,9 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
-#include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
-#include <aws/sdkutils/endpoints_rule_engine.h>
 #include <aws/testing/aws_test_harness.h>
+
+#ifdef AWS_ENABLE_S3_ENDPOINT_RESOLVER
+#    include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
+#    include <aws/sdkutils/endpoints_rule_engine.h>
 
 AWS_TEST_CASE(test_s3_endpoint_resolver_create_destroy, s_test_s3_endpoint_resolver_create_destroy)
 static int s_test_s3_endpoint_resolver_create_destroy(struct aws_allocator *allocator, void *ctx) {
@@ -44,3 +46,5 @@ static int s_test_s3_endpoint_resolver_resolve_endpoint(struct aws_allocator *al
     aws_s3_library_clean_up();
     return 0;
 }
+
+#endif
