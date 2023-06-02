@@ -23,6 +23,7 @@
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
 #include <aws/testing/aws_test_harness.h>
+#include <aws/testing/stream_tester.h>
 #include <inttypes.h>
 
 AWS_TEST_CASE(test_s3_client_create_destroy, s_test_s3_client_create_destroy)
@@ -2235,6 +2236,46 @@ static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator
 
     ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_UNSUPPORTED_OPERATION);
 
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_async, s_test_s3_put_object_async)
+static int s_test_s3_put_object_async(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 19,
+                .async_input_stream = true,
+            },
+    };
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_s3_client_release(client);
@@ -6054,8 +6095,12 @@ static int s_test_s3_put_pause_resume_invalid_resume_stream(struct aws_allocator
     aws_input_stream_release(initial_upload_stream);
 
     /* a bad input stream to resume from */
-    struct aws_input_stream *resume_upload_stream =
-        aws_s3_bad_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+    struct aws_input_stream_tester_options stream_options = {
+        .autogen_length = s_pause_resume_object_length_128MB,
+        .fail_on_nth_read = 1,
+        .fail_with_error_code = AWS_IO_STREAM_READ_FAILED,
+    };
+    struct aws_input_stream *resume_upload_stream = aws_input_stream_new_tester(allocator, &stream_options);
 
     struct aws_s3_meta_request_resume_token *persistable_state = aws_atomic_load_ptr(&test_data.persistable_state_ptr);
 

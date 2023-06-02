@@ -120,6 +120,9 @@ struct aws_s3_meta_request {
     /* Async stream for meta request's body */
     struct aws_async_input_stream *request_body_async_stream;
 
+    /* TODO: this is confusing. Maybe don't wrap synchronous stream in async stream anymore */
+    bool request_body_stream_is_actually_async;
+
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
 

@@ -20,7 +20,9 @@
 #include <aws/io/host_resolver.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
+#include <aws/testing/async_stream_tester.h>
 #include <aws/testing/aws_test_harness.h>
+#include <aws/testing/stream_tester.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <time.h>
@@ -1326,6 +1328,7 @@ int aws_s3_tester_send_meta_request_with_options(
     AWS_ZERO_STRUCT(input_stream_buffer);
 
     struct aws_input_stream *input_stream = NULL;
+    struct aws_async_input_stream *async_stream = NULL;
 
     if (meta_request_options.message == NULL) {
         const struct aws_byte_cursor *bucket_name = options->bucket_name;
@@ -1382,10 +1385,29 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_TRUE(object_size_bytes > client->part_size);
             }
 
-            if (options->put_options.invalid_input_stream) {
-                input_stream = aws_s3_bad_input_stream_new(allocator, object_size_bytes);
+            if (options->put_options.async_input_stream) {
+                struct aws_async_input_stream_tester_options async_options = {
+                    .autogen_length = object_size_bytes,
+                    .completion_strategy = AWS_ASYNC_READ_COMPLETES_ON_ANOTHER_THREAD,
+                };
+                if (options->put_options.invalid_input_stream) {
+                    async_options.fail_on_nth_read = 1;
+                    async_options.fail_with_error_code = AWS_IO_STREAM_READ_FAILED;
+                }
+                async_stream = aws_async_input_stream_new_tester(allocator, &async_options);
+                ASSERT_NOT_NULL(async_stream);
+                meta_request_options.send_async_stream = async_stream;
             } else {
-                input_stream = aws_s3_test_input_stream_new(allocator, object_size_bytes);
+                struct aws_input_stream_tester_options stream_options = {
+                    .autogen_length = object_size_bytes,
+                };
+
+                if (options->put_options.invalid_input_stream) {
+                    stream_options.fail_on_nth_read = 1;
+                    stream_options.fail_with_error_code = AWS_IO_STREAM_READ_FAILED;
+                }
+                input_stream = aws_input_stream_new_tester(allocator, &stream_options);
+                ASSERT_NOT_NULL(input_stream);
             }
 
             struct aws_byte_buf object_path_buffer;
@@ -1441,8 +1463,19 @@ int aws_s3_tester_send_meta_request_with_options(
             struct aws_byte_cursor test_object_path = aws_byte_cursor_from_buf(&object_path_buffer);
             struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
             /* Put together a simple S3 Put Object request. */
-            struct aws_http_message *message = aws_s3_test_put_object_request_new(
-                allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, options->sse_type);
+            struct aws_http_message *message;
+            if (input_stream != NULL) {
+                message = aws_s3_test_put_object_request_new(
+                    allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, options->sse_type);
+            } else {
+                message = aws_s3_test_put_object_request_new_without_body(
+                    allocator,
+                    &host_cur,
+                    g_test_body_content_type,
+                    test_object_path,
+                    object_size_bytes,
+                    options->sse_type);
+            }
 
             if (options->put_options.content_length) {
                 /* make a invalid request */
@@ -1588,6 +1621,8 @@ int aws_s3_tester_send_meta_request_with_options(
 
     aws_input_stream_release(input_stream);
     input_stream = NULL;
+
+    async_stream = aws_async_input_stream_release(async_stream);
 
     aws_byte_buf_clean_up(&input_stream_buffer);
 

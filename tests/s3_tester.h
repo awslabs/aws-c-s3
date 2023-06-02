@@ -178,12 +178,12 @@ struct aws_s3_tester_meta_request_options {
         struct aws_byte_cursor object_path_override;
         uint32_t object_size_mb;
         bool ensure_multipart;
+        bool async_input_stream; /* send via async stream */
+        bool file_on_disk;       /* write to file on disk, then send via aws_s3_meta_request_options.send_filepath */
         bool invalid_request;
         bool invalid_input_stream;
         bool valid_md5;
         bool invalid_md5;
-        /* write file to desk, and then send via aws_s3_meta_request_options.send_filepath */
-        bool file_on_disk;
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
@@ -410,8 +410,6 @@ enum aws_s3_test_stream_value {
     TEST_STREAM_VALUE_1,
     TEST_STREAM_VALUE_2,
 };
-
-struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
 

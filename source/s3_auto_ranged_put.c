@@ -440,6 +440,16 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 static bool s_should_skip_scheduling_more_parts_based_on_flags(
     const struct aws_s3_auto_ranged_put *auto_ranged_put,
     uint32_t flags) {
+
+    uint32_t num_parts_in_flight =
+        (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_completed);
+
+    /* If the stream is actually async, only allow 1 part to be in flight at a time.
+     * We need to wait for read() to complete before calling it again */
+    if (auto_ranged_put->base.request_body_stream_is_actually_async) {
+        return num_parts_in_flight > 0;
+    }
+
     if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
         uint32_t num_parts_in_flight =
             (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_completed);
