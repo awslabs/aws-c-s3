@@ -1,5 +1,9 @@
 #ifndef AWS_S3_ENDPOINT_RULE_SET_H
 #define AWS_S3_ENDPOINT_RULE_SET_H
+/**
+ * Copyright Amazon.com, Inc. or its affiliates.
+ * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
+ */
 
 #include <aws/s3/s3.h>
 
@@ -33,8 +37,9 @@ struct aws_s3_resolve_endpoint_config {
      * constructing the endpoint instead of the client's configured region. */
     bool use_arn_region;
 };
-int aws_s3_endpoint_rule_set_length = 104103;
-char aws_s3_endpoint_rule_set[] = {
+
+static int aws_s3_endpoint_rule_set_length = 104103;
+static char aws_s3_endpoint_rule_set[] = {
     '{', '"', 'v', 'e', 'r',  's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '0', '"', ',',  '"',  'p', 'a', 'r', 'a',
     'm', 'e', 't', 'e', 'r',  's', '"', ':', '{', '"', 'B', 'u', 'c', 'k', 'e', 't', '"',  ':',  '{', '"', 'r', 'e',
     'q', 'u', 'i', 'r', 'e',  'd', '"', ':', 'f', 'a', 'l', 's', 'e', ',', '"', 'd', 'o',  'c',  'u', 'm', 'e', 'n',
@@ -4766,5 +4771,5 @@ char aws_s3_endpoint_rule_set[] = {
     'o', 'n', 's', '"', ':',  '[', ']', ',', '"', 'e', 'r', 'r', 'o', 'r', '"', ':', '"',  'A',  ' ', 'r', 'e', 'g',
     'i', 'o', 'n', ' ', 'm',  'u', 's', 't', ' ', 'b', 'e', ' ', 's', 'e', 't', ' ', 'w',  'h',  'e', 'n', ' ', 's',
     'e', 'n', 'd', 'i', 'n',  'g', ' ', 'r', 'e', 'q', 'u', 'e', 's', 't', 's', ' ', 't',  'o',  ' ', 'S', '3', '.',
-    '"', ',', '"', 't', 'y',  'p', 'e', '"', ':', '"', 'e', 'r', 'r', 'o', 'r', '"', '}',  ']',  '}', ']', '}'};
+    '"', ',', '"', 't', 'y',  'p', 'e', '"', ':', '"', 'e', 'r', 'r', 'o', 'r', '"', '}',  ']',  '}', ']', '}', '\0'};
 #endif // AWS_S3_ENDPOINT_RULE_SET_H
