@@ -233,6 +233,25 @@ static void s_s3_test_meta_request_telemetry(
     aws_s3_tester_unlock_synced_data(tester);
 }
 
+static void s_s3_test_meta_request_progress(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+
+    (void)meta_request;
+    AWS_ASSERT(meta_request);
+    AWS_ASSERT(progress);
+    AWS_ASSERT(user_data);
+
+    struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
+
+    aws_atomic_fetch_add(&meta_request_test_results->total_bytes_uploaded, (size_t)progress->bytes_transferred);
+
+    if (meta_request_test_results->progress_callback != NULL) {
+        meta_request_test_results->progress_callback(meta_request, progress, user_data);
+    }
+}
+
 /* Notify the tester that a particular clean up step has finished. */
 static void s_s3_test_client_shutdown(void *user_data);
 
@@ -402,7 +421,8 @@ int aws_s3_tester_bind_meta_request(
     ASSERT_TRUE(options->telemetry_callback == NULL);
     options->telemetry_callback = s_s3_test_meta_request_telemetry;
 
-    options->progress_callback = meta_request_test_results->progress_callback;
+    ASSERT_TRUE(options->progress_callback == NULL);
+    options->progress_callback = s_s3_test_meta_request_progress;
 
     ASSERT_TRUE(options->user_data == NULL);
     options->user_data = meta_request_test_results;
@@ -1498,6 +1518,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("invalid_path"));
             }
 
+            /* TODO: move this block up with the async-stream stuff */
             if (options->put_options.file_on_disk) {
                 /* write input_stream to a tmp file on disk */
                 struct aws_byte_buf filepath_buf;
@@ -1562,6 +1583,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->headers_callback = options->headers_callback;
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
+    out_results->progress_callback = options->progress_callback;
 
     out_results->algorithm = options->expected_validate_checksum_alg;
 

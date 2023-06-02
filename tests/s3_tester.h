@@ -161,6 +161,7 @@ struct aws_s3_tester_meta_request_options {
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
+    aws_s3_meta_request_progress_fn *progress_callback;
 
     /* Default Meta Request specific options. */
     struct {
@@ -206,7 +207,6 @@ struct aws_s3_meta_request_test_results {
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
-    aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
 
     struct aws_http_headers *error_response_headers;
