@@ -20,7 +20,9 @@
 #include <aws/io/host_resolver.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
+#include <aws/testing/async_stream_tester.h>
 #include <aws/testing/aws_test_harness.h>
+#include <aws/testing/stream_tester.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <time.h>
@@ -231,6 +233,25 @@ static void s_s3_test_meta_request_telemetry(
     aws_s3_tester_unlock_synced_data(tester);
 }
 
+static void s_s3_test_meta_request_progress(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+
+    (void)meta_request;
+    AWS_ASSERT(meta_request);
+    AWS_ASSERT(progress);
+    AWS_ASSERT(user_data);
+
+    struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
+
+    aws_atomic_fetch_add(&meta_request_test_results->total_bytes_uploaded, (size_t)progress->bytes_transferred);
+
+    if (meta_request_test_results->progress_callback != NULL) {
+        meta_request_test_results->progress_callback(meta_request, progress, user_data);
+    }
+}
+
 /* Notify the tester that a particular clean up step has finished. */
 static void s_s3_test_client_shutdown(void *user_data);
 
@@ -400,7 +421,8 @@ int aws_s3_tester_bind_meta_request(
     ASSERT_TRUE(options->telemetry_callback == NULL);
     options->telemetry_callback = s_s3_test_meta_request_telemetry;
 
-    options->progress_callback = meta_request_test_results->progress_callback;
+    ASSERT_TRUE(options->progress_callback == NULL);
+    options->progress_callback = s_s3_test_meta_request_progress;
 
     ASSERT_TRUE(options->user_data == NULL);
     options->user_data = meta_request_test_results;
@@ -1326,6 +1348,7 @@ int aws_s3_tester_send_meta_request_with_options(
     AWS_ZERO_STRUCT(input_stream_buffer);
 
     struct aws_input_stream *input_stream = NULL;
+    struct aws_async_input_stream *async_stream = NULL;
 
     if (meta_request_options.message == NULL) {
         const struct aws_byte_cursor *bucket_name = options->bucket_name;
@@ -1382,12 +1405,6 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_TRUE(object_size_bytes > client->part_size);
             }
 
-            if (options->put_options.invalid_input_stream) {
-                input_stream = aws_s3_bad_input_stream_new(allocator, object_size_bytes);
-            } else {
-                input_stream = aws_s3_test_input_stream_new(allocator, object_size_bytes);
-            }
-
             struct aws_byte_buf object_path_buffer;
             aws_byte_buf_init(&object_path_buffer, allocator, 128);
 
@@ -1440,33 +1457,33 @@ int aws_s3_tester_send_meta_request_with_options(
 
             struct aws_byte_cursor test_object_path = aws_byte_cursor_from_buf(&object_path_buffer);
             struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
-            /* Put together a simple S3 Put Object request. */
-            struct aws_http_message *message = aws_s3_test_put_object_request_new(
-                allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, options->sse_type);
 
-            if (options->put_options.content_length) {
-                /* make a invalid request */
-                char content_length_buffer[64] = "";
-                snprintf(
-                    content_length_buffer, sizeof(content_length_buffer), "%zu", options->put_options.content_length);
-
-                struct aws_http_headers *headers = aws_http_message_get_headers(message);
-                aws_http_headers_set(
-                    headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
+            /* Create "tester" stream with appropriate options */
+            struct aws_async_input_stream_tester_options stream_options = {
+                .base =
+                    {
+                        .autogen_length = object_size_bytes,
+                    },
+            };
+            if (options->put_options.invalid_input_stream) {
+                stream_options.base.fail_on_nth_read = 1;
+                stream_options.base.fail_with_error_code = AWS_IO_STREAM_READ_FAILED;
             }
 
-            if (options->put_options.skip_content_length) {
-                struct aws_http_headers *headers = aws_http_message_get_headers(message);
-                aws_http_headers_erase(headers, g_content_length_header_name);
+            if (options->put_options.async_input_stream) {
+                stream_options.completion_strategy = AWS_ASYNC_READ_COMPLETES_ON_ANOTHER_THREAD;
+
+                async_stream = aws_async_input_stream_new_tester(allocator, &stream_options);
+                ASSERT_NOT_NULL(async_stream);
+                meta_request_options.send_async_stream = async_stream;
+            } else {
+                input_stream = aws_input_stream_new_tester(allocator, &stream_options.base);
+                ASSERT_NOT_NULL(input_stream);
             }
 
-            if (options->put_options.invalid_request) {
-                /* make a invalid request */
-                aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("invalid_path"));
-            }
-
+            /* if uploading via filepath, write input_stream out as tmp file on disk, and then upload that */
             if (options->put_options.file_on_disk) {
-                /* write input_stream to a tmp file on disk */
+                ASSERT_NOT_NULL(input_stream);
                 struct aws_byte_buf filepath_buf;
                 aws_byte_buf_init(&filepath_buf, allocator, 128);
                 struct aws_byte_cursor filepath_prefix = aws_byte_cursor_from_c_str("tmp");
@@ -1497,7 +1514,43 @@ int aws_s3_tester_send_meta_request_with_options(
 
                 /* use filepath instead of input_stream */
                 meta_request_options.send_filepath = aws_byte_cursor_from_string(filepath_str);
-                aws_http_message_set_body_stream(message, NULL);
+                input_stream = aws_input_stream_release(input_stream);
+            }
+
+            /* Put together a simple S3 Put Object request. */
+            struct aws_http_message *message;
+            if (input_stream != NULL) {
+                message = aws_s3_test_put_object_request_new(
+                    allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, options->sse_type);
+            } else {
+                message = aws_s3_test_put_object_request_new_without_body(
+                    allocator,
+                    &host_cur,
+                    g_test_body_content_type,
+                    test_object_path,
+                    object_size_bytes,
+                    options->sse_type);
+            }
+
+            if (options->put_options.content_length) {
+                /* make a invalid request */
+                char content_length_buffer[64] = "";
+                snprintf(
+                    content_length_buffer, sizeof(content_length_buffer), "%zu", options->put_options.content_length);
+
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                aws_http_headers_set(
+                    headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
+            }
+
+            if (options->put_options.skip_content_length) {
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                aws_http_headers_erase(headers, g_content_length_header_name);
+            }
+
+            if (options->put_options.invalid_request) {
+                /* make a invalid request */
+                aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("invalid_path"));
             }
 
             if (options->put_options.content_encoding.ptr != NULL) {
@@ -1529,6 +1582,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->headers_callback = options->headers_callback;
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
+    out_results->progress_callback = options->progress_callback;
 
     out_results->algorithm = options->expected_validate_checksum_alg;
 
@@ -1588,6 +1642,8 @@ int aws_s3_tester_send_meta_request_with_options(
 
     aws_input_stream_release(input_stream);
     input_stream = NULL;
+
+    async_stream = aws_async_input_stream_release(async_stream);
 
     aws_byte_buf_clean_up(&input_stream_buffer);
 
