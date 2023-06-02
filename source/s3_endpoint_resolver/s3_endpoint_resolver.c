@@ -48,6 +48,7 @@ struct aws_s3_endpoint_resolver *aws_s3_endpoint_resolver_new(struct aws_allocat
     }
 
     success = true;
+
 cleanup:
     aws_endpoints_ruleset_release(ruleset);
     aws_partitions_config_release(partitions);

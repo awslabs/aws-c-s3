@@ -55,7 +55,7 @@ file(GLOB AWS_S3_PRIVATE_HEADERS
         )
 
 file(GLOB AWS_S3_ROOT_SRC
-        "source/*.c",
+        "source/*.c"
         )
 file(GLOB AWS_S3_ENDPOINT_RESOLVER_SRC
         "source/s3_endpoint_resolver/*.c"
