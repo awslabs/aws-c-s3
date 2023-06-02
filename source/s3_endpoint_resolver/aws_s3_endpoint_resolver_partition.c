@@ -1,6 +1,3 @@
-#ifndef AWS_S3_ENDPOINT_RESOLVER_PARTITION_H
-#define AWS_S3_ENDPOINT_RESOLVER_PARTITION_H
-
 /**
  * Copyright Amazon.com, Inc. or its affiliates.
  * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
@@ -103,4 +100,3 @@ const char aws_s3_endpoint_resolver_partitions[] = {
     'i',  'o',  'n',  's',  '"',  ':',  '{',  '"',  'u',  's',  '-',  'i',  's',  'o',  'b',  '-',  'e',  'a',  's',
     't',  '-',  '1',  '"',  ':',  '{',  '}',  ',',  '"',  'a',  'w',  's',  '-',  'i',  's',  'o',  '-',  'b',  '-',
     'g',  'l',  'o',  'b',  'a',  'l',  '"',  ':',  '{',  '}',  '}',  '}',  ']',  '}',  '\0'};
-#endif // AWS_S3_ENDPOINT_RESOLVER_PARTITION_H

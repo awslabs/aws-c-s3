@@ -1,5 +1,3 @@
-#ifndef AWS_S3_ENDPOINT_RULE_SET_H
-#define AWS_S3_ENDPOINT_RULE_SET_H
 /**
  * Copyright Amazon.com, Inc. or its affiliates.
  * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
@@ -7,7 +5,7 @@
 #include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
 
 /**
- * This file is generated using aws_s3_endpoint_resolver.py script.
+ * This file is generated using a Python script.
  * Do not modify directly.
  */
 const char aws_s3_endpoint_rule_set[] = {
@@ -4743,4 +4741,3 @@ const char aws_s3_endpoint_rule_set[] = {
     'i', 'o', 'n', ' ', 'm',  'u', 's', 't', ' ', 'b', 'e', ' ', 's', 'e', 't', ' ', 'w',  'h',  'e', 'n', ' ', 's',
     'e', 'n', 'd', 'i', 'n',  'g', ' ', 'r', 'e', 'q', 'u', 'e', 's', 't', 's', ' ', 't',  'o',  ' ', 'S', '3', '.',
     '"', ',', '"', 't', 'y',  'p', 'e', '"', ':', '"', 'e', 'r', 'r', 'o', 'r', '"', '}',  ']',  '}', ']', '}', '\0'};
-#endif // AWS_S3_ENDPOINT_RULE_SET_H
