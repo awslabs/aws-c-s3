@@ -9,6 +9,7 @@ endif()
 option(ASSERT_LOCK_HELD "Enable ASSERT_SYNCED_DATA_LOCK_HELD for checking thread issue" OFF)
 option(ENABLE_MOCK_SERVER_TESTS "Whether to run the integration tests that rely on pre-configured mock server" OFF)
 option(ENABLE_MRAP_TESTS "Whether to run the integration tests that rely on pre-configured multi-region access point" OFF)
+option(ENABLE_S3_ENDPOINT_RESOLVER "Whether to include the s3 endpoint resolver and related config files" OFF)
 
 if (ASSERT_LOCK_HELD)
     add_definitions(-DASSERT_LOCK_HELD)
@@ -43,6 +44,10 @@ include(AwsFindPackage)
 
 file(GLOB AWS_S3_ROOT_HEADERS
         "include/aws/s3/*.h"
+        )
+
+file(GLOB AWS_S3_ENDPOINT_RESOLVER_HEADERS
+        "include/aws/s3/s3_endpoint_resolver/*.h"
         )
 
 file(GLOB AWS_S3_PRIVATE_HEADERS
@@ -104,7 +109,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_AWS_LIBS})
 aws_prepare_shared_lib_exports(${PROJECT_NAME})
 
 install(FILES ${AWS_S3_ROOT_HEADERS} DESTINATION "include/aws/s3" COMPONENT Development)
-
+if (ENABLE_S3_ENDPOINT_RESOLVER)
+    install(FILES ${AWS_S3_ENDPOINT_RESOLVER_HEADERS} DESTINATION "include/aws/s3/s3_endpoint_resolver" COMPONENT Development)
+endif()
 if (BUILD_SHARED_LIBS)
    set (TARGET_DIR "shared")
 else()
