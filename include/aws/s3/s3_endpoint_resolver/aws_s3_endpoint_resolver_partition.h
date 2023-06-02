@@ -8,7 +8,6 @@
 
 #include <aws/s3/s3.h>
 
-static int aws_s3_endpoint_partitions_length = 1705;
 static char aws_s3_endpoint_resolver_partitions[] = {
     '{',  '"',  'v',  'e',  'r',  's',  'i',  'o',  'n',  '"',  ':',  '"',  '1',  '.',  '1',  '"',  ',',  '"',  'p',
     'a',  'r',  't',  'i',  't',  'i',  'o',  'n',  's',  '"',  ':',  '[',  '{',  '"',  'i',  'd',  '"',  ':',  '"',

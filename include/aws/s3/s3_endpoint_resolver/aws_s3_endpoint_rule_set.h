@@ -7,38 +7,6 @@
 
 #include <aws/s3/s3.h>
 
-struct aws_s3_resolve_endpoint_config {
-    /* The S3 bucket used to send the request. This is an optional parameter that will be set automatically for
-     * operations that are scoped to an S3 bucket. */
-    struct aws_byte_cursor bucket;
-    /* The AWS region used to dispatch the request. */
-    struct aws_byte_cursor region;
-    /* When true, send this request to the FIPS-compliant regional endpoint. If the configured endpoint does not have a
-     * FIPS compliant endpoint, dispatching the request will return an error. */
-    bool use_fips;
-    /* When true, use the dual-stack endpoint. If the configured endpoint does not support dual-stack, dispatching the
-     * request MAY return an error. */
-    bool use_dual_stack;
-    /* Override the endpoint used to send this request */
-    struct aws_byte_cursor endpoint;
-    /* When true, force a path-style endpoint to be used where the bucket name is part of the path. */
-    bool force_path_style;
-    /* When true, use S3 Accelerate. NOTE: Not all regions support S3 accelerate. */
-    bool accelerate;
-    /* Whether the global endpoint should be used, rather then the regional endpoint for us-east-1. */
-    bool use_global_endpoint;
-    /* Internal parameter to use object lambda endpoint for an operation (eg: WriteGetObjectResponse) */
-    bool use_object_lambda_endpoint;
-    /* Internal parameter to disable Access Point Buckets */
-    bool disable_access_points;
-    /* Whether multi-region access points (MRAP) should be disabled. */
-    bool disable_multi_region_access_points;
-    /* When an Access Point ARN is provided and this flag is enabled, the SDK MUST use the ARN's region when
-     * constructing the endpoint instead of the client's configured region. */
-    bool use_arn_region;
-};
-
-static int aws_s3_endpoint_rule_set_length = 104103;
 static char aws_s3_endpoint_rule_set[] = {
     '{', '"', 'v', 'e', 'r',  's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '0', '"', ',',  '"',  'p', 'a', 'r', 'a',
     'm', 'e', 't', 'e', 'r',  's', '"', ':', '{', '"', 'B', 'u', 'c', 'k', 'e', 't', '"',  ':',  '{', '"', 'r', 'e',
