@@ -7,11 +7,9 @@
  */
 
 #include <aws/s3/s3.h>
+#include <aws/sdkutils/endpoints_rule_engine.h>
 
 AWS_PUSH_SANE_WARNING_LEVEL
-struct aws_allocator;
-struct aws_s3_endpoint_resolver;
-struct aws_endpoints_request_context;
 extern const char aws_s3_endpoint_resolver_partitions[];
 extern const char aws_s3_endpoint_rule_set[];
 

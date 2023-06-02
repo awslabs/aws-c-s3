@@ -5,7 +5,6 @@
 
 #include <aws/common/ref_count.h>
 #include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
-#include <aws/sdkutils/endpoints_rule_engine.h>
 #include <aws/sdkutils/partitions.h>
 
 struct aws_s3_endpoint_resolver {
