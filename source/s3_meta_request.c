@@ -230,19 +230,23 @@ int aws_s3_meta_request_init_base(
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
 
-    /* Keep a reference to the original message structure passed in. */
-    meta_request->initial_request_message = aws_http_message_acquire(options->message);
-
-    /* There are several ways for the user to pass in the request's body.
-     * If something besides an aws_async_input_stream was passed in, create an
-     * async wrapper around it */
-    meta_request->request_body_async_stream = aws_s3_message_util_acquire_async_body_stream(
-        allocator, meta_request->initial_request_message, options->send_filepath, options->send_async_stream);
-    if (meta_request->request_body_async_stream == NULL) {
-        goto error;
+    /* Set initial_meta_request */
+    if (options->send_filepath.len > 0) {
+        /* Create copy of original message, but with body-stream that reads directly from file */
+        meta_request->initial_request_message = aws_s3_message_util_copy_http_message_filepath_body_all_headers(
+            allocator, options->message, options->send_filepath);
+        if (meta_request->initial_request_message == NULL) {
+            goto error;
+        }
+    } else {
+        /* Keep a reference to the original message structure passed in. */
+        meta_request->initial_request_message = aws_http_message_acquire(options->message);
     }
 
-    meta_request->request_body_stream_is_actually_async = (options->send_async_stream != NULL);
+    /* Set async stream (if any) */
+    if (options->send_async_stream != NULL) {
+        meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);
+    }
 
     /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
     if (client != NULL) {
@@ -1590,7 +1594,38 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
 
-    return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
+    /* If async-stream, simply call read_to_fill() */
+    if (meta_request->request_body_async_stream != NULL) {
+        return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
+    }
+
+    /* Else synchronous aws_input_stream */
+    struct aws_input_stream *synchronous_stream =
+        aws_http_message_get_body_stream(meta_request->initial_request_message);
+    AWS_FATAL_ASSERT(synchronous_stream);
+
+    struct aws_future_bool *synchronous_read_future = aws_future_bool_new(meta_request->allocator);
+
+    /* Keep calling read() until we fill the buffer, or hit EOF */
+    struct aws_stream_status status = {.is_end_of_stream = false, .is_valid = true};
+    while ((buffer->len < buffer->capacity) && !status.is_end_of_stream) {
+        /* Read from stream */
+        if (aws_input_stream_read(synchronous_stream, buffer) != AWS_OP_SUCCESS) {
+            aws_future_bool_set_error(synchronous_read_future, aws_last_error());
+            goto synchronous_read_done;
+        }
+
+        /* Check if stream is done */
+        if (aws_input_stream_get_status(synchronous_stream, &status) != AWS_OP_SUCCESS) {
+            aws_future_bool_set_error(synchronous_read_future, aws_last_error());
+            goto synchronous_read_done;
+        }
+    }
+
+    aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
+
+synchronous_read_done:
+    return synchronous_read_future;
 }
 
 bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request) {

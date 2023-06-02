@@ -117,11 +117,9 @@ struct aws_s3_meta_request {
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
 
-    /* Async stream for meta request's body */
+    /* Async stream for meta request's body.
+     * NULL if using initial_request_message's synchronous body stream instead.  */
     struct aws_async_input_stream *request_body_async_stream;
-
-    /* TODO: this is confusing. Maybe don't wrap synchronous stream in async stream anymore */
-    bool request_body_stream_is_actually_async;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
