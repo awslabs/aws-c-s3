@@ -537,8 +537,7 @@ static bool s_s3_auto_ranged_put_update(
                     struct aws_string *etag = NULL;
 
                     if (!aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index) && etag) {
-                        /* part already downloaded, skip it here and prepare will take care of adjusting the buffer
-                         */
+                        /* part already downloaded, skip it here and prepare will take care of adjusting the buffer */
                         ++auto_ranged_put->threaded_update_data.next_part_number;
 
                     } else {
