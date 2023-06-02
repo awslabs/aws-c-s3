@@ -8,6 +8,10 @@
 
 #include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
 
+/**
+ * This file is generated using a Python script.
+ * Do not modify directly.
+ */
 const char aws_s3_endpoint_resolver_partitions[] = {
     '{',  '"',  'v',  'e',  'r',  's',  'i',  'o',  'n',  '"',  ':',  '"',  '1',  '.',  '1',  '"',  ',',  '"',  'p',
     'a',  'r',  't',  'i',  't',  'i',  'o',  'n',  's',  '"',  ':',  '[',  '{',  '"',  'i',  'd',  '"',  ':',  '"',

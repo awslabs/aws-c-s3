@@ -6,6 +6,10 @@
  */
 #include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
 
+/**
+ * This file is generated using aws_s3_endpoint_resolver.py script.
+ * Do not modify directly.
+ */
 const char aws_s3_endpoint_rule_set[] = {
     '{', '"', 'v', 'e', 'r',  's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '0', '"', ',',  '"',  'p', 'a', 'r', 'a',
     'm', 'e', 't', 'e', 'r',  's', '"', ':', '{', '"', 'B', 'u', 'c', 'k', 'e', 't', '"',  ':',  '{', '"', 'r', 'e',
