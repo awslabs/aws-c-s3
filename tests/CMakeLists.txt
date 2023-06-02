@@ -260,6 +260,7 @@ add_net_test_case(bad_request_error_handling)
 add_net_test_case(make_meta_request_error_handling)
 
 add_test_case(test_s3_endpoint_resolver_create_destroy)
+add_test_case(test_s3_endpoint_resolver_resolve_endpoint)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

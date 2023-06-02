@@ -25,7 +25,7 @@ AWS_S3_API
 struct aws_s3_endpoint_resolver *aws_s3_endpoint_resolver_release(struct aws_s3_endpoint_resolver *endpoint_resolver);
 
 AWS_S3_API
-struct aws_endpoints_resolved_endpoint *aws_s3_resolve_endpoint(
+struct aws_endpoints_resolved_endpoint *aws_s3_endpoint_resolver_resolve_endpoint(
     struct aws_s3_endpoint_resolver *endpoint_resolver,
     struct aws_endpoints_request_context *request_context);
 
