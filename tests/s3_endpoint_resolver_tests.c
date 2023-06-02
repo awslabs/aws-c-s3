@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
-#include <aws/s3/s3_endpoint_resolver.h>
+#include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
 #include <aws/sdkutils/endpoints_rule_engine.h>
 #include <aws/testing/aws_test_harness.h>
 
