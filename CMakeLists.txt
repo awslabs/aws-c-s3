@@ -46,10 +46,6 @@ file(GLOB AWS_S3_ROOT_HEADERS
         "include/aws/s3/*.h"
         )
 
-file(GLOB AWS_S3_ENDPOINT_RESOLVER_HEADERS
-        "include/aws/s3/s3_endpoint_resolver/*.h"
-        )
-
 file(GLOB AWS_S3_PRIVATE_HEADERS
         "include/aws/s3/private/*.h"
         )
@@ -114,9 +110,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_AWS_LIBS})
 aws_prepare_shared_lib_exports(${PROJECT_NAME})
 
 install(FILES ${AWS_S3_ROOT_HEADERS} DESTINATION "include/aws/s3" COMPONENT Development)
-if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
-    install(FILES ${AWS_S3_ENDPOINT_RESOLVER_HEADERS} DESTINATION "include/aws/s3/s3_endpoint_resolver" COMPONENT Development)
-endif()
+
 if (BUILD_SHARED_LIBS)
    set (TARGET_DIR "shared")
 else()

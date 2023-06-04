@@ -3,7 +3,7 @@
  * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/s3_endpoint_resolver/s3_endpoint_resolver.h>
+#include <aws/s3/s3_endpoint_resolver.h>
 
 /**
  * This file is generated using a Python script.
