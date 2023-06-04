@@ -440,10 +440,17 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
 static bool s_should_skip_scheduling_more_parts_based_on_flags(
     const struct aws_s3_auto_ranged_put *auto_ranged_put,
     uint32_t flags) {
-    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
-        uint32_t num_parts_in_flight =
-            (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_completed);
 
+    uint32_t num_parts_in_flight =
+        (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_completed);
+
+    /* If the stream is actually async, only allow 1 part in flight at a time.
+     * We need to wait for async read() to complete before calling it again */
+    if (auto_ranged_put->base.request_body_async_stream != NULL) {
+        return num_parts_in_flight > 0;
+    }
+
+    if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
         /* Because uploads must read from their streams serially, we try to limit the amount of in flight
          * requests for a given multipart upload if we can. */
         return num_parts_in_flight > 0;
@@ -530,8 +537,7 @@ static bool s_s3_auto_ranged_put_update(
                     struct aws_string *etag = NULL;
 
                     if (!aws_array_list_get_at(&auto_ranged_put->synced_data.etag_list, &etag, etag_index) && etag) {
-                        /* part already downloaded, skip it here and prepare will take care of adjusting the buffer
-                         */
+                        /* part already downloaded, skip it here and prepare will take care of adjusting the buffer */
                         ++auto_ranged_put->threaded_update_data.next_part_number;
 
                     } else {
@@ -1668,7 +1674,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
                 if (error_code == AWS_ERROR_SUCCESS && meta_request->progress_callback != NULL) {
                     struct aws_s3_meta_request_progress progress = {
-                        .bytes_transferred = meta_request->part_size,
+                        .bytes_transferred = request->request_body.len,
                         .content_length = auto_ranged_put->content_length,
                     };
                     meta_request->progress_callback(meta_request, &progress, meta_request->user_data);

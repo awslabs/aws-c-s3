@@ -531,21 +531,6 @@ TEST_CASE(upload_part_invalid_response_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-static void s_resume_meta_request_progress(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_progress *progress,
-    void *user_data) {
-
-    (void)meta_request;
-    AWS_ASSERT(meta_request);
-    AWS_ASSERT(progress);
-    AWS_ASSERT(user_data);
-
-    struct aws_s3_meta_request_test_results *out_results = user_data;
-
-    aws_atomic_fetch_add(&out_results->total_bytes_uploaded, (size_t)progress->bytes_transferred);
-}
-
 /* Fake a MPU with 4 parts and the 2nd and 3rd have already completed and resume works fine */
 TEST_CASE(resume_first_part_not_completed_mock_server) {
     (void)ctx;
@@ -587,7 +572,6 @@ TEST_CASE(resume_first_part_not_completed_mock_server) {
     };
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    out_results.progress_callback = s_resume_meta_request_progress;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
@@ -645,7 +629,6 @@ TEST_CASE(resume_mutli_page_list_parts_mock_server) {
     };
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    out_results.progress_callback = s_resume_meta_request_progress;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
@@ -754,7 +737,6 @@ TEST_CASE(resume_after_finished_mock_server) {
     };
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    out_results.progress_callback = s_resume_meta_request_progress;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* The error code should be success, but there are no headers and stuff as no request was made. */

@@ -161,6 +161,7 @@ struct aws_s3_tester_meta_request_options {
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
+    aws_s3_meta_request_progress_fn *progress_callback;
 
     /* Default Meta Request specific options. */
     struct {
@@ -178,12 +179,12 @@ struct aws_s3_tester_meta_request_options {
         struct aws_byte_cursor object_path_override;
         uint32_t object_size_mb;
         bool ensure_multipart;
+        bool async_input_stream; /* send via async stream */
+        bool file_on_disk;       /* write to file on disk, then send via aws_s3_meta_request_options.send_filepath */
         bool invalid_request;
         bool invalid_input_stream;
         bool valid_md5;
         bool invalid_md5;
-        /* write file to desk, and then send via aws_s3_meta_request_options.send_filepath */
-        bool file_on_disk;
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
@@ -206,7 +207,6 @@ struct aws_s3_meta_request_test_results {
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
-    aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
 
     struct aws_http_headers *error_response_headers;
@@ -223,7 +223,9 @@ struct aws_s3_meta_request_test_results {
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
 
-    /* accumulator of amount of bytes uploaded */
+    /* accumulator of amount of bytes uploaded.
+     * Currently, this only works for MPU and Copy meta-requests.
+     * It's powered by the progress_callback which isn't invoked for all types */
     struct aws_atomic_var total_bytes_uploaded;
 
     /* Protected the tester->synced_data.lock */
@@ -410,8 +412,6 @@ enum aws_s3_test_stream_value {
     TEST_STREAM_VALUE_1,
     TEST_STREAM_VALUE_2,
 };
-
-struct aws_input_stream *aws_s3_bad_input_stream_new(struct aws_allocator *allocator, size_t length);
 
 struct aws_input_stream *aws_s3_test_input_stream_new(struct aws_allocator *allocator, size_t length);
 
