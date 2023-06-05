@@ -7,26 +7,20 @@ import json
 import boto3
 
 def escape_char(c):
-    if c == '\\':
-        return '\\\\'
-    elif c == '\'':
-        return '\\\''
-    elif c == '\a':
-        return '\\a'
-    elif c == '\b':
-        return '\\b'
-    elif c == '\f':
-        return '\\f'
-    elif c == '\n':
-        return '\\n'
-    elif c == '\r':
-        return '\\r'
-    elif c == '\t':
-        return '\\t'
-    elif c == '\v':
-        return '\\v'
-    else:
-        return c
+    escape_dict = {
+        '\\': '\\\\',
+        '\'': '\\\'',
+        '\0': '\\0',
+        '\a': '\\a',
+        '\b': '\\b',
+        '\f': '\\f',
+        '\n': '\\n',
+        '\r': '\\r',
+        '\t': '\\t',
+        '\v': '\\v'
+    }
+
+    return escape_dict.get(c, c)
 
 def get_header():
     return """\
