@@ -54,15 +54,15 @@ def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_stru
         json_content = json.loads(json_content_str)
         # Compact the json
         compact_json_str: str = json.dumps(json_content, separators=(',', ':'))
+        compact_c = []
+        for i in range(0, len(compact_json_str), num_chars_per_line):
+            compact_c.append(', '.join("'{}'".format(escape_char(char)) for char in compact_json_str[i:i + num_chars_per_line]))
 
         # Write json to a C file
         with open(c_file_name, 'w') as f:
             f.write(get_header())
             f.write(f"const char {c_struct_name}[] = {{\n\t")
-            for i in range(0, len(compact_json_str), num_chars_per_line):
-                f.write(', '.join("'{}'".format(escape_char(char)) for char in compact_json_str[i:i + num_chars_per_line]))
-                if i + num_chars_per_line < len(compact_json_str):
-                    f.write(",\n\t")
+            f.write(",\n\t".join(compact_c))
             f.write(", '\\0'};\n")
 
         print(f"{c_file_name} has been created successfully.")
