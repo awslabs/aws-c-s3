@@ -27,7 +27,9 @@ static int s_test_s3_endpoint_resolver_resolve_endpoint(struct aws_allocator *al
     aws_s3_library_init(allocator);
 
     struct aws_endpoints_rule_engine *rule_engine = aws_s3_endpoint_resolver_new(allocator);
+    ASSERT_NOT_NULL(rule_engine);
     struct aws_endpoints_request_context *context = aws_endpoints_request_context_new(allocator);
+    ASSERT_NOT_NULL(context);
     ASSERT_SUCCESS(aws_endpoints_request_context_add_string(
         allocator, context, aws_byte_cursor_from_c_str("Region"), aws_byte_cursor_from_c_str("us-west-2")));
     struct aws_endpoints_resolved_endpoint *resolved_endpoint;
