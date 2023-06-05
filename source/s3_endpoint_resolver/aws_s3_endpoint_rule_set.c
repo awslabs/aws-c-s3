@@ -10,7 +10,7 @@
  * Do not modify directly. */
 /* clang-format off */
 
-const static char s_generated_array[] = {
+static const char s_generated_array[] = {
 	'{', '"', 'v', 'e', 'r', 's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '0', '"', ',', '"', 'p', 'a',
 	'r', 'a', 'm', 'e', 't', 'e', 'r', 's', '"', ':', '{', '"', 'B', 'u', 'c', 'k', 'e', 't', '"', ':',
 	'{', '"', 'r', 'e', 'q', 'u', 'i', 'r', 'e', 'd', '"', ':', 'f', 'a', 'l', 's', 'e', ',', '"', 'd',
