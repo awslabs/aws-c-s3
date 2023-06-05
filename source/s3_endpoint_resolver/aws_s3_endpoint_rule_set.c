@@ -8,6 +8,7 @@
 /**
  * This file is generated using a Python script.
  * Do not modify directly. */
+// Test modify
 /* clang-format off */
 const char aws_s3_endpoint_rule_set[] = {
 	'{', '"', 'v', 'e', 'r', 's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '0', '"', ',', '"', 'p', 'a',
