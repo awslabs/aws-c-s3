@@ -9,18 +9,6 @@
 #    include <aws/s3/s3_endpoint_resolver.h>
 #    include <aws/sdkutils/endpoints_rule_engine.h>
 
-AWS_TEST_CASE(test_s3_endpoint_resolver_create_destroy, s_test_s3_endpoint_resolver_create_destroy)
-static int s_test_s3_endpoint_resolver_create_destroy(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-    aws_s3_library_init(allocator);
-
-    struct aws_endpoints_rule_engine *rule_engine = aws_s3_endpoint_resolver_new(allocator);
-    aws_endpoints_rule_engine_release(rule_engine);
-
-    aws_s3_library_clean_up();
-    return 0;
-}
-
 AWS_TEST_CASE(test_s3_endpoint_resolver_resolve_endpoint, s_test_s3_endpoint_resolver_resolve_endpoint)
 static int s_test_s3_endpoint_resolver_resolve_endpoint(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

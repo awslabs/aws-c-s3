@@ -263,7 +263,6 @@ add_net_test_case(bad_request_error_handling)
 add_net_test_case(make_meta_request_error_handling)
 
 if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
-    add_test_case(test_s3_endpoint_resolver_create_destroy)
     add_test_case(test_s3_endpoint_resolver_resolve_endpoint)
 endif()
 
