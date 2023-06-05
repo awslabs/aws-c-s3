@@ -1,9 +1,9 @@
 # This script pulls latest 'partitions.json' and 's3-endpoint-rule-set.json' from 'aws-c-s3-endpoint-artifacts' S3 bucket.
-# It uses the latest files to generate aws_s3_endpoint_rule_set.c and aws_s3_endpoint_resolver_partition.c
+# It uses the latest files to generate 'source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c' and
+# 'source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c'
 
 import json
 import boto3
-from botocore.exceptions import NoCredentialsError
 
 def escape_char(c):
     if c == '\\':
@@ -65,9 +65,6 @@ def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_stru
             f.write(", '\\0'};\n")
 
         print(f"{c_file_name} has been created successfully.")
-
-    except NoCredentialsError:
-        print("No AWS credentials found.")
 
     except Exception as e:
         print(f"An error occurred: {e}")
