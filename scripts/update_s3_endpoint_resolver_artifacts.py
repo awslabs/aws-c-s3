@@ -74,7 +74,7 @@ def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_stru
 if __name__ == '__main__':
     session = boto3.session.Session()
     s3 = session.client('s3', region_name='us-east-1')
-    bucket_name = 'aws-c-s3-models'
+    bucket_name = 'aws-c-s3-endpoint-artifacts'
 
     generate_c_file_from_json(
         s3,
