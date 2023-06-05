@@ -1,3 +1,6 @@
+# This script pulls latest 'partitions.json' and 's3-endpoint-rule-set.json' from 'aws-c-s3-endpoint-artifacts' S3 bucket.
+# It uses the latest files to generate aws_s3_endpoint_rule_set.c and aws_s3_endpoint_resolver_partition.c
+
 import json
 import boto3
 from botocore.exceptions import NoCredentialsError
@@ -24,6 +27,21 @@ def escape_char(c):
     else:
         return c
 
+def get_header():
+    return """\
+/**
+* Copyright Amazon.com, Inc. or its affiliates.
+* All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
+*/
+
+#include <aws/s3/s3_endpoint_resolver.h>
+
+/**
+ * This file is generated using scripts/update_s3_endpoint_ruleset_and_partition.py.
+ * Do not modify directly. */
+/* clang-format off */
+
+"""
 
 def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_struct_name):
     num_chars_per_line = 20
@@ -38,11 +56,7 @@ def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_stru
 
         # Write json to a C file
         with open(c_file_name, 'w') as f:
-            f.write(
-                "/**\n * Copyright Amazon.com, Inc. or its affiliates.\n * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.\n */\n\n")
-            f.write('#include <aws/s3/s3_endpoint_resolver.h>\n\n')
-            f.write('/**\n * This file is generated using a Python script.\n * Do not modify directly. */\n')
-            f.write('/* clang-format off */\n')
+            f.write(get_header())
             f.write(f"const char {c_struct_name}[] = {{\n\t")
             for i in range(0, len(compact_json_str), num_chars_per_line):
                 f.write(', '.join("'{}'".format(escape_char(char)) for char in compact_json_str[i:i + num_chars_per_line]))

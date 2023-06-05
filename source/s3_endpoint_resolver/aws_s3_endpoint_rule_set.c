@@ -1,15 +1,15 @@
 /**
- * Copyright Amazon.com, Inc. or its affiliates.
- * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
- */
+* Copyright Amazon.com, Inc. or its affiliates.
+* All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
+*/
 
 #include <aws/s3/s3_endpoint_resolver.h>
 
 /**
- * This file is generated using a Python script.
+ * This file is generated using scripts/update_s3_endpoint_ruleset_and_partition.py.
  * Do not modify directly. */
-// Test modify
 /* clang-format off */
+
 const char aws_s3_endpoint_rule_set[] = {
 	'{', '"', 'v', 'e', 'r', 's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '0', '"', ',', '"', 'p', 'a',
 	'r', 'a', 'm', 'e', 't', 'e', 'r', 's', '"', ':', '{', '"', 'B', 'u', 'c', 'k', 'e', 't', '"', ':',
