@@ -1,4 +1,5 @@
-# This script pulls latest 'partitions.json' and 's3-endpoint-rule-set.json' from 'aws-c-s3-endpoint-artifacts' S3 bucket.
+# This script pulls latest 'partitions.json' and 's3-endpoint-rule-set.json'
+# from 'aws-c-s3-endpoint-artifacts' S3 bucket in 'us-east-1' region.
 # It uses the latest files to generate 'source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c' and
 # 'source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c'
 
@@ -30,9 +31,9 @@ def escape_char(c):
 def get_header():
     return """\
 /**
-* Copyright Amazon.com, Inc. or its affiliates.
-* All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
-*/
+ * Copyright Amazon.com, Inc. or its affiliates.
+ * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
+ */
 
 #include <aws/s3/s3_endpoint_resolver.h>
 
