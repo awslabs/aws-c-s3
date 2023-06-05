@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
+#include <aws/sdkutils/endpoints_rule_engine.h>
 #include <aws/testing/aws_test_harness.h>
 
 #ifdef AWS_ENABLE_S3_ENDPOINT_RESOLVER
@@ -29,8 +30,8 @@ static int s_test_s3_endpoint_resolver_resolve_endpoint(struct aws_allocator *al
     struct aws_endpoints_request_context *context = aws_endpoints_request_context_new(allocator);
     ASSERT_SUCCESS(aws_endpoints_request_context_add_string(
         allocator, context, aws_byte_cursor_from_c_str("Region"), aws_byte_cursor_from_c_str("us-west-2")));
-    struct aws_endpoints_resolved_endpoint *resolved_endpoint =
-        aws_s3_endpoint_resolver_resolve_endpoint(rule_engine, context);
+    struct aws_endpoints_resolved_endpoint *resolved_endpoint;
+    ASSERT_SUCCESS(aws_endpoints_rule_engine_resolve(rule_engine, context, &resolved_endpoint));
 
     ASSERT_INT_EQUALS(AWS_ENDPOINTS_RESOLVED_ENDPOINT, aws_endpoints_resolved_endpoint_get_type(resolved_endpoint));
 

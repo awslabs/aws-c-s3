@@ -32,13 +32,3 @@ cleanup:
     aws_partitions_config_release(partitions);
     return rule_engine;
 }
-
-struct aws_endpoints_resolved_endpoint *aws_s3_endpoint_resolver_resolve_endpoint(
-    struct aws_endpoints_rule_engine *rule_engine,
-    struct aws_endpoints_request_context *request_context) {
-
-    struct aws_endpoints_resolved_endpoint *resolved_endpoint = NULL;
-    aws_endpoints_rule_engine_resolve(rule_engine, request_context, &resolved_endpoint);
-
-    return resolved_endpoint;
-}

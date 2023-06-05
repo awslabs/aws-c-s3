@@ -74,7 +74,6 @@ endif()
 file(GLOB S3_HEADERS
         ${AWS_S3_ROOT_HEADERS}
         ${AWS_S3_PRIVATE_HEADERS}
-        ${AWS_S3_ENDPOINT_RESOLVER_HEADERS}
         ${AWS_S3_EXTERNAL_HEADERS}
         )
 
