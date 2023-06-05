@@ -6,7 +6,7 @@
 #include <aws/s3/s3_endpoint_resolver.h>
 
 /**
- * This file is generated using scripts/update_s3_endpoint_ruleset_and_partition.py.
+ * This file is generated using scripts/update_s3_endpoint_resolver_artifacts.py.
  * Do not modify directly. */
 /* clang-format off */
 
