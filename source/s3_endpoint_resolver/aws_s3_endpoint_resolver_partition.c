@@ -10,7 +10,7 @@
  * Do not modify directly. */
 /* clang-format off */
 
-const char aws_s3_endpoint_resolver_partitions[] = {
+const static char s_generated_array[] = {
 	'{', '"', 'v', 'e', 'r', 's', 'i', 'o', 'n', '"', ':', '"', '1', '.', '1', '"', ',', '"', 'p', 'a',
 	'r', 't', 'i', 't', 'i', 'o', 'n', 's', '"', ':', '[', '{', '"', 'i', 'd', '"', ':', '"', 'a', 'w',
 	's', '"', ',', '"', 'r', 'e', 'g', 'i', 'o', 'n', 'R', 'e', 'g', 'e', 'x', '"', ':', '"', '^', '(',
@@ -96,4 +96,9 @@ const char aws_s3_endpoint_resolver_partitions[] = {
 	'o', 'v', '.', 'g', 'o', 'v', '"', '}', ',', '"', 'r', 'e', 'g', 'i', 'o', 'n', 's', '"', ':', '{',
 	'"', 'u', 's', '-', 'i', 's', 'o', 'b', '-', 'e', 'a', 's', 't', '-', '1', '"', ':', '{', '}', ',',
 	'"', 'a', 'w', 's', '-', 'i', 's', 'o', '-', 'b', '-', 'g', 'l', 'o', 'b', 'a', 'l', '"', ':', '{',
-	'}', '}', '}', ']', '}', '\0'};
+	'}', '}', '}', ']', '}'};
+
+const struct aws_byte_cursor aws_s3_endpoint_resolver_partitions = {
+	.len = 1705,
+	.ptr = (uint8_t *) s_generated_array
+};

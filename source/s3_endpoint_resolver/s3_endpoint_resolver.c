@@ -12,15 +12,12 @@ struct aws_endpoints_rule_engine *aws_s3_endpoint_resolver_new(struct aws_alloca
     struct aws_partitions_config *partitions = NULL;
     struct aws_endpoints_rule_engine *rule_engine = NULL;
 
-    struct aws_byte_cursor ruleset_cursor = aws_byte_cursor_from_c_str(aws_s3_endpoint_rule_set);
-    struct aws_byte_cursor partitions_cursor = aws_byte_cursor_from_c_str(aws_s3_endpoint_resolver_partitions);
-
-    ruleset = aws_endpoints_ruleset_new_from_string(allocator, ruleset_cursor);
+    ruleset = aws_endpoints_ruleset_new_from_string(allocator, aws_s3_endpoint_rule_set);
     if (!ruleset) {
         goto cleanup;
     }
 
-    partitions = aws_partitions_config_new_from_string(allocator, partitions_cursor);
+    partitions = aws_partitions_config_new_from_string(allocator, aws_s3_endpoint_resolver_partitions);
     if (!partitions) {
         goto cleanup;
     }

@@ -61,9 +61,13 @@ def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_stru
         # Write json to a C file
         with open(c_file_name, 'w') as f:
             f.write(get_header())
-            f.write(f"const char {c_struct_name}[] = {{\n\t")
+            f.write(f"const static char s_generated_array[] = {{\n\t")
             f.write(",\n\t".join(compact_c))
-            f.write(", '\\0'};\n")
+            f.write("};\n\n")
+
+            f.write(f"const struct aws_byte_cursor {c_struct_name} = {{\n\t")
+            f.write(f".len = {len(compact_json_str)},\n\t")
+            f.write(f".ptr = (uint8_t *) s_generated_array\n}};\n")
 
         print(f"{c_file_name} has been created successfully.")
 
