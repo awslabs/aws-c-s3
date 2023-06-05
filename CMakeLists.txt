@@ -96,6 +96,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES VERSION 1.0.0)
 set_target_properties(${PROJECT_NAME} PROPERTIES SOVERSION 0unstable)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DCJSON_HIDE_SYMBOLS)
+if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE "-DAWS_ENABLE_S3_ENDPOINT_RESOLVER")
+endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
