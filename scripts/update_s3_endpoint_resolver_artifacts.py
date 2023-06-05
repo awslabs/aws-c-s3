@@ -61,7 +61,7 @@ def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_stru
             f.write(f"const char {c_struct_name}[] = {{\n\t")
             for i in range(0, len(compact_json_str), num_chars_per_line):
                 f.write(', '.join("'{}'".format(escape_char(char)) for char in compact_json_str[i:i + num_chars_per_line]))
-                if i + 15 < len(compact_json_str):
+                if i + num_chars_per_line < len(compact_json_str):
                     f.write(",\n\t")
             f.write(", '\\0'};\n")
 
