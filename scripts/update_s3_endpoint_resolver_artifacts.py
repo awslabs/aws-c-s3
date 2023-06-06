@@ -70,7 +70,6 @@ def generate_c_file_from_json(json_content, c_file_name, c_struct_name):
 
 
 def get_secret_from_secrets_manager(secret_name, region_name):
-    # Create a Secrets Manager client
     session = boto3.session.Session()
     client = session.client(
         service_name='secretsmanager',
@@ -83,7 +82,7 @@ def get_secret_from_secrets_manager(secret_name, region_name):
         )
     except Exception as e:
         raise e
-    # Decrypts secret using the associated KMS key.
+
     return json.loads(get_secret_value_response['SecretString'])
 
 
