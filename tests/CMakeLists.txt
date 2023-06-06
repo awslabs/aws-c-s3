@@ -263,6 +263,8 @@ add_net_test_case(bad_request_error_handling)
 add_net_test_case(make_meta_request_error_handling)
 if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     add_test_case(test_s3_endpoint_resolver_resolve_endpoint)
+    add_test_case(test_s3_endpoint_resolver_resolve_endpoint_fips)
+    add_test_case(test_s3_endpoint_resolver_resolve_endpoint_force_path_style)
 endif()
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
