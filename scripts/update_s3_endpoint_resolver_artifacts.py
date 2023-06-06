@@ -7,6 +7,7 @@ import json
 import boto3
 import requests
 
+
 def escape_char(c):
     escape_dict = {
         '\\': '\\\\',
@@ -46,7 +47,7 @@ def generate_c_file_from_json(json_content, c_file_name, c_struct_name):
 
     try:
         # Compact the json
-        compact_json_str: str = json.dumps(json_content, separators=(',', ':'))
+        compact_json_str = json.dumps(json_content, separators=(',', ':'))
         compact_c = []
         for i in range(0, len(compact_json_str), num_chars_per_line):
             compact_c.append(
@@ -86,25 +87,10 @@ def get_secret_from_secrets_manager(secret_name, region_name):
     return json.loads(get_secret_value_response['SecretString'])
 
 
-def download_rule_set(secret):
-    url = secret['ruleset-url']
-    headers = {'Accept': 'application/vnd.github+json', 'Authorization': f"Bearer {secret['ruleset-token']}"}
-    http_response = requests.get(url, headers=headers)
-    if http_response.status_code != 200:
-        raise Exception(f"HTTP Status code is {http_response.status_code}")
-
-    body = json.loads(http_response.content.decode())
-    http_response = requests.get(body['download_url'])
-    if http_response.status_code != 200:
-        raise Exception(f"HTTP Status code is {http_response.status_code}")
-
-    return json.loads(http_response.content.decode())
-
-
-def download_partition():
-    url = 'https://raw.githubusercontent.com/awslabs/smithy/main/smithy-rules-engine/src/main/resources/software' \
-          '/amazon/smithy/rulesengine/language/partitions.json'
+def download_from_git(url, token=None):
     headers = {'Accept': 'application/vnd.github+json'}
+    if token is not None:
+        headers['Authorization'] = f"Bearer {token}"
     http_response = requests.get(url, headers=headers)
     if http_response.status_code != 200:
         raise Exception(f"HTTP Status code is {http_response.status_code}")
@@ -115,8 +101,9 @@ def download_partition():
 if __name__ == '__main__':
     git_secret = get_secret_from_secrets_manager("s3/endpoint/resolver/artifacts/git", "us-east-1")
 
-    rule_set = download_rule_set(git_secret)
-    partition = download_partition()
+    rule_set = download_from_git(git_secret['ruleset-url'], git_secret['ruleset-token'])
+    partition = download_from_git('https://raw.githubusercontent.com/awslabs/smithy/main/smithy-rules-engine/src/main'
+                                  '/resources/software/amazon/smithy/rulesengine/language/partitions.json')
 
     generate_c_file_from_json(
         rule_set,
