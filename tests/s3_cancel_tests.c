@@ -141,6 +141,7 @@ static void s_s3_meta_request_finished_request_cancel_test(
 
     if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD) {
+
         cancel_test_user_data->abort_successful = error_code == AWS_ERROR_SUCCESS;
     }
 
@@ -171,7 +172,11 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_update_cancel_te
     return meta_request;
 }
 
-static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update_cancel_type cancel_type) {
+static int s3_cancel_test_helper_ex(
+    struct aws_allocator *allocator,
+    enum s3_update_cancel_type cancel_type,
+    bool async_input_stream) {
+
     AWS_ASSERT(allocator);
 
     struct aws_s3_tester tester;
@@ -211,11 +216,12 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
             .put_options =
                 {
                     .ensure_multipart = true,
+                    .async_input_stream = async_input_stream,
                 },
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_CANCELED);
+        ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, meta_request_test_results.finished_error_code);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -275,6 +281,10 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
+}
+
+static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update_cancel_type cancel_type) {
+    return s3_cancel_test_helper_ex(allocator, cancel_type, false /*async_input_stream*/);
 }
 
 static int s3_cancel_test_helper_fc(
@@ -441,6 +451,16 @@ static int s_test_s3_cancel_mpu_one_part_completed(struct aws_allocator *allocat
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpu_one_part_completed_async, s_test_s3_cancel_mpu_one_part_completed_async)
+static int s_test_s3_cancel_mpu_one_part_completed_async(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(
+        s3_cancel_test_helper_ex(allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED, true /*async_input_stream*/));
 
     return 0;
 }
