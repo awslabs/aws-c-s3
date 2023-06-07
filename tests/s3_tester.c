@@ -1463,6 +1463,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 .base =
                     {
                         .autogen_length = object_size_bytes,
+                        .eof_requires_extra_read = options->put_options.eof_requires_extra_read,
                     },
             };
             if (options->put_options.invalid_input_stream) {
@@ -1603,7 +1604,20 @@ int aws_s3_tester_send_meta_request_with_options(
         ASSERT_TRUE(aws_s3_meta_request_is_finished(meta_request));
     }
 
-    aws_s3_tester_lock_synced_data(tester);
+    /* If total_bytes_uploaded wasn't set by the progress callback,
+     * then set it based on number of bytes read from input-stream.
+     * (progress callback isn't currently hooked up for single part upload) */
+    if ((out_results->finished_error_code == AWS_ERROR_SUCCESS) &&
+        (aws_atomic_load_int(&out_results->total_bytes_uploaded) == 0)) {
+
+        uint64_t bytes_read_from_stream = 0;
+        if (input_stream != NULL) {
+            bytes_read_from_stream = aws_input_stream_tester_total_bytes_read(input_stream);
+        } else if (async_stream != NULL) {
+            bytes_read_from_stream = aws_async_input_stream_tester_total_bytes_read(async_stream);
+        }
+        aws_atomic_store_int(&out_results->total_bytes_uploaded, (size_t)bytes_read_from_stream);
+    }
 
     switch (options->validate_type) {
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS:
@@ -1624,8 +1638,6 @@ int aws_s3_tester_send_meta_request_with_options(
             ASSERT_TRUE(false);
             break;
     }
-
-    aws_s3_tester_unlock_synced_data(tester);
 
     if (meta_request != NULL) {
         out_results->part_size = meta_request->part_size;

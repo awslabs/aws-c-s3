@@ -181,6 +181,10 @@ struct aws_s3_tester_meta_request_options {
         bool ensure_multipart;
         bool async_input_stream; /* send via async stream */
         bool file_on_disk;       /* write to file on disk, then send via aws_s3_meta_request_options.send_filepath */
+        /* If false, EOF is reported by the read() which produces the last few bytes.
+         * If true, EOF isn't reported until there's one more read(), producing zero bytes.
+         * This emulates an underlying stream that reports EOF by reading 0 bytes */
+        bool eof_requires_extra_read;
         bool invalid_request;
         bool invalid_input_stream;
         bool valid_md5;
