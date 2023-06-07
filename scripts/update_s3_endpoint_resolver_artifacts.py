@@ -1,10 +1,12 @@
-# This script pulls latest 'partitions.json' and 's3-endpoint-rule-set.json'
-# from 'aws-c-s3-endpoint-artifacts' S3 bucket in 'us-east-1' region.
+# This script pulls latest 'partitions.json' and 's3-endpoint-rule-set.json' from Git.
+# You will need a secret in secrets manager which has the 'ruleset-url' and 'ruleset-token'.
 # It uses the latest files to generate 'source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c' and
 # 'source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c'
 
 import json
 import boto3
+import requests
+
 
 def escape_char(c):
     escape_dict = {
@@ -22,6 +24,7 @@ def escape_char(c):
 
     return escape_dict.get(c, c)
 
+
 def get_header():
     return """\
 /**
@@ -38,19 +41,17 @@ def get_header():
 
 """
 
-def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_struct_name):
+
+def generate_c_file_from_json(json_content, c_file_name, c_struct_name):
     num_chars_per_line = 20
 
     try:
-        # Retrieve the JSON file from S3
-        response = s3.get_object(Bucket=bucket_name, Key=s3_file_name)
-        json_content_str = response['Body'].read().decode()
-        json_content = json.loads(json_content_str)
         # Compact the json
-        compact_json_str: str = json.dumps(json_content, separators=(',', ':'))
+        compact_json_str = json.dumps(json_content, separators=(',', ':'))
         compact_c = []
         for i in range(0, len(compact_json_str), num_chars_per_line):
-            compact_c.append(', '.join("'{}'".format(escape_char(char)) for char in compact_json_str[i:i + num_chars_per_line]))
+            compact_c.append(
+                ', '.join("'{}'".format(escape_char(char)) for char in compact_json_str[i:i + num_chars_per_line]))
 
         # Write json to a C file
         with open(c_file_name, 'w') as f:
@@ -69,21 +70,47 @@ def generate_c_file_from_json(s3, bucket_name, s3_file_name, c_file_name, c_stru
         print(f"An error occurred: {e}")
 
 
-if __name__ == '__main__':
+def get_secret_from_secrets_manager(secret_name, region_name):
     session = boto3.session.Session()
-    s3 = session.client('s3', region_name='us-east-1')
-    bucket_name = 'aws-c-s3-endpoint-artifacts'
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name
+    )
+
+    try:
+        get_secret_value_response = client.get_secret_value(
+            SecretId=secret_name
+        )
+    except Exception as e:
+        raise e
+
+    return json.loads(get_secret_value_response['SecretString'])
+
+
+def download_from_git(url, token=None):
+    headers = {'Accept': 'application/vnd.github+json'}
+    if token is not None:
+        headers['Authorization'] = f"Bearer {token}"
+    http_response = requests.get(url, headers=headers)
+    if http_response.status_code != 200:
+        raise Exception(f"HTTP Status code is {http_response.status_code}")
+
+    return json.loads(http_response.content.decode())
+
+
+if __name__ == '__main__':
+    git_secret = get_secret_from_secrets_manager("s3/endpoint/resolver/artifacts/git", "us-east-1")
+
+    rule_set = download_from_git(git_secret['ruleset-url'], git_secret['ruleset-token'])
+    partition = download_from_git('https://raw.githubusercontent.com/awslabs/smithy/main/smithy-rules-engine/src/main'
+                                  '/resources/software/amazon/smithy/rulesengine/language/partitions.json')
 
     generate_c_file_from_json(
-        s3,
-        bucket_name,
-        's3-endpoint-rule-set.json',
+        rule_set,
         'source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c',
         'aws_s3_endpoint_rule_set')
 
     generate_c_file_from_json(
-        s3,
-        bucket_name,
-        'partitions.json',
+        partition,
         'source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c',
         'aws_s3_endpoint_resolver_partitions')
