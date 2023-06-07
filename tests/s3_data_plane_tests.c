@@ -2245,6 +2245,7 @@ static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator
     return 0;
 }
 
+/* Test async-input-stream when we're not doing multipart upload */
 AWS_TEST_CASE(test_s3_put_object_async_singlepart, s_test_s3_put_object_async_singlepart)
 static int s_test_s3_put_object_async_singlepart(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -2269,6 +2270,7 @@ static int s_test_s3_put_object_async_singlepart(struct aws_allocator *allocator
     return 0;
 }
 
+/* Test async-input-stream in multipart upload */
 AWS_TEST_CASE(test_s3_put_object_async_multipart, s_test_s3_put_object_async_multipart)
 static int s_test_s3_put_object_async_multipart(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
