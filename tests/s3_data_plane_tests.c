@@ -2338,7 +2338,7 @@ static int s_test_s3_put_object_async_small_reads(struct aws_allocator *allocato
             {
                 .object_size_mb = 10,
                 .async_input_stream = true,
-                .max_bytes_per_read = 1001, /* something that doesn't evenly divide into 8MB parts */
+                .max_bytes_per_read = KB_TO_BYTES(1001), /* something that doesn't evenly divide into 8MB parts */
             },
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
@@ -2363,7 +2363,7 @@ static int s_test_s3_put_object_small_reads(struct aws_allocator *allocator, voi
         .put_options =
             {
                 .object_size_mb = 10,
-                .max_bytes_per_read = 1001, /* something that doesn't evenly divide into 8MB parts */
+                .max_bytes_per_read = KB_TO_BYTES(1001), /* something that doesn't evenly divide into 8MB parts */
             },
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
