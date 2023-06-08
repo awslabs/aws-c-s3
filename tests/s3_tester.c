@@ -20,7 +20,6 @@
 #include <aws/io/host_resolver.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
-#include <aws/testing/async_stream_tester.h>
 #include <aws/testing/aws_test_harness.h>
 #include <aws/testing/stream_tester.h>
 #include <inttypes.h>
@@ -1464,6 +1463,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     {
                         .autogen_length = object_size_bytes,
                         .eof_requires_extra_read = options->put_options.eof_requires_extra_read,
+                        .max_bytes_per_read = options->put_options.max_bytes_per_read,
                     },
             };
             if (options->put_options.invalid_input_stream) {
@@ -1472,9 +1472,8 @@ int aws_s3_tester_send_meta_request_with_options(
             }
 
             if (options->put_options.async_input_stream) {
-                /* have async reads complete on another thread, and take a bit of time */
-                stream_options.completion_strategy = AWS_ASYNC_READ_COMPLETES_ON_ANOTHER_THREAD;
-                stream_options.read_duration_ns = MS_TO_NS(100),
+                stream_options.completion_strategy = options->put_options.async_read_strategy;
+                stream_options.read_duration_ns = MS_TO_NS(100); /* have async reads take a bit of time. */
 
                 async_stream = aws_async_input_stream_new_tester(allocator, &stream_options);
                 ASSERT_NOT_NULL(async_stream);

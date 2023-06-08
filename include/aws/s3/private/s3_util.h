@@ -26,8 +26,8 @@
 #define MB_TO_BYTES(mb) ((mb)*1024 * 1024)
 #define GB_TO_BYTES(gb) ((gb)*1024 * 1024 * 1024)
 
-#define MS_TO_NS(ms) ((uint64_t)(ms) * 1000000)
-#define SEC_TO_NS(ms) ((uint64_t)(ms) * 1000000000)
+#define MS_TO_NS(ms) ((uint64_t)(ms)*1000000)
+#define SEC_TO_NS(ms) ((uint64_t)(ms)*1000000000)
 
 struct aws_allocator;
 struct aws_http_stream;

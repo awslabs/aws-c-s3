@@ -2295,6 +2295,85 @@ static int s_test_s3_put_object_async_multipart(struct aws_allocator *allocator,
     return 0;
 }
 
+/* Test async-input-stream, but the aws_async_input_stream_read() calls all complete synchronously */
+AWS_TEST_CASE(
+    test_s3_put_object_async_read_completes_synchronously,
+    s_test_s3_put_object_async_read_completes_synchronously)
+static int s_test_s3_put_object_async_read_completes_synchronously(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .async_input_stream = true,
+                .async_read_strategy = AWS_ASYNC_READ_COMPLETES_IMMEDIATELY,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(10), aws_atomic_load_int(&test_results.total_bytes_uploaded));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
+/* Test async-input-stream, where it takes multiple read() calls to fill each part */
+AWS_TEST_CASE(test_s3_put_object_async_small_reads, s_test_s3_put_object_async_small_reads)
+static int s_test_s3_put_object_async_small_reads(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .async_input_stream = true,
+                .max_bytes_per_read = 1001, /* something that doesn't evenly divide into 8MB parts */
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(10), aws_atomic_load_int(&test_results.total_bytes_uploaded));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
+/* Test synchronous input-stream, where it takes multiple read() calls to fill each part */
+AWS_TEST_CASE(test_s3_put_object_small_reads, s_test_s3_put_object_small_reads)
+static int s_test_s3_put_object_small_reads(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .max_bytes_per_read = 1001, /* something that doesn't evenly divide into 8MB parts */
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(10), aws_atomic_load_int(&test_results.total_bytes_uploaded));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
 /* Test async-input-stream, with undeclared Content-Length, that doesn't end exactly on a part boundary */
 AWS_TEST_CASE(
     test_s3_put_object_async_no_content_length_partial_part,
