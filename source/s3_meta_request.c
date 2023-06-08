@@ -13,6 +13,7 @@
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
 #include <aws/auth/signing_result.h>
+#include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -525,6 +526,24 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
     struct aws_s3_meta_request *meta_request = payload->request->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    uint64_t prepare_end;
+    aws_high_res_clock_get_ticks(&prepare_end);
+
+    uint64_t prev_prepare_end = meta_request->graebm.prepare_end;
+    uint64_t prepare_start = meta_request->graebm.prepare_start;
+    uint64_t gap = prev_prepare_end == 0 ? 0 : prepare_start - prev_prepare_end;
+    uint64_t duration = prepare_end - prepare_start;
+
+    double gap_f = gap / 1e9;
+    double duration_f = duration / 1e9;
+    double start_f = prepare_start / 1e9;
+    double end_f = prepare_end / 1e9;
+
+    meta_request->graebm.prepare_start = 0;
+    meta_request->graebm.prepare_end = prepare_end;
+
+    fprintf(stderr, "%.8f,%.4f,%.3f,%.3f\n", gap_f, duration_f, start_f, end_f);
+
     ++payload->request->num_times_prepared;
 
     if (error_code) {
@@ -617,6 +636,9 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+
+    AWS_FATAL_ASSERT(meta_request->graebm.prepare_start == 0);
+    aws_high_res_clock_get_ticks(&meta_request->graebm.prepare_start);
 
     if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_CANCELED);

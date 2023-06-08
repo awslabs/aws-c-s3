@@ -442,7 +442,7 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     uint32_t flags) {
 
     uint32_t num_parts_in_flight =
-        (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_completed);
+        (auto_ranged_put->synced_data.num_parts_sent - auto_ranged_put->synced_data.num_parts_read);
 
     /* If the stream is actually async, only allow 1 part in flight at a time.
      * We need to wait for async read() to complete before calling it again */

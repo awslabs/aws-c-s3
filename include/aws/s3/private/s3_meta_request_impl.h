@@ -215,6 +215,11 @@ struct aws_s3_meta_request {
 
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
+
+    struct {
+        uint64_t prepare_start;
+        uint64_t prepare_end;
+    } graebm;
 };
 
 AWS_EXTERN_C_BEGIN
