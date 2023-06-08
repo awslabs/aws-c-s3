@@ -1472,7 +1472,9 @@ int aws_s3_tester_send_meta_request_with_options(
             }
 
             if (options->put_options.async_input_stream) {
+                /* have async reads complete on another thread, and take a bit of time */
                 stream_options.completion_strategy = AWS_ASYNC_READ_COMPLETES_ON_ANOTHER_THREAD;
+                stream_options.read_duration_ns = MS_TO_NS(100),
 
                 async_stream = aws_async_input_stream_new_tester(allocator, &stream_options);
                 ASSERT_NOT_NULL(async_stream);
@@ -1688,7 +1690,7 @@ int aws_s3_tester_send_meta_request(
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_CANCEL) {
         /* take a random sleep from 0-1 ms. */
         srand((uint32_t)time(NULL));
-        aws_thread_current_sleep(rand() % 1000000);
+        aws_thread_current_sleep(rand() % MS_TO_NS(1));
         aws_s3_meta_request_cancel(meta_request);
     }
 
