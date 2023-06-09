@@ -22,7 +22,7 @@ enum aws_s3_copy_object_request_tag {
 struct aws_s3_copy_object {
     struct aws_s3_meta_request base;
 
-    /* Useable after the Create Multipart Upload request succeeds. */
+    /* Usable after the Create Multipart Upload request succeeds. */
     struct aws_string *upload_id;
 
     /* Only meant for use in the update function, which is never called concurrently. */

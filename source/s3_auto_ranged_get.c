@@ -11,11 +11,6 @@
 #include <aws/common/string.h>
 #include <inttypes.h>
 
-#ifdef _MSC_VER
-/* sscanf warning (not currently scanning for strings) */
-#    pragma warning(disable : 4996)
-#endif
-
 const uint32_t s_conservative_max_requests_in_flight = 8;
 const struct aws_byte_cursor g_application_xml_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("application/xml");
 const struct aws_byte_cursor g_object_size_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ActualObjectSize");
@@ -27,14 +22,14 @@ static bool s_s3_auto_ranged_get_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static int s_s3_auto_ranged_get_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request);
+static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request);
 
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);
+
+static int s_s3_auto_ranged_get_request_type(struct aws_s3_request *request);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
@@ -45,7 +40,20 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .finished_request = s_s3_auto_ranged_get_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .get_request_type = s_s3_auto_ranged_get_request_type,
 };
+
+static int s_s3_auto_ranged_get_request_type(struct aws_s3_request *request) {
+    switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
+            return AWS_S3_REQUEST_TYPE_HEAD_OBJECT;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
+            return AWS_S3_REQUEST_TYPE_GET_OBJECT;
+    }
+    AWS_ASSERT(false);
+    return AWS_S3_REQUEST_TYPE_MAX;
+}
 
 static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
@@ -142,7 +150,7 @@ static bool s_s3_auto_ranged_get_update(
                 /* auto-ranged-gets make use of body streaming, which will hold onto response bodies if parts earlier in
                  * the file haven't arrived yet. This can potentially create a lot of backed up requests, causing us to
                  * hit our global request limit. To help mitigate this, when the "conservative" flag is passed in, we
-                 * only allow the total amount of requests being sent/streamed to be inside of a set limit.  */
+                 * only allow the total amount of requests being sent/streamed to be inside a set limit.  */
                 if (num_requests_in_flight > s_conservative_max_requests_in_flight) {
                     goto has_work_remaining;
                 }
@@ -315,7 +323,7 @@ static bool s_s3_auto_ranged_get_update(
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
             if (auto_ranged_get->synced_data.num_parts_checksum_validated ==
                 auto_ranged_get->synced_data.num_parts_requested) {
-                /* If we have validated the checksum for every parts, we set the meta request level checksum validation
+                /* If we have validated the checksum for every part, we set the meta request level checksum validation
                  * result.*/
                 meta_request->synced_data.finish_result.did_validate = true;
                 meta_request->synced_data.finish_result.validation_algorithm = auto_ranged_get->validation_algorithm;
@@ -336,16 +344,17 @@ static bool s_s3_auto_ranged_get_update(
     return work_remaining;
 }
 
-/* Given a request, prepare it for sending based on its description. */
-static int s_s3_auto_ranged_get_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request) {
-    AWS_PRECONDITION(meta_request);
+/* Given a request, prepare it for sending based on its description.
+ * Currently, this is actually synchronous. */
+static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
+    struct aws_s3_meta_request *meta_request = request->meta_request;
 
     /* Generate a new ranged get request based on the original message. */
     struct aws_http_message *message = NULL;
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+
+    bool success = false;
 
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
@@ -375,7 +384,7 @@ static int s_s3_auto_ranged_get_prepare_request(
             "id=%p Could not create message for request with tag %d for auto-ranged-get meta request.",
             (void *)meta_request,
             request->request_tag);
-        goto message_alloc_failed;
+        goto finish;
     }
     if (meta_request->checksum_config.validate_response_checksum) {
         aws_http_headers_set(aws_http_message_get_headers(message), g_request_validation_mode, g_enabled);
@@ -397,6 +406,7 @@ static int s_s3_auto_ranged_get_prepare_request(
     aws_s3_request_setup_send_data(request, message);
     aws_http_message_release(message);
 
+    /* Success! */
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Created request %p for part %d",
@@ -404,11 +414,16 @@ static int s_s3_auto_ranged_get_prepare_request(
         (void *)request,
         request->part_number);
 
-    return AWS_OP_SUCCESS;
+    success = true;
 
-message_alloc_failed:
-
-    return AWS_OP_ERR;
+finish:;
+    struct aws_future_void *future = aws_future_void_new(meta_request->allocator);
+    if (success) {
+        aws_future_void_set_result(future);
+    } else {
+        aws_future_void_set_error(future, aws_last_error_or_unknown());
+    }
+    return future;
 }
 
 /* Check the finish result of meta request, in case of the request failed because of downloading an empty file */
@@ -476,7 +491,7 @@ static int s_discover_object_range_and_content_length(
             }
 
             /* if the inital message had a ranged header, there should also be a Content-Range header that specifies the
-             * object range and total object size. Otherwise the size and range should be equal to the
+             * object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_range_end = total_content_length - 1;

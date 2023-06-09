@@ -21,7 +21,7 @@
 static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list) {
     /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
      * upload parts and one complete MPU */
-    ASSERT_UINT_EQUALS(aws_array_list_length(metrics_list), 4);
+    ASSERT_UINT_EQUALS(4, aws_array_list_length(metrics_list));
     struct aws_s3_request_metrics *metrics = NULL;
 
     /* First metrics should be the CreateMPU */
@@ -37,10 +37,10 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     ASSERT_TRUE(aws_string_eq_c_str(ip_address, "::1") || aws_string_eq_c_str(ip_address, "127.0.0.1"));
     int response_status = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_response_status_code(metrics, &response_status));
-    ASSERT_UINT_EQUALS(response_status, 200);
+    ASSERT_UINT_EQUALS(200, response_status);
     uint32_t stream_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_request_stream_id(metrics, &stream_id));
-    ASSERT_UINT_EQUALS(stream_id, 1);
+    ASSERT_UINT_EQUALS(1, stream_id);
     const struct aws_string *request_path_query = NULL;
     aws_s3_request_metrics_get_request_path_query(metrics, &request_path_query);
     ASSERT_TRUE(request_path_query->len > 0);
@@ -51,7 +51,7 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     ASSERT_SUCCESS(aws_s3_request_metrics_get_thread_id(metrics, &thread_id));
     size_t connection_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_connection_id(metrics, &connection_id));
-    ASSERT_UINT_EQUALS(aws_s3_request_metrics_get_error_code(metrics), AWS_ERROR_SUCCESS);
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, aws_s3_request_metrics_get_error_code(metrics));
     /* Get all those time stamp */
     uint64_t time_stamp = 0;
     aws_s3_request_metrics_get_start_timestamp_ns(metrics, &time_stamp);
@@ -81,6 +81,9 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     ASSERT_SUCCESS(aws_s3_request_metrics_get_receiving_duration_ns(metrics, &time_stamp));
     ASSERT_FALSE(time_stamp == 0);
     time_stamp = 0;
+    enum aws_s3_request_type request_type = 0;
+    aws_s3_request_metrics_get_request_type(metrics, &request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, request_type);
 
     /* Second metrics should be the Upload Part */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 1);
@@ -92,6 +95,21 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     ASSERT_TRUE(aws_byte_cursor_eq_c_str(&header_value, "b54357faf0632cce46e942fa68356b38"));
     ASSERT_SUCCESS(aws_http_headers_get(response_headers, aws_byte_cursor_from_c_str("Connection"), &header_value));
     ASSERT_TRUE(aws_byte_cursor_eq_c_str(&header_value, "keep-alive"));
+    request_type = 0;
+    aws_s3_request_metrics_get_request_type(metrics, &request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_UPLOAD_PART, request_type);
+
+    /* Third metrics still be Upload Part */
+    aws_array_list_get_at(metrics_list, (void **)&metrics, 2);
+    request_type = 0;
+    aws_s3_request_metrics_get_request_type(metrics, &request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_UPLOAD_PART, request_type);
+
+    /* Fourth should be complete MPU */
+    aws_array_list_get_at(metrics_list, (void **)&metrics, 3);
+    request_type = 0;
+    aws_s3_request_metrics_get_request_type(metrics, &request_type);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD, request_type);
     /* All the rest should be similar */
 
     return AWS_OP_SUCCESS;
@@ -212,7 +230,7 @@ TEST_CASE(async_internal_error_from_complete_multipart_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
 
     /* Internal error will be retried and failed with internal error. */
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_INTERNAL_ERROR);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_INTERNAL_ERROR, out_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -256,8 +274,8 @@ TEST_CASE(async_access_denied_from_complete_multipart_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
 
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR);
-    ASSERT_UINT_EQUALS(out_results.finished_response_status, AWS_S3_RESPONSE_STATUS_SUCCESS);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_S3_RESPONSE_STATUS_SUCCESS, out_results.finished_response_status);
     ASSERT_TRUE(out_results.error_response_body.len != 0);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
@@ -299,8 +317,8 @@ TEST_CASE(get_object_modified_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
 
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_OBJECT_MODIFIED);
-    ASSERT_UINT_EQUALS(out_results.finished_response_status, AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_OBJECT_MODIFIED, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED, out_results.finished_response_status);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -342,13 +360,13 @@ TEST_CASE(get_object_invalid_responses_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
 
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER, out_results.finished_error_code);
 
     /* 2 - Mock server will response without Etags */
     object_path = aws_byte_cursor_from_c_str("/get_object_invalid_response_missing_etags");
     get_options.get_options.object_path = object_path;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_MISSING_ETAG);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_MISSING_ETAG, out_results.finished_error_code);
 
     /* 3 -  Mock server will response without Content-Range response for HEAD request */
     object_path = aws_byte_cursor_from_c_str("/get_object_invalid_response_missing_content_range");
@@ -365,7 +383,7 @@ TEST_CASE(get_object_invalid_responses_mock_server) {
     get_options.get_options.object_path = object_path;
     get_options.message = message;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER, out_results.finished_error_code);
     aws_uri_clean_up(&mock_server);
     aws_http_message_destroy(message);
 
@@ -415,8 +433,8 @@ TEST_CASE(get_object_missmatch_checksum_responses_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
 
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
-    ASSERT_UINT_EQUALS(out_results.algorithm, AWS_SCA_CRC32);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -462,7 +480,7 @@ TEST_CASE(get_object_throughput_failure_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
 
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_HTTP_CHANNEL_THROUGHPUT_FAILURE);
+    ASSERT_UINT_EQUALS(AWS_ERROR_HTTP_CHANNEL_THROUGHPUT_FAILURE, out_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -471,8 +489,9 @@ TEST_CASE(get_object_throughput_failure_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(upload_part_invalid_response_mock_server) {
-    (void)ctx;
+static int s_test_upload_part_invalid_response_mock_server_ex(
+    struct aws_allocator *allocator,
+    bool async_input_stream) {
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -494,8 +513,9 @@ TEST_CASE(upload_part_invalid_response_mock_server) {
         .validate_get_response_checksum = false,
         .put_options =
             {
-                .object_size_mb = 10,
+                .object_size_mb = 1024, /* big, so it's likely we're still reading when failure happens */
                 .object_path_override = object_path,
+                .async_input_stream = async_input_stream,
             },
         .mock_server = true,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
@@ -504,7 +524,7 @@ TEST_CASE(upload_part_invalid_response_mock_server) {
     aws_s3_meta_request_test_results_init(&out_results, allocator);
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_MISSING_ETAG);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_MISSING_ETAG, out_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -513,19 +533,16 @@ TEST_CASE(upload_part_invalid_response_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-static void s_resume_meta_request_progress(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_progress *progress,
-    void *user_data) {
+/* Test an UploadPart failing due to invalid response */
+TEST_CASE(upload_part_invalid_response_mock_server) {
+    (void)ctx;
+    return s_test_upload_part_invalid_response_mock_server_ex(allocator, false /*async_input_stream*/);
+}
 
-    (void)meta_request;
-    AWS_ASSERT(meta_request);
-    AWS_ASSERT(progress);
-    AWS_ASSERT(user_data);
-
-    struct aws_s3_meta_request_test_results *out_results = user_data;
-
-    aws_atomic_fetch_add(&out_results->total_bytes_uploaded, (size_t)progress->bytes_transferred);
+/* Test an UploadPart failing due to invalid response, while uploading from an async-input-stream */
+TEST_CASE(upload_part_async_invalid_response_mock_server) {
+    (void)ctx;
+    return s_test_upload_part_invalid_response_mock_server_ex(allocator, true /*async_input_stream*/);
 }
 
 /* Fake a MPU with 4 parts and the 2nd and 3rd have already completed and resume works fine */
@@ -569,7 +586,6 @@ TEST_CASE(resume_first_part_not_completed_mock_server) {
     };
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    out_results.progress_callback = s_resume_meta_request_progress;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
@@ -627,7 +643,6 @@ TEST_CASE(resume_mutli_page_list_parts_mock_server) {
     };
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    out_results.progress_callback = s_resume_meta_request_progress;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
@@ -684,8 +699,8 @@ TEST_CASE(resume_list_parts_failed_mock_server) {
     aws_s3_meta_request_test_results_init(&out_results, allocator);
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
-    ASSERT_UINT_EQUALS(out_results.finished_response_status, AWS_HTTP_STATUS_CODE_404_NOT_FOUND);
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_INVALID_RESPONSE_STATUS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_404_NOT_FOUND, out_results.finished_response_status);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
@@ -736,11 +751,10 @@ TEST_CASE(resume_after_finished_mock_server) {
     };
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    out_results.progress_callback = s_resume_meta_request_progress;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* The error code should be success, but there are no headers and stuff as no request was made. */
-    ASSERT_UINT_EQUALS(out_results.finished_error_code, AWS_ERROR_SUCCESS);
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
     size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
     ASSERT_UINT_EQUALS(0, total_bytes_uploaded);
 

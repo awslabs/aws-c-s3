@@ -10,6 +10,8 @@
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 
+AWS_PUSH_SANE_WARNING_LEVEL
+
 struct aws_allocator;
 
 struct aws_http_stream;
@@ -52,6 +54,16 @@ enum aws_s3_meta_request_type {
     /**
      * The PutObject request will be split into MultiPart uploads that are executed in parallel
      * to improve throughput, when possible.
+     * Note: put object supports both known and unknown body length. The client
+     * relies on Content-Length header to determine length of the body.
+     * Request with unknown content length are always sent using multipart
+     * upload regardless of final number of parts and do have the following limitations:
+     * - multipart threshold is ignored and all request are made through mpu,
+     *   even if they only need one part
+     * - pause/resume is not supported
+     * - meta request will throw error if checksum header is provider (due to
+     *   general limitation of checksum not being usable if meta request is
+     *   getting split)
      */
     AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
 
@@ -60,10 +72,36 @@ enum aws_s3_meta_request_type {
      * using multiple S3 UploadPartCopy requests in parallel, or bypasses
      * a CopyObject request to S3 if the object size is not large enough for
      * a multipart upload.
+     * Note: copy support is still in development and has following limitations:
+     * - host header must use virtual host addressing style (path style is not
+     *   supported) and both source and dest buckets must have dns compliant name
+     * - only {bucket}/{key} format is supported for source and passing arn as
+     *   source will not work
+     * - source bucket is assumed to be in the same region as dest
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
     AWS_S3_META_REQUEST_TYPE_MAX,
+};
+
+/**
+ * The type of S3 request made. Used by metrics.
+ */
+enum aws_s3_request_type {
+    /* Same as the original HTTP request passed to aws_s3_meta_request_options */
+    AWS_S3_REQUEST_TYPE_DEFAULT,
+
+    /* S3 APIs */
+    AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+    AWS_S3_REQUEST_TYPE_GET_OBJECT,
+    AWS_S3_REQUEST_TYPE_LIST_PARTS,
+    AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_UPLOAD_PART,
+    AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
+    AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
+
+    AWS_S3_REQUEST_TYPE_MAX,
 };
 
 /**
@@ -360,7 +398,14 @@ struct aws_s3_checksum_config {
     struct aws_array_list *validate_checksum_algorithms;
 };
 
-/* Options for a new meta request, ie, file transfer that will be handled by the high performance client. */
+/**
+ * Options for a new meta request, ie, file transfer that will be handled by the high performance client.
+ *
+ * There are several ways to pass the request's body data:
+ * 1) If the data is already in memory, set the body-stream on `message`.
+ * 2) If the data is on disk, set `send_filepath` for best performance.
+ * 3) If the data will be be produced in asynchronous chunks, set `send_async_stream`.
+ */
 struct aws_s3_meta_request_options {
     /* TODO: The meta request options cannot control the request to be split or not. Should consider to add one */
 
@@ -372,16 +417,24 @@ struct aws_s3_meta_request_options {
     const struct aws_signing_config_aws *signing_config;
 
     /* Initial HTTP message that defines what operation we are doing.
-     * When uploading a file, you should set `send_filepath` (instead of the message's body-stream)
-     * for better performance. */
+     * Do not set the message's body-stream if the body is being passed by other means (see note above) */
     struct aws_http_message *message;
 
     /**
      * Optional.
-     * If set, this file is sent as the request body, and the `message` body-stream is ignored.
-     * This can give better performance than sending data using the body-stream.
+     * If set, this file is sent as the request body.
+     * This gives the best performance when sending data from a file.
+     * Do not set if the body is being passed by other means (see note above).
      */
     struct aws_byte_cursor send_filepath;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * If set, the request body comes from this async stream.
+     * Use this when outgoing data will be produced in asynchronous chunks.
+     * Do not set if the body is being passed by other means (see note above).
+     */
+    struct aws_async_input_stream *send_async_stream;
 
     /**
      * Optional.
@@ -419,9 +472,6 @@ struct aws_s3_meta_request_options {
 
     /**
      * Invoked to report progress of the meta request execution.
-     * Currently, the progress callback is invoked only for the CopyObject meta request type.
-     * TODO: support this callback for all the types of meta requests
-     * See `aws_s3_meta_request_progress_fn`
      */
     aws_s3_meta_request_progress_fn *progress_callback;
 
@@ -489,7 +539,7 @@ struct aws_s3_meta_request_result {
      * uploaded as a multipart object.
      *
      * If the object to get is multipart object, the part checksum MAY be validated if the part size to get matches the
-     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will failed with
+     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will fail with
      * checksum mismatch. However, even if the parts checksum were validated, this will NOT be set to true, as the
      * checksum for the whole meta request was NOT validated.
      **/
@@ -846,10 +896,17 @@ int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *me
 AWS_S3_API
 int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, uint32_t *out_stream_id);
 
+/* Get the request type from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_type(
+    const struct aws_s3_request_metrics *metrics,
+    enum aws_s3_request_type *out_request_type);
+
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API
-int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *out_metrics);
+int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
 
 AWS_EXTERN_C_END
+AWS_POP_SANE_WARNING_LEVEL
 
 #endif /* AWS_S3_CLIENT_H */

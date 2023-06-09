@@ -76,7 +76,7 @@ def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public
     except botocore.exceptions.ClientError as e:
         print(f"Object {keyname} failed to upload, with exception: {e}")
         if public_read and e.response['Error']['Code'] == 'AccessDenied':
-            print(f"Check your account level S3 settings, public access may be blocked.")
+            print("Check your account level S3 settings, public access may be blocked.")
         exit(-1)
     print(f"Object {keyname} uploaded")
 
@@ -116,8 +116,13 @@ def create_bucket_with_lifecycle():
             10*MB, 'pre-existing-10MB-aes256', sse='aes256')
         put_pre_existing_objects(
             10*MB, 'pre-existing-10MB-kms', sse='kms')
+        put_pre_existing_objects(256*MB, 'pre-existing-256MB')
+        put_pre_existing_objects(256*MB, 'pre-existing-256MB-@')
+        put_pre_existing_objects(2*GB, 'pre-existing-2GB')
+        put_pre_existing_objects(2*GB, 'pre-existing-2GB-@')
         put_pre_existing_objects(10*MB, 'pre-existing-10MB')
         put_pre_existing_objects(1*MB, 'pre-existing-1MB')
+        put_pre_existing_objects(1*MB, 'pre-existing-1MB-@')
         put_pre_existing_objects(0, 'pre-existing-empty')
 
     except botocore.exceptions.ClientError as e:

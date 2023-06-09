@@ -65,8 +65,8 @@ static bool s_s3_meta_request_update_cancel_test(
             block_update = !call_cancel && auto_ranged_put->synced_data.num_parts_sent == 1;
             break;
         case S3_UPDATE_CANCEL_TYPE_MPU_ALL_PARTS_COMPLETED:
-            call_cancel =
-                auto_ranged_put->synced_data.num_parts_completed == auto_ranged_put->synced_data.total_num_parts;
+            call_cancel = auto_ranged_put->synced_data.num_parts_completed ==
+                          auto_ranged_put->total_num_parts_from_content_length;
             break;
 
         case S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES:
@@ -141,6 +141,7 @@ static void s_s3_meta_request_finished_request_cancel_test(
 
     if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD) {
+
         cancel_test_user_data->abort_successful = error_code == AWS_ERROR_SUCCESS;
     }
 
@@ -171,7 +172,11 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_update_cancel_te
     return meta_request;
 }
 
-static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update_cancel_type cancel_type) {
+static int s3_cancel_test_helper_ex(
+    struct aws_allocator *allocator,
+    enum s3_update_cancel_type cancel_type,
+    bool async_input_stream) {
+
     AWS_ASSERT(allocator);
 
     struct aws_s3_tester tester;
@@ -211,11 +216,12 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
             .put_options =
                 {
                     .ensure_multipart = true,
+                    .async_input_stream = async_input_stream,
                 },
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
-        ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_CANCELED);
+        ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, meta_request_test_results.finished_error_code);
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -275,6 +281,10 @@ static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
+}
+
+static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update_cancel_type cancel_type) {
+    return s3_cancel_test_helper_ex(allocator, cancel_type, false /*async_input_stream*/);
 }
 
 static int s3_cancel_test_helper_fc(
@@ -445,6 +455,16 @@ static int s_test_s3_cancel_mpu_one_part_completed(struct aws_allocator *allocat
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_cancel_mpu_one_part_completed_async, s_test_s3_cancel_mpu_one_part_completed_async)
+static int s_test_s3_cancel_mpu_one_part_completed_async(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(
+        s3_cancel_test_helper_ex(allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED, true /*async_input_stream*/));
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_cancel_mpu_all_parts_completed, s_test_s3_cancel_mpu_all_parts_completed)
 static int s_test_s3_cancel_mpu_all_parts_completed(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -530,10 +550,18 @@ struct test_s3_cancel_prepare_user_data {
     uint32_t request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_MAX];
 };
 
-static int s_test_s3_cancel_prepare_meta_request_prepare_request(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request) {
+/* Data for async cancel-prepare-meta-request job */
+struct test_s3_cancel_prepare_meta_request_prepare_request_job {
+    struct aws_allocator *allocator;
+    struct aws_s3_request *request;
+    struct aws_future_void *original_future; /* original future that we're intercepting and patching */
+    struct aws_future_void *patched_future;  /* patched future to set when this job completes */
+};
 
+static void s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_done(void *user_data);
+
+static struct aws_future_void *s_test_s3_cancel_prepare_meta_request_prepare_request(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_ASSERT(meta_request != NULL);
 
     struct aws_s3_meta_request_test_results *results = meta_request->user_data;
@@ -542,14 +570,41 @@ static int s_test_s3_cancel_prepare_meta_request_prepare_request(
     struct aws_s3_tester *tester = results->tester;
     AWS_ASSERT(tester != NULL);
 
+    struct aws_future_void *patched_future = aws_future_void_new(meta_request->allocator);
+
+    struct test_s3_cancel_prepare_meta_request_prepare_request_job *patched_prep = aws_mem_calloc(
+        meta_request->allocator, 1, sizeof(struct test_s3_cancel_prepare_meta_request_prepare_request_job));
+    patched_prep->allocator = meta_request->allocator;
+    patched_prep->request = request;
+    patched_prep->patched_future = aws_future_void_acquire(patched_future);
+
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
         aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
 
-    if (original_meta_request_vtable->prepare_request(meta_request, request)) {
-        return AWS_OP_ERR;
+    patched_prep->original_future = original_meta_request_vtable->prepare_request(request);
+    aws_future_void_register_callback(
+        patched_prep->original_future,
+        s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_done,
+        patched_prep);
+
+    return patched_future;
+}
+
+static void s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_done(void *user_data) {
+
+    struct test_s3_cancel_prepare_meta_request_prepare_request_job *patched_prep = user_data;
+    struct aws_s3_request *request = patched_prep->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
+    struct aws_s3_tester *tester = results->tester;
+    struct test_s3_cancel_prepare_user_data *test_user_data = tester->user_data;
+
+    int error_code = aws_future_void_get_error(patched_prep->original_future);
+    if (error_code != AWS_ERROR_SUCCESS) {
+        aws_future_void_set_error(patched_prep->patched_future, error_code);
+        goto finish;
     }
 
-    struct test_s3_cancel_prepare_user_data *test_user_data = tester->user_data;
     ++test_user_data->request_prepare_counters[request->request_tag];
 
     /* Cancel after the first part is prepared, preventing any additional parts from being prepared. */
@@ -558,7 +613,11 @@ static int s_test_s3_cancel_prepare_meta_request_prepare_request(
         aws_s3_meta_request_cancel(meta_request);
     }
 
-    return AWS_OP_SUCCESS;
+    aws_future_void_set_result(patched_prep->patched_future);
+finish:
+    aws_future_void_release(patched_prep->original_future);
+    aws_future_void_release(patched_prep->patched_future);
+    aws_mem_release(patched_prep->allocator, patched_prep);
 }
 
 static struct aws_s3_meta_request *s_test_s3_cancel_prepare_meta_request_factory(

@@ -7,15 +7,17 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
-#include <aws/io/stream.h>
 
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
-static const size_t s_multipart_copy_minimum_object_size = 1L * 1024L * 1024L * 1024L;
+static const size_t s_multipart_copy_minimum_object_size = GB_TO_BYTES(1);
 
 static const size_t s_etags_initial_capacity = 16;
 static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
+
+/* TODO: make this configurable or at least expose it. */
+const size_t s_min_copy_part_size = MB_TO_BYTES(128);
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
@@ -30,12 +32,33 @@ static bool s_s3_copy_object_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
-static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_request *request);
 
 static void s_s3_copy_object_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);
+
+static int s_s3_copy_object_request_type(struct aws_s3_request *request) {
+    switch (request->request_tag) {
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE:
+            /* It's a HEAD request of GetObject call */
+            return AWS_S3_REQUEST_TYPE_HEAD_OBJECT;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS:
+            /* A single copy object request, same as default */
+            return AWS_S3_REQUEST_TYPE_DEFAULT;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY:
+            return AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD;
+        case AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD:
+            return AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD;
+    }
+    AWS_ASSERT(false);
+    return AWS_S3_REQUEST_TYPE_MAX;
+}
 
 static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .update = s_s3_copy_object_update,
@@ -46,6 +69,7 @@ static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .finished_request = s_s3_copy_object_request_finished,
     .destroy = s_s3_meta_request_copy_object_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .get_request_type = s_s3_copy_object_request_type,
 };
 
 /* Allocate a new copy object meta request */
@@ -67,7 +91,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     const size_t UNKNOWN_CONTENT_LENGTH = 0;
     const int UNKNOWN_NUM_PARTS = 0;
 
-    /* TODO Handle and test multipart copy */
     if (aws_s3_meta_request_init_base(
             allocator,
             client,
@@ -333,7 +356,8 @@ no_work_remaining:
 }
 
 /* Given a request, prepare it for sending based on its description. */
-static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
     struct aws_s3_copy_object *copy_object = meta_request->impl;
@@ -342,6 +366,7 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
     aws_s3_meta_request_lock_synced_data(meta_request);
 
     struct aws_http_message *message = NULL;
+    bool success = false;
 
     switch (request->request_tag) {
 
@@ -372,21 +397,18 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
                     part_size_uint64);
 
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return AWS_OP_ERR;
+                goto finish;
             }
 
-            size_t part_size = (size_t)part_size_uint64;
-
-            const size_t MIN_PART_SIZE = 128L * 1024L * 1024L; /* minimum partition size */
-            if (part_size < MIN_PART_SIZE) {
-                part_size = MIN_PART_SIZE;
+            uint64_t max_part_size = GB_TO_BYTES((uint64_t)5);
+            if (max_part_size > SIZE_MAX) {
+                max_part_size = SIZE_MAX;
             }
+            uint32_t num_parts = 0;
+            size_t part_size = 0;
 
-            uint32_t num_parts = (uint32_t)(copy_object->synced_data.content_length / part_size);
-
-            if ((copy_object->synced_data.content_length % part_size) > 0) {
-                ++num_parts;
-            }
+            aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+                copy_object->synced_data.content_length, s_min_copy_part_size, max_part_size, &part_size, &num_parts);
 
             copy_object->synced_data.total_num_parts = num_parts;
             copy_object->synced_data.part_size = part_size;
@@ -498,13 +520,14 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
             "id=%p Could not allocate message for request with tag %d for CopyObject meta request.",
             (void *)meta_request,
             request->request_tag);
-        goto message_create_failed;
+        goto finish;
     }
 
     aws_s3_request_setup_send_data(request, message);
 
     aws_http_message_release(message);
 
+    /* Success! */
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p: Prepared request %p for part %d",
@@ -512,42 +535,38 @@ static int s_s3_copy_object_prepare_request(struct aws_s3_meta_request *meta_req
         (void *)request,
         request->part_number);
 
-    return AWS_OP_SUCCESS;
+    success = true;
 
-message_create_failed:
-
-    return AWS_OP_ERR;
+finish:;
+    struct aws_future_void *future = aws_future_void_new(meta_request->allocator);
+    if (success) {
+        aws_future_void_set_result(future);
+    } else {
+        aws_future_void_set_error(future, aws_last_error_or_unknown());
+    }
+    return future;
 }
 
 /* For UploadPartCopy requests, etag is sent in the request body, within XML entity quotes */
 static struct aws_string *s_etag_new_from_upload_part_copy_response(
     struct aws_allocator *allocator,
     struct aws_byte_buf *response_body) {
-    struct aws_string *etag = NULL;
 
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(response_body);
 
     struct aws_string *etag_within_xml_quotes =
         aws_xml_get_top_level_tag(allocator, &g_etag_header_name, &response_body_cursor);
 
-    struct aws_byte_buf etag_within_quotes_byte_buf;
-    AWS_ZERO_STRUCT(etag_within_quotes_byte_buf);
-    replace_quote_entities(allocator, etag_within_xml_quotes, &etag_within_quotes_byte_buf);
+    struct aws_byte_buf etag_within_quotes_byte_buf = {0};
+    aws_replace_quote_entities(allocator, etag_within_xml_quotes, &etag_within_quotes_byte_buf);
 
-    /* Remove the quotes surrounding the etag. */
-    struct aws_byte_cursor etag_within_quotes_byte_cursor = aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf);
-    if (etag_within_quotes_byte_cursor.len >= 2 && etag_within_quotes_byte_cursor.ptr[0] == '"' &&
-        etag_within_quotes_byte_cursor.ptr[etag_within_quotes_byte_cursor.len - 1] == '"') {
+    struct aws_string *stripped_etag =
+        aws_strip_quotes(allocator, aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf));
 
-        aws_byte_cursor_advance(&etag_within_quotes_byte_cursor, 1);
-        --etag_within_quotes_byte_cursor.len;
-    }
-
-    etag = aws_string_new_from_cursor(allocator, &etag_within_quotes_byte_cursor);
     aws_byte_buf_clean_up(&etag_within_quotes_byte_buf);
     aws_string_destroy(etag_within_xml_quotes);
 
-    return etag;
+    return stripped_etag;
 }
 
 static void s_s3_copy_object_request_finished(
@@ -743,7 +762,7 @@ static void s_s3_copy_object_request_finished(
                     struct aws_byte_buf etag_header_value_byte_buf;
                     AWS_ZERO_STRUCT(etag_header_value_byte_buf);
 
-                    replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
+                    aws_replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
 
                     aws_http_headers_set(
                         final_response_headers,

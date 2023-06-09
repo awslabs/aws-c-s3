@@ -73,7 +73,7 @@ TEST_CASE(meta_request_auto_ranged_put_new_error_handling) {
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
     };
     struct aws_s3_meta_request *meta_request =
-        aws_s3_meta_request_auto_ranged_put_new(allocator, client, SIZE_MAX, MB_TO_BYTES(10), 2, &options);
+        aws_s3_meta_request_auto_ranged_put_new(allocator, client, SIZE_MAX, true, MB_TO_BYTES(10), 2, &options);
 
     ASSERT_NULL(meta_request);
 
@@ -82,7 +82,7 @@ TEST_CASE(meta_request_auto_ranged_put_new_error_handling) {
     token->part_size = 1; /* Less than g_s3_min_upload_part_size */
     options.resume_token = token;
     meta_request =
-        aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), MB_TO_BYTES(10), 2, &options);
+        aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), true, MB_TO_BYTES(10), 2, &options);
     ASSERT_NULL(meta_request);
     aws_s3_meta_request_resume_token_release(token);
 
@@ -95,12 +95,12 @@ TEST_CASE(meta_request_auto_ranged_put_new_error_handling) {
     };
     token = aws_s3_meta_request_resume_token_new_upload(allocator, &token_options);
     options.resume_token = token;
-    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_type(token), AWS_S3_META_REQUEST_TYPE_PUT_OBJECT);
-    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_part_size(token), token_options.part_size);
-    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_total_num_parts(token), token_options.total_num_parts);
-    ASSERT_UINT_EQUALS(aws_s3_meta_request_resume_token_num_parts_completed(token), token_options.num_parts_completed);
+    ASSERT_UINT_EQUALS(AWS_S3_META_REQUEST_TYPE_PUT_OBJECT, aws_s3_meta_request_resume_token_type(token));
+    ASSERT_UINT_EQUALS(token_options.part_size, aws_s3_meta_request_resume_token_part_size(token));
+    ASSERT_UINT_EQUALS(token_options.total_num_parts, aws_s3_meta_request_resume_token_total_num_parts(token));
+    ASSERT_UINT_EQUALS(token_options.num_parts_completed, aws_s3_meta_request_resume_token_num_parts_completed(token));
     meta_request =
-        aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), MB_TO_BYTES(10), 2, &options);
+        aws_s3_meta_request_auto_ranged_put_new(allocator, client, MB_TO_BYTES(8), true, MB_TO_BYTES(10), 2, &options);
 
     ASSERT_NULL(meta_request);
 
@@ -143,7 +143,7 @@ TEST_CASE(bad_request_error_handling) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
         &tester, client, &options, &meta_request_test_results, 0 /* Not expect success */));
 
-    ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_HTTP_DATA_NOT_AVAILABLE);
+    ASSERT_UINT_EQUALS(AWS_ERROR_HTTP_DATA_NOT_AVAILABLE, meta_request_test_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

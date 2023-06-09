@@ -22,78 +22,68 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-struct replace_quote_entities_test_case {
-    struct aws_string *test_string;
-    struct aws_byte_cursor expected_result;
-};
-
 AWS_TEST_CASE(test_s3_replace_quote_entities, s_test_s3_replace_quote_entities)
 static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct test_case {
+        struct aws_string *test_string;
+        const char *expected_result;
+    };
 
-    struct replace_quote_entities_test_case test_cases[] = {
+    struct test_case test_cases[] = {
         {
             .test_string = aws_string_new_from_c_str(allocator, "&quot;testtest"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"testtest"),
+            .expected_result = "\"testtest",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, "testtest&quot;"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest\""),
+            .expected_result = "testtest\"",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, "&quot;&quot;"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"\""),
+            .expected_result = "\"\"",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, "testtest"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest"),
+            .expected_result = "testtest",
         },
         {
             .test_string = aws_string_new_from_c_str(allocator, ""),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(""),
+            .expected_result = "",
         },
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
-        struct replace_quote_entities_test_case *test_case = &test_cases[i];
+        struct test_case *test_case = &test_cases[i];
 
         struct aws_byte_buf result_byte_buf;
         AWS_ZERO_STRUCT(result_byte_buf);
 
-        replace_quote_entities(allocator, test_case->test_string, &result_byte_buf);
+        aws_replace_quote_entities(allocator, test_case->test_string, &result_byte_buf);
 
         struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_buf(&result_byte_buf);
 
-        ASSERT_TRUE(aws_byte_cursor_eq(&test_case->expected_result, &result_byte_cursor));
+        ASSERT_CURSOR_VALUE_CSTRING_EQUALS(result_byte_cursor, test_case->expected_result);
 
         aws_byte_buf_clean_up(&result_byte_buf);
         aws_string_destroy(test_case->test_string);
         test_case->test_string = NULL;
     }
 
-    aws_s3_tester_clean_up(&tester);
-
     return 0;
 }
-
-struct strip_quotes_test_case {
-    struct aws_byte_cursor test_cursor;
-    struct aws_byte_cursor expected_result;
-};
 
 AWS_TEST_CASE(test_s3_strip_quotes, s_test_s3_strip_quotes)
 static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct test_case {
+        struct aws_byte_cursor test_cursor;
+        struct aws_byte_cursor expected_result;
+    };
 
-    struct strip_quotes_test_case test_cases[] = {
+    struct test_case test_cases[] = {
         {
             .test_cursor = aws_byte_cursor_from_c_str("\"test\""),
             .expected_result = aws_byte_cursor_from_c_str("test"),
@@ -117,7 +107,7 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
-        struct strip_quotes_test_case *test_case = &test_cases[i];
+        struct test_case *test_case = &test_cases[i];
 
         struct aws_byte_buf result_byte_buf;
         AWS_ZERO_STRUCT(result_byte_buf);
@@ -131,8 +121,6 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
         aws_byte_buf_clean_up(&result_byte_buf);
         aws_string_destroy(result);
     }
-
-    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
@@ -362,6 +350,152 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
     }
 
     return 0;
+}
+
+struct s3_request_part_config_example {
+    const char *name;
+    uint64_t content_length;
+    size_t client_part_size;
+    uint64_t client_max_part_size;
+    size_t expected_part_size;
+    uint32_t expected_num_parts;
+};
+
+AWS_TEST_CASE(test_s3_mpu_get_part_size_and_num_parts, s_test_s3_mpu_get_part_size_and_num_parts)
+static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+    uint64_t default_max_part_size = 5368709120ULL;
+
+    const struct s3_request_part_config_example valid_request_part_config[] = {
+        {
+            .name = "simple case",
+            .content_length = MB_TO_BYTES((uint64_t)10000),
+            .client_part_size = MB_TO_BYTES(5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5242880,
+            .expected_num_parts = 2000,
+        },
+        {
+            .name = "large content length with small part size",
+            .content_length = MB_TO_BYTES((uint64_t)990000),
+            .client_part_size = MB_TO_BYTES(5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 103809024,
+            .expected_num_parts = 10000,
+        },
+        {
+
+            .name = "large content length with large part size",
+            .content_length = MB_TO_BYTES((uint64_t)1000000),
+            .client_part_size = MB_TO_BYTES(500),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = MB_TO_BYTES(500),
+            .expected_num_parts = 2000,
+        },
+        {
+            .name = "large odd content length",
+            .content_length = 1044013645824,
+            .client_part_size = 5242880,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 104401365,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "10k parts",
+            .content_length = MB_TO_BYTES((uint64_t)50000),
+            .client_part_size = MB_TO_BYTES(5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = MB_TO_BYTES(5),
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "10k - 1 parts",
+            .content_length = 49995,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 9999,
+        },
+        {
+            .name = "10k with small last part",
+            .content_length = 49998,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "10k + 1 parts",
+            .content_length = 50001,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 6,
+            .expected_num_parts = 8334,
+
+        },
+        {
+            .name = "bump content length",
+            .content_length = 100000,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 10,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "bump content length with non-zero mod",
+            .content_length = 999999,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 100,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "5 tb content length",
+            .content_length = MB_TO_BYTES((uint64_t)5 * 1024 * 1024),
+            .client_part_size = MB_TO_BYTES((uint64_t)5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 549755814,
+            .expected_num_parts = 10000,
+        },
+    };
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_request_part_config); ++i) {
+        AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "valid example [%zu]: %s\n", i, valid_request_part_config[i].name);
+
+        uint64_t content_length = valid_request_part_config[i].content_length;
+        size_t part_size;
+        uint32_t num_parts;
+
+        ASSERT_SUCCESS(aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+            content_length,
+            valid_request_part_config[i].client_part_size,
+            valid_request_part_config[i].client_max_part_size,
+            &part_size,
+            &num_parts));
+        ASSERT_INT_EQUALS(valid_request_part_config[i].expected_part_size, part_size);
+        ASSERT_INT_EQUALS(valid_request_part_config[i].expected_num_parts, num_parts);
+    }
+
+    /* Invalid cases */
+    const struct s3_request_part_config_example invalid_request_part_config[] = {{
+        .name = "max part < required part size",
+        .content_length = 900000,
+        .client_part_size = 5,
+        .client_max_part_size = 10,
+    }};
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(invalid_request_part_config); ++i) {
+        printf("invalid example [%zu]: %s\n", i, invalid_request_part_config[i].name);
+        size_t part_size;
+        uint32_t num_parts;
+        ASSERT_FAILS(aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+            invalid_request_part_config[i].content_length,
+            invalid_request_part_config[i].client_part_size,
+            invalid_request_part_config[i].client_max_part_size,
+            &part_size,
+            &num_parts));
+    }
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_aws_xml_get_top_level_tag_with_root_name, s_test_s3_aws_xml_get_top_level_tag_with_root_name)
