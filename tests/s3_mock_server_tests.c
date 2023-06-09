@@ -489,8 +489,9 @@ TEST_CASE(get_object_throughput_failure_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(upload_part_invalid_response_mock_server) {
-    (void)ctx;
+static int s_test_upload_part_invalid_response_mock_server_ex(
+    struct aws_allocator *allocator,
+    bool async_input_stream) {
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -512,8 +513,9 @@ TEST_CASE(upload_part_invalid_response_mock_server) {
         .validate_get_response_checksum = false,
         .put_options =
             {
-                .object_size_mb = 10,
+                .object_size_mb = 1024, /* big, so it's likely we're still reading when failure happens */
                 .object_path_override = object_path,
+                .async_input_stream = async_input_stream,
             },
         .mock_server = true,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
@@ -529,6 +531,18 @@ TEST_CASE(upload_part_invalid_response_mock_server) {
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
+}
+
+/* Test an UploadPart failing due to invalid response */
+TEST_CASE(upload_part_invalid_response_mock_server) {
+    (void)ctx;
+    return s_test_upload_part_invalid_response_mock_server_ex(allocator, false /*async_input_stream*/);
+}
+
+/* Test an UploadPart failing due to invalid response, while uploading from an async-input-stream */
+TEST_CASE(upload_part_async_invalid_response_mock_server) {
+    (void)ctx;
+    return s_test_upload_part_invalid_response_mock_server_ex(allocator, true /*async_input_stream*/);
 }
 
 /* Fake a MPU with 4 parts and the 2nd and 3rd have already completed and resume works fine */
