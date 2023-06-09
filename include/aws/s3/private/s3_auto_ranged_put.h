@@ -73,7 +73,7 @@ struct aws_s3_auto_ranged_put {
         struct aws_string *list_parts_continuation_token;
 
         /* Number of parts we've started work on */
-        uint32_t num_parts_sent;
+        uint32_t num_parts_started;
         /* Number of "sent" parts we've finished reading the body for
          * (does not include skipped parts in the case of pause/resume) */
         uint32_t num_parts_read;
