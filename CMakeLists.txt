@@ -9,6 +9,7 @@ endif()
 option(ASSERT_LOCK_HELD "Enable ASSERT_SYNCED_DATA_LOCK_HELD for checking thread issue" OFF)
 option(ENABLE_MOCK_SERVER_TESTS "Whether to run the integration tests that rely on pre-configured mock server" OFF)
 option(ENABLE_MRAP_TESTS "Whether to run the integration tests that rely on pre-configured multi-region access point" OFF)
+option(AWS_ENABLE_S3_ENDPOINT_RESOLVER "Whether to include the s3 endpoint resolver and related config files" OFF)
 
 if (ASSERT_LOCK_HELD)
     add_definitions(-DASSERT_LOCK_HELD)
@@ -52,6 +53,9 @@ file(GLOB AWS_S3_PRIVATE_HEADERS
 file(GLOB AWS_S3_ROOT_SRC
         "source/*.c"
         )
+file(GLOB AWS_S3_ENDPOINT_RESOLVER_SRC
+        "source/s3_endpoint_resolver/*.c"
+)
 
 if (WIN32)
     if (MSVC)
@@ -75,9 +79,10 @@ file(GLOB S3_HEADERS
 
 file(GLOB S3_SRC
         ${AWS_S3_ROOT_SRC}
-        ${AWS_S3_MODEL_SRC}
-        ${AWS_S3_EXTERNAL_SRC}
         )
+if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
+    list(APPEND S3_SRC ${AWS_S3_ENDPOINT_RESOLVER_SRC})
+endif()
 
 add_library(${PROJECT_NAME} ${S3_HEADERS} ${S3_SRC})
 aws_set_common_properties(${PROJECT_NAME})
@@ -91,6 +96,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES VERSION 1.0.0)
 set_target_properties(${PROJECT_NAME} PROPERTIES SOVERSION 0unstable)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DCJSON_HIDE_SYMBOLS)
+if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE "-DAWS_ENABLE_S3_ENDPOINT_RESOLVER")
+endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
