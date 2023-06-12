@@ -5940,6 +5940,13 @@ static int s_test_s3_put_pause_resume_helper(
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
 
+    if (resume_state == NULL) {
+        /* If we're going to cancel this operation, limit the client to 1 HTTP connection.
+         * That way, we don't end up "cancelling" but all the parts actually
+         * succeed anyway on other connections */
+        client_config.max_active_connections_override = 1;
+    }
+
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 

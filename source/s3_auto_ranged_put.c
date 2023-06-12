@@ -441,10 +441,6 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     const struct aws_s3_auto_ranged_put *auto_ranged_put,
     uint32_t flags) {
 
-    /* Number of parts we've started, but they're not done reading from stream yet */
-    uint32_t num_parts_pending_read =
-        (auto_ranged_put->synced_data.num_parts_started - auto_ranged_put->synced_data.num_parts_read);
-
     /* TODO: benchmark ALWAYS limiting to 1 pending-read.
      * That would reduce complexity.
      * We could eliminate the concept of "no-op" for unknown content-length. */
@@ -452,19 +448,19 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     /* If the stream is actually async, only allow 1 pending-read.
      * We need to wait for async read() to complete before calling it again. */
     if (auto_ranged_put->base.request_body_async_stream != NULL) {
-        return num_parts_pending_read > 0;
+        return auto_ranged_put->synced_data.num_parts_pending_read > 0;
     }
 
     /* If this is the conservative pass, only allow 1 pending-read.
      * Reads are serial anyway, so queuing up a whole bunch isn't necessarily a speedup. */
     if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
-        return num_parts_pending_read > 0;
+        return auto_ranged_put->synced_data.num_parts_pending_read > 0;
     }
 
     /* If content-length is unknown, don't queue up too many.
      * We might hit EOF and everything else in the queue will end up as no-op. */
     if (!auto_ranged_put->has_content_length) {
-        return num_parts_pending_read >= s_unknown_length_max_optimistic_prepared_parts;
+        return auto_ranged_put->synced_data.num_parts_pending_read >= s_unknown_length_max_optimistic_prepared_parts;
     }
 
     return false;
@@ -590,6 +586,7 @@ static bool s_s3_auto_ranged_put_update(
 
                 ++auto_ranged_put->threaded_update_data.next_part_number;
                 ++auto_ranged_put->synced_data.num_parts_started;
+                ++auto_ranged_put->synced_data.num_parts_pending_read;
 
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,
@@ -1180,7 +1177,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
 
-        ++auto_ranged_put->synced_data.num_parts_read;
+        --auto_ranged_put->synced_data.num_parts_pending_read;
 
         auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
 

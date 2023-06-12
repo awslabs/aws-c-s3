@@ -74,9 +74,7 @@ struct aws_s3_auto_ranged_put {
 
         /* Number of parts we've started work on */
         uint32_t num_parts_started;
-        /* Number of "sent" parts we've finished reading the body for
-         * (does not include skipped parts in the case of pause/resume) */
-        uint32_t num_parts_read;
+        /* Number of parts we've started, and we have no more work to do */
         uint32_t num_parts_completed;
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
@@ -84,6 +82,11 @@ struct aws_s3_auto_ranged_put {
          * scheduled, below represents how many requests were scheduled and had no
          * work to do*/
         uint32_t num_parts_noop;
+
+        /* Number of parts we've started, but they're not done reading from stream yet.
+         * Though reads are serial (only 1 part can be reading from stream at a time)
+         * we may queue up more to minimize delays between each read. */
+        uint32_t num_parts_pending_read;
 
         struct aws_http_headers *needed_response_headers;
 
