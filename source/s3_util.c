@@ -226,6 +226,9 @@ struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
     cached_signing_config->config.date = signing_config->date;
 
     cached_signing_config->config.should_sign_header = signing_config->should_sign_header;
+    /* It's the user's responsibility to keep the user data around */
+    cached_signing_config->config.should_sign_header_ud = signing_config->should_sign_header_ud;
+
     cached_signing_config->config.flags = signing_config->flags;
 
     AWS_ASSERT(aws_byte_cursor_is_valid(&signing_config->signed_body_value));
