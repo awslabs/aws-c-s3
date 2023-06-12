@@ -6360,7 +6360,7 @@ static int s_test_s3_put_pause_resume_invalid_resume_stream(struct aws_allocator
         resume_upload_stream,
         persistable_state,
         AWS_SCA_CRC32,
-        AWS_ERROR_S3_RESUME_FAILED,
+        AWS_IO_STREAM_READ_FAILED,
         0));
 
     bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);
@@ -6443,7 +6443,7 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
         resume_upload_stream,
         persistable_state,
         AWS_SCA_CRC32,
-        AWS_ERROR_S3_RESUME_FAILED,
+        AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH,
         0));
 
     bytes_uploaded = aws_atomic_load_int(&test_data.total_bytes_uploaded);

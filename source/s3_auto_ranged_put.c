@@ -24,12 +24,19 @@ static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
  */
 static const uint32_t s_unknown_length_default_num_parts = 32;
 
-/* For unknown length body we dont know how many parts we'll end up with.
- * We optimistically schedule upload requests, but cap the number of requests
- * being prepared by bellow number to avoid unknown length request dominating the
- * queue.
- * TODO: this value needs further benchmarking.*/
-static const uint32_t s_unknown_length_max_optimistic_prepared_parts = 5;
+/* Max number of parts (per meta-request) that can be: "started, but not done reading from stream".
+ * Though reads are serial (only 1 part can be reading from stream at a time)
+ * we may queue up more to minimize delays between each read.
+ *
+ * If this number is too low, there could be an avoidable delay between each read
+ * (meta-request ready for more work, but client hasn't run update and given it more work yet)
+ *
+ * If this number is too high, early meta-requests could hog all the "work tokens"
+ * (1st meta-request as queue of 100 "work tokens" that it needs to read
+ * the stream for, while later meta-requests are doing nothing waiting for work tokens)
+ *
+ * TODO: this value needs further benchmarking. */
+static const uint32_t s_max_parts_pending_read = 5;
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
@@ -441,10 +448,6 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     const struct aws_s3_auto_ranged_put *auto_ranged_put,
     uint32_t flags) {
 
-    /* TODO: benchmark ALWAYS limiting to 1 pending-read.
-     * That would reduce complexity.
-     * We could eliminate the concept of "no-op" for unknown content-length. */
-
     /* If the stream is actually async, only allow 1 pending-read.
      * We need to wait for async read() to complete before calling it again. */
     if (auto_ranged_put->base.request_body_async_stream != NULL) {
@@ -457,13 +460,8 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
         return auto_ranged_put->synced_data.num_parts_pending_read > 0;
     }
 
-    /* If content-length is unknown, don't queue up too many.
-     * We might hit EOF and everything else in the queue will end up as no-op. */
-    if (!auto_ranged_put->has_content_length) {
-        return auto_ranged_put->synced_data.num_parts_pending_read >= s_unknown_length_max_optimistic_prepared_parts;
-    }
-
-    return false;
+    /* In all other cases, cap the number of pending-reads to something reasonable */
+    return auto_ranged_put->synced_data.num_parts_pending_read >= s_max_parts_pending_read;
 }
 
 static bool s_s3_auto_ranged_put_update(
@@ -922,20 +920,19 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
         if (error_code != AWS_ERROR_SUCCESS) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p: Failed to resume upload. Input stream read error %d (%s)",
+                "id=%p: Failed resuming upload, error reading request body %d (%s)",
                 (void *)meta_request,
                 error_code,
                 aws_error_str(error_code));
-            error_code = AWS_ERROR_S3_RESUME_FAILED;
             goto on_done;
         }
 
         if (temp_body_buf->len < temp_body_buf->capacity) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p: Failed to resume upload. Input steam ended prematurely.",
+                "id=%p: Failed resuming upload, request body smaller than 'Content-Length' header said it would be.",
                 (void *)meta_request);
-            error_code = AWS_ERROR_S3_RESUME_FAILED;
+            error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
             goto on_done;
         }
 
