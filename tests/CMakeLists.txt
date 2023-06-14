@@ -169,6 +169,7 @@ add_net_test_case(test_s3_range_requests)
 add_net_test_case(test_s3_not_satisfiable_range)
 
 add_net_test_case(test_s3_bad_endpoint)
+add_net_test_case(test_s3_bad_cert)
 add_net_test_case(test_s3_different_endpoints)
 
 add_test_case(test_s3_replace_quote_entities)
@@ -270,7 +271,8 @@ add_net_test_case(meta_request_auto_ranged_get_new_error_handling)
 add_net_test_case(meta_request_auto_ranged_put_new_error_handling)
 add_net_test_case(bad_request_error_handling)
 add_net_test_case(make_meta_request_error_handling)
-if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
+
+if(AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     add_test_case(test_s3_endpoint_resolver_resolve_endpoint)
     add_test_case(test_s3_endpoint_resolver_resolve_endpoint_fips)
     add_test_case(test_s3_endpoint_resolver_resolve_endpoint_force_path_style)
@@ -279,7 +281,6 @@ endif()
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
 
-if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
+if(AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     target_compile_definitions(${PROJECT_NAME}-tests PRIVATE "-DAWS_ENABLE_S3_ENDPOINT_RESOLVER")
 endif()
-

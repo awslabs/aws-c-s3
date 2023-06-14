@@ -1594,15 +1594,10 @@ static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_alloca
 static int s_test_s3_put_object_helper(
     struct aws_allocator *allocator,
     enum aws_s3_client_tls_usage tls_usage,
-    uint32_t extra_meta_request_flag,
-    const enum aws_s3_checksum_algorithm checksum_algorithm) {
+    uint32_t extra_meta_request_flag) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
-    if (checksum_algorithm) {
-        ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    } else {
-        ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    }
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_tls_connection_options tls_connection_options;
     AWS_ZERO_STRUCT(tls_connection_options);
@@ -1664,7 +1659,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_disabled, s_test_s3_put_object_tls_disabled
 static int s_test_s3_put_object_tls_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DISABLED, 0, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DISABLED, 0));
 
     return 0;
 }
@@ -1673,7 +1668,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_enabled, s_test_s3_put_object_tls_enabled)
 static int s_test_s3_put_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0));
 
     return 0;
 }
@@ -1682,7 +1677,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_default, s_test_s3_put_object_tls_default)
 static int s_test_s3_put_object_tls_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0));
 
     return 0;
 }
@@ -1691,8 +1686,7 @@ AWS_TEST_CASE(test_s3_multipart_put_object_with_acl, s_test_s3_multipart_put_obj
 static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(
-        allocator, AWS_S3_TLS_DEFAULT, AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL));
 
     return 0;
 }
@@ -4063,6 +4057,71 @@ static int s_test_s3_bad_endpoint(struct aws_allocator *allocator, void *ctx) {
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &options, &meta_request_test_results, 0));
+
+    ASSERT_TRUE(
+        meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME ||
+        meta_request_test_results.finished_error_code == AWS_IO_DNS_QUERY_FAILED);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_http_message_release(message);
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test that we are not retry for a bad tls negotiation. */
+AWS_TEST_CASE(test_s3_bad_tls_negotiation, s_test_s3_bad_tls_negotiation)
+static int s_test_s3_bad_tls_negotiation(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_tls_connection_options tls_connection_options;
+    AWS_ZERO_STRUCT(tls_connection_options);
+
+#ifndef BYO_CRYPTO
+    struct aws_tls_ctx_options tls_context_options;
+    aws_tls_ctx_options_init_default_client(&tls_context_options, allocator);
+
+    struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
+    aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
+#endif
+
+    /* With a wrong server name for tls */
+    struct aws_string *endpoint = aws_string_new_from_c_str(allocator, "www.example.com");
+    struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
+    tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    client_config.tls_mode = AWS_MR_TLS_ENABLED;
+    client_config.tls_connection_options = &tls_connection_options;
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 5,
+            },
+    };
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     ASSERT_TRUE(
         meta_request_test_results.finished_error_code == AWS_IO_DNS_INVALID_NAME ||
