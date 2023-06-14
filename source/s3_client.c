@@ -1694,7 +1694,7 @@ static void s_s3_client_on_acquire_http_connection(
             error_code,
             aws_error_str(error_code));
 
-        if (error_code == AWS_IO_DNS_INVALID_NAME) {
+        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE) {
             goto error_fail;
         }
 
@@ -1770,11 +1770,13 @@ void aws_s3_client_notify_connection_finished(
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_CLIENT,
-            "id=%p Client scheduling retry of request %p for meta request %p with token %p.",
+            "id=%p Client scheduling retry of request %p for meta request %p with token %p with error code %d (%s).",
             (void *)client,
             (void *)request,
             (void *)meta_request,
-            (void *)connection->retry_token);
+            (void *)connection->retry_token,
+            error_code,
+            aws_error_str(error_code));
 
         enum aws_retry_error_type error_type = AWS_RETRY_ERROR_TYPE_TRANSIENT;
 
