@@ -169,7 +169,6 @@ add_net_test_case(test_s3_range_requests)
 add_net_test_case(test_s3_not_satisfiable_range)
 
 add_net_test_case(test_s3_bad_endpoint)
-add_net_test_case(test_s3_bad_cert)
 add_net_test_case(test_s3_different_endpoints)
 
 add_test_case(test_s3_replace_quote_entities)
@@ -265,6 +264,7 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(resume_after_finished_mock_server)
     add_net_test_case(multipart_upload_proxy_mock_server)
     add_net_test_case(endpoint_override_mock_server)
+    add_net_test_case(bad_tls_negotiation_mock_server)
 endif()
 
 add_net_test_case(meta_request_auto_ranged_get_new_error_handling)
