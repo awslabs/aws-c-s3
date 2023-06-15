@@ -22,6 +22,7 @@
 #include <aws/io/tls_channel_handler.h>
 #include <aws/testing/aws_test_harness.h>
 #include <aws/testing/stream_tester.h>
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <time.h>
