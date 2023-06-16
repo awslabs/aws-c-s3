@@ -1695,6 +1695,11 @@ static void s_s3_client_on_acquire_http_connection(
             aws_error_str(error_code));
 
         if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE) {
+            /**
+             * Fall fast without retry
+             * - Invalid DNS name will not change after retry.
+             * - TLS negotiation is expensive and retry will not help in most case.
+             */
             goto error_fail;
         }
 
