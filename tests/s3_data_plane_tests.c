@@ -1594,15 +1594,10 @@ static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_alloca
 static int s_test_s3_put_object_helper(
     struct aws_allocator *allocator,
     enum aws_s3_client_tls_usage tls_usage,
-    uint32_t extra_meta_request_flag,
-    const enum aws_s3_checksum_algorithm checksum_algorithm) {
+    uint32_t extra_meta_request_flag) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
-    if (checksum_algorithm) {
-        ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    } else {
-        ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    }
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_tls_connection_options tls_connection_options;
     AWS_ZERO_STRUCT(tls_connection_options);
@@ -1664,7 +1659,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_disabled, s_test_s3_put_object_tls_disabled
 static int s_test_s3_put_object_tls_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DISABLED, 0, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DISABLED, 0));
 
     return 0;
 }
@@ -1673,7 +1668,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_enabled, s_test_s3_put_object_tls_enabled)
 static int s_test_s3_put_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0));
 
     return 0;
 }
@@ -1682,7 +1677,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_default, s_test_s3_put_object_tls_default)
 static int s_test_s3_put_object_tls_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0));
 
     return 0;
 }
@@ -1691,8 +1686,7 @@ AWS_TEST_CASE(test_s3_multipart_put_object_with_acl, s_test_s3_multipart_put_obj
 static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(
-        allocator, AWS_S3_TLS_DEFAULT, AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL, AWS_SCA_NONE));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL));
 
     return 0;
 }
