@@ -2160,6 +2160,8 @@ static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws
     (void)ctx;
 
     struct aws_s3_tester tester;
+    /* To override the default logger incase of the trace log is just too long to read. */
+    static struct aws_logger s_logger;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     /* Use Debug level log for large object by default. */
     struct aws_logger_standard_options logger_options = {
