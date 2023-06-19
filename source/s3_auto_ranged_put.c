@@ -151,7 +151,8 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
      * element make sure to init any new elements to zeroed values. */
     size_t current_num_parts = aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
     if (info->part_number > current_num_parts) {
-        struct aws_byte_buf *empty_buf = NULL;
+        struct aws_byte_buf *empty_buf =
+            aws_mem_calloc(auto_ranged_put->base.allocator, 1, sizeof(struct aws_byte_buf));
         struct aws_string *null_etag = NULL;
 
         /* Note: using 1 based part nums here to avoid dealing with underflow of
