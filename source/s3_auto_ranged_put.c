@@ -1247,7 +1247,7 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
         if (checksum_buf) {
             aws_byte_buf_clean_up(checksum_buf);
         } else {
-            struct aws_byte_buf *checksum_buf = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
+            checksum_buf = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
             *checksum_buf_pointer = checksum_buf;
         }
 
