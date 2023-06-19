@@ -151,7 +151,7 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
      * element make sure to init any new elements to zeroed values. */
     size_t current_num_parts = aws_array_list_length(&auto_ranged_put->synced_data.etag_list);
     if (info->part_number > current_num_parts) {
-        struct aws_byte_buf *empty_buf = NULL;
+        struct aws_byte_buf *null_buf = NULL;
         struct aws_string *null_etag = NULL;
 
         /* Note: using 1 based part nums here to avoid dealing with underflow of
@@ -945,7 +945,7 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
         struct aws_byte_buf *checksum_buf;
         aws_array_list_get_at(&auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, skip_job->part_index);
 
-        // compare skipped checksum to previously uploaded checksum
+        // if previously uploaded part had a checksum, compare it to what we just skipped
         if (checksum_buf && s_verify_part_matches_checksum(
                                 meta_request->allocator,
                                 *temp_body_buf,
@@ -1191,7 +1191,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
              * Note: During resume flow this might cause the values to be
              * reset twice (if we are preparing part in between
              * previously completed parts). */
-            struct aws_byte_buf *checksum_buf = NULL;
+            struct aws_byte_buf *null_buf = NULL;
             aws_array_list_set_at(
                 &auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, request->part_number - 1);
 
