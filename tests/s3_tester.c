@@ -1392,7 +1392,7 @@ int aws_s3_tester_send_meta_request_with_options(
             meta_request_options.checksum_config = &checksum_config;
 
             uint32_t object_size_mb = options->put_options.object_size_mb;
-            size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
+            size_t object_size_bytes = (size_t)object_size_mb * 1000ULL * 1000ULL;
 
             /* This doesn't do what we think it should because
              * g_min_upload_part_size overrides client->part_size */

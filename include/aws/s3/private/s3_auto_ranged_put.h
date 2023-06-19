@@ -65,8 +65,11 @@ struct aws_s3_auto_ranged_put {
         /* Array list of `struct aws_string *`. */
         struct aws_array_list etag_list;
 
-        /* Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set
-         * the corresponding index to its checksum result. */
+        /**
+         * Array list of `struct aws_byte_buf *`.
+         * Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set
+         * the corresponding index to its checksum result.
+         **/
         struct aws_array_list encoded_checksum_list;
 
         struct aws_s3_paginated_operation *list_parts_operation;

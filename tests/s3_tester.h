@@ -26,6 +26,9 @@ struct aws_event_loop_group;
 struct aws_host_resolver;
 struct aws_input_stream;
 
+/* To override the default logger incase of the trace log is just too long to read. */
+static struct aws_logger s_logger;
+
 enum AWS_S3_TESTER_BIND_CLIENT_FLAGS {
     AWS_S3_TESTER_BIND_CLIENT_REGION = 0x00000001,
     AWS_S3_TESTER_BIND_CLIENT_SIGNING = 0x00000002,
