@@ -2160,6 +2160,7 @@ static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws
     (void)ctx;
 
     struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client_config client_config = {
         .part_size = MB_TO_BYTES(8),
