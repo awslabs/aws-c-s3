@@ -752,9 +752,9 @@ static size_t s_compute_request_body_size(const struct aws_s3_meta_request *meta
 
 static int s_verify_part_matches_checksum(
     struct aws_allocator *allocator,
-    struct aws_byte_buf part_body,
+    struct aws_byte_cursor body_cur,
     enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *part_checksum) {
+    struct aws_byte_cursor part_checksum) {
     AWS_PRECONDITION(allocator);
 
     if (algorithm == AWS_SCA_NONE) {
@@ -769,7 +769,6 @@ static int s_verify_part_matches_checksum(
     struct aws_byte_buf encoded_checksum = {0};
 
     int return_status = AWS_OP_SUCCESS;
-    struct aws_byte_cursor body_cur = aws_byte_cursor_from_buf(&part_body);
 
     size_t encoded_len = 0;
     if (aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len)) {
@@ -800,7 +799,7 @@ static int s_verify_part_matches_checksum(
         goto on_done;
     }
 
-    if (!aws_byte_buf_eq(&encoded_checksum, part_checksum)) {
+    if (!aws_byte_cursor_eq_byte_buf(&part_checksum, &encoded_checksum)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Checksum for previously uploaded part does not match");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH);
@@ -946,11 +945,12 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
         aws_array_list_get_at(&auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, skip_job->part_index);
 
         // compare skipped checksum to previously uploaded checksum
-        if (checksum_buf && s_verify_part_matches_checksum(
-                                meta_request->allocator,
-                                *temp_body_buf,
-                                meta_request->checksum_config.checksum_algorithm,
-                                checksum_buf)) {
+        if (checksum_buf && checksum_buf->len > 0 &&
+            s_verify_part_matches_checksum(
+                meta_request->allocator,
+                aws_byte_cursor_from_buf(temp_body_buf),
+                meta_request->checksum_config.checksum_algorithm,
+                aws_byte_cursor_from_buf(checksum_buf))) {
             error_code = aws_last_error_or_unknown();
             goto on_done;
         }
@@ -1237,19 +1237,26 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
             aws_string_c_str(auto_ranged_put->upload_id));
 
     } else {
-        struct aws_byte_buf **checksum_buf_pointer = NULL;
-        aws_array_list_get_at_ptr(
-            &auto_ranged_put->synced_data.encoded_checksum_list,
-            (void **)&checksum_buf_pointer,
-            request->part_number - 1);
-        /* Clean up the buffer in case of it's initialized before and retry happens. */
-        checksum_buf = *checksum_buf_pointer;
-        if (checksum_buf) {
-            aws_byte_buf_clean_up(checksum_buf);
-        } else {
-            checksum_buf = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
-            *checksum_buf_pointer = checksum_buf;
+
+        /* BEGIN CRITICAL SECTION */
+        {
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            struct aws_byte_buf **checksum_buf_pointer = NULL;
+            aws_array_list_get_at_ptr(
+                &auto_ranged_put->synced_data.encoded_checksum_list,
+                (void **)&checksum_buf_pointer,
+                request->part_number - 1);
+            /* Clean up the buffer in case of it's initialized before and retry happens. */
+            checksum_buf = *checksum_buf_pointer;
+            if (checksum_buf) {
+                aws_byte_buf_clean_up(checksum_buf);
+            } else {
+                checksum_buf = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
+                *checksum_buf_pointer = checksum_buf;
+            }
+            aws_s3_meta_request_unlock_synced_data(meta_request);
         }
+        /* END CRITICAL SECTION */
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
