@@ -1158,7 +1158,9 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
 
     /* Reading succeeded. */
     bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep2_read_part);
-    request->is_noop = request->request_body.len == 0 && request->part_number > 1;
+    request->is_noop = 
+        request->part_number > 1 && /* allow first part to have 0 length to support empty unknown content length objects. */
+        request->request_body.len == 0;
 
     /* If Content-Length is defined, check that we read the expected amount */
     if (has_content_length && (request->request_body.len < request->request_body.capacity)) {
