@@ -2112,7 +2112,7 @@ static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, vo
     return 0;
 }
 
-static int s3_no_content_length_test_helper(struct aws_allocator *allocator, void *ctx, size_t object_size_in_mb) {
+static int s3_no_content_length_test_helper(struct aws_allocator *allocator, void *ctx, uint32_t object_size_in_mb) {
     (void)ctx;
 
     struct aws_s3_tester tester;
