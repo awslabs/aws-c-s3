@@ -2112,8 +2112,11 @@ static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, vo
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_no_content_length, s_test_s3_put_object_no_content_length)
-static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocator, void *ctx) {
+static int s3_no_content_length_test_helper(
+    struct aws_allocator *allocator,
+    void *ctx,
+    uint32_t object_size_in_mb,
+    bool use_checksum) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -2134,9 +2137,10 @@ static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocato
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = use_checksum ? AWS_SCA_CRC32 : AWS_SCA_NONE,
         .put_options =
             {
-                .object_size_mb = 19,
+                .object_size_mb = object_size_in_mb,
                 .skip_content_length = true,
             },
     };
@@ -2149,6 +2153,27 @@ static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocato
     aws_s3_client_release(client);
 
     aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_no_content_length, s_test_s3_put_object_no_content_length)
+static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocator, void *ctx) {
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 19, false));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_single_part_no_content_length, s_test_s3_put_object_single_part_no_content_length)
+static int s_test_s3_put_object_single_part_no_content_length(struct aws_allocator *allocator, void *ctx) {
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 5, false));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_zero_size_no_content_length, s_test_s3_put_object_zero_size_no_content_length)
+static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator *allocator, void *ctx) {
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 0, false));
 
     return 0;
 }
@@ -2157,128 +2182,7 @@ AWS_TEST_CASE(
     test_s3_put_large_object_no_content_length_with_checksum,
     s_test_s3_put_large_object_no_content_length_with_checksum)
 static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = MB_TO_BYTES(8),
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    ASSERT_TRUE(client != NULL);
-
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
-        .put_options =
-            {
-                .object_size_mb = 1280,
-                .skip_content_length = true,
-            },
-    };
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    aws_s3_client_release(client);
-
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_put_object_single_part_no_content_length, s_test_s3_put_object_single_part_no_content_length)
-static int s_test_s3_put_object_single_part_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = MB_TO_BYTES(8),
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    ASSERT_TRUE(client != NULL);
-
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .client = client,
-        .put_options =
-            {
-                .object_size_mb = 5,
-                .skip_content_length = true,
-            },
-    };
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    aws_s3_client_release(client);
-
-    aws_s3_tester_clean_up(&tester);
-
-    return 0;
-}
-
-AWS_TEST_CASE(test_s3_put_object_zero_size_no_content_length, s_test_s3_put_object_zero_size_no_content_length)
-static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-
-    struct aws_s3_client_config client_config = {
-        .part_size = MB_TO_BYTES(8),
-    };
-
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    ASSERT_TRUE(client != NULL);
-
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .client = client,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
-        .put_options =
-            {
-                .object_size_mb = 0,
-                .skip_content_length = true,
-            },
-    };
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-
-    ASSERT_INT_EQUALS(AWS_ERROR_UNSUPPORTED_OPERATION, meta_request_test_results.finished_error_code);
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    aws_s3_client_release(client);
-
-    aws_s3_tester_clean_up(&tester);
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 1280, true));
 
     return 0;
 }
