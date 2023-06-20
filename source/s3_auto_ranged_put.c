@@ -157,7 +157,7 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
         /* Note: using 1 based part nums here to avoid dealing with underflow of
         unsigned number in case part 1 was not completed, but other parts were. */
         for (size_t part_num = info->part_number; part_num > current_num_parts; --part_num) {
-            aws_array_list_set_at(&auto_ranged_put->synced_data.encoded_checksum_list, &empty_buf, part_num - 1);
+            aws_array_list_set_at(&auto_ranged_put->synced_data.encoded_checksum_list, &null_buf, part_num - 1);
             aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, part_num - 1);
         }
     }
@@ -1193,7 +1193,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
              * previously completed parts). */
             struct aws_byte_buf *null_buf = NULL;
             aws_array_list_set_at(
-                &auto_ranged_put->synced_data.encoded_checksum_list, &checksum_buf, request->part_number - 1);
+                &auto_ranged_put->synced_data.encoded_checksum_list, &null_buf, request->part_number - 1);
 
             struct aws_string *null_etag = NULL;
             aws_array_list_set_at(&auto_ranged_put->synced_data.etag_list, &null_etag, request->part_number - 1);
