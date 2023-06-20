@@ -2135,7 +2135,7 @@ static int s3_no_content_length_test_helper(struct aws_allocator *allocator, voi
         .client = client,
         .put_options =
             {
-                .object_size_mb = 19,
+                .object_size_mb = object_size_in_mb,
                 .skip_content_length = true,
             },
     };
