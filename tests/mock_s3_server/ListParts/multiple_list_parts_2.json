@@ -11,6 +11,7 @@
       "<IsTruncated>false</IsTruncated>",
       "<Part>",
         "<PartNumber>3</PartNumber>",
+        "<ChecksumCRC32>yagJog==</ChecksumCRC32>",
         "<LastModified>2010-11-10T20:48:33.000Z</LastModified>",
         "<ETag>\"aaaa18db4cc2f85cedef654fccc4a4x8\"</ETag>",
         "<Size>10485760</Size>",

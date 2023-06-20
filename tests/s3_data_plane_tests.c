@@ -2112,7 +2112,11 @@ static int s_test_s3_put_object_empty_object(struct aws_allocator *allocator, vo
     return 0;
 }
 
-static int s3_no_content_length_test_helper(struct aws_allocator *allocator, void *ctx, uint32_t object_size_in_mb) {
+static int s3_no_content_length_test_helper(
+    struct aws_allocator *allocator,
+    void *ctx,
+    uint32_t object_size_in_mb,
+    bool use_checksum) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -2133,6 +2137,7 @@ static int s3_no_content_length_test_helper(struct aws_allocator *allocator, voi
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = use_checksum ? AWS_SCA_CRC32 : AWS_SCA_NONE,
         .put_options =
             {
                 .object_size_mb = object_size_in_mb,
@@ -2154,21 +2159,30 @@ static int s3_no_content_length_test_helper(struct aws_allocator *allocator, voi
 
 AWS_TEST_CASE(test_s3_put_object_no_content_length, s_test_s3_put_object_no_content_length)
 static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 19));
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 19, false));
 
     return 0;
 }
 
 AWS_TEST_CASE(test_s3_put_object_single_part_no_content_length, s_test_s3_put_object_single_part_no_content_length)
 static int s_test_s3_put_object_single_part_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 5));
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 5, false));
 
     return 0;
 }
 
 AWS_TEST_CASE(test_s3_put_object_zero_size_no_content_length, s_test_s3_put_object_zero_size_no_content_length)
 static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 0));
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 0, false));
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_put_large_object_no_content_length_with_checksum,
+    s_test_s3_put_large_object_no_content_length_with_checksum)
+static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws_allocator *allocator, void *ctx) {
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 1280, true));
 
     return 0;
 }
