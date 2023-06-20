@@ -2154,17 +2154,23 @@ static int s3_no_content_length_test_helper(struct aws_allocator *allocator, voi
 
 AWS_TEST_CASE(test_s3_put_object_no_content_length, s_test_s3_put_object_no_content_length)
 static int s_test_s3_put_object_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    s3_no_content_length_test_helper(allocator, ctx, 19);
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 19));
+
+    return 0;
 }
 
 AWS_TEST_CASE(test_s3_put_object_single_part_no_content_length, s_test_s3_put_object_single_part_no_content_length)
 static int s_test_s3_put_object_single_part_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    s3_no_content_length_test_helper(allocator, ctx, 5);
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 5));
+
+    return 0;
 }
 
 AWS_TEST_CASE(test_s3_put_object_zero_size_no_content_length, s_test_s3_put_object_zero_size_no_content_length)
 static int s_test_s3_put_object_zero_size_no_content_length(struct aws_allocator *allocator, void *ctx) {
-    s3_no_content_length_test_helper(allocator, ctx, 0);
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 0));
+
+    return 0;
 }
 
 /* Test async-input-stream when we're not doing multipart upload */
