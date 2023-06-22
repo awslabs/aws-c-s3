@@ -31,7 +31,6 @@ def get_header():
  * Copyright Amazon.com, Inc. or its affiliates.
  * All Rights Reserved. SPDX-License-Identifier: Apache-2.0.
  */
- 
 #include "aws/s3/private/s3_endpoint_resolver.h"
 #include <aws/s3/s3_endpoint_resolver.h>
 
