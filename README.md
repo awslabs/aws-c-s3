@@ -83,7 +83,6 @@ aws-c-s3/build/samples/s3/s3 cp <upload-path> s3://<bucket-name>/<object-name> -
 To list objects:
 ```
 aws-c-s3/build/samples/s3/s3 ls s3://<bucket-name> --region <region>
-
 ```
 
 ## Testing
