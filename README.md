@@ -68,12 +68,7 @@ cmake -S aws-c-s3 -B aws-c-s3/build -DCMAKE_INSTALL_PREFIX=<install-path> -DCMAK
 cmake --build aws-c-s3/build --target install
 ```
 
-## Testing
-
-The unit tests require an AWS account with S3 buckets set up in a particular way.
-Use the [test_helper script](./tests/test_helper/) to set this up.
-
-## Running S3 sample
+#### Running S3 sample
 
 After installing all the dependencies, and building aws-c-s3, you can run the sample directly from the s3 build directory.
 
@@ -90,3 +85,8 @@ To list objects:
 aws-c-s3/build/samples/s3/s3 ls s3://<bucket-name> --region <region>
 
 ```
+
+## Testing
+
+The unit tests require an AWS account with S3 buckets set up in a particular way.
+Use the [test_helper script](./tests/test_helper/) to set this up.
