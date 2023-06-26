@@ -816,7 +816,8 @@ void s_on_object_list_finished(struct aws_s3_paginator *paginator, int error_cod
     if (error_code != AWS_OP_SUCCESS) {
         fprintf(
             stderr,
-            "Failure while listing objects. Please check if you have valid credentials. Error: %s\n",
+            "Failure while listing objects. Please check if you have valid credentials and s3 path is correct. Error: "
+            "%s\n",
             aws_error_debug_str(error_code));
         exit(1);
     }

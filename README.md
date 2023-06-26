@@ -75,15 +75,19 @@ Use the [test_helper script](./tests/test_helper/) to set this up.
 
 ## Running samples/s3
 
-After installing all the dependencies, and building aws-c-s3, you can run the sample from the s3 build directory.
+After installing all the dependencies, and building aws-c-s3, you can run the sample directly from the s3 build directory.
 
 To download:
 ```
-cd aws-c-s3/build
-samples/s3/s3 cp s3://<bucket-name>/<object-name> <download-path> --region <region>
+aws-c-s3/build/samples/s3/s3 cp s3://<bucket-name>/<object-name> <download-path> --region <region>
 ```
 To upload:
 ```
 cd aws-c-s3/build
-samples/s3/s3 cp <upload-path> s3://<bucket-name>/<object-name> --region <region>
+aws-c-s3/build/samples/s3/s3 cp <upload-path> s3://<bucket-name>/<object-name> --region <region>
+```
+To list objects:
+```
+aws-c-s3/build/samples/s3/s3 ls s3://<bucket-name> --region <region>
+
 ```
