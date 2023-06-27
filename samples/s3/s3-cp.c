@@ -811,10 +811,16 @@ static bool s_are_all_transfers_and_listings_done(void *arg) {
 }
 
 void s_on_object_list_finished(struct aws_s3_paginator *paginator, int error_code, void *user_data) {
-    (void)error_code;
 
     struct cp_app_ctx *cp_app_ctx = user_data;
-
+    if (error_code != AWS_OP_SUCCESS) {
+        fprintf(
+            stderr,
+            "Failure while listing objects. Please check if you have valid credentials and s3 path is correct. Error: "
+            "%s\n",
+            aws_error_debug_str(error_code));
+        exit(1);
+    }
     if (aws_s3_paginator_has_more_results(paginator)) {
         aws_s3_paginator_continue(paginator, &cp_app_ctx->app_ctx->signing_config);
     } else {

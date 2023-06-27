@@ -114,6 +114,13 @@ void s_on_list_finished(struct aws_s3_paginator *paginator, int error_code, void
             }
             return;
         }
+    } else {
+        fprintf(
+            stderr,
+            "Failure while listing objects. Please check if you have valid credentials and s3 path is correct. "
+            "Error: "
+            "%s\n",
+            aws_error_debug_str(error_code));
     }
 
     /* all pages received. triggers the condition variable to exit the application. */
