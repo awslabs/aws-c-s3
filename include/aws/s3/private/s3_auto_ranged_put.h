@@ -62,15 +62,13 @@ struct aws_s3_auto_ranged_put {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
-        /* Array list of `struct aws_string *`. */
-        struct aws_array_list etag_list;
-
-        /**
-         * Array list of `struct aws_byte_buf *`.
-         * Very similar to the etag_list used in complete_multipart_upload to create the XML payload. Each part will set
-         * the corresponding index to its checksum result.
-         **/
-        struct aws_array_list encoded_checksum_list;
+        /* Array list of `struct aws_s3_put_part_info *`
+         * Info about each part, that we need to remember for CompleteMultipartUpload.
+         * This is updated as we upload each part.
+         * If resuming an upload, we first call ListParts and store the details
+         * of previously uploaded parts here. In this case, the array may start with gaps
+         * (e.g. if parts 1 and 3 were previously uploaded, but not part 2). */
+        struct aws_array_list part_list;
 
         struct aws_s3_paginated_operation *list_parts_operation;
         struct aws_string *list_parts_continuation_token;

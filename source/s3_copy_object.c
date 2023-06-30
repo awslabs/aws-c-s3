@@ -11,7 +11,6 @@
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
 static const size_t s_multipart_copy_minimum_object_size = GB_TO_BYTES(1);
 
-static const size_t s_etags_initial_capacity = 16;
 static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
@@ -105,7 +104,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     }
 
     aws_array_list_init_dynamic(
-        &copy_object->synced_data.etag_list, allocator, s_etags_initial_capacity, sizeof(struct aws_string *));
+        &copy_object->synced_data.part_list, allocator, 0, sizeof(struct aws_s3_put_part_info *));
 
     copy_object->synced_data.content_length = UNKNOWN_CONTENT_LENGTH;
     copy_object->synced_data.total_num_parts = UNKNOWN_NUM_PARTS;
@@ -125,14 +124,15 @@ static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *me
     aws_string_destroy(copy_object->upload_id);
     copy_object->upload_id = NULL;
 
-    for (size_t etag_index = 0; etag_index < aws_array_list_length(&copy_object->synced_data.etag_list); ++etag_index) {
-        struct aws_string *etag = NULL;
-
-        aws_array_list_get_at(&copy_object->synced_data.etag_list, &etag, etag_index);
-        aws_string_destroy(etag);
+    for (size_t part_index = 0; part_index < aws_array_list_length(&copy_object->synced_data.part_list); ++part_index) {
+        struct aws_s3_put_part_info *part = NULL;
+        aws_array_list_get_at(&copy_object->synced_data.part_list, &part, part_index);
+        aws_string_destroy(part->etag);
+        aws_byte_buf_clean_up(&part->checksum_base64);
+        aws_mem_release(meta_request->allocator, part);
     }
 
-    aws_array_list_clean_up(&copy_object->synced_data.etag_list);
+    aws_array_list_clean_up(&copy_object->synced_data.part_list);
     aws_http_headers_release(copy_object->synced_data.needed_response_headers);
     aws_mem_release(meta_request->allocator, copy_object);
 }
@@ -413,6 +413,14 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
             copy_object->synced_data.total_num_parts = num_parts;
             copy_object->synced_data.part_size = part_size;
 
+            /* Fill part_list */
+            aws_array_list_ensure_capacity(&copy_object->synced_data.part_list, num_parts);
+            while (aws_array_list_length(&copy_object->synced_data.part_list) < num_parts) {
+                struct aws_s3_put_part_info *part =
+                    aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_put_part_info));
+                aws_array_list_push_back(&copy_object->synced_data.part_list, &part);
+            }
+
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
                 "Starting multi-part Copy using part size=%zu, total_num_parts=%zu",
@@ -481,8 +489,7 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
                 meta_request->initial_request_message,
                 &request->request_body,
                 copy_object->upload_id,
-                &copy_object->synced_data.etag_list,
-                NULL,
+                &copy_object->synced_data.part_list,
                 AWS_SCA_NONE);
 
             break;
@@ -722,15 +729,11 @@ static void s_s3_copy_object_request_finished(
                     meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
                 }
 
-                struct aws_string *null_etag = NULL;
-                /* ETags need to be associated with their part number, so we keep the etag indices consistent with
-                 * part numbers. This means we may have to add padding to the list in the case that parts finish out
-                 * of order. */
-                while (aws_array_list_length(&copy_object->synced_data.etag_list) < part_number) {
-                    int push_back_result = aws_array_list_push_back(&copy_object->synced_data.etag_list, &null_etag);
-                    AWS_FATAL_ASSERT(push_back_result == AWS_OP_SUCCESS);
-                }
-                aws_array_list_set_at(&copy_object->synced_data.etag_list, &etag, part_index);
+                struct aws_s3_put_part_info *part = NULL;
+                aws_array_list_get_at(&copy_object->synced_data.part_list, &part, part_index);
+                AWS_ASSERT(part != NULL);
+                part->etag = etag;
+
             } else {
                 ++copy_object->synced_data.num_parts_failed;
                 aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);

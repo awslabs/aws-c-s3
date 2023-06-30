@@ -856,10 +856,11 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
 #define EXPECTED_UPLOAD_PART_PATH TEST_PATH "?uploadId=" UPLOAD_ID
 #define ETAG_VALUE "etag_value"
 
-    struct aws_array_list etags;
-    ASSERT_SUCCESS(aws_array_list_init_dynamic(&etags, allocator, 1, sizeof(struct aws_string *)));
-    struct aws_string *etag = aws_string_new_from_c_str(allocator, ETAG_VALUE);
-    ASSERT_SUCCESS(aws_array_list_push_back(&etags, &etag));
+    struct aws_array_list parts;
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&parts, allocator, 1, sizeof(struct aws_s3_put_part_info *)));
+    struct aws_s3_put_part_info *part = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_put_part_info));
+    part->etag = aws_string_new_from_c_str(allocator, ETAG_VALUE);
+    ASSERT_SUCCESS(aws_array_list_push_back(&parts, &part));
 
     const struct aws_byte_cursor header_exclude_exceptions[] = {
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
@@ -878,7 +879,7 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     aws_byte_buf_init(&body_buffer, allocator, 64);
 
     struct aws_http_message *complete_multipart_message = aws_s3_complete_multipart_message_new(
-        allocator, original_message, &body_buffer, upload_id, &etags, NULL, AWS_SCA_NONE);
+        allocator, original_message, &body_buffer, upload_id, &parts, AWS_SCA_NONE);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(complete_multipart_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(complete_multipart_message, &expected_create_path));
@@ -919,8 +920,9 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     aws_http_message_release(complete_multipart_message);
     aws_http_message_release(original_message);
 
-    aws_string_destroy(etag);
-    aws_array_list_clean_up(&etags);
+    aws_string_destroy(part->etag);
+    aws_mem_release(allocator, part);
+    aws_array_list_clean_up(&parts);
 #undef TEST_PATH
 #undef UPLOAD_ID
 #undef EXPECTED_UPLOAD_PART_PATH

@@ -32,7 +32,7 @@ struct aws_s3_copy_object {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
-        struct aws_array_list etag_list;
+        struct aws_array_list part_list;
 
         /* obtained through a HEAD request against the source object */
         uint64_t content_length;
