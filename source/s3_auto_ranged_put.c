@@ -800,7 +800,7 @@ struct aws_s3_skip_parts_from_stream_job {
     uint32_t skip_until_part_number;
     struct aws_byte_buf temp_body_buf;
     /* non-owning reference to info about part we're currently skipping */
-    const struct aws_s3_put_part_info *part_being_skipped;
+    struct aws_s3_put_part_info *part_being_skipped;
     /* repeated async step: read each part we're skipping */
     struct aws_future_bool *asyncstep_read_each_part;
     /* future to set when this job completes */
@@ -1526,7 +1526,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         for (size_t part_index = 0;
                              part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
                              part_index++) {
-                            const struct aws_s3_put_part_info *part = NULL;
+                            struct aws_s3_put_part_info *part = NULL;
                             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
                             if (part != NULL) {
                                 /* Update the number of parts sent/completed previously */
