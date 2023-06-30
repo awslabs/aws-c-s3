@@ -4,7 +4,7 @@
  */
 
 #include "aws/s3/private/s3_request_messages.h"
-#include "aws/s3/private/s3_checksums.h"
+#include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
 #include <aws/common/byte_buf.h>
@@ -551,14 +551,13 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
-    const struct aws_array_list *etags,
-    const struct aws_array_list *checksums,
+    const struct aws_array_list *parts,
     enum aws_s3_checksum_algorithm algorithm) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
     AWS_PRECONDITION(upload_id);
-    AWS_PRECONDITION(etags);
+    AWS_PRECONDITION(parts);
 
     const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
 
@@ -607,18 +606,17 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        for (size_t etag_index = 0; etag_index < aws_array_list_length(etags); ++etag_index) {
-            struct aws_string *etag = NULL;
+        for (size_t part_index = 0; part_index < aws_array_list_length(parts); ++part_index) {
+            struct aws_s3_mpu_part_info *part = NULL;
 
-            aws_array_list_get_at(etags, &etag, etag_index);
-
-            AWS_FATAL_ASSERT(etag != NULL);
+            aws_array_list_get_at(parts, &part, part_index);
+            AWS_FATAL_ASSERT(part != NULL);
 
             if (aws_byte_buf_append_dynamic(body_buffer, &s_part_section_string_0)) {
                 goto error_clean_up;
             }
 
-            struct aws_byte_cursor etag_byte_cursor = aws_byte_cursor_from_string(etag);
+            struct aws_byte_cursor etag_byte_cursor = aws_byte_cursor_from_string(part->etag);
 
             if (aws_byte_buf_append_dynamic(body_buffer, &etag_byte_cursor)) {
                 goto error_clean_up;
@@ -629,7 +627,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             }
 
             char part_number_buffer[32] = "";
-            int part_number = (int)(etag_index + 1);
+            int part_number = (int)(part_index + 1);
             int part_number_num_char = snprintf(part_number_buffer, sizeof(part_number_buffer), "%d", part_number);
             struct aws_byte_cursor part_number_byte_cursor =
                 aws_byte_cursor_from_array(part_number_buffer, part_number_num_char);
@@ -643,11 +641,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             }
 
             if (mpu_algorithm_checksum_name) {
-                struct aws_byte_buf *checksum_buf;
-
-                aws_array_list_get_at(checksums, &checksum_buf, etag_index);
-
-                struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(checksum_buf);
+                struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(&part->checksum_base64);
 
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
                     goto error_clean_up;

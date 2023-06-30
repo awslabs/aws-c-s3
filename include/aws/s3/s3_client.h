@@ -375,7 +375,7 @@ struct aws_s3_checksum_config {
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
     /**
-     * Enable checksum mode header will be attached to get requests, this will tell s3 to send back checksums headers if
+     * Enable checksum mode header will be attached to GET requests, this will tell s3 to send back checksums headers if
      * they exist. Calculate the corresponding checksum on the response bodies. The meta request will finish with a did
      * validate field and set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
      * checksum, and checksum found in the response header do not match.
@@ -527,7 +527,7 @@ struct aws_s3_meta_request_result {
     /* HTTP Headers for the failed request that triggered finish of the meta request.  NULL if no request failed. */
     struct aws_http_headers *error_response_headers;
 
-    /* Response body for the failed request that triggered finishing of the meta request.  NUll if no request failed.*/
+    /* Response body for the failed request that triggered finishing of the meta request.  NULL if no request failed.*/
     struct aws_byte_buf *error_response_body;
 
     /* Response status of the failed request or of the entire meta request. */

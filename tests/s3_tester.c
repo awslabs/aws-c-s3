@@ -1623,7 +1623,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     switch (options->validate_type) {
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS:
-            ASSERT_TRUE(out_results->finished_error_code == AWS_ERROR_SUCCESS);
+            ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, out_results->finished_error_code);
 
             if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
                 ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, options->sse_type));

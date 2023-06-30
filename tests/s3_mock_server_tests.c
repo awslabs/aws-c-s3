@@ -603,7 +603,7 @@ TEST_CASE(resume_first_part_not_completed_mock_server) {
 /* Fake a MPU with 4 parts and the 2nd and 3rd have already completed and resume works fine with two response of
  * ListParts
  */
-TEST_CASE(resume_mutli_page_list_parts_mock_server) {
+TEST_CASE(resume_multi_page_list_parts_mock_server) {
     (void)ctx;
 
     struct aws_s3_tester tester;

@@ -768,7 +768,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             options->checksum_config->checksum_algorithm == AWS_SCA_NONE) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum algorithm must be set to calculate checksum.",
+                "id=%p Cannot create meta s3 request; checksum location is set, but no checksum algorithm selected.",
                 (void *)client);
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
@@ -777,8 +777,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             options->checksum_config->location == AWS_SCL_NONE) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum algorithm cannot be set if not calculate checksum from "
-                "client.",
+                "id=%p Cannot create meta s3 request; checksum algorithm is set, but no checksum location selected.",
                 (void *)client);
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
