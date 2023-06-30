@@ -119,9 +119,11 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **resume_token);
 
-static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_data) {
+static bool s_process_part_info_synced(const struct aws_s3_part_info *info, void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
     struct aws_s3_meta_request *meta_request = &auto_ranged_put->base;
+
+    ASSERT_SYNCED_DATA_LOCK_HELD(auto_ranged_put);
 
     struct aws_s3_put_part_info *part = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_put_part_info));
     part->size = info->size;
@@ -155,7 +157,6 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
     /* Parts might be out of order or have gaps in them.
      * Resize array-list to be long enough to hold this part,
      * filling any intermediate slots with NULL. */
-    ASSERT_SYNCED_DATA_LOCK_HELD(auto_ranged_put);
     aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, info->part_number);
     while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < info->part_number) {
         struct aws_s3_put_part_info *null_part = NULL;
@@ -1710,6 +1711,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         struct aws_s3_put_part_info *part = NULL;
                         aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
                         AWS_ASSERT(part != NULL);
+                        AWS_ASSERT(part->etag == NULL);
                         part->etag = etag;
                     } else {
                         ++auto_ranged_put->synced_data.num_parts_failed;
