@@ -152,23 +152,18 @@ static bool s_process_part_info(const struct aws_s3_part_info *info, void *user_
         aws_byte_buf_init_copy_from_cursor(&part->checksum_base64, auto_ranged_put->base.allocator, *checksum_cur);
     }
 
-    { /* BEGIN CRITICAL SECTION */
-        aws_s3_meta_request_lock_synced_data(meta_request);
+    /* Parts might be out of order or have gaps in them.
+     * Resize array-list to be long enough to hold this part,
+     * filling any intermediate slots with NULL. */
+    ASSERT_SYNCED_DATA_LOCK_HELD(auto_ranged_put);
+    aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, info->part_number);
+    while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < info->part_number) {
+        struct aws_s3_put_part_info *null_part = NULL;
+        aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
+    }
 
-        /* Parts might be out of order or have gaps in them.
-         * Resize array-list to be long enough to hold this part,
-         * filling any intermediate slots with NULL. */
-        aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, info->part_number);
-        while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < info->part_number) {
-            struct aws_s3_put_part_info *null_part = NULL;
-            aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
-        }
-
-        /* Add this part */
-        aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, info->part_number - 1);
-
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-    } /* END CRITICAL SECTION */
+    /* Add this part */
+    aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, info->part_number - 1);
 
     return true;
 }
