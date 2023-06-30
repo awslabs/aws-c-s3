@@ -607,7 +607,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         }
 
         for (size_t part_index = 0; part_index < aws_array_list_length(parts); ++part_index) {
-            struct aws_s3_put_part_info *part = NULL;
+            struct aws_s3_mpu_part_info *part = NULL;
 
             aws_array_list_get_at(parts, &part, part_index);
             AWS_FATAL_ASSERT(part != NULL);

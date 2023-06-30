@@ -3044,7 +3044,7 @@ static int s_test_s3_complete_multipart_message_with_content_md5(struct aws_allo
     struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "dummy_upload_id");
 
     struct aws_array_list parts;
-    ASSERT_SUCCESS(aws_array_list_init_dynamic(&parts, allocator, 0, sizeof(struct aws_s3_put_part_info *)));
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&parts, allocator, 0, sizeof(struct aws_s3_mpu_part_info *)));
 
     struct aws_http_message *new_message =
         aws_s3_complete_multipart_message_new(allocator, base_message, &body_buffer, upload_id, &parts, AWS_SCA_NONE);

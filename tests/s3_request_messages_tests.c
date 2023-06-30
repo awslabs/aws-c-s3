@@ -857,8 +857,8 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
 #define ETAG_VALUE "etag_value"
 
     struct aws_array_list parts;
-    ASSERT_SUCCESS(aws_array_list_init_dynamic(&parts, allocator, 1, sizeof(struct aws_s3_put_part_info *)));
-    struct aws_s3_put_part_info *part = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_put_part_info));
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&parts, allocator, 1, sizeof(struct aws_s3_mpu_part_info *)));
+    struct aws_s3_mpu_part_info *part = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mpu_part_info));
     part->etag = aws_string_new_from_c_str(allocator, ETAG_VALUE);
     ASSERT_SUCCESS(aws_array_list_push_back(&parts, &part));
 

@@ -62,7 +62,7 @@ struct aws_s3_auto_ranged_put {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
-        /* Array list of `struct aws_s3_put_part_info *`
+        /* Array list of `struct aws_s3_mpu_part_info *`
          * Info about each part, that we need to remember for CompleteMultipartUpload.
          * This is updated as we upload each part.
          * If resuming an upload, we first call ListParts and store the details

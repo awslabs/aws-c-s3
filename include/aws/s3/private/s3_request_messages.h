@@ -118,7 +118,7 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     bool should_compute_content_md5);
 
 /* Create an HTTP request for an S3 Complete-Multipart-Upload request. Creates the necessary XML payload using the
- * passed in array list of `struct aws_s3_put_part_info *`. Buffer passed in will be used to store
+ * passed in array list of `struct aws_s3_mpu_part_info *`. Buffer passed in will be used to store
  * said XML payload, which will be used as the body. */
 AWS_S3_API
 struct aws_http_message *aws_s3_complete_multipart_message_new(

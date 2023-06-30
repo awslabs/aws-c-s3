@@ -104,7 +104,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     }
 
     aws_array_list_init_dynamic(
-        &copy_object->synced_data.part_list, allocator, 0, sizeof(struct aws_s3_put_part_info *));
+        &copy_object->synced_data.part_list, allocator, 0, sizeof(struct aws_s3_mpu_part_info *));
 
     copy_object->synced_data.content_length = UNKNOWN_CONTENT_LENGTH;
     copy_object->synced_data.total_num_parts = UNKNOWN_NUM_PARTS;
@@ -125,7 +125,7 @@ static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *me
     copy_object->upload_id = NULL;
 
     for (size_t part_index = 0; part_index < aws_array_list_length(&copy_object->synced_data.part_list); ++part_index) {
-        struct aws_s3_put_part_info *part = NULL;
+        struct aws_s3_mpu_part_info *part = NULL;
         aws_array_list_get_at(&copy_object->synced_data.part_list, &part, part_index);
         aws_string_destroy(part->etag);
         aws_byte_buf_clean_up(&part->checksum_base64);
@@ -416,8 +416,8 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
             /* Fill part_list */
             aws_array_list_ensure_capacity(&copy_object->synced_data.part_list, num_parts);
             while (aws_array_list_length(&copy_object->synced_data.part_list) < num_parts) {
-                struct aws_s3_put_part_info *part =
-                    aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_put_part_info));
+                struct aws_s3_mpu_part_info *part =
+                    aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
                 aws_array_list_push_back(&copy_object->synced_data.part_list, &part);
             }
 
@@ -729,7 +729,7 @@ static void s_s3_copy_object_request_finished(
                     meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
                 }
 
-                struct aws_s3_put_part_info *part = NULL;
+                struct aws_s3_mpu_part_info *part = NULL;
                 aws_array_list_get_at(&copy_object->synced_data.part_list, &part, part_index);
                 AWS_ASSERT(part != NULL);
                 part->etag = etag;

@@ -125,7 +125,7 @@ static bool s_process_part_info_synced(const struct aws_s3_part_info *info, void
 
     ASSERT_SYNCED_DATA_LOCK_HELD(auto_ranged_put);
 
-    struct aws_s3_put_part_info *part = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_put_part_info));
+    struct aws_s3_mpu_part_info *part = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
     part->size = info->size;
     part->etag = aws_strip_quotes(meta_request->allocator, info->e_tag);
 
@@ -150,7 +150,7 @@ static bool s_process_part_info_synced(const struct aws_s3_part_info *info, void
             break;
     }
 
-    if (checksum_cur && checksum_cur->len > 0) {
+    if ((checksum_cur != NULL) && (checksum_cur->len > 0)) {
         aws_byte_buf_init_copy_from_cursor(&part->checksum_base64, auto_ranged_put->base.allocator, *checksum_cur);
     }
 
@@ -159,7 +159,7 @@ static bool s_process_part_info_synced(const struct aws_s3_part_info *info, void
      * filling any intermediate slots with NULL. */
     aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, info->part_number);
     while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < info->part_number) {
-        struct aws_s3_put_part_info *null_part = NULL;
+        struct aws_s3_mpu_part_info *null_part = NULL;
         aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
     }
 
@@ -270,7 +270,7 @@ static int s_try_init_resume_state_from_persisted_data(
     struct aws_s3_list_parts_params list_parts_params = {
         .key = request_path,
         .upload_id = aws_byte_cursor_from_string(auto_ranged_put->upload_id),
-        .on_part = s_process_part_info,
+        .on_part = s_process_part_info_synced,
         .user_data = auto_ranged_put,
     };
 
@@ -380,7 +380,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     uint32_t initial_num_parts = auto_ranged_put->has_content_length ? num_parts : s_unknown_length_default_num_parts;
 
     aws_array_list_init_dynamic(
-        &auto_ranged_put->synced_data.part_list, allocator, initial_num_parts, sizeof(struct aws_s3_put_part_info *));
+        &auto_ranged_put->synced_data.part_list, allocator, initial_num_parts, sizeof(struct aws_s3_mpu_part_info *));
 
     if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
         goto error_clean_up;
@@ -413,9 +413,9 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     for (size_t part_index = 0; part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
          ++part_index) {
 
-        struct aws_s3_put_part_info *part;
+        struct aws_s3_mpu_part_info *part;
         aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
-        if (part) {
+        if (part != NULL) {
             aws_byte_buf_clean_up(&part->checksum_base64);
             aws_string_destroy(part->etag);
             aws_mem_release(auto_ranged_put->base.allocator, part);
@@ -526,7 +526,7 @@ static bool s_s3_auto_ranged_put_update(
                      part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
                      ++part_index) {
 
-                    struct aws_s3_put_part_info *part;
+                    struct aws_s3_mpu_part_info *part;
                     aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
                     if (part != NULL) {
                         /* part already downloaded, skip it here and prepare will take care of adjusting the buffer */
@@ -801,7 +801,7 @@ struct aws_s3_skip_parts_from_stream_job {
     uint32_t skip_until_part_number;
     struct aws_byte_buf temp_body_buf;
     /* non-owning reference to info about part we're currently skipping */
-    struct aws_s3_put_part_info *part_being_skipped;
+    struct aws_s3_mpu_part_info *part_being_skipped;
     /* repeated async step: read each part we're skipping */
     struct aws_future_bool *asyncstep_read_each_part;
     /* future to set when this job completes */
@@ -1192,8 +1192,8 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             auto_ranged_put->prepare_data.part_index_for_skipping = request->part_number;
 
             /* Add part to array-list */
-            struct aws_s3_put_part_info *part =
-                aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_put_part_info));
+            struct aws_s3_mpu_part_info *part =
+                aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
             part->size = request->request_body.len;
             aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
         }
@@ -1240,7 +1240,7 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
         /* BEGIN CRITICAL SECTION */
         {
             aws_s3_meta_request_lock_synced_data(meta_request);
-            struct aws_s3_put_part_info *part = NULL;
+            struct aws_s3_mpu_part_info *part = NULL;
             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
             AWS_ASSERT(part != NULL);
             checksum_buf = &part->checksum_base64;
@@ -1527,7 +1527,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         for (size_t part_index = 0;
                              part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
                              part_index++) {
-                            struct aws_s3_put_part_info *part = NULL;
+                            struct aws_s3_mpu_part_info *part = NULL;
                             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
                             if (part != NULL) {
                                 /* Update the number of parts sent/completed previously */
@@ -1708,7 +1708,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         ++auto_ranged_put->synced_data.num_parts_successful;
 
                         /* Store part's ETag */
-                        struct aws_s3_put_part_info *part = NULL;
+                        struct aws_s3_mpu_part_info *part = NULL;
                         aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
                         AWS_ASSERT(part != NULL);
                         AWS_ASSERT(part->etag == NULL);
