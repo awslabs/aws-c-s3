@@ -32,7 +32,10 @@ struct aws_s3_copy_object {
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
-        struct aws_array_list etag_list;
+        /* Array-list of `struct aws_s3_mpu_part_info *`.
+         * If copying via multipart upload, we fill in this info as each part gets copied,
+         * and it's used to generate the final CompleteMultipartUpload. */
+        struct aws_array_list part_list;
 
         /* obtained through a HEAD request against the source object */
         uint64_t content_length;

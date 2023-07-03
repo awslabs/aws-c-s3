@@ -118,7 +118,7 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     bool should_compute_content_md5);
 
 /* Create an HTTP request for an S3 Complete-Multipart-Upload request. Creates the necessary XML payload using the
- * passed in array list of ETags.  (Each ETag is assumed to be an aws_string*)  Buffer passed in will be used to store
+ * passed in array list of `struct aws_s3_mpu_part_info *`. Buffer passed in will be used to store
  * said XML payload, which will be used as the body. */
 AWS_S3_API
 struct aws_http_message *aws_s3_complete_multipart_message_new(
@@ -126,8 +126,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
-    const struct aws_array_list *etags,
-    const struct aws_array_list *checksums,
+    const struct aws_array_list *parts,
     enum aws_s3_checksum_algorithm algorithm);
 
 AWS_S3_API

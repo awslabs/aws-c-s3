@@ -217,6 +217,13 @@ struct aws_s3_meta_request {
     struct aws_s3_checksum *meta_request_level_running_response_sum;
 };
 
+/* Info for each part, that we need to remember until we send CompleteMultipartUpload */
+struct aws_s3_mpu_part_info {
+    uint64_t size;
+    struct aws_string *etag;
+    struct aws_byte_buf checksum_base64;
+};
+
 AWS_EXTERN_C_BEGIN
 
 /* Initialize the base meta request structure. */
