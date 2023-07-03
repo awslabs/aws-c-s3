@@ -102,8 +102,7 @@ if __name__ == '__main__':
     git_secret = get_secret_from_secrets_manager("s3/endpoint/resolver/artifacts/git", "us-east-1")
 
     rule_set = download_from_git(git_secret['ruleset-url'], git_secret['ruleset-token'])
-    partition = download_from_git('https://raw.githubusercontent.com/awslabs/smithy/main/smithy-rules-engine/src/main'
-                                  '/resources/software/amazon/smithy/rulesengine/language/partitions.json')
+    partition = download_from_git('https://raw.githubusercontent.com/aws/aws-sdk-cpp/main/tools/code-generation/partitions/partitions.json')
 
     generate_c_file_from_json(
         rule_set,
