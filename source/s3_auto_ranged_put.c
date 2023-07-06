@@ -1323,8 +1323,6 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
 static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_data) {
 
     struct aws_s3_prepare_complete_multipart_upload_job *complete_mpu_prep = user_data;
-    struct aws_s3_request *request = complete_mpu_prep->request;
-    struct aws_s3_meta_request *meta_request = request->meta_request;
 
     int error_code = aws_future_void_get_error(complete_mpu_prep->asyncstep_skip_remaining_parts);
     if (error_code != AWS_ERROR_SUCCESS) {
@@ -1332,11 +1330,67 @@ static void s_s3_prepare_complete_multipart_upload_on_skipping_done(void *user_d
         return;
     }
 
-    aws_byte_buf_init(
-        &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
-
     /* Async steps complete, finish up job */
     s_s3_prepare_complete_multipart_upload_finish(complete_mpu_prep, AWS_ERROR_SUCCESS);
+}
+
+/* Allow user to review what we've uploaded, and fail the meta-request if they don't approve. */
+static int s_s3_review_multipart_upload(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    /* If user registered no callback, then success! */
+    if (meta_request->upload_review_callback == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+
+    /* Prepare review info */
+    struct aws_s3_upload_review_info review = {
+        .checksum_algorithm = meta_request->checksum_config.checksum_algorithm,
+    };
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    review.part_count = aws_array_list_length(&auto_ranged_put->synced_data.part_list);
+
+    if (review.part_count > 0) {
+        review.part_array =
+            aws_mem_calloc(meta_request->allocator, review.part_count, sizeof(struct aws_s3_upload_review_part_info));
+
+        for (size_t part_index = 0; part_index < review.part_count; ++part_index) {
+            struct aws_s3_mpu_part_info *part;
+            aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
+
+            struct aws_s3_upload_review_part_info *part_review = &review.part_array[part_index];
+            part_review->size = part->size;
+            part_review->checksum = aws_byte_cursor_from_buf(&part->checksum_base64);
+        }
+    }
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    /* Invoke callback */
+    int error_code = AWS_ERROR_SUCCESS;
+    if (meta_request->upload_review_callback(meta_request, &review, meta_request->user_data) != AWS_OP_SUCCESS) {
+        error_code = aws_last_error_or_unknown();
+    }
+
+    /* Clean up review info */
+    aws_mem_release(meta_request->allocator, review.part_array);
+
+    if (error_code == AWS_ERROR_SUCCESS) {
+        return AWS_OP_SUCCESS;
+    } else {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Upload review callback raised error %d (%s)",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code));
+        return aws_raise_error(error_code);
+    }
 }
 
 /* Finish async preparation of a CompleteMultipartUpload request */
@@ -1354,8 +1408,23 @@ static void s_s3_prepare_complete_multipart_upload_finish(
     }
 
     AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
-    AWS_ASSERT(request->request_body.capacity > 0);
-    aws_byte_buf_reset(&request->request_body, false);
+
+    if (request->num_times_prepared == 0) {
+        /* Invoke upload_review_callback, and fail meta-request if user raises an error */
+        if (s_s3_review_multipart_upload(request) != AWS_OP_SUCCESS) {
+            error_code = aws_last_error();
+            aws_future_http_message_set_error(complete_mpu_prep->on_complete, error_code);
+            goto on_done;
+        }
+
+        /* Allocate request body */
+        aws_byte_buf_init(
+            &request->request_body, meta_request->allocator, s_complete_multipart_upload_init_body_size_bytes);
+
+    } else {
+        /* This is a retry, reset request body */
+        aws_byte_buf_reset(&request->request_body, false);
+    }
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
