@@ -538,14 +538,21 @@ static int s_kickoff_put_object(
     aws_http_message_add_header(request_options.message, content_length_header);
     aws_http_message_set_request_method(request_options.message, aws_http_method_put);
     aws_http_message_set_request_path(request_options.message, full_path);
+    struct aws_string *file_path = aws_string_new_from_cursor(cp_app_ctx->app_ctx->allocator, src_path);
 
     struct aws_input_stream *body_input =
-        aws_input_stream_new_from_file(cp_app_ctx->app_ctx->allocator, (const char *)src_path->ptr);
+        aws_input_stream_new_from_file(cp_app_ctx->app_ctx->allocator, aws_string_c_str(file_path));
 
     if (!body_input) {
         aws_mem_release(cp_app_ctx->app_ctx->allocator, transfer_ctx);
-        return AWS_OP_ERR;
+        fprintf(
+            stderr,
+            "Failure when creating input stream from %s with error %s\n",
+            aws_string_c_str(file_path),
+            aws_error_debug_str(aws_last_error()));
+        exit(1);
     }
+    aws_string_destroy(file_path);
 
     struct progress_update_stream *update_stream =
         aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct progress_update_stream));
@@ -565,7 +572,11 @@ static int s_kickoff_put_object(
 
     if (!transfer_ctx->meta_request) {
         aws_mem_release(cp_app_ctx->app_ctx->allocator, transfer_ctx);
-        return AWS_OP_ERR;
+        fprintf(
+            stderr,
+            "Failure when initiating put object request with error %s\n",
+            aws_error_debug_str(aws_last_error()));
+        exit(1);
     }
 
     aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
@@ -667,13 +678,17 @@ static int s_kickoff_get_object(
 
     struct aws_string *file_path = aws_string_new_from_cursor(cp_app_ctx->app_ctx->allocator, destination);
     struct aws_string *mode = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "wb");
-    transfer_ctx->output_sink = aws_fopen_safe(file_path, mode);
+    transfer_ctx->output_sink = NULL;
+    if (!transfer_ctx->output_sink) {
+        fprintf(
+            stderr,
+            "Failure when open file %s with error %s\n",
+            aws_string_c_str(file_path),
+            aws_error_debug_str(aws_last_error()));
+        exit(1);
+    }
     aws_string_destroy(mode);
     aws_string_destroy(file_path);
-
-    if (!transfer_ctx->output_sink) {
-        return AWS_OP_ERR;
-    }
 
     struct aws_s3_meta_request_options request_options = {
         .user_data = transfer_ctx,
@@ -715,7 +730,11 @@ static int s_kickoff_get_object(
     transfer_ctx->meta_request = aws_s3_client_make_meta_request(cp_app_ctx->app_ctx->client, &request_options);
 
     if (!transfer_ctx->meta_request) {
-        return AWS_OP_ERR;
+        fprintf(
+            stderr,
+            "Failure when initiating get object request with error %s\n",
+            aws_error_debug_str(aws_last_error()));
+        exit(1);
     }
 
     aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
@@ -880,7 +899,13 @@ void s_dispatch_and_run_transfers(struct cp_app_ctx *cp_app_ctx) {
                 fprintf(stderr, "List objects failed with error %s\n", aws_error_debug_str(aws_last_error()));
                 s_usage(1);
             }
-            aws_s3_paginator_continue(paginator, &cp_app_ctx->app_ctx->signing_config);
+            int paginator_result = aws_s3_paginator_continue(paginator, &cp_app_ctx->app_ctx->signing_config);
+            if (paginator_result) {
+                printf(
+                    "ERROR returned from initial call to aws_s3_paginator_continue: %s \n",
+                    aws_error_debug_str(aws_last_error()));
+                exit(1);
+            }
 
             aws_mutex_lock(&cp_app_ctx->mutex);
             aws_condition_variable_wait_pred(

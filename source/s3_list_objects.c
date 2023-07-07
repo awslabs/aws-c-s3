@@ -142,7 +142,7 @@ static bool s_on_list_bucket_result_node_encountered(
         }
 
         if (ret_val && operation_data->on_object) {
-            ret_val |= operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
+            ret_val &= operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
         }
 
         if (trimmed_etag.len) {
