@@ -109,7 +109,10 @@ enum aws_s3_request_type {
  * success and error HTTP status codes.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
- * Return AWS_OP_ERR to indicate failure and cancel the request.
+ *
+ * Return aws_raise_error(E) to cancel the request.
+ * The error you raise will be reflected in `aws_s3_meta_request_result.error_code`.
+ * If you're not sure which error to raise, use AWS_ERROR_S3_CANCELED.
  */
 typedef int(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
@@ -133,7 +136,10 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
  * No back-pressure is applied and data arrives as fast as possible.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
- * Return AWS_OP_ERR to indicate failure and cancel the request.
+ *
+ * Return aws_raise_error(E) to cancel the request.
+ * The error you raise will be reflected in `aws_s3_meta_request_result.error_code`.
+ * If you're not sure which error to raise, use AWS_ERROR_S3_CANCELED.
  */
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
 
@@ -260,7 +266,10 @@ struct aws_s3_upload_review {
  * @param info Detailed info about the upload.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
- * Return AWS_OP_ERR to indicate failure and cancel the request.
+ *
+ * Return aws_raise_error(E) to cancel the request.
+ * The error you raise will be reflected in `aws_s3_meta_request_result.error_code`.
+ * If you're not sure which error to raise, use AWS_ERROR_S3_CANCELED.
  *
  * WARNING: This feature is experimental/unstable.
  * At this time, the callback is only invoked for multipart upload
