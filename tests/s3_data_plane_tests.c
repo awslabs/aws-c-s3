@@ -6413,7 +6413,7 @@ static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
         .checksum_algorithm = AWS_SCA_CRC32,
         .put_options =
             {
-                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_10MB_CRC32"),
+                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_10MB_CRC32.txt"),
                 .object_size_mb = 10,
             },
     };
@@ -6447,7 +6447,7 @@ static int s_test_s3_upload_review_no_content_length(struct aws_allocator *alloc
         .checksum_algorithm = AWS_SCA_CRC32,
         .put_options =
             {
-                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_1MB_CRC32"),
+                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_1MB_CRC32.txt"),
                 .object_size_mb = 1,
                 .skip_content_length = true,
             },
@@ -6468,11 +6468,11 @@ static int s_test_s3_upload_review_no_content_length(struct aws_allocator *alloc
 
 static int s_upload_review_raise_canceled_error(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_upload_review_info *info,
+    const struct aws_s3_upload_review *review,
     void *user_data) {
 
     (void)meta_request;
-    (void)info;
+    (void)review;
     (void)user_data;
 
     return aws_raise_error(AWS_ERROR_S3_CANCELED);
@@ -6482,7 +6482,7 @@ static int s_upload_review_raise_canceled_error(
 AWS_TEST_CASE(test_s3_upload_review_rejection, s_test_s3_upload_review_rejection)
 static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_rejection");
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_rejection.txt");
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));

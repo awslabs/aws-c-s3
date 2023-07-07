@@ -1345,7 +1345,7 @@ static int s_s3_review_multipart_upload(struct aws_s3_request *request) {
     }
 
     /* Prepare review info */
-    struct aws_s3_upload_review_info review = {
+    struct aws_s3_upload_review review = {
         .checksum_algorithm = meta_request->checksum_config.checksum_algorithm,
     };
 
@@ -1356,13 +1356,13 @@ static int s_s3_review_multipart_upload(struct aws_s3_request *request) {
 
     if (review.part_count > 0) {
         review.part_array =
-            aws_mem_calloc(meta_request->allocator, review.part_count, sizeof(struct aws_s3_upload_review_part_info));
+            aws_mem_calloc(meta_request->allocator, review.part_count, sizeof(struct aws_s3_upload_part_review));
 
         for (size_t part_index = 0; part_index < review.part_count; ++part_index) {
             struct aws_s3_mpu_part_info *part;
             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
 
-            struct aws_s3_upload_review_part_info *part_review = &review.part_array[part_index];
+            struct aws_s3_upload_part_review *part_review = &review.part_array[part_index];
             part_review->size = part->size;
             part_review->checksum = aws_byte_cursor_from_buf(&part->checksum_base64);
         }

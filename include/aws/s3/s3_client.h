@@ -221,20 +221,14 @@ enum aws_s3_checksum_location {
 
 /**
  * Info about a single part, for you to review before the upload completes.
- *
- * TODO: name? We'd probably re-use this struct for whole-object upload, so "part" isn't quite right.
- * aws_s3_upload_review_range_info? aws_s3_upload_review_content_info? aws_s3_upload_review_data_info?
  */
-struct aws_s3_upload_review_part_info {
+struct aws_s3_upload_part_review {
     /* Size in bytes of this part */
     uint64_t size;
 
     /* Checksum string, as sent in the UploadPart request (usually base64-encoded):
      * https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html#API_UploadPart_RequestSyntax
-     * This is empty if no checksum is used.
-     *
-     * TODO: name? checksum_value? checksum_string? encoded_checksum?
-     */
+     * This is empty if no checksum is used. */
     struct aws_byte_cursor checksum;
 };
 
@@ -245,10 +239,8 @@ struct aws_s3_upload_review_part_info {
  * At this time, review is only available for multipart upload
  * (when Content-Length is above the `multipart_upload_threshold`,
  * or Content-Length not specified).
- *
- * TODO: name? just aws_s3_upload_review with "info"?
  */
-struct aws_s3_upload_review_info {
+struct aws_s3_upload_review {
     /* The checksum algorithm used. */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
@@ -256,7 +248,7 @@ struct aws_s3_upload_review_info {
     size_t part_count;
 
     /* Array of info about each part uploaded (array is `part_count` in length) */
-    struct aws_s3_upload_review_part_info *part_array;
+    struct aws_s3_upload_part_review *part_array;
 };
 
 /**
@@ -274,12 +266,10 @@ struct aws_s3_upload_review_info {
  * At this time, the callback is only invoked for multipart upload
  * (when Content-Length is above the `multipart_upload_threshold`,
  * or Content-Length not specified).
- *
- * TODO: Should user raise error, or call aws_s3_meta_request_cancel() to kill upload? support both?
  */
 typedef int(aws_s3_meta_request_upload_review_fn)(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_upload_review_info *info,
+    const struct aws_s3_upload_review *review,
     void *user_data);
 
 /* Keepalive properties are TCP only.

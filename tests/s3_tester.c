@@ -254,7 +254,7 @@ static void s_s3_test_meta_request_progress(
 
 static int s_s3_test_meta_request_upload_review(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_upload_review_info *info,
+    const struct aws_s3_upload_review *review,
     void *user_data) {
 
     struct aws_s3_meta_request_test_results *test_results = user_data;
@@ -262,25 +262,25 @@ static int s_s3_test_meta_request_upload_review(
     AWS_FATAL_ASSERT(test_results->upload_review.invoked_count == 0);
     test_results->upload_review.invoked_count++;
 
-    test_results->upload_review.checksum_algorithm = info->checksum_algorithm;
+    test_results->upload_review.checksum_algorithm = review->checksum_algorithm;
 
-    test_results->upload_review.part_count = info->part_count;
+    test_results->upload_review.part_count = review->part_count;
     if (test_results->upload_review.part_count > 0) {
         test_results->upload_review.part_sizes_array =
-            aws_mem_calloc(test_results->allocator, info->part_count, sizeof(uint64_t));
+            aws_mem_calloc(test_results->allocator, review->part_count, sizeof(uint64_t));
 
         test_results->upload_review.part_checksums_array =
-            aws_mem_calloc(test_results->allocator, info->part_count, sizeof(struct aws_string *));
+            aws_mem_calloc(test_results->allocator, review->part_count, sizeof(struct aws_string *));
 
-        for (size_t i = 0; i < info->part_count; ++i) {
-            test_results->upload_review.part_sizes_array[i] = info->part_array[i].size;
+        for (size_t i = 0; i < review->part_count; ++i) {
+            test_results->upload_review.part_sizes_array[i] = review->part_array[i].size;
             test_results->upload_review.part_checksums_array[i] =
-                aws_string_new_from_cursor(test_results->allocator, &info->part_array[i].checksum);
+                aws_string_new_from_cursor(test_results->allocator, &review->part_array[i].checksum);
         }
     }
 
     if (test_results->upload_review_callback != NULL) {
-        return test_results->upload_review_callback(meta_request, info, user_data);
+        return test_results->upload_review_callback(meta_request, review, user_data);
     } else {
         return AWS_OP_SUCCESS;
     }
