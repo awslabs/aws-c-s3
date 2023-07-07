@@ -245,7 +245,6 @@ add_net_test_case(test_s3_put_pause_resume_invalid_content_length)
 add_net_test_case(test_s3_upload_review)
 add_net_test_case(test_s3_upload_review_no_content_length)
 add_net_test_case(test_s3_upload_review_rejection)
-# TODO add_net_test_case(test_s3_upload_review_after_pause_resume)
 
 add_test_case(test_s3_list_bucket_init_mem_safety)
 add_test_case(test_s3_list_bucket_init_mem_safety_optional_copies)
