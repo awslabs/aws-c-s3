@@ -32,8 +32,8 @@ class MockServerSetup(Builder.Action):
                             '-c', 'import h11, trio', check=True)
 
         # set cmake flag so mock server tests are enabled
-        env.project.config['cmake_args'].append(
-            '-DENABLE_MOCK_SERVER_TESTS=ON')
+        env.project.config['cmake_args'].extend(
+            ['-DENABLE_MOCK_SERVER_TESTS=ON', '-DASSERT_LOCK_HELD=ON'])
 
         base_dir = os.path.dirname(os.path.realpath(__file__))
         dir = os.path.join(base_dir, "..", "..", "tests", "mock_s3_server")
