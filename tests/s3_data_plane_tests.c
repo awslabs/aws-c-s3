@@ -5838,6 +5838,7 @@ static int s_pause_resume_upload_review_callback(
     void *user_data) {
 
     (void)meta_request;
+    (void)user_data;
     struct aws_allocator *allocator = meta_request->allocator;
 
     /* A bit hacky, but stream the same data that the test always uploads, and ensure the checksums match */
