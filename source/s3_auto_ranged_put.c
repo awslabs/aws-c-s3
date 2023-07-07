@@ -1374,7 +1374,7 @@ static int s_s3_review_multipart_upload(struct aws_s3_request *request) {
     /* Invoke callback */
     int error_code = AWS_ERROR_SUCCESS;
     if (meta_request->upload_review_callback(meta_request, &review, meta_request->user_data) != AWS_OP_SUCCESS) {
-        error_code = aws_last_error_or(AWS_ERROR_S3_CANCELED);
+        error_code = aws_last_error_or_unknown();
     }
 
     /* Clean up review info */
