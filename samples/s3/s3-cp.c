@@ -376,13 +376,14 @@ static void s_copy_object_request_finish(
 }
 
 /* create a copy object request and send it based on the source bucket/key and destination bucket/key. */
-static int s_kick_off_copy_object_request(
+static void s_kick_off_copy_object_request(
     struct cp_app_ctx *cp_app_ctx,
     const struct aws_byte_cursor *source_bucket,
     const struct aws_byte_cursor *source_key,
-    const struct aws_byte_cursor *destination_key) {
+    struct aws_byte_buf *destination_key_buf) {
+    struct aws_byte_cursor destination_key = aws_byte_cursor_from_buf(destination_key_buf);
     struct aws_http_message *message =
-        s_copy_object_request_new(cp_app_ctx, source_bucket, source_key, destination_key);
+        s_copy_object_request_new(cp_app_ctx, source_bucket, source_key, &destination_key);
 
     struct single_transfer_ctx *transfer_ctx =
         aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
@@ -397,7 +398,7 @@ static int s_kick_off_copy_object_request(
     struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to s3://");
     aws_byte_buf_append_dynamic(&label_buf, &to_cur);
     aws_byte_buf_append_dynamic(&label_buf, &cp_app_ctx->destination_uri.host_name);
-    aws_byte_buf_append_dynamic(&label_buf, destination_key);
+    aws_byte_buf_append_dynamic(&label_buf, &destination_key);
 
     struct aws_string *label = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &label_buf);
     aws_byte_buf_clean_up(&label_buf);
@@ -430,7 +431,7 @@ static int s_kick_off_copy_object_request(
     transfer_ctx->cp_app_ctx->expected_transfers++;
     aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
 
-    return AWS_OP_SUCCESS;
+    aws_byte_buf_clean_up(destination_key_buf);
 }
 
 /* invoked upon an upload completion. */
@@ -646,14 +647,15 @@ void s_get_request_finished(
 }
 
 /* Setup a get object request and write the file to disk as it's downloaded. */
-static int s_kickoff_get_object(
+static void s_kickoff_get_object(
     struct cp_app_ctx *cp_app_ctx,
     const struct aws_byte_cursor *key,
-    const struct aws_byte_cursor *destination,
+    struct aws_byte_buf *destination_buf,
     uint64_t size) {
     struct single_transfer_ctx *transfer_ctx =
         aws_mem_calloc(cp_app_ctx->app_ctx->allocator, 1, sizeof(struct single_transfer_ctx));
     transfer_ctx->cp_app_ctx = cp_app_ctx;
+    struct aws_byte_cursor destination = aws_byte_cursor_from_buf(destination_buf);
 
     struct aws_byte_buf label_buf;
     struct aws_byte_cursor operation_name_cur = aws_byte_cursor_from_c_str("download: s3://");
@@ -664,7 +666,7 @@ static int s_kickoff_get_object(
     aws_byte_buf_append_dynamic(&label_buf, key);
     struct aws_byte_cursor to_cur = aws_byte_cursor_from_c_str(" to ");
     aws_byte_buf_append_dynamic(&label_buf, &to_cur);
-    aws_byte_buf_append_dynamic(&label_buf, destination);
+    aws_byte_buf_append_dynamic(&label_buf, &destination);
 
     struct aws_string *label = aws_string_new_from_buf(cp_app_ctx->app_ctx->allocator, &label_buf);
     aws_byte_buf_clean_up(&label_buf);
@@ -676,9 +678,9 @@ static int s_kickoff_get_object(
     aws_string_destroy(label);
     aws_byte_buf_clean_up(&label_buf);
 
-    struct aws_string *file_path = aws_string_new_from_cursor(cp_app_ctx->app_ctx->allocator, destination);
+    struct aws_string *file_path = aws_string_new_from_cursor(cp_app_ctx->app_ctx->allocator, &destination);
     struct aws_string *mode = aws_string_new_from_c_str(cp_app_ctx->app_ctx->allocator, "wb");
-    transfer_ctx->output_sink = NULL;
+    transfer_ctx->output_sink = aws_fopen_safe(file_path, mode);
     if (!transfer_ctx->output_sink) {
         fprintf(
             stderr,
@@ -741,7 +743,7 @@ static int s_kickoff_get_object(
     transfer_ctx->cp_app_ctx->expected_transfers++;
     aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
 
-    return AWS_OP_SUCCESS;
+    aws_byte_buf_clean_up(destination_buf);
 }
 
 /* upon listing the objects in a bucket, this is invoked for each object encountered. */
@@ -799,9 +801,7 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
                 }
             }
 
-            struct aws_byte_cursor destination_cur = aws_byte_cursor_from_buf(&dest_directory);
-            s_kickoff_get_object(cp_app_ctx, &info->key, &destination_cur, info->size);
-            aws_byte_buf_clean_up(&dest_directory);
+            s_kickoff_get_object(cp_app_ctx, &info->key, &dest_directory, info->size);
 
             return true;
         }
@@ -811,10 +811,8 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
         aws_byte_buf_init_copy_from_cursor(
             &destination_key, cp_app_ctx->app_ctx->allocator, cp_app_ctx->destination_uri.path);
         aws_byte_buf_append_dynamic(&destination_key, &trimmed_key);
-        struct aws_byte_cursor destination_key_cur = aws_byte_cursor_from_buf(&destination_key);
 
-        s_kick_off_copy_object_request(cp_app_ctx, &cp_app_ctx->source_uri.host_name, &info->key, &destination_key_cur);
-        aws_byte_buf_clean_up(&destination_key);
+        s_kick_off_copy_object_request(cp_app_ctx, &cp_app_ctx->source_uri.host_name, &info->key, &destination_key);
         return true;
     }
 
