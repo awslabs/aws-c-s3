@@ -800,10 +800,10 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
             }
 
             struct aws_byte_cursor destination_cur = aws_byte_cursor_from_buf(&dest_directory);
-            int ret_val = s_kickoff_get_object(cp_app_ctx, &info->key, &destination_cur, info->size);
+            s_kickoff_get_object(cp_app_ctx, &info->key, &destination_cur, info->size);
             aws_byte_buf_clean_up(&dest_directory);
 
-            return ret_val == AWS_OP_SUCCESS;
+            return true;
         }
 
         /* otherwise, we're copying between buckets. Set up the copy here. */
@@ -813,12 +813,9 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
         aws_byte_buf_append_dynamic(&destination_key, &trimmed_key);
         struct aws_byte_cursor destination_key_cur = aws_byte_cursor_from_buf(&destination_key);
 
-        int return_code =
-            s_kick_off_copy_object_request(
-                cp_app_ctx, &cp_app_ctx->source_uri.host_name, &info->key, &destination_key_cur) == AWS_OP_SUCCESS;
-
+        s_kick_off_copy_object_request(cp_app_ctx, &cp_app_ctx->source_uri.host_name, &info->key, &destination_key_cur);
         aws_byte_buf_clean_up(&destination_key);
-        return return_code == AWS_OP_SUCCESS;
+        return true;
     }
 
     return true;
