@@ -6484,11 +6484,24 @@ static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, vo
     (void)ctx;
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_rejection");
 
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+
+    /* Send meta-request that will raise an error from the review_upload_callback */
     struct aws_s3_meta_request_test_results test_results;
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
+        .client = client,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .checksum_algorithm = AWS_SCA_CRC32,
@@ -6500,7 +6513,7 @@ static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, vo
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
 
     /* Check that meta-request failed with the error raised by the upload_review_callback */
     ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, test_results.finished_error_code);
@@ -6517,6 +6530,7 @@ static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, vo
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
+        .client = client,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .get_options =
@@ -6524,9 +6538,11 @@ static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, vo
                 .object_path = object_path,
             },
     };
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &get_options, &test_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
     ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_404_NOT_FOUND, test_results.finished_response_status);
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
     return 0;
 }
