@@ -12,6 +12,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
+#include <aws/common/encoding.h>
 #include <aws/common/environment.h>
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
@@ -5830,6 +5831,62 @@ static void s_pause_meta_request_progress(
 /* total length of the object to simulate for upload */
 static const size_t s_pause_resume_object_length_128MB = 128 * 1024 * 1024;
 
+/* this runs when a RESUMED upload is about to successfully complete */
+static int s_pause_resume_upload_review_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_upload_review *review,
+    void *user_data) {
+
+    (void)meta_request;
+    struct aws_allocator *allocator = meta_request->allocator;
+
+    /* A bit hacky, but stream the same data that the test always uploads, and ensure the checksums match */
+
+    struct aws_input_stream *reread_stream =
+        aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+
+    for (size_t part_index = 0; part_index < review->part_count; ++part_index) {
+        const struct aws_s3_upload_part_review *part_review = &review->part_array[part_index];
+        struct aws_byte_buf reread_part_buf;
+        aws_byte_buf_init(&reread_part_buf, allocator, part_review->size);
+        ASSERT_SUCCESS(aws_input_stream_read(reread_stream, &reread_part_buf));
+
+        /* part sizes should match */
+        ASSERT_UINT_EQUALS(part_review->size, reread_part_buf.len);
+
+        if (review->checksum_algorithm != AWS_SCA_NONE) {
+            struct aws_byte_cursor reread_part_cursor = aws_byte_cursor_from_buf(&reread_part_buf);
+
+            struct aws_byte_buf checksum_buf;
+            aws_byte_buf_init(&checksum_buf, allocator, 128);
+            ASSERT_SUCCESS(
+                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf, 0));
+            struct aws_byte_cursor checksum_cursor = aws_byte_cursor_from_buf(&checksum_buf);
+
+            struct aws_byte_buf encoded_checksum_buf;
+            aws_byte_buf_init(&encoded_checksum_buf, allocator, 128);
+
+            ASSERT_SUCCESS(aws_base64_encode(&checksum_cursor, &encoded_checksum_buf));
+
+            /* part checksums should match */
+            ASSERT_BIN_ARRAYS_EQUALS(
+                encoded_checksum_buf.buffer,
+                encoded_checksum_buf.len,
+                part_review->checksum.ptr,
+                part_review->checksum.len);
+
+            aws_byte_buf_clean_up(&checksum_buf);
+            aws_byte_buf_clean_up(&encoded_checksum_buf);
+        }
+
+        aws_byte_buf_clean_up(&reread_part_buf);
+    }
+
+    aws_input_stream_release(reread_stream);
+
+    return AWS_OP_SUCCESS;
+}
+
 static int s_pause_resume_receive_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -5930,6 +5987,7 @@ static int s_test_s3_put_pause_resume_helper(
         .finish_callback = s_put_pause_resume_meta_request_finish,
         .headers_callback = NULL,
         .progress_callback = s_pause_meta_request_progress,
+        .upload_review_callback = s_pause_resume_upload_review_callback,
         .message = message,
         .shutdown_callback = NULL,
         .resume_token = NULL,
