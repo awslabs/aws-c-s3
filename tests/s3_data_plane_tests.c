@@ -5849,7 +5849,8 @@ static int s_pause_resume_upload_review_callback(
     for (size_t part_index = 0; part_index < review->part_count; ++part_index) {
         const struct aws_s3_upload_part_review *part_review = &review->part_array[part_index];
         struct aws_byte_buf reread_part_buf;
-        aws_byte_buf_init(&reread_part_buf, allocator, part_review->size);
+        ASSERT_TRUE(part_review->size <= SIZE_MAX);
+        aws_byte_buf_init(&reread_part_buf, allocator, (size_t)part_review->size);
         ASSERT_SUCCESS(aws_input_stream_read(reread_stream, &reread_part_buf));
 
         /* part sizes should match */
