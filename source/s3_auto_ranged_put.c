@@ -123,7 +123,7 @@ static bool s_process_part_info_synced(const struct aws_s3_part_info *info, void
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
     struct aws_s3_meta_request *meta_request = &auto_ranged_put->base;
 
-    ASSERT_SYNCED_DATA_LOCK_HELD(auto_ranged_put);
+    ASSERT_SYNCED_DATA_LOCK_HELD(&auto_ranged_put->base);
 
     struct aws_s3_mpu_part_info *part = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
     part->size = info->size;
