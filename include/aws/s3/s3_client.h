@@ -109,7 +109,10 @@ enum aws_s3_request_type {
  * success and error HTTP status codes.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
- * Return AWS_OP_ERR to indicate failure and cancel the request.
+ *
+ * Return aws_raise_error(E) to cancel the request.
+ * The error you raise will be reflected in `aws_s3_meta_request_result.error_code`.
+ * If you're not sure which error to raise, use AWS_ERROR_S3_CANCELED.
  */
 typedef int(aws_s3_meta_request_headers_callback_fn)(
     struct aws_s3_meta_request *meta_request,
@@ -133,7 +136,10 @@ typedef int(aws_s3_meta_request_headers_callback_fn)(
  * No back-pressure is applied and data arrives as fast as possible.
  *
  * Return AWS_OP_SUCCESS to continue processing the request.
- * Return AWS_OP_ERR to indicate failure and cancel the request.
+ *
+ * Return aws_raise_error(E) to cancel the request.
+ * The error you raise will be reflected in `aws_s3_meta_request_result.error_code`.
+ * If you're not sure which error to raise, use AWS_ERROR_S3_CANCELED.
  */
 typedef int(aws_s3_meta_request_receive_body_callback_fn)(
 
@@ -218,6 +224,62 @@ enum aws_s3_checksum_location {
     AWS_SCL_HEADER,
     AWS_SCL_TRAILER,
 };
+
+/**
+ * Info about a single part, for you to review before the upload completes.
+ */
+struct aws_s3_upload_part_review {
+    /* Size in bytes of this part */
+    uint64_t size;
+
+    /* Checksum string, as sent in the UploadPart request (usually base64-encoded):
+     * https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html#API_UploadPart_RequestSyntax
+     * This is empty if no checksum is used. */
+    struct aws_byte_cursor checksum;
+};
+
+/**
+ * Info for you to review before an upload completes.
+ *
+ * WARNING: This feature is experimental/unstable.
+ * At this time, review is only available for multipart upload
+ * (when Content-Length is above the `multipart_upload_threshold`,
+ * or Content-Length not specified).
+ */
+struct aws_s3_upload_review {
+    /* The checksum algorithm used. */
+    enum aws_s3_checksum_algorithm checksum_algorithm;
+
+    /* Number of parts uploaded. */
+    size_t part_count;
+
+    /* Array of info about each part uploaded (array is `part_count` in length) */
+    struct aws_s3_upload_part_review *part_array;
+};
+
+/**
+ * Optional callback, for you to review an upload before it completes.
+ * For example, you can review each part's checksum and fail the upload if
+ * you do not agree with them.
+ *
+ * @param meta_request pointer to the aws_s3_meta_request of the upload.
+ * @param info Detailed info about the upload.
+ *
+ * Return AWS_OP_SUCCESS to continue processing the request.
+ *
+ * Return aws_raise_error(E) to cancel the request.
+ * The error you raise will be reflected in `aws_s3_meta_request_result.error_code`.
+ * If you're not sure which error to raise, use AWS_ERROR_S3_CANCELED.
+ *
+ * WARNING: This feature is experimental/unstable.
+ * At this time, the callback is only invoked for multipart upload
+ * (when Content-Length is above the `multipart_upload_threshold`,
+ * or Content-Length not specified).
+ */
+typedef int(aws_s3_meta_request_upload_review_fn)(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_upload_review *review,
+    void *user_data);
 
 /* Keepalive properties are TCP only.
  * If interval or timeout are zero, then default values are used.
@@ -486,6 +548,14 @@ struct aws_s3_meta_request_options {
      * - The callback will be invoked multiple times from different threads.
      */
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
+
+    /**
+     * Optional.
+     * Callback for reviewing an upload before it completes.
+     * WARNING: experimental/unstable
+     * See `aws_s3_upload_review_fn`
+     */
+    aws_s3_meta_request_upload_review_fn *upload_review_callback;
 
     /**
      * Optional.

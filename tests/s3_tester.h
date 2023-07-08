@@ -163,6 +163,7 @@ struct aws_s3_tester_meta_request_options {
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
+    aws_s3_meta_request_upload_review_fn *upload_review_callback;
 
     /* Default Meta Request specific options. */
     struct {
@@ -209,12 +210,14 @@ struct aws_s3_tester_meta_request_options {
 
 /* TODO Rename to something more generic such as "aws_s3_meta_request_test_data" */
 struct aws_s3_meta_request_test_results {
+    struct aws_allocator *allocator;
     struct aws_s3_tester *tester;
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
+    aws_s3_meta_request_upload_review_fn *upload_review_callback;
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
@@ -240,6 +243,15 @@ struct aws_s3_meta_request_test_results {
         /* The array_list of `struct aws_s3_request_metrics *` */
         struct aws_array_list metrics;
     } synced_data;
+
+    /* record data from the upload_review_callback */
+    struct {
+        size_t invoked_count;
+        enum aws_s3_checksum_algorithm checksum_algorithm;
+        size_t part_count;
+        uint64_t *part_sizes_array;
+        struct aws_string **part_checksums_array;
+    } upload_review;
 };
 
 struct aws_s3_client_config;
