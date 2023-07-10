@@ -139,7 +139,7 @@ static bool s_on_list_bucket_result_node_encountered(
         result_wrapper.allocator = operation_data->allocator;
         /* this will traverse the current Parts node, get the metadata necessary to construct
          * an instance of fs_info so we can invoke the callback on it. This happens once per part. */
-        bool ret_val = aws_xml_node_traverse(parser, node, s_on_parts_node, &result_wrapper) == AWS_OP_SUCCESS;
+        bool keep_going = aws_xml_node_traverse(parser, node, s_on_parts_node, &result_wrapper) == AWS_OP_SUCCESS;
 
         struct aws_byte_buf trimmed_etag;
         AWS_ZERO_STRUCT(trimmed_etag);
@@ -147,20 +147,20 @@ static bool s_on_list_bucket_result_node_encountered(
         if (result_wrapper.part_info.e_tag.len) {
             struct aws_string *quoted_etag_str =
                 aws_string_new_from_cursor(result_wrapper.allocator, &result_wrapper.part_info.e_tag);
-            aws_replace_quote_entities(result_wrapper.allocator, quoted_etag_str, &trimmed_etag);
+            replace_quote_entities(result_wrapper.allocator, quoted_etag_str, &trimmed_etag);
             result_wrapper.part_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
             aws_string_destroy(quoted_etag_str);
         }
 
-        if (ret_val && operation_data->on_part) {
-            ret_val |= operation_data->on_part(&result_wrapper.part_info, operation_data->user_data);
+        if (keep_going && operation_data->on_part) {
+            keep_going = operation_data->on_part(&result_wrapper.part_info, operation_data->user_data);
         }
 
         if (trimmed_etag.len) {
             aws_byte_buf_clean_up(&trimmed_etag);
         }
 
-        return ret_val;
+        return keep_going;
     }
 
     return true;

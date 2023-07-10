@@ -684,7 +684,7 @@ static void s_kickoff_get_object(
     if (!transfer_ctx->output_sink) {
         fprintf(
             stderr,
-            "Failure when open file %s with error %s\n",
+            "Failure to open file %s, error %s\n",
             aws_string_c_str(file_path),
             aws_error_debug_str(aws_last_error()));
         exit(1);

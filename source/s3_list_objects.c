@@ -124,7 +124,7 @@ static bool s_on_list_bucket_result_node_encountered(
         fs_wrapper.allocator = operation_data->allocator;
         /* this will traverse the current Contents node, get the metadata necessary to construct
          * an instance of fs_info so we can invoke the callback on it. This happens once per object. */
-        bool ret_val = aws_xml_node_traverse(parser, node, s_on_contents_node, &fs_wrapper) == AWS_OP_SUCCESS;
+        bool keep_going = aws_xml_node_traverse(parser, node, s_on_contents_node, &fs_wrapper) == AWS_OP_SUCCESS;
 
         if (operation_data->prefix && !fs_wrapper.fs_info.prefix.len) {
             fs_wrapper.fs_info.prefix = aws_byte_cursor_from_string(operation_data->prefix);
@@ -136,20 +136,20 @@ static bool s_on_list_bucket_result_node_encountered(
         if (fs_wrapper.fs_info.e_tag.len) {
             struct aws_string *quoted_etag_str =
                 aws_string_new_from_cursor(fs_wrapper.allocator, &fs_wrapper.fs_info.e_tag);
-            aws_replace_quote_entities(fs_wrapper.allocator, quoted_etag_str, &trimmed_etag);
+            replace_quote_entities(fs_wrapper.allocator, quoted_etag_str, &trimmed_etag);
             fs_wrapper.fs_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
             aws_string_destroy(quoted_etag_str);
         }
 
-        if (ret_val && operation_data->on_object) {
-            ret_val &= operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
+        if (keep_going && operation_data->on_object) {
+            keep_going = operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
         }
 
         if (trimmed_etag.len) {
             aws_byte_buf_clean_up(&trimmed_etag);
         }
 
-        return ret_val;
+        return keep_going;
     }
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "CommonPrefixes")) {
