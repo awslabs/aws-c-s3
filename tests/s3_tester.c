@@ -252,6 +252,40 @@ static void s_s3_test_meta_request_progress(
     }
 }
 
+static int s_s3_test_meta_request_upload_review(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_upload_review *review,
+    void *user_data) {
+
+    struct aws_s3_meta_request_test_results *test_results = user_data;
+
+    AWS_FATAL_ASSERT(test_results->upload_review.invoked_count == 0);
+    test_results->upload_review.invoked_count++;
+
+    test_results->upload_review.checksum_algorithm = review->checksum_algorithm;
+
+    test_results->upload_review.part_count = review->part_count;
+    if (test_results->upload_review.part_count > 0) {
+        test_results->upload_review.part_sizes_array =
+            aws_mem_calloc(test_results->allocator, review->part_count, sizeof(uint64_t));
+
+        test_results->upload_review.part_checksums_array =
+            aws_mem_calloc(test_results->allocator, review->part_count, sizeof(struct aws_string *));
+
+        for (size_t i = 0; i < review->part_count; ++i) {
+            test_results->upload_review.part_sizes_array[i] = review->part_array[i].size;
+            test_results->upload_review.part_checksums_array[i] =
+                aws_string_new_from_cursor(test_results->allocator, &review->part_array[i].checksum);
+        }
+    }
+
+    if (test_results->upload_review_callback != NULL) {
+        return test_results->upload_review_callback(meta_request, review, user_data);
+    } else {
+        return AWS_OP_SUCCESS;
+    }
+}
+
 /* Notify the tester that a particular clean up step has finished. */
 static void s_s3_test_client_shutdown(void *user_data);
 
@@ -424,6 +458,9 @@ int aws_s3_tester_bind_meta_request(
     ASSERT_TRUE(options->progress_callback == NULL);
     options->progress_callback = s_s3_test_meta_request_progress;
 
+    ASSERT_TRUE(options->upload_review_callback == NULL);
+    options->upload_review_callback = s_s3_test_meta_request_upload_review;
+
     ASSERT_TRUE(options->user_data == NULL);
     options->user_data = meta_request_test_results;
 
@@ -434,8 +471,8 @@ void aws_s3_meta_request_test_results_init(
     struct aws_s3_meta_request_test_results *test_meta_request,
     struct aws_allocator *allocator) {
 
-    (void)allocator;
     AWS_ZERO_STRUCT(*test_meta_request);
+    test_meta_request->allocator = allocator;
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
     aws_atomic_init_int(&test_meta_request->total_bytes_uploaded, 0);
     aws_array_list_init_dynamic(
@@ -457,6 +494,12 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
+
+    for (size_t i = 0; i < test_meta_request->upload_review.part_count; ++i) {
+        aws_string_destroy(test_meta_request->upload_review.part_checksums_array[i]);
+    }
+    aws_mem_release(test_meta_request->allocator, test_meta_request->upload_review.part_sizes_array);
+    aws_mem_release(test_meta_request->allocator, test_meta_request->upload_review.part_checksums_array);
 
     AWS_ZERO_STRUCT(*test_meta_request);
 }
@@ -1389,8 +1432,6 @@ int aws_s3_tester_send_meta_request_with_options(
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT)) {
 
-            meta_request_options.checksum_config = &checksum_config;
-
             uint32_t object_size_mb = options->put_options.object_size_mb;
             size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
 
@@ -1586,6 +1627,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
     out_results->progress_callback = options->progress_callback;
+    out_results->upload_review_callback = options->upload_review_callback;
 
     out_results->algorithm = options->expected_validate_checksum_alg;
 

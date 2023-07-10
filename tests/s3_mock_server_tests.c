@@ -395,7 +395,7 @@ TEST_CASE(get_object_invalid_responses_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(get_object_missmatch_checksum_responses_mock_server) {
+TEST_CASE(get_object_mismatch_checksum_responses_mock_server) {
     (void)ctx;
 
     struct aws_s3_tester tester;

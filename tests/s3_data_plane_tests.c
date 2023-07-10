@@ -12,6 +12,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
+#include <aws/common/encoding.h>
 #include <aws/common/environment.h>
 #include <aws/common/ref_count.h>
 #include <aws/http/request_response.h>
@@ -5830,6 +5831,64 @@ static void s_pause_meta_request_progress(
 /* total length of the object to simulate for upload */
 static const size_t s_pause_resume_object_length_128MB = 128 * 1024 * 1024;
 
+/* this runs when a RESUMED upload is about to successfully complete */
+static int s_pause_resume_upload_review_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_upload_review *review,
+    void *user_data) {
+
+    (void)meta_request;
+    (void)user_data;
+    struct aws_allocator *allocator = meta_request->allocator;
+
+    /* A bit hacky, but stream the same data that the test always uploads, and ensure the checksums match */
+
+    struct aws_input_stream *reread_stream =
+        aws_s3_test_input_stream_new(allocator, s_pause_resume_object_length_128MB);
+
+    for (size_t part_index = 0; part_index < review->part_count; ++part_index) {
+        const struct aws_s3_upload_part_review *part_review = &review->part_array[part_index];
+        struct aws_byte_buf reread_part_buf;
+        ASSERT_TRUE(part_review->size <= SIZE_MAX);
+        aws_byte_buf_init(&reread_part_buf, allocator, (size_t)part_review->size);
+        ASSERT_SUCCESS(aws_input_stream_read(reread_stream, &reread_part_buf));
+
+        /* part sizes should match */
+        ASSERT_UINT_EQUALS(part_review->size, reread_part_buf.len);
+
+        if (review->checksum_algorithm != AWS_SCA_NONE) {
+            struct aws_byte_cursor reread_part_cursor = aws_byte_cursor_from_buf(&reread_part_buf);
+
+            struct aws_byte_buf checksum_buf;
+            aws_byte_buf_init(&checksum_buf, allocator, 128);
+            ASSERT_SUCCESS(
+                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf, 0));
+            struct aws_byte_cursor checksum_cursor = aws_byte_cursor_from_buf(&checksum_buf);
+
+            struct aws_byte_buf encoded_checksum_buf;
+            aws_byte_buf_init(&encoded_checksum_buf, allocator, 128);
+
+            ASSERT_SUCCESS(aws_base64_encode(&checksum_cursor, &encoded_checksum_buf));
+
+            /* part checksums should match */
+            ASSERT_BIN_ARRAYS_EQUALS(
+                encoded_checksum_buf.buffer,
+                encoded_checksum_buf.len,
+                part_review->checksum.ptr,
+                part_review->checksum.len);
+
+            aws_byte_buf_clean_up(&checksum_buf);
+            aws_byte_buf_clean_up(&encoded_checksum_buf);
+        }
+
+        aws_byte_buf_clean_up(&reread_part_buf);
+    }
+
+    aws_input_stream_release(reread_stream);
+
+    return AWS_OP_SUCCESS;
+}
+
 static int s_pause_resume_receive_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -5930,6 +5989,7 @@ static int s_test_s3_put_pause_resume_helper(
         .finish_callback = s_put_pause_resume_meta_request_finish,
         .headers_callback = NULL,
         .progress_callback = s_pause_meta_request_progress,
+        .upload_review_callback = s_pause_resume_upload_review_callback,
         .message = message,
         .shutdown_callback = NULL,
         .resume_token = NULL,
@@ -6398,4 +6458,151 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
     aws_s3_tester_clean_up(&tester);
 
     return AWS_ERROR_SUCCESS;
+}
+
+/* Most basic test of the upload_review_callback */
+AWS_TEST_CASE(test_s3_upload_review, s_test_s3_upload_review)
+static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_10MB_CRC32.txt"),
+                .object_size_mb = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    /* The tester always registers an upload_review_callback.
+     * Check that it got what we expect */
+    ASSERT_UINT_EQUALS(1, test_results.upload_review.invoked_count);
+    ASSERT_UINT_EQUALS(2, test_results.upload_review.part_count);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(8), test_results.upload_review.part_sizes_array[0]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(10) - MB_TO_BYTES(8), test_results.upload_review.part_sizes_array[1]);
+    ASSERT_INT_EQUALS(AWS_SCA_CRC32, test_results.upload_review.checksum_algorithm);
+    ASSERT_STR_EQUALS("9J8ZNA==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
+    ASSERT_STR_EQUALS("BNjxzQ==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
+/* Test upload_review_callback when Content-Length is not declared */
+AWS_TEST_CASE(test_s3_upload_review_no_content_length, s_test_s3_upload_review_no_content_length)
+static int s_test_s3_upload_review_no_content_length(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_1MB_CRC32.txt"),
+                .object_size_mb = 1,
+                .skip_content_length = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    /* The tester always registers an upload_review_callback.
+     * Check that it got what we expect */
+    ASSERT_UINT_EQUALS(1, test_results.upload_review.invoked_count);
+    ASSERT_UINT_EQUALS(1, test_results.upload_review.part_count);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(1), test_results.upload_review.part_sizes_array[0]);
+    ASSERT_STR_EQUALS("4hP4ig==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
+static int s_upload_review_raise_canceled_error(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_upload_review *review,
+    void *user_data) {
+
+    (void)meta_request;
+    (void)review;
+    (void)user_data;
+
+    return aws_raise_error(AWS_ERROR_S3_CANCELED);
+}
+
+/* Test that if upload_review_callback raises an error, then the upload is canceled. */
+AWS_TEST_CASE(test_s3_upload_review_rejection, s_test_s3_upload_review_rejection)
+static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_rejection.txt");
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+
+    /* Send meta-request that will raise an error from the review_upload_callback */
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .upload_review_callback = s_upload_review_raise_canceled_error,
+        .put_options =
+            {
+                .object_path_override = object_path,
+                .object_size_mb = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
+
+    /* Check that meta-request failed with the error raised by the upload_review_callback */
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, test_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+
+    /*
+     * Now check that the upload did not complete on the server either
+     * (server should have received AbortMultipartUpload).
+     * Check by attempting to GET the object, which should fail with 404 NOT FOUND.
+     */
+
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_404_NOT_FOUND, test_results.finished_response_status);
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
 }
