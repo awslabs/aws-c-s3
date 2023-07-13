@@ -14,7 +14,6 @@
 
 /* TODO: better logging of steps */
 
-static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 /* For unknown length body we no longer know the number of parts. to avoid
@@ -119,11 +118,17 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **resume_token);
 
-static bool s_process_part_info_synced(const struct aws_s3_part_info *info, void *user_data) {
+static int s_process_part_info_synced(const struct aws_s3_part_info *info, void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
     struct aws_s3_meta_request *meta_request = &auto_ranged_put->base;
 
     ASSERT_SYNCED_DATA_LOCK_HELD(&auto_ranged_put->base);
+
+    if (info->part_number == 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "id=%p: ListParts reported Part without valid PartNumber", (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED);
+    }
 
     struct aws_s3_mpu_part_info *part = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
     part->size = info->size;
@@ -166,7 +171,7 @@ static bool s_process_part_info_synced(const struct aws_s3_part_info *info, void
     /* Add this part */
     aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, info->part_number - 1);
 
-    return true;
+    return AWS_OP_SUCCESS;
 }
 
 /*
@@ -1666,13 +1671,15 @@ static void s_s3_auto_ranged_put_request_finished(
                     }
                 }
 
-                struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 /* Find the upload id for this multipart upload. */
-                struct aws_string *upload_id =
-                    aws_xml_get_top_level_tag(meta_request->allocator, &s_upload_id, &buffer_byte_cursor);
+                struct aws_byte_cursor upload_id = {0};
+                const char *xml_path[] = {"InitiateMultipartUploadResult", "UploadId"};
+                aws_xml_get_body_at_path(
+                    meta_request->allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &upload_id);
 
-                if (upload_id == NULL) {
+                if (upload_id.len == 0) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p Could not find upload-id in create-multipart-upload response",
@@ -1682,7 +1689,7 @@ static void s_s3_auto_ranged_put_request_finished(
                     error_code = AWS_ERROR_S3_MISSING_UPLOAD_ID;
                 } else {
                     /* Store the multipart upload id. */
-                    auto_ranged_put->upload_id = upload_id;
+                    auto_ranged_put->upload_id = aws_string_new_from_cursor(meta_request->allocator, &upload_id);
                 }
             }
 
@@ -1814,8 +1821,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
                 /* END CRITICAL SECTION */
 
-                struct aws_byte_cursor response_body_cursor =
-                    aws_byte_cursor_from_buf(&request->send_data.response_body);
+                struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 /**
                  * TODO: The body of the response can be ERROR, check Error specified in body part from
@@ -1825,21 +1831,20 @@ static void s_s3_auto_ranged_put_request_finished(
                  */
 
                 /* Grab the ETag for the entire object, and set it as a header. */
-                struct aws_string *etag_header_value =
-                    aws_xml_get_top_level_tag(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
+                struct aws_byte_cursor etag_header_value = {0};
+                const char *xml_path[] = {"CompleteMultipartUploadResult", "ETag"};
+                aws_xml_get_body_at_path(
+                    meta_request->allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &etag_header_value);
 
-                if (etag_header_value != NULL) {
-                    struct aws_byte_buf etag_header_value_byte_buf;
-                    AWS_ZERO_STRUCT(etag_header_value_byte_buf);
-
-                    aws_replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
+                if (etag_header_value.len > 0) {
+                    struct aws_byte_buf etag_header_value_byte_buf =
+                        aws_replace_quote_entities(meta_request->allocator, etag_header_value);
 
                     aws_http_headers_set(
                         final_response_headers,
                         g_etag_header_name,
                         aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
 
-                    aws_string_destroy(etag_header_value);
                     aws_byte_buf_clean_up(&etag_header_value_byte_buf);
                 }
 

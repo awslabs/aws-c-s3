@@ -27,29 +27,29 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
     (void)ctx;
 
     struct test_case {
-        struct aws_string *test_string;
+        struct aws_byte_cursor test_string;
         const char *expected_result;
     };
 
     struct test_case test_cases[] = {
         {
-            .test_string = aws_string_new_from_c_str(allocator, "&quot;testtest"),
+            .test_string = aws_byte_cursor_from_c_str("&quot;testtest"),
             .expected_result = "\"testtest",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, "testtest&quot;"),
+            .test_string = aws_byte_cursor_from_c_str("testtest&quot;"),
             .expected_result = "testtest\"",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, "&quot;&quot;"),
+            .test_string = aws_byte_cursor_from_c_str("&quot;&quot;"),
             .expected_result = "\"\"",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, "testtest"),
+            .test_string = aws_byte_cursor_from_c_str("testtest"),
             .expected_result = "testtest",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, ""),
+            .test_string = aws_byte_cursor_from_c_str(""),
             .expected_result = "",
         },
     };
@@ -57,18 +57,13 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
         struct test_case *test_case = &test_cases[i];
 
-        struct aws_byte_buf result_byte_buf;
-        AWS_ZERO_STRUCT(result_byte_buf);
-
-        aws_replace_quote_entities(allocator, test_case->test_string, &result_byte_buf);
+        struct aws_byte_buf result_byte_buf = aws_replace_quote_entities(allocator, test_case->test_string);
 
         struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_buf(&result_byte_buf);
 
         ASSERT_CURSOR_VALUE_CSTRING_EQUALS(result_byte_cursor, test_case->expected_result);
 
         aws_byte_buf_clean_up(&result_byte_buf);
-        aws_string_destroy(test_case->test_string);
-        test_case->test_string = NULL;
     }
 
     return 0;
@@ -498,8 +493,8 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
     return AWS_OP_SUCCESS;
 }
 
-AWS_TEST_CASE(test_s3_aws_xml_get_top_level_tag_with_root_name, s_test_s3_aws_xml_get_top_level_tag_with_root_name)
-static int s_test_s3_aws_xml_get_top_level_tag_with_root_name(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_aws_xml_get_body_at_path, s_test_s3_aws_xml_get_body_at_path)
+static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
 
@@ -512,38 +507,46 @@ static int s_test_s3_aws_xml_get_top_level_tag_with_root_name(struct aws_allocat
         "<HostId>Uuag1LuByRx9e6j5Onimru9pO4ZVKnJ2Qz7/C1NPcfTWAtRPfTaOFg==</HostId>\n"
         "</Error>");
 
-    struct aws_byte_cursor example_success_body = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<CompleteMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n"
-        "<Location>http://Example-Bucket.s3.<Region>.amazonaws.com/Example-Object</Location>\n"
-        "<Bucket>Example-Bucket</Bucket>\n"
-        "<Key>Example-Object</Key>\n"
-        "<ETag>\"3858f62230ac3c915f300c664312c11f-9\"</ETag>\n"
-        "</CompleteMultipartUploadResult>");
+    /* Ensure we can successfully look up <Error><Code> */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"Error", "Code"};
 
-    struct aws_byte_cursor error_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Error");
-    struct aws_byte_cursor code_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Code");
-    struct aws_byte_cursor etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
+        ASSERT_SUCCESS(
+            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, AWS_ARRAY_SIZE(xml_path), &error_code));
+        ASSERT_CURSOR_VALUE_CSTRING_EQUALS(error_code, "AccessDenied");
+    }
 
-    bool root_name_mismatch = false;
-    struct aws_string *error_code = aws_xml_get_top_level_tag_with_root_name(
-        allocator, &code_body_xml_name, &error_body_xml_name, &root_name_mismatch, &example_error_body);
+    /* Ensure we fail if the beginning of the path doesn't match */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"ObviouslyInvalidName", "Code"};
+        ASSERT_ERROR(
+            AWS_ERROR_STRING_MATCH_NOT_FOUND,
+            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, AWS_ARRAY_SIZE(xml_path), &error_code));
+    }
 
-    ASSERT_NOT_NULL(error_code);
-    ASSERT_FALSE(root_name_mismatch);
-    ASSERT_TRUE(aws_string_eq_c_str(error_code, "AccessDenied"));
-    aws_string_destroy(error_code);
+    /* Ensure we fail if the end of the path doesn't match */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"Error", "ObviouslyInvalidName"};
+        ASSERT_ERROR(
+            AWS_ERROR_STRING_MATCH_NOT_FOUND,
+            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, AWS_ARRAY_SIZE(xml_path), &error_code));
+    }
 
-    error_code = aws_xml_get_top_level_tag_with_root_name(
-        allocator, &code_body_xml_name, &error_body_xml_name, &root_name_mismatch, &example_success_body);
-    ASSERT_NULL(error_code);
-    ASSERT_TRUE(root_name_mismatch);
-
-    struct aws_string *etag = aws_xml_get_top_level_tag(allocator, &etag_header_name, &example_success_body);
-
-    ASSERT_NOT_NULL(etag);
-    ASSERT_TRUE(aws_string_eq_c_str(etag, "\"3858f62230ac3c915f300c664312c11f-9\""));
-    aws_string_destroy(etag);
-
+    /* Ensure we fail if the document isn't valid XML */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"Error", "Code"};
+        ASSERT_ERROR(
+            AWS_ERROR_INVALID_XML,
+            aws_xml_get_body_at_path(
+                allocator,
+                aws_byte_cursor_from_c_str("Obviously invalid XML document"),
+                xml_path,
+                AWS_ARRAY_SIZE(xml_path),
+                &error_code));
+    }
     return AWS_OP_SUCCESS;
 }

@@ -799,10 +799,7 @@ struct complete_multipart_upload_xml_test_data {
     bool found_part_number;
 };
 
-static bool s_complete_multipart_upload_traverse_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data) {
+static int s_complete_multipart_upload_traverse_xml_node(struct aws_xml_node *node, void *user_data) {
 
     const struct aws_byte_cursor complete_multipar_upload_tag_name =
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CompleteMultipartUpload");
@@ -810,41 +807,38 @@ static bool s_complete_multipart_upload_traverse_xml_node(
     const struct aws_byte_cursor etag_tag_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
     const struct aws_byte_cursor part_number_tag_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("PartNumber");
 
-    struct aws_byte_cursor node_name;
-    AWS_ZERO_STRUCT(node_name);
-
-    bool keep_traversing = false;
     struct complete_multipart_upload_xml_test_data *test_data = user_data;
 
-    /* If we can't get the name of the node, stop traversing. */
-    if (aws_xml_node_get_name(node, &node_name)) {
-        /* Couldn't get the tag name, so nothing to do but stop traversing. */
-    } else if (aws_byte_cursor_eq(&node_name, &complete_multipar_upload_tag_name)) {
-        aws_xml_node_traverse(parser, node, s_complete_multipart_upload_traverse_xml_node, user_data);
+    struct aws_byte_cursor node_name = aws_xml_node_get_name(node);
+    if (aws_byte_cursor_eq(&node_name, &complete_multipar_upload_tag_name)) {
+        if (aws_xml_node_traverse(node, s_complete_multipart_upload_traverse_xml_node, user_data)) {
+            return AWS_OP_ERR;
+        }
     } else if (aws_byte_cursor_eq(&node_name, &part_tag_name)) {
-        aws_xml_node_traverse(parser, node, s_complete_multipart_upload_traverse_xml_node, user_data);
+        if (aws_xml_node_traverse(node, s_complete_multipart_upload_traverse_xml_node, user_data)) {
+            return AWS_OP_ERR;
+        }
     } else if (aws_byte_cursor_eq(&node_name, &etag_tag_name)) {
 
         struct aws_byte_cursor node_body;
         AWS_ZERO_STRUCT(node_body);
-        if (aws_xml_node_as_body(parser, node, &node_body)) {
-            goto finish;
+        if (aws_xml_node_as_body(node, &node_body)) {
+            return AWS_OP_ERR;
         }
 
         test_data->found_etag = aws_byte_cursor_eq(&node_body, &test_data->etag_value);
-        keep_traversing = true;
     } else if (aws_byte_cursor_eq(&node_name, &part_number_tag_name)) {
 
         struct aws_byte_cursor node_body;
         AWS_ZERO_STRUCT(node_body);
-        aws_xml_node_as_body(parser, node, &node_body);
+        if (aws_xml_node_as_body(node, &node_body)) {
+            return AWS_OP_ERR;
+        }
 
         test_data->found_part_number = aws_byte_cursor_eq(&node_body, &test_data->part_number_value);
-        keep_traversing = true;
     }
 
-finish:
-    return keep_traversing;
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_complete_multipart_message_new, s_test_s3_complete_multipart_message_new)
@@ -893,12 +887,6 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
         AWS_ARRAY_SIZE(header_exclude_exceptions)));
 
     {
-        struct aws_xml_parser_options parser_options = {
-            .doc = aws_byte_cursor_from_buf(&body_buffer),
-        };
-
-        struct aws_xml_parser *parser = aws_xml_parser_new(allocator, &parser_options);
-
         struct complete_multipart_upload_xml_test_data xml_user_data = {
             .etag_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(ETAG_VALUE),
             .part_number_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("1"),
@@ -906,9 +894,12 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
             .found_part_number = false,
         };
 
-        ASSERT_SUCCESS(
-            aws_xml_parser_parse(parser, s_complete_multipart_upload_traverse_xml_node, (void *)&xml_user_data));
-        aws_xml_parser_destroy(parser);
+        struct aws_xml_parser_options parser_options = {
+            .doc = aws_byte_cursor_from_buf(&body_buffer),
+            .on_root_encountered = s_complete_multipart_upload_traverse_xml_node,
+            .user_data = &xml_user_data,
+        };
+        ASSERT_SUCCESS(aws_xml_parse(allocator, &parser_options));
 
         ASSERT_TRUE(xml_user_data.found_etag);
         ASSERT_TRUE(xml_user_data.found_part_number);

@@ -61,9 +61,6 @@ const struct aws_byte_cursor g_user_agent_header_name = AWS_BYTE_CUR_INIT_FROM_S
 const struct aws_byte_cursor g_user_agent_header_product_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRTS3NativeClient");
 
-const struct aws_byte_cursor g_error_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Error");
-const struct aws_byte_cursor g_code_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Code");
-
 const struct aws_byte_cursor g_s3_internal_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalError");
 const struct aws_byte_cursor g_s3_slow_down_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SlowDown");
 /* The special error code as Asynchronous Error Codes */
@@ -85,111 +82,85 @@ void copy_http_headers(const struct aws_http_headers *src, struct aws_http_heade
         aws_http_headers_set(dest, header.name, header.value);
     }
 }
-
-struct top_level_xml_tag_value_with_root_value_user_data {
+/* user_data for XML traversal */
+struct xml_get_body_at_path_traversal {
     struct aws_allocator *allocator;
-    const struct aws_byte_cursor *tag_name;
-    const struct aws_byte_cursor *expected_root_name;
-    bool *root_name_mismatch;
-    struct aws_string *result;
+    const char **path_name_array;
+    size_t path_name_count;
+    size_t path_name_i;
+    struct aws_byte_cursor *out_body;
+    bool found_node;
 };
 
-static bool s_top_level_xml_tag_value_child_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data) {
+static int s_xml_get_body_at_path_on_node(struct aws_xml_node *node, void *user_data) {
+    struct xml_get_body_at_path_traversal *traversal = user_data;
 
-    struct aws_byte_cursor node_name;
-
-    /* If we can't get the name of the node, stop traversing. */
-    if (aws_xml_node_get_name(node, &node_name)) {
-        return false;
+    /* if we already found what we're looking for, just finish parsing */
+    if (traversal->found_node) {
+        return AWS_OP_SUCCESS;
     }
 
-    struct top_level_xml_tag_value_with_root_value_user_data *xml_user_data = user_data;
+    /* check if this node is on the path */
+    struct aws_byte_cursor node_name = aws_xml_node_get_name(node);
+    const char *expected_name = traversal->path_name_array[traversal->path_name_i];
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, expected_name)) {
 
-    /* If the name of the node is what we are looking for, store the body of the node in our result, and stop
-     * traversing. */
-    if (aws_byte_cursor_eq(&node_name, xml_user_data->tag_name)) {
-
-        struct aws_byte_cursor node_body;
-        aws_xml_node_as_body(parser, node, &node_body);
-
-        xml_user_data->result = aws_string_new_from_cursor(xml_user_data->allocator, &node_body);
-
-        return false;
+        bool is_final_node_on_path = traversal->path_name_i + 1 == traversal->path_name_count;
+        if (is_final_node_on_path) {
+            /* retrieve the body */
+            if (aws_xml_node_as_body(node, traversal->out_body) != AWS_OP_SUCCESS) {
+                return AWS_OP_ERR;
+            }
+            traversal->found_node = true;
+            return AWS_OP_SUCCESS;
+        } else {
+            /* node is on path, but it's not the final node, so traverse its children */
+            traversal->path_name_i++;
+            if (aws_xml_node_traverse(node, s_xml_get_body_at_path_on_node, traversal) != AWS_OP_SUCCESS) {
+                return AWS_OP_ERR;
+            }
+            traversal->path_name_i--;
+            return AWS_OP_SUCCESS;
+        }
+    } else {
+        /* this node is not on the path, continue parsing siblings */
+        return AWS_OP_SUCCESS;
     }
-
-    /* If we made it here, the tag hasn't been found yet, so return true to keep looking. */
-    return true;
 }
 
-static bool s_top_level_xml_tag_value_root_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data) {
-    struct top_level_xml_tag_value_with_root_value_user_data *xml_user_data = user_data;
-    if (xml_user_data->expected_root_name) {
-        /* If we can't get the name of the node, stop traversing. */
-        struct aws_byte_cursor node_name;
-        if (aws_xml_node_get_name(node, &node_name)) {
-            return false;
-        }
-        if (!aws_byte_cursor_eq(&node_name, xml_user_data->expected_root_name)) {
-            /* Not match the expected root name, stop parsing. */
-            *xml_user_data->root_name_mismatch = true;
-            return false;
-        }
-    }
-
-    /* Traverse the root node, and then return false to stop. */
-    aws_xml_node_traverse(parser, node, s_top_level_xml_tag_value_child_xml_node, user_data);
-    return false;
-}
-
-struct aws_string *aws_xml_get_top_level_tag_with_root_name(
+int aws_xml_get_body_at_path(
     struct aws_allocator *allocator,
-    const struct aws_byte_cursor *tag_name,
-    const struct aws_byte_cursor *expected_root_name,
-    bool *out_root_name_mismatch,
-    struct aws_byte_cursor *xml_body) {
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(tag_name);
-    AWS_PRECONDITION(xml_body);
+    struct aws_byte_cursor xml_doc,
+    const char **path_name_array,
+    size_t path_name_count,
+    struct aws_byte_cursor *out_body) {
 
-    struct aws_xml_parser_options parser_options = {.doc = *xml_body};
-    struct aws_xml_parser *parser = aws_xml_parser_new(allocator, &parser_options);
-    bool root_name_mismatch = false;
+    AWS_PRECONDITION(path_name_count != 0);
 
-    struct top_level_xml_tag_value_with_root_value_user_data xml_user_data = {
-        allocator,
-        tag_name,
-        expected_root_name,
-        &root_name_mismatch,
-        NULL,
+    out_body->ptr = NULL;
+    out_body->len = 0;
+
+    struct xml_get_body_at_path_traversal traversal = {
+        .allocator = allocator,
+        .path_name_array = path_name_array,
+        .path_name_count = path_name_count,
+        .out_body = out_body,
     };
 
-    if (aws_xml_parser_parse(parser, s_top_level_xml_tag_value_root_xml_node, (void *)&xml_user_data)) {
-        aws_string_destroy(xml_user_data.result);
-        xml_user_data.result = NULL;
-        goto clean_up;
+    struct aws_xml_parser_options parse_options = {
+        .doc = xml_doc,
+        .on_root_encountered = s_xml_get_body_at_path_on_node,
+        .user_data = &traversal,
+    };
+    if (aws_xml_parse(allocator, &parse_options)) {
+        return AWS_OP_ERR;
     }
-    if (out_root_name_mismatch) {
-        *out_root_name_mismatch = root_name_mismatch;
+
+    if (!traversal.found_node) {
+        return aws_raise_error(AWS_ERROR_STRING_MATCH_NOT_FOUND);
     }
 
-clean_up:
-
-    aws_xml_parser_destroy(parser);
-
-    return xml_user_data.result;
-}
-
-struct aws_string *aws_xml_get_top_level_tag(
-    struct aws_allocator *allocator,
-    const struct aws_byte_cursor *tag_name,
-    struct aws_byte_cursor *xml_body) {
-    return aws_xml_get_top_level_tag_with_root_name(allocator, tag_name, NULL, NULL, xml_body);
+    return AWS_OP_SUCCESS;
 }
 
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
@@ -294,26 +265,26 @@ void aws_s3_init_default_signing_config(
 static struct aws_byte_cursor s_quote_entity_literal = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&quot;");
 static struct aws_byte_cursor s_quote_literal = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"");
 
-void aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf) {
-    AWS_PRECONDITION(str);
+struct aws_byte_buf aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_byte_cursor src) {
+    struct aws_byte_buf out_buf;
+    aws_byte_buf_init(&out_buf, allocator, src.len);
 
-    aws_byte_buf_init(out_buf, allocator, str->len);
-
-    for (size_t i = 0; i < str->len; ++i) {
-        size_t chars_remaining = str->len - i;
+    for (size_t i = 0; i < src.len; ++i) {
+        size_t chars_remaining = src.len - i;
 
         if (chars_remaining >= s_quote_entity_literal.len &&
-            !strncmp(
-                (const char *)&str->bytes[i], (const char *)s_quote_entity_literal.ptr, s_quote_entity_literal.len)) {
+            !strncmp((const char *)&src.ptr[i], (const char *)s_quote_entity_literal.ptr, s_quote_entity_literal.len)) {
             /* Append quote */
-            aws_byte_buf_append(out_buf, &s_quote_literal);
+            aws_byte_buf_append(&out_buf, &s_quote_literal);
             i += s_quote_entity_literal.len - 1;
         } else {
             /* Append character */
-            struct aws_byte_cursor character_cursor = aws_byte_cursor_from_array(&str->bytes[i], 1);
-            aws_byte_buf_append(out_buf, &character_cursor);
+            struct aws_byte_cursor character_cursor = aws_byte_cursor_from_array(&src.ptr[i], 1);
+            aws_byte_buf_append(&out_buf, &character_cursor);
         }
     }
+
+    return out_buf;
 }
 
 struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur) {
@@ -605,12 +576,12 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string) {
-    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_slow_down_error_code)) {
+int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string) {
+    if (aws_byte_cursor_eq_ignore_case(&error_code_string, &g_s3_slow_down_error_code)) {
         return AWS_ERROR_S3_SLOW_DOWN;
     }
-    if (aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_error_code) ||
-        aws_string_eq_byte_cursor(error_code_string, &g_s3_internal_errors_code)) {
+    if (aws_byte_cursor_eq_ignore_case(&error_code_string, &g_s3_internal_error_code) ||
+        aws_byte_cursor_eq_ignore_case(&error_code_string, &g_s3_internal_errors_code)) {
         return AWS_ERROR_S3_INTERNAL_ERROR;
     }
     return AWS_ERROR_UNKNOWN;

@@ -84,7 +84,7 @@ struct aws_s3_list_objects_params {
      */
     struct aws_byte_cursor endpoint;
     /**
-     * Callback to invoke on each object that's listed.
+     * Must not be NULL. Callback to invoke on each object that's listed.
      */
     aws_s3_on_object_fn *on_object;
     /**
@@ -109,10 +109,6 @@ AWS_EXTERN_C_BEGIN
  * the operation.
  */
 AWS_S3_API struct aws_s3_paginator *aws_s3_initiate_list_objects(
-    struct aws_allocator *allocator,
-    const struct aws_s3_list_objects_params *params);
-
-AWS_S3_API struct aws_s3_paginated_operation *aws_s3_list_objects_operation_new(
     struct aws_allocator *allocator,
     const struct aws_s3_list_objects_params *params);
 

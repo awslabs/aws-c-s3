@@ -165,10 +165,6 @@ extern const struct aws_byte_cursor g_head_method;
 AWS_S3_API
 extern const struct aws_byte_cursor g_delete_method;
 
-extern const struct aws_byte_cursor g_error_body_xml_name;
-
-extern const struct aws_byte_cursor g_code_body_xml_name;
-
 extern const struct aws_byte_cursor g_s3_internal_error_code;
 
 AWS_S3_API
@@ -184,25 +180,28 @@ void aws_cached_signing_config_destroy(struct aws_cached_signing_config_aws *cac
 AWS_S3_API
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest);
 
-/* Get a top-level (exists directly under the root tag) tag value. */
-AWS_S3_API
-struct aws_string *aws_xml_get_top_level_tag(
+/**
+ * Get content of XML element at path.
+ * For example:
+ * Given `xml_doc`: "<Error><Code>SlowDown</Code></Error>"
+ * And `path_name_array`: {"Error", "Code"}
+ * `out_body` is set to: "SlowDown"
+ *
+ * Returns AWS_OP_SUCCESS or AWS_OP_ERR.
+ * Raises AWS_ERROR_STRING_MATCH_NOT_FOUND if path not found in XML,
+ * or AWS_ERROR_INVALID_XML if the XML can't be parsed.
+ */
+int aws_xml_get_body_at_path(
     struct aws_allocator *allocator,
-    const struct aws_byte_cursor *tag_name,
-    struct aws_byte_cursor *xml_body);
+    struct aws_byte_cursor xml_doc,
+    const char **path_name_array,
+    size_t path_name_count,
+    struct aws_byte_cursor *out_body);
 
-/* Get a top-level (exists directly under the root tag) tag value with expected root name. */
+/* replace &quot; with escaped /"
+ * Returns initialized aws_byte_buf */
 AWS_S3_API
-struct aws_string *aws_xml_get_top_level_tag_with_root_name(
-    struct aws_allocator *allocator,
-    const struct aws_byte_cursor *tag_name,
-    const struct aws_byte_cursor *expected_root_name,
-    bool *out_root_name_mismatch,
-    struct aws_byte_cursor *xml_body);
-
-/* replace &quot; with escaped /" */
-AWS_S3_API
-void aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_string *str, struct aws_byte_buf *out_buf);
+struct aws_byte_buf aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_byte_cursor src);
 
 /* strip quotes if string is enclosed in quotes. does not remove quotes if they only appear on either side of the string
  */
@@ -267,7 +266,7 @@ void aws_s3_get_part_range(
 
 /* Match the S3 error code to CRT error code, return AWS_ERROR_UNKNOWN when not matched */
 AWS_S3_API
-int aws_s3_crt_error_code_from_server_error_code_string(const struct aws_string *error_code_string);
+int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string);
 
 AWS_EXTERN_C_END
 

@@ -11,7 +11,6 @@
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
 static const size_t s_multipart_copy_minimum_object_size = GB_TO_BYTES(1);
 
-static const struct aws_byte_cursor s_upload_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("UploadId");
 static const size_t s_complete_multipart_upload_init_body_size_bytes = 512;
 static const size_t s_abort_multipart_upload_init_body_size_bytes = 512;
 
@@ -559,19 +558,17 @@ static struct aws_string *s_etag_new_from_upload_part_copy_response(
     struct aws_allocator *allocator,
     struct aws_byte_buf *response_body) {
 
-    struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(response_body);
+    struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(response_body);
+    struct aws_byte_cursor etag_within_xml_quotes = {0};
+    const char *xml_path[] = {"CopyPartResult", "ETag"};
+    aws_xml_get_body_at_path(allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &etag_within_xml_quotes);
 
-    struct aws_string *etag_within_xml_quotes =
-        aws_xml_get_top_level_tag(allocator, &g_etag_header_name, &response_body_cursor);
-
-    struct aws_byte_buf etag_within_quotes_byte_buf = {0};
-    aws_replace_quote_entities(allocator, etag_within_xml_quotes, &etag_within_quotes_byte_buf);
+    struct aws_byte_buf etag_within_quotes_byte_buf = aws_replace_quote_entities(allocator, etag_within_xml_quotes);
 
     struct aws_string *stripped_etag =
         aws_strip_quotes(allocator, aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf));
 
     aws_byte_buf_clean_up(&etag_within_quotes_byte_buf);
-    aws_string_destroy(etag_within_xml_quotes);
 
     return stripped_etag;
 }
@@ -669,13 +666,15 @@ static void s_s3_copy_object_request_finished(
                     }
                 }
 
-                struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 /* Find the upload id for this multipart upload. */
-                struct aws_string *upload_id =
-                    aws_xml_get_top_level_tag(meta_request->allocator, &s_upload_id, &buffer_byte_cursor);
+                struct aws_byte_cursor upload_id = {0};
+                const char *xml_path[] = {"InitiateMultipartUploadResult", "UploadId"};
+                aws_xml_get_body_at_path(
+                    meta_request->allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &upload_id);
 
-                if (upload_id == NULL) {
+                if (upload_id.len == 0) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p Could not find upload-id in create-multipart-upload response",
@@ -685,7 +684,7 @@ static void s_s3_copy_object_request_finished(
                     error_code = AWS_ERROR_S3_MISSING_UPLOAD_ID;
                 } else {
                     /* Store the multipart upload id. */
-                    copy_object->upload_id = upload_id;
+                    copy_object->upload_id = aws_string_new_from_cursor(meta_request->allocator, &upload_id);
                 }
             }
 
@@ -754,25 +753,22 @@ static void s_s3_copy_object_request_finished(
                  */
                 copy_http_headers(copy_object->synced_data.needed_response_headers, final_response_headers);
 
-                struct aws_byte_cursor response_body_cursor =
-                    aws_byte_cursor_from_buf(&request->send_data.response_body);
+                struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 /* Grab the ETag for the entire object, and set it as a header. */
-                struct aws_string *etag_header_value =
-                    aws_xml_get_top_level_tag(meta_request->allocator, &g_etag_header_name, &response_body_cursor);
-
-                if (etag_header_value != NULL) {
-                    struct aws_byte_buf etag_header_value_byte_buf;
-                    AWS_ZERO_STRUCT(etag_header_value_byte_buf);
-
-                    aws_replace_quote_entities(meta_request->allocator, etag_header_value, &etag_header_value_byte_buf);
+                struct aws_byte_cursor etag_header_value = {0};
+                const char *xml_path[] = {"CompleteMultipartUploadResult", "ETag"};
+                aws_xml_get_body_at_path(
+                    meta_request->allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &etag_header_value);
+                if (etag_header_value.len > 0) {
+                    struct aws_byte_buf etag_header_value_byte_buf =
+                        aws_replace_quote_entities(meta_request->allocator, etag_header_value);
 
                     aws_http_headers_set(
                         final_response_headers,
                         g_etag_header_name,
                         aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
 
-                    aws_string_destroy(etag_header_value);
                     aws_byte_buf_clean_up(&etag_header_value_byte_buf);
                 }
 
