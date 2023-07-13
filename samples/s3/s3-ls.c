@@ -86,14 +86,14 @@ static bool s_app_completion_predicate(void *arg) {
 /**
  * Called once for each object returned in the ListObjectsV2 responses.
  */
-bool s_on_object(const struct aws_s3_object_info *info, void *user_data) {
+int s_on_object(const struct aws_s3_object_info *info, void *user_data) {
     struct s3_ls_app_data *app_ctx = user_data;
 
     if (app_ctx->long_format) {
         printf("%-18" PRIu64 " ", info->size);
     }
     printf("%.*s\n", (int)info->key.len, info->key.ptr);
-    return true;
+    return AWS_OP_SUCCESS;
 }
 
 /**

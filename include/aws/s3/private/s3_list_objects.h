@@ -44,7 +44,7 @@ struct aws_s3_object_info {
  * Invoked when an object or prefix is encountered during a ListObjectsV2 API call. Return false, to immediately
  * terminate the list operation. Returning true will continue until at least the current page is iterated.
  */
-typedef bool(aws_s3_on_object_fn)(const struct aws_s3_object_info *info, void *user_data);
+typedef int(aws_s3_on_object_fn)(const struct aws_s3_object_info *info, void *user_data);
 
 /**
  * Invoked upon the complete fetch and parsing of a page. If error_code is AWS_OP_SUCCESS and
@@ -84,7 +84,7 @@ struct aws_s3_list_objects_params {
      */
     struct aws_byte_cursor endpoint;
     /**
-     * Must not be NULL. Callback to invoke on each object that's listed.
+     * Callback to invoke on each object that's listed.
      */
     aws_s3_on_object_fn *on_object;
     /**

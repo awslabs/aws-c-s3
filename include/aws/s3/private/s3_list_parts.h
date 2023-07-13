@@ -86,13 +86,9 @@ struct aws_s3_list_parts_params {
      */
     struct aws_byte_cursor endpoint;
     /**
-     * Must not be NULL. Callback to invoke on each part that's listed.
+     * Callback to invoke on each part that's listed.
      */
     aws_s3_on_part_fn *on_part;
-    /**
-     * Must not be NULL. Callback to invoke when each page of the bucket listing completes.
-     */
-    aws_s3_on_page_finished_fn *on_list_finished;
     /**
      * Associated user data.
      */

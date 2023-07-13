@@ -134,7 +134,10 @@ static int s_on_list_bucket_result_node_encountered(struct aws_xml_node *node, v
         struct aws_byte_buf trimmed_etag = aws_replace_quote_entities(fs_wrapper.allocator, fs_wrapper.fs_info.e_tag);
         fs_wrapper.fs_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
 
-        int ret_val = operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
+        int ret_val = AWS_OP_SUCCESS;
+        if (operation_data->on_object) {
+            ret_val = operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
+        }
 
         aws_byte_buf_clean_up(&trimmed_etag);
 
@@ -148,10 +151,14 @@ static int s_on_list_bucket_result_node_encountered(struct aws_xml_node *node, v
             return AWS_OP_ERR;
         }
 
-        return operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
+        int ret_val = AWS_OP_SUCCESS;
+        if (operation_data->on_object) {
+            ret_val = operation_data->on_object(&fs_wrapper.fs_info, operation_data->user_data);
+        }
+        return ret_val;
     }
 
-    return true;
+    return AWS_OP_SUCCESS;
 }
 
 static int s_construct_next_request_http_message(
@@ -211,7 +218,6 @@ struct aws_s3_paginator *aws_s3_initiate_list_objects(
     AWS_FATAL_PRECONDITION(params->client);
     AWS_FATAL_PRECONDITION(params->bucket_name.len);
     AWS_FATAL_PRECONDITION(params->endpoint.len);
-    AWS_FATAL_PRECONDITION(params->on_object);
 
     struct aws_s3_operation_data *operation_data = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_operation_data));
     operation_data->allocator = allocator;

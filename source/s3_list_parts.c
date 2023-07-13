@@ -146,7 +146,10 @@ static int s_xml_on_ListPartsResult_child(struct aws_xml_node *node, void *user_
             aws_replace_quote_entities(result_wrapper.allocator, result_wrapper.part_info.e_tag);
         result_wrapper.part_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
 
-        int ret_val = operation_data->on_part(&result_wrapper.part_info, operation_data->user_data);
+        int ret_val = AWS_OP_SUCCESS;
+        if (operation_data->on_part) {
+            ret_val = operation_data->on_part(&result_wrapper.part_info, operation_data->user_data);
+        }
 
         aws_byte_buf_clean_up(&trimmed_etag);
 
