@@ -134,9 +134,6 @@ int aws_xml_get_body_at_path(
     const char **path_name_array,
     struct aws_byte_cursor *out_body) {
 
-    out_body->ptr = NULL;
-    out_body->len = 0;
-
     struct xml_get_body_at_path_traversal traversal = {
         .allocator = allocator,
         .path_name_array = path_name_array,
@@ -158,14 +155,18 @@ int aws_xml_get_body_at_path(
         .user_data = &traversal,
     };
     if (aws_xml_parse(allocator, &parse_options)) {
-        return AWS_OP_ERR;
+        goto error;
     }
 
     if (!traversal.found_node) {
-        return aws_raise_error(AWS_ERROR_STRING_MATCH_NOT_FOUND);
+        aws_raise_error(AWS_ERROR_STRING_MATCH_NOT_FOUND);
+        goto error;
     }
 
     return AWS_OP_SUCCESS;
+error:
+    AWS_ZERO_STRUCT(*out_body);
+    return AWS_OP_ERR;
 }
 
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
