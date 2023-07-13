@@ -510,43 +510,38 @@ static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, v
     /* Ensure we can successfully look up <Error><Code> */
     {
         struct aws_byte_cursor error_code = {0};
-        const char *xml_path[] = {"Error", "Code"};
+        const char *xml_path[] = {"Error", "Code", NULL};
 
-        ASSERT_SUCCESS(
-            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, AWS_ARRAY_SIZE(xml_path), &error_code));
+        ASSERT_SUCCESS(aws_xml_get_body_at_path(allocator, example_error_body, xml_path, &error_code));
         ASSERT_CURSOR_VALUE_CSTRING_EQUALS(error_code, "AccessDenied");
     }
 
     /* Ensure we fail if the beginning of the path doesn't match */
     {
         struct aws_byte_cursor error_code = {0};
-        const char *xml_path[] = {"ObviouslyInvalidName", "Code"};
+        const char *xml_path[] = {"ObviouslyInvalidName", "Code", NULL};
         ASSERT_ERROR(
             AWS_ERROR_STRING_MATCH_NOT_FOUND,
-            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, AWS_ARRAY_SIZE(xml_path), &error_code));
+            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, &error_code));
     }
 
     /* Ensure we fail if the end of the path doesn't match */
     {
         struct aws_byte_cursor error_code = {0};
-        const char *xml_path[] = {"Error", "ObviouslyInvalidName"};
+        const char *xml_path[] = {"Error", "ObviouslyInvalidName", NULL};
         ASSERT_ERROR(
             AWS_ERROR_STRING_MATCH_NOT_FOUND,
-            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, AWS_ARRAY_SIZE(xml_path), &error_code));
+            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, &error_code));
     }
 
     /* Ensure we fail if the document isn't valid XML */
     {
         struct aws_byte_cursor error_code = {0};
-        const char *xml_path[] = {"Error", "Code"};
+        const char *xml_path[] = {"Error", "Code", NULL};
         ASSERT_ERROR(
             AWS_ERROR_INVALID_XML,
             aws_xml_get_body_at_path(
-                allocator,
-                aws_byte_cursor_from_c_str("Obviously invalid XML document"),
-                xml_path,
-                AWS_ARRAY_SIZE(xml_path),
-                &error_code));
+                allocator, aws_byte_cursor_from_c_str("Obviously invalid XML document"), xml_path, &error_code));
     }
     return AWS_OP_SUCCESS;
 }

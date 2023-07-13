@@ -182,20 +182,27 @@ void copy_http_headers(const struct aws_http_headers *src, struct aws_http_heade
 
 /**
  * Get content of XML element at path.
+ *
+ * path_name_array must be a C array of char*, with a NULL as its final entry.
+ *
  * For example:
  * Given `xml_doc`: "<Error><Code>SlowDown</Code></Error>"
- * And `path_name_array`: {"Error", "Code"}
- * `out_body` is set to: "SlowDown"
+ * And `path_name_array`: {"Error", "Code", NULL}
+ * `out_body` will get set to: "SlowDown"
  *
  * Returns AWS_OP_SUCCESS or AWS_OP_ERR.
  * Raises AWS_ERROR_STRING_MATCH_NOT_FOUND if path not found in XML,
  * or AWS_ERROR_INVALID_XML if the XML can't be parsed.
+ *
+ * DO NOT make this function public without a lot of thought.
+ * The whole thing of passing a C-array of C-strings with a NULL sentinel
+ * is unconventional for this codebase.
  */
+AWS_S3_API
 int aws_xml_get_body_at_path(
     struct aws_allocator *allocator,
     struct aws_byte_cursor xml_doc,
-    const char **path_name_array,
-    size_t path_name_count,
+    const char *path_name_array[],
     struct aws_byte_cursor *out_body);
 
 /* replace &quot; with escaped /"

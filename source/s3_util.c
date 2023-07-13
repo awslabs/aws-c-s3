@@ -132,10 +132,7 @@ int aws_xml_get_body_at_path(
     struct aws_allocator *allocator,
     struct aws_byte_cursor xml_doc,
     const char **path_name_array,
-    size_t path_name_count,
     struct aws_byte_cursor *out_body) {
-
-    AWS_PRECONDITION(path_name_count != 0);
 
     out_body->ptr = NULL;
     out_body->len = 0;
@@ -143,10 +140,18 @@ int aws_xml_get_body_at_path(
     struct xml_get_body_at_path_traversal traversal = {
         .allocator = allocator,
         .path_name_array = path_name_array,
-        .path_name_count = path_name_count,
+        .path_name_count = 0,
         .out_body = out_body,
     };
 
+    /* find path_name_count */
+    while (path_name_array[traversal.path_name_count] != NULL) {
+        traversal.path_name_count++;
+        AWS_ASSERT(traversal.path_name_count < 4); /* sanity check, increase cap if necessary */
+    }
+    AWS_ASSERT(traversal.path_name_count > 0);
+
+    /* parse XML */
     struct aws_xml_parser_options parse_options = {
         .doc = xml_doc,
         .on_root_encountered = s_xml_get_body_at_path_on_node,

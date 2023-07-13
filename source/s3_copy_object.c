@@ -560,8 +560,8 @@ static struct aws_string *s_etag_new_from_upload_part_copy_response(
 
     struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(response_body);
     struct aws_byte_cursor etag_within_xml_quotes = {0};
-    const char *xml_path[] = {"CopyPartResult", "ETag"};
-    aws_xml_get_body_at_path(allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &etag_within_xml_quotes);
+    const char *xml_path[] = {"CopyPartResult", "ETag", NULL};
+    aws_xml_get_body_at_path(allocator, xml_doc, xml_path, &etag_within_xml_quotes);
 
     struct aws_byte_buf etag_within_quotes_byte_buf = aws_replace_quote_entities(allocator, etag_within_xml_quotes);
 
@@ -670,9 +670,8 @@ static void s_s3_copy_object_request_finished(
 
                 /* Find the upload id for this multipart upload. */
                 struct aws_byte_cursor upload_id = {0};
-                const char *xml_path[] = {"InitiateMultipartUploadResult", "UploadId"};
-                aws_xml_get_body_at_path(
-                    meta_request->allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &upload_id);
+                const char *xml_path[] = {"InitiateMultipartUploadResult", "UploadId", NULL};
+                aws_xml_get_body_at_path(meta_request->allocator, xml_doc, xml_path, &upload_id);
 
                 if (upload_id.len == 0) {
                     AWS_LOGF_ERROR(
@@ -757,9 +756,8 @@ static void s_s3_copy_object_request_finished(
 
                 /* Grab the ETag for the entire object, and set it as a header. */
                 struct aws_byte_cursor etag_header_value = {0};
-                const char *xml_path[] = {"CompleteMultipartUploadResult", "ETag"};
-                aws_xml_get_body_at_path(
-                    meta_request->allocator, xml_doc, xml_path, AWS_ARRAY_SIZE(xml_path), &etag_header_value);
+                const char *xml_path[] = {"CompleteMultipartUploadResult", "ETag", NULL};
+                aws_xml_get_body_at_path(meta_request->allocator, xml_doc, xml_path, &etag_header_value);
                 if (etag_header_value.len > 0) {
                     struct aws_byte_buf etag_header_value_byte_buf =
                         aws_replace_quote_entities(meta_request->allocator, etag_header_value);

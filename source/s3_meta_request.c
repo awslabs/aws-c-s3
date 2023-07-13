@@ -1160,9 +1160,8 @@ static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request
     }
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
     struct aws_byte_cursor error_code_string = {0};
-    const char *xml_path[] = {"Error", "Code"};
-    if (aws_xml_get_body_at_path(
-            request->allocator, response_body_cursor, xml_path, AWS_ARRAY_SIZE(xml_path), &error_code_string)) {
+    const char *xml_path[] = {"Error", "Code", NULL};
+    if (aws_xml_get_body_at_path(request->allocator, response_body_cursor, xml_path, &error_code_string)) {
 
         if (aws_last_error() == AWS_ERROR_INVALID_XML || aws_last_error() == AWS_ERROR_STRING_MATCH_NOT_FOUND) {
             /* The xml body is not Error, we can safely think the request succeed. */
