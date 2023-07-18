@@ -1159,11 +1159,11 @@ static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request
         return AWS_ERROR_SUCCESS;
     }
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
-    bool root_name_mismatch = false;
-    struct aws_string *error_code_string = aws_xml_get_top_level_tag_with_root_name(
-        request->allocator, &g_code_body_xml_name, &g_error_body_xml_name, &root_name_mismatch, &response_body_cursor);
-    if (error_code_string == NULL) {
-        if (root_name_mismatch || aws_last_error() == AWS_ERROR_MALFORMED_INPUT_STRING) {
+    struct aws_byte_cursor error_code_string = {0};
+    const char *xml_path[] = {"Error", "Code", NULL};
+    if (aws_xml_get_body_at_path(request->allocator, response_body_cursor, xml_path, &error_code_string)) {
+
+        if (aws_last_error() == AWS_ERROR_INVALID_XML || aws_last_error() == AWS_ERROR_STRING_MATCH_NOT_FOUND) {
             /* The xml body is not Error, we can safely think the request succeed. */
             aws_reset_error();
             return AWS_ERROR_SUCCESS;
@@ -1177,7 +1177,6 @@ static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request
             /* All error besides of internal error from async error are not recoverable from retry for now. */
             error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
         }
-        aws_string_destroy(error_code_string);
         return error_code;
     }
 }
