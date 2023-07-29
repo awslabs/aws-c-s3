@@ -19,6 +19,7 @@
 #include <aws/common/mutex.h>
 #include <aws/common/string.h>
 #include <aws/testing/async_stream_tester.h>
+#include <ittnotify.h>
 
 struct aws_client_bootstrap;
 struct aws_credentials_provider;

@@ -26,6 +26,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <time.h>
+#include <ittnotify.h>
 
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
