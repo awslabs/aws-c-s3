@@ -221,7 +221,6 @@ void aws_s3_client_unlock_synced_data(struct aws_s3_client *client) {
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
-
     __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("create s3 client"));
 
     AWS_PRECONDITION(allocator);
