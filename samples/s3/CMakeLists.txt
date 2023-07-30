@@ -26,6 +26,7 @@ target_include_directories(${S3_PROJECT_NAME} PUBLIC
         $<INSTALL_INTERFACE:include>)
 
 target_link_libraries(${S3_PROJECT_NAME} aws-c-s3)
+target_link_libraries(${S3_PROJECT_NAME} ittnotify)
 
 
 

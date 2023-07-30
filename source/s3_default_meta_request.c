@@ -54,6 +54,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     uint64_t content_length,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options) {
+    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("meta_request_default_new"));
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
@@ -105,7 +106,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     meta_request_default->content_length = (size_t)content_length;
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
-
+    __itt_task_end(s3_domain);
     return &meta_request_default->base;
 }
 

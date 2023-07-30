@@ -215,6 +215,12 @@ struct aws_s3_meta_request {
 
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
+
+    struct {
+        __itt_event prepare_request_event;
+        __itt_event sign_request_event;
+        __itt_event http_request_event;
+    } tracing_events;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */

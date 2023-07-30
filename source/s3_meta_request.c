@@ -565,7 +565,8 @@ void aws_s3_meta_request_prepare_request(
     void *user_data) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
-
+    meta_request->tracing_events.prepare_request_event = __itt_event_create("prepare_request", 15);
+    __itt_event_start(meta_request->tracing_events.prepare_request_event);
     if (meta_request->vtable->schedule_prepare_request) {
         meta_request->vtable->schedule_prepare_request(meta_request, request, callback, user_data);
     } else {
@@ -637,7 +638,7 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     struct aws_s3_prepare_request_payload *payload = user_data;
     struct aws_s3_request *request = payload->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
-
+    __itt_event_end(meta_request->tracing_events.prepare_request_event);
     int error_code = aws_future_void_get_error(payload->asyncstep_prepare_request);
     if (error_code) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
@@ -645,7 +646,6 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     }
 
     aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message);
-
     /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);
 }
@@ -769,7 +769,6 @@ static void s_s3_meta_request_request_on_signed(
     struct aws_signing_result *signing_result,
     int error_code,
     void *user_data) {
-
     struct aws_s3_prepare_request_payload *payload = user_data;
     AWS_PRECONDITION(payload);
 
@@ -810,7 +809,6 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(connection);
     AWS_PRECONDITION(connection->http_connection);
-
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
