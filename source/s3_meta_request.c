@@ -1593,10 +1593,12 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
-
+    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("read"));
     /* If async-stream, simply call read_to_fill() */
     if (meta_request->request_body_async_stream != NULL) {
-        return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
+        struct aws_future_bool *result = aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
+        __itt_task_end(s3_domain);
+        return result;
     }
 
     /* Else synchronous aws_input_stream */
@@ -1625,6 +1627,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
 
 synchronous_read_done:
+    __itt_task_end(s3_domain);
     return synchronous_read_future;
 }
 

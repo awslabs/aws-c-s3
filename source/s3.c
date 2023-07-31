@@ -97,10 +97,10 @@ static bool s_library_initialized = false;
 static struct aws_allocator *s_library_allocator = NULL;
 __itt_domain* s3_domain;
 void aws_s3_library_init(struct aws_allocator *allocator) {
-    s3_domain = __itt_domain_create("aws.c.s3");
     if (s_library_initialized) {
         return;
     }
+    s3_domain = __itt_domain_create("aws.c.s3");
 
     if (allocator) {
         s_library_allocator = allocator;
