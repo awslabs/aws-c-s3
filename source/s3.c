@@ -9,7 +9,6 @@
 #include <aws/common/error.h>
 #include <aws/common/hash_table.h>
 #include <aws/http/http.h>
-#include <aws/common/ittnotify.h>
 
 #define AWS_DEFINE_ERROR_INFO_S3(CODE, STR) AWS_DEFINE_ERROR_INFO(CODE, STR, "aws-c-s3")
 
@@ -95,7 +94,7 @@ static struct aws_hash_table s_compute_platform_info_table;
 
 static bool s_library_initialized = false;
 static struct aws_allocator *s_library_allocator = NULL;
-__itt_domain* s3_domain;
+__itt_domain *s3_domain;
 void aws_s3_library_init(struct aws_allocator *allocator) {
     if (s_library_initialized) {
         return;

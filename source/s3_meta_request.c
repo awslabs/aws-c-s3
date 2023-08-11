@@ -636,6 +636,7 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     struct aws_s3_prepare_request_payload *payload = user_data;
     struct aws_s3_request *request = payload->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
+
     int error_code = aws_future_void_get_error(payload->asyncstep_prepare_request);
     if (error_code) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
@@ -1587,12 +1588,14 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
     struct aws_byte_buf *buffer) {
-
+    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("read"));
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
     /* If async-stream, simply call read_to_fill() */
     if (meta_request->request_body_async_stream != NULL) {
-        struct aws_future_bool *result = aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
+        struct aws_future_bool *result =
+            aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
+        __itt_task_end(s3_domain);
         return result;
     }
 
@@ -1622,6 +1625,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
 
 synchronous_read_done:
+    __itt_task_end(s3_domain);
     return synchronous_read_future;
 }
 

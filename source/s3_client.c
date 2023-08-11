@@ -32,7 +32,6 @@
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
-#include <aws/common/ittnotify.h>
 #include <inttypes.h>
 #include <math.h>
 
