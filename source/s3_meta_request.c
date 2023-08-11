@@ -565,8 +565,6 @@ void aws_s3_meta_request_prepare_request(
     void *user_data) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
-    meta_request->tracing_events.prepare_request_event = __itt_event_create("prepare_request", 15);
-    __itt_event_start(meta_request->tracing_events.prepare_request_event);
     if (meta_request->vtable->schedule_prepare_request) {
         meta_request->vtable->schedule_prepare_request(meta_request, request, callback, user_data);
     } else {
@@ -638,7 +636,6 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     struct aws_s3_prepare_request_payload *payload = user_data;
     struct aws_s3_request *request = payload->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    __itt_event_end(meta_request->tracing_events.prepare_request_event);
     int error_code = aws_future_void_get_error(payload->asyncstep_prepare_request);
     if (error_code) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
@@ -1593,11 +1590,9 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
-    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("read"));
     /* If async-stream, simply call read_to_fill() */
     if (meta_request->request_body_async_stream != NULL) {
         struct aws_future_bool *result = aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
-        __itt_task_end(s3_domain);
         return result;
     }
 
@@ -1627,7 +1622,6 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
 
 synchronous_read_done:
-    __itt_task_end(s3_domain);
     return synchronous_read_future;
 }
 

@@ -9,7 +9,6 @@
 #include <aws/auth/signing_config.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
-#include <ittnotify.h>
 
 AWS_PUSH_SANE_WARNING_LEVEL
 

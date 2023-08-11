@@ -32,10 +32,9 @@
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
-
+#include <aws/common/ittnotify.h>
 #include <inttypes.h>
 #include <math.h>
-#include <ittnotify.h>
 
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
@@ -221,7 +220,6 @@ void aws_s3_client_unlock_synced_data(struct aws_s3_client *client) {
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
-    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("s3_client_new"));
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client_config);
@@ -464,7 +462,6 @@ struct aws_s3_client *aws_s3_client_new(
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
 
-    __itt_task_end(s3_domain);
     return client;
 
 on_error:
@@ -707,7 +704,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     const struct aws_s3_meta_request_options *options) {
 
     AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p Initiating making of meta request", (void *)client);
-    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("make_meta_request"));
 
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->vtable);
@@ -916,7 +912,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     } else {
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
     }
-    __itt_task_end(s3_domain);
 
     return meta_request;
 }
@@ -1176,7 +1171,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(client->vtable);
     AWS_PRECONDITION(client->vtable->finish_destroy);
-    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("process_work"));
 
     struct aws_linked_list meta_request_work_list;
     aws_linked_list_init(&meta_request_work_list);
@@ -1354,7 +1348,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             client->vtable->finish_destroy(client);
         }
     }
-    __itt_task_end(s3_domain);
 }
 
 static void s_s3_client_prepare_callback_queue_request(

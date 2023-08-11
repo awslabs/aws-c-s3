@@ -71,7 +71,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->host_name);
-    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("s3_endpoint_new"));
 
     struct aws_s3_endpoint *endpoint = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_endpoint));
     endpoint->client_synced_data.ref_count = 1;
@@ -119,7 +118,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     }
 
     endpoint->client = options->client;
-    __itt_task_end(s3_domain);
     return endpoint;
 
 error_cleanup:
@@ -127,7 +125,6 @@ error_cleanup:
     aws_string_destroy(options->host_name);
 
     aws_mem_release(allocator, endpoint);
-    __itt_task_end(s3_domain);
     return NULL;
 }
 

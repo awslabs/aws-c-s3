@@ -108,7 +108,6 @@ aws_use_package(aws-c-auth)
 aws_use_package(aws-checksums)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_AWS_LIBS})
-target_link_libraries(${PROJECT_NAME} PUBLIC ittnotify)
 
 aws_prepare_shared_lib_exports(${PROJECT_NAME})
 
