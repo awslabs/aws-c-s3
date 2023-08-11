@@ -62,13 +62,6 @@ if (WIN32)
         source_group("Header Files\\aws\\s3" FILES ${AWS_S3_HEADERS})
         source_group("Source Files" FILES ${AWS_S3_SRC})
     endif ()
-    set(PLATFORM_LIBS "")
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(PLATFORM_LIBS "")
-elseif (APPLE)
-    set(PLATFORM_LIBS "")
-elseif (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD" OR CMAKE_SYSTEM_NAME STREQUAL "NetBSD")
-    set(PLATFORM_LIBS "")
 endif()
 
 file(GLOB S3_HEADERS
