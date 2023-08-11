@@ -7,10 +7,9 @@
  */
 
 #include <aws/common/common.h>
+#include <aws/common/external/ittnotify.h>
 #include <aws/io/logging.h>
 #include <aws/s3/exports.h>
-#define INTEL_NO_ITTNOTIFY_API
-#include <aws/common/external/ittnotify.h>
 AWS_PUSH_SANE_WARNING_LEVEL
 
 #define AWS_C_S3_PACKAGE_ID 14
