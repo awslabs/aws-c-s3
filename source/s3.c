@@ -100,13 +100,13 @@ void aws_s3_library_init(struct aws_allocator *allocator) {
     if (s_library_initialized) {
         return;
     }
-    s3_domain = __itt_domain_create("aws.c.s3");
 
     if (allocator) {
         s_library_allocator = allocator;
     } else {
         s_library_allocator = aws_default_allocator();
     }
+    s3_domain = __itt_domain_create("aws.c.s3");
 
     aws_auth_library_init(s_library_allocator);
     aws_http_library_init(s_library_allocator);
