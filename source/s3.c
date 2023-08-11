@@ -5,6 +5,7 @@
 
 #include <aws/s3/s3.h>
 
+#include "aws/s3/private/s3_tracing.h"
 #include <aws/auth/auth.h>
 #include <aws/common/error.h>
 #include <aws/common/hash_table.h>

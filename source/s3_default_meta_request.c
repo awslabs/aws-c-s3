@@ -2,6 +2,7 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
+#include "aws/s3/private/s3_tracing.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
 #include <inttypes.h>
