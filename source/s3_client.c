@@ -32,6 +32,7 @@
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 #include <aws/io/uri.h>
+
 #include <inttypes.h>
 #include <math.h>
 
@@ -931,7 +932,6 @@ static void s_s3_client_endpoint_shutdown_callback(struct aws_s3_client *client)
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
-
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
 

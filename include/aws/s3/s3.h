@@ -9,6 +9,7 @@
 #include <aws/common/common.h>
 #include <aws/io/logging.h>
 #include <aws/s3/exports.h>
+
 AWS_PUSH_SANE_WARNING_LEVEL
 
 #define AWS_C_S3_PACKAGE_ID 14
