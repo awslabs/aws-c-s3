@@ -10,6 +10,7 @@ set(S3_PROJECT_NAME s3)
 add_executable(${S3_PROJECT_NAME} ${S3_SRC})
 aws_set_common_properties(${S3_PROJECT_NAME})
 
+
 target_include_directories(${S3_PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)

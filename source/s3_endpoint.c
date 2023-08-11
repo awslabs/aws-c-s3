@@ -118,6 +118,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     }
 
     endpoint->client = options->client;
+
     return endpoint;
 
 error_cleanup:
@@ -125,6 +126,7 @@ error_cleanup:
     aws_string_destroy(options->host_name);
 
     aws_mem_release(allocator, endpoint);
+
     return NULL;
 }
 

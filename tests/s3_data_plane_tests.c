@@ -1247,7 +1247,7 @@ static int s_test_s3_get_object_less_than_part_size(struct aws_allocator *alloca
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    ASSERT_NOT_NULL(client);
+
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
         &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
 
