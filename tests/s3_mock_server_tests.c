@@ -901,13 +901,12 @@ TEST_CASE(request_time_too_skewed_mock_server) {
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
     };
 
-    /* The request can fail if proxy is unavailable. */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
 
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED, out_results.finished_error_code);
-    /* Check the metrics, we should have  */
-    size_t result_num = aws_array_list_length(&out_results.synced_data.metrics);
+
     /* The default retry will max out after 5 times. So, in total, it will be 6 requests, first one and 5 retries. */
+    size_t result_num = aws_array_list_length(&out_results.synced_data.metrics);
     ASSERT_UINT_EQUALS(6, result_num);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
