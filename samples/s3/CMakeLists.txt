@@ -15,7 +15,7 @@ target_include_directories(${S3_PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
-target_link_libraries(${S3_PROJECT_NAME} aws-c-s3)
+target_link_libraries(${S3_PROJECT_NAME} PRIVATE aws-c-s3)
 
 if (BUILD_SHARED_LIBS AND NOT WIN32)
     message(INFO " s3 will be built with shared libs, but you may need to set LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib to run the application")
