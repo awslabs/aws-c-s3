@@ -294,13 +294,6 @@ void aws_s3_meta_request_send_request_finish_default(
     struct aws_http_stream *stream,
     int error_code);
 
-/* Implementation for when a request finishes a particular send to handle possible async error from S3. */
-AWS_S3_API
-void aws_s3_meta_request_send_request_finish_handle_async_error(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code);
-
 /* Called by the client when a request is completely finished and not doing any further retries. */
 AWS_S3_API
 void aws_s3_meta_request_finished_request(

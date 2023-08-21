@@ -60,7 +60,7 @@ static int s_s3_copy_object_request_type(struct aws_s3_request *request) {
 
 static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .update = s_s3_copy_object_update,
-    .send_request_finish = aws_s3_meta_request_send_request_finish_handle_async_error,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_copy_object_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
