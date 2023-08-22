@@ -63,11 +63,6 @@ const struct aws_byte_cursor g_user_agent_header_product_name =
 
 const struct aws_byte_cursor g_s3_internal_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalError");
 
-const struct aws_byte_cursor s_s3_slow_down_error_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SlowDown");
-const struct aws_byte_cursor s_s3_time_too_skewed = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("RequestTimeTooSkewed");
-/* The special error code as Asynchronous Error Codes */
-const struct aws_byte_cursor s_s3_internal_errors_code = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("InternalErrors");
-
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
 
@@ -585,14 +580,14 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
 }
 
 int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string) {
-    if (aws_byte_cursor_eq_ignore_case(&error_code_string, &s_s3_slow_down_error_code)) {
+    if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "SlowDown")) {
         return AWS_ERROR_S3_SLOW_DOWN;
     }
     if (aws_byte_cursor_eq_ignore_case(&error_code_string, &g_s3_internal_error_code) ||
-        aws_byte_cursor_eq_ignore_case(&error_code_string, &s_s3_internal_errors_code)) {
+        aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "InternalErrors")) {
         return AWS_ERROR_S3_INTERNAL_ERROR;
     }
-    if (aws_byte_cursor_eq_ignore_case(&error_code_string, &s_s3_time_too_skewed)) {
+    if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "RequestTimeTooSkewed")) {
         return AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED;
     }
     return AWS_ERROR_UNKNOWN;

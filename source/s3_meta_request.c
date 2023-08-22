@@ -1152,6 +1152,30 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(connection, stream, error_code);
 }
 
+static bool s_handle_async_error(struct aws_s3_request *request) {
+    /* We handle async error for */
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    switch (meta_request->type) {
+        case AWS_S3_META_REQUEST_TYPE_DEFAULT:
+        case AWS_S3_META_REQUEST_TYPE_COPY_OBJECT:
+            /**
+             * Handle async error for default type of request. Mostly for single part copy object.
+             * Also handle it for all copy object requests.
+             **/
+            return true;
+        case AWS_S3_META_REQUEST_TYPE_GET_OBJECT:
+            return false;
+        case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT:
+            if (meta_request->vtable->get_request_type(request) == AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
+                /* Only handle the async error for complete multipart upload. */
+                return true;
+            }
+            return false;
+        default:
+            return false;
+    }
+}
+
 static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
     int response_status = request->send_data.response_status;
@@ -1159,7 +1183,7 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
     struct aws_byte_cursor error_code_string = {0};
 
-    if (response_status == AWS_HTTP_STATUS_CODE_200_OK) {
+    if (response_status == AWS_HTTP_STATUS_CODE_200_OK && s_handle_async_error(request)) {
         /* Handle Async Error, 200 status code with error in the body. */
         if (request->send_data.response_body.len == 0) {
             /* Empty body is success */
@@ -1190,9 +1214,9 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
                 AWS_OP_SUCCESS) {
                 /* Check the error code. Map the S3 error code to CRT error code. */
                 int error_code = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
-                if (error_code == AWS_ERROR_UNKNOWN) {
-                    /* All error besides of internal error from async error are not recoverable from retry for now. */
-                    error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+                if (error_code != AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED) {
+                    /* If error code is not too skewed, we report unrecoverable invalid response status for 403 */
+                    error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
                 }
                 return error_code;
             }
