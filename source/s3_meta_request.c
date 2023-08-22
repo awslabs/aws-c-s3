@@ -1166,7 +1166,8 @@ static bool s_handle_async_error(struct aws_s3_request *request) {
         case AWS_S3_META_REQUEST_TYPE_GET_OBJECT:
             return false;
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT:
-            if (meta_request->vtable->get_request_type(request) == AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
+            if (meta_request->vtable->get_request_type &&
+                meta_request->vtable->get_request_type(request) == AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
                 /* Only handle the async error for complete multipart upload. */
                 return true;
             }
