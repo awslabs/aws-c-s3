@@ -245,7 +245,6 @@ static void s_s3_test_meta_request_progress(
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
 
-    meta_request_test_results->progress.invoked_count += 1;
     meta_request_test_results->progress.total_bytes_transferred += progress->bytes_transferred;
 
     /* Once content_length is reported, it shouldn't change */
@@ -1630,9 +1629,9 @@ int aws_s3_tester_send_meta_request_with_options(
 
         if (options->meta_request_type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
             /* Figure out how much is being uploaded from pre-existing message */
-            struct aws_input_stream *input_stream = aws_http_message_get_body_stream(meta_request_options.message);
-            if (input_stream != NULL) {
-                ASSERT_SUCCESS(aws_input_stream_get_length(input_stream, (int64_t *)&upload_size_bytes));
+            struct aws_input_stream *mystery_stream = aws_http_message_get_body_stream(meta_request_options.message);
+            if (mystery_stream != NULL) {
+                ASSERT_SUCCESS(aws_input_stream_get_length(mystery_stream, (int64_t *)&upload_size_bytes));
             }
         }
     }

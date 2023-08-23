@@ -5325,6 +5325,7 @@ static void s_copy_object_meta_request_progress_callback(
     const struct aws_s3_meta_request_progress *progress,
     void *user_data) {
 
+    (void)meta_request;
     struct copy_object_test_data *test_data = user_data;
 
     aws_mutex_lock(&test_data->mutex);
