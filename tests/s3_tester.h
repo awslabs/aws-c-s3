@@ -236,8 +236,8 @@ struct aws_s3_meta_request_test_results {
     /* Record data from progress_callback() */
     struct {
         size_t invoked_count;    /* Number of times callback invoked */
-        uint64_t total_bytes;    /* Accumulator for progress_bytes */
-        uint64_t content_length; /* Store info->content_legnth */
+        uint64_t content_length; /* Remember progress->content_length */
+        uint64_t total_bytes;    /* Accumulator for progress->progress_bytes */
     } progress;
 
     /* Protected the tester->synced_data.lock */
