@@ -177,7 +177,11 @@ struct aws_s3_meta_request_progress {
 };
 
 /**
- * Invoked to report progress of multi-part upload and copy object requests.
+ * Invoked to report progress of a meta-request.
+ * For PutObject, progress refers to bytes uploaded.
+ * For CopyObject, progress refers to bytes copied.
+ * For GetObject, progress refers to bytes downloaded.
+ * For anything else, progress refers to response bytes received.
  */
 typedef void(aws_s3_meta_request_progress_fn)(
     struct aws_s3_meta_request *meta_request,
@@ -534,6 +538,7 @@ struct aws_s3_meta_request_options {
 
     /**
      * Invoked to report progress of the meta request execution.
+     * See `aws_s3_meta_request_progress_fn`.
      */
     aws_s3_meta_request_progress_fn *progress_callback;
 

@@ -336,6 +336,10 @@ has_work_remaining:
     work_remaining = true;
 
 no_work_remaining:
+    /* If some events are still being delivered to caller, then wait for those to finish */
+    if (!work_remaining && aws_s3_meta_request_are_events_out_for_delivery_synced(meta_request)) {
+        work_remaining = true;
+    }
 
     if (!work_remaining) {
         aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
@@ -640,6 +644,15 @@ static void s_s3_copy_object_request_finished(
 
             /* Signals completion of the meta request */
             if (error_code == AWS_ERROR_SUCCESS) {
+
+                /* Send progress_callback for delivery on io_event_loop thread */
+                if (meta_request->progress_callback != NULL) {
+                    struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                    event.u.progress.info.bytes_transferred = copy_object->synced_data.content_length;
+                    event.u.progress.info.content_length = copy_object->synced_data.content_length;
+                    aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+                }
+
                 copy_object->synced_data.copy_request_bypass_completed = true;
             } else {
                 /* Bypassed CopyObject request failed */
@@ -720,11 +733,13 @@ static void s_s3_copy_object_request_finished(
                 AWS_ASSERT(etag != NULL);
 
                 ++copy_object->synced_data.num_parts_successful;
+
+                /* Send progress_callback for delivery on io_event_loop thread. */
                 if (meta_request->progress_callback != NULL) {
-                    struct aws_s3_meta_request_progress progress = {
-                        .bytes_transferred = copy_object->synced_data.part_size,
-                        .content_length = copy_object->synced_data.content_length};
-                    meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
+                    struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                    event.u.progress.info.bytes_transferred = copy_object->synced_data.part_size;
+                    event.u.progress.info.content_length = copy_object->synced_data.content_length;
+                    aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
                 }
 
                 struct aws_s3_mpu_part_info *part = NULL;

@@ -245,7 +245,20 @@ static void s_s3_test_meta_request_progress(
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
 
-    aws_atomic_fetch_add(&meta_request_test_results->total_bytes_uploaded, (size_t)progress->bytes_transferred);
+    meta_request_test_results->progress.invoked_count += 1;
+    meta_request_test_results->progress.total_bytes += progress->bytes_transferred;
+
+    /* Once content_length is reported, it shouldn't change */
+    if (meta_request_test_results->progress.content_length == 0) {
+        meta_request_test_results->progress.content_length = progress->content_length;
+    } else {
+        AWS_FATAL_ASSERT(meta_request_test_results->progress.content_length == progress->content_length);
+    }
+
+    /* If content_length is known, we shouldn't go over it */
+    if (progress->content_length != 0) {
+        AWS_FATAL_ASSERT(meta_request_test_results->progress.total_bytes <= progress->content_length);
+    }
 
     if (meta_request_test_results->progress_callback != NULL) {
         meta_request_test_results->progress_callback(meta_request, progress, user_data);
@@ -474,7 +487,6 @@ void aws_s3_meta_request_test_results_init(
     AWS_ZERO_STRUCT(*test_meta_request);
     test_meta_request->allocator = allocator;
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
-    aws_atomic_init_int(&test_meta_request->total_bytes_uploaded, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
@@ -1648,21 +1660,6 @@ int aws_s3_tester_send_meta_request_with_options(
         ASSERT_TRUE(aws_s3_meta_request_is_finished(meta_request));
     }
 
-    /* If total_bytes_uploaded wasn't set by the progress callback,
-     * then set it based on number of bytes read from input-stream.
-     * (progress callback isn't currently hooked up for single part upload) */
-    if ((out_results->finished_error_code == AWS_ERROR_SUCCESS) &&
-        (aws_atomic_load_int(&out_results->total_bytes_uploaded) == 0)) {
-
-        uint64_t bytes_read_from_stream = 0;
-        if (input_stream != NULL) {
-            bytes_read_from_stream = aws_input_stream_tester_total_bytes_read(input_stream);
-        } else if (async_stream != NULL) {
-            bytes_read_from_stream = aws_async_input_stream_tester_total_bytes_read(async_stream);
-        }
-        aws_atomic_store_int(&out_results->total_bytes_uploaded, (size_t)bytes_read_from_stream);
-    }
-
     switch (options->validate_type) {
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS:
             ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, out_results->finished_error_code);
@@ -1671,6 +1668,15 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, options->sse_type));
             } else if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
                 ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(out_results, options->sse_type));
+
+                /* Expected number of bytes should have been read from stream, and reported via progress callbacks */
+                uint64_t object_size = MB_TO_BYTES(options->put_options.object_size_mb);
+                ASSERT_UINT_EQUALS(object_size, out_results->progress.total_bytes);
+                if (input_stream != NULL) {
+                    ASSERT_UINT_EQUALS(object_size, aws_input_stream_tester_total_bytes_read(input_stream));
+                } else if (async_stream != NULL) {
+                    ASSERT_UINT_EQUALS(object_size, aws_async_input_stream_tester_total_bytes_read(async_stream));
+                }
             }
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:
@@ -1857,6 +1863,8 @@ int aws_s3_tester_validate_get_object_results(
         meta_request_test_results->received_body_size);
 
     ASSERT_TRUE(content_length == meta_request_test_results->received_body_size);
+    ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.total_bytes);
+    ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.content_length);
 
     return AWS_OP_SUCCESS;
 }

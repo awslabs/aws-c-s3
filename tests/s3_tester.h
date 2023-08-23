@@ -233,10 +233,12 @@ struct aws_s3_meta_request_test_results {
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
 
-    /* accumulator of amount of bytes uploaded.
-     * Currently, this only works for MPU and Copy meta-requests.
-     * It's powered by the progress_callback which isn't invoked for all types */
-    struct aws_atomic_var total_bytes_uploaded;
+    /* Record data from progress_callback() */
+    struct {
+        size_t invoked_count;    /* Number of times callback invoked */
+        uint64_t total_bytes;    /* Accumulator for progress_bytes */
+        uint64_t content_length; /* Store info->content_legnth */
+    } progress;
 
     /* Protected the tester->synced_data.lock */
     struct {

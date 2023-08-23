@@ -317,6 +317,10 @@ static bool s_s3_auto_ranged_get_update(
         }
 
     no_work_remaining:
+        /* If some events are still being delivered to caller, then wait for those to finish */
+        if (!work_remaining && aws_s3_meta_request_are_events_out_for_delivery_synced(meta_request)) {
+            work_remaining = true;
+        }
 
         if (!work_remaining) {
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
@@ -694,6 +698,18 @@ update_synced_data:
                         ++auto_ranged_get->synced_data.num_parts_checksum_validated;
                     }
                     ++auto_ranged_get->synced_data.num_parts_successful;
+
+                    /* Send progress_callback for delivery on io_event_loop thread */
+                    if (meta_request->progress_callback != NULL) {
+                        struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                        event.u.progress.info.bytes_transferred = request->send_data.response_body.len;
+                        event.u.progress.info.content_length =
+                            auto_ranged_get->synced_data.object_range_empty
+                                ? 0
+                                : (auto_ranged_get->synced_data.object_range_end + 1 -
+                                   auto_ranged_get->synced_data.object_range_start);
+                        aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+                    }
 
                     aws_s3_meta_request_stream_response_body_synced(meta_request, request);
 
