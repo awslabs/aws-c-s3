@@ -831,9 +831,6 @@ TEST_CASE(endpoint_override_mock_server) {
         .mock_server = true,
     };
 
-    struct aws_s3_meta_request_test_results out_results;
-    aws_s3_meta_request_test_results_init(&out_results, allocator);
-
     /* Put together a simple S3 Put Object request. */
     struct aws_input_stream *input_stream =
         aws_s3_test_input_stream_new(allocator, put_options.put_options.object_size_mb);
@@ -843,7 +840,7 @@ TEST_CASE(endpoint_override_mock_server) {
 
     /* 1. Create request without host and use endpoint override for the host info */
     put_options.message = message;
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /* 2. Create request with host info missmatch endpoint override */
     struct aws_http_header host_header = {
@@ -853,12 +850,11 @@ TEST_CASE(endpoint_override_mock_server) {
     ASSERT_SUCCESS(aws_http_message_add_header(message, host_header));
     put_options.message = message;
     put_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /* Clean up */
     aws_http_message_destroy(message);
     aws_input_stream_release(input_stream);
-    aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
