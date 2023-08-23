@@ -246,7 +246,7 @@ static void s_s3_test_meta_request_progress(
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
 
     meta_request_test_results->progress.invoked_count += 1;
-    meta_request_test_results->progress.total_bytes += progress->bytes_transferred;
+    meta_request_test_results->progress.total_bytes_transferred += progress->bytes_transferred;
 
     /* Once content_length is reported, it shouldn't change */
     if (meta_request_test_results->progress.content_length == 0) {
@@ -257,7 +257,7 @@ static void s_s3_test_meta_request_progress(
 
     /* If content_length is known, we shouldn't go over it */
     if (progress->content_length != 0) {
-        AWS_FATAL_ASSERT(meta_request_test_results->progress.total_bytes <= progress->content_length);
+        AWS_FATAL_ASSERT(meta_request_test_results->progress.total_bytes_transferred <= progress->content_length);
     }
 
     if (meta_request_test_results->progress_callback != NULL) {
@@ -1685,7 +1685,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     ASSERT_UINT_EQUALS(upload_size_bytes, aws_async_input_stream_tester_total_bytes_read(async_stream));
                 }
 
-                ASSERT_UINT_EQUALS(upload_size_bytes, out_results->progress.total_bytes);
+                ASSERT_UINT_EQUALS(upload_size_bytes, out_results->progress.total_bytes_transferred);
                 if (!options->put_options.skip_content_length) {
                     ASSERT_UINT_EQUALS(upload_size_bytes, out_results->progress.content_length);
                 }
@@ -1875,7 +1875,7 @@ int aws_s3_tester_validate_get_object_results(
         meta_request_test_results->received_body_size);
 
     ASSERT_TRUE(content_length == meta_request_test_results->received_body_size);
-    ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.total_bytes);
+    ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.total_bytes_transferred);
     ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.content_length);
 
     return AWS_OP_SUCCESS;

@@ -5271,6 +5271,8 @@ struct copy_object_test_data {
     bool headers_callback_was_invoked;
     int meta_request_error_code;
     int response_status_code;
+    uint64_t progress_callback_content_length;
+    uint64_t progress_callback_total_bytes_transferred;
 };
 
 static void s_copy_object_meta_request_finish(
@@ -5318,6 +5320,19 @@ static int s_copy_object_meta_request_headers_callback(
     return AWS_OP_SUCCESS;
 }
 
+static void s_copy_object_meta_request_progress_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+
+    struct copy_object_test_data *test_data = user_data;
+
+    aws_mutex_lock(&test_data->mutex);
+    test_data->progress_callback_content_length = progress->content_length;
+    test_data->progress_callback_total_bytes_transferred += progress->bytes_transferred;
+    aws_mutex_unlock(&test_data->mutex);
+}
+
 static bool s_copy_test_completion_predicate(void *arg) {
     struct copy_object_test_data *test_data = arg;
     return test_data->execution_completed;
@@ -5328,7 +5343,8 @@ static int s_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_byte_cursor x_amz_copy_source,
     struct aws_byte_cursor destination_key,
     int expected_error_code,
-    int expected_response_status) {
+    int expected_response_status,
+    uint64_t expected_size) {
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -5369,6 +5385,7 @@ static int s_test_s3_copy_object_from_x_amz_copy_source(
         .signing_config = client_config.signing_config,
         .finish_callback = s_copy_object_meta_request_finish,
         .headers_callback = s_copy_object_meta_request_headers_callback,
+        .progress_callback = s_copy_object_meta_request_progress_callback,
         .message = message,
         .shutdown_callback = NULL,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
@@ -5385,6 +5402,12 @@ static int s_test_s3_copy_object_from_x_amz_copy_source(
     /* assert error_code and response_status_code */
     ASSERT_INT_EQUALS(expected_error_code, test_data.meta_request_error_code);
     ASSERT_INT_EQUALS(expected_response_status, test_data.response_status_code);
+
+    /* assert that progress_callback matches the expected size*/
+    if (test_data.meta_request_error_code == AWS_ERROR_SUCCESS) {
+        ASSERT_UINT_EQUALS(expected_size, test_data.progress_callback_total_bytes_transferred);
+        ASSERT_UINT_EQUALS(expected_size, test_data.progress_callback_content_length);
+    }
 
     /* assert headers callback was invoked */
     ASSERT_TRUE(test_data.headers_callback_was_invoked);
@@ -5404,7 +5427,8 @@ static int s_test_s3_copy_object_helper(
     struct aws_byte_cursor source_key,
     struct aws_byte_cursor destination_key,
     int expected_error_code,
-    int expected_response_status) {
+    int expected_response_status,
+    uint64_t expected_size) {
 
     struct aws_byte_cursor source_bucket = g_test_bucket_name;
 
@@ -5421,7 +5445,7 @@ static int s_test_s3_copy_object_helper(
     struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
 
     return s_test_s3_copy_object_from_x_amz_copy_source(
-        allocator, x_amz_copy_source, destination_key, expected_error_code, expected_response_status);
+        allocator, x_amz_copy_source, destination_key, expected_error_code, expected_response_status, expected_size);
 }
 
 AWS_TEST_CASE(test_s3_copy_small_object, s_test_s3_copy_small_object)
@@ -5431,7 +5455,7 @@ static int s_test_s3_copy_small_object(struct aws_allocator *allocator, void *ct
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-1MB");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_1MB");
     return s_test_s3_copy_object_helper(
-        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK, MB_TO_BYTES(1));
 }
 
 AWS_TEST_CASE(test_s3_copy_small_object_special_char, s_test_s3_copy_small_object_special_char)
@@ -5442,7 +5466,7 @@ static int s_test_s3_copy_small_object_special_char(struct aws_allocator *alloca
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_1MB_@");
 
     return s_test_s3_copy_object_helper(
-        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK, MB_TO_BYTES(1));
 }
 
 AWS_TEST_CASE(test_s3_multipart_copy_large_object_special_char, s_test_s3_multipart_copy_large_object_special_char)
@@ -5453,7 +5477,7 @@ static int s_test_s3_multipart_copy_large_object_special_char(struct aws_allocat
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_2GB-@");
 
     return s_test_s3_copy_object_helper(
-        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK, GB_TO_BYTES(2));
 }
 
 AWS_TEST_CASE(test_s3_multipart_copy_large_object, s_test_s3_multipart_copy_large_object)
@@ -5463,7 +5487,7 @@ static int s_test_s3_multipart_copy_large_object(struct aws_allocator *allocator
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-2GB");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_2GB");
     return s_test_s3_copy_object_helper(
-        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK, GB_TO_BYTES(2));
 }
 
 AWS_TEST_CASE(test_s3_copy_object_invalid_source_key, s_test_s3_copy_object_invalid_source_key)
@@ -5477,7 +5501,8 @@ static int s_test_s3_copy_object_invalid_source_key(struct aws_allocator *alloca
         source_key,
         destination_key,
         AWS_ERROR_S3_INVALID_RESPONSE_STATUS,
-        AWS_HTTP_STATUS_CODE_404_NOT_FOUND);
+        AWS_HTTP_STATUS_CODE_404_NOT_FOUND,
+        0 /* expected_size is ignored */);
 }
 
 /**
@@ -5507,7 +5532,7 @@ static int s_test_s3_copy_source_prefixed_by_slash(struct aws_allocator *allocat
     struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
 
     return s_test_s3_copy_object_from_x_amz_copy_source(
-        allocator, x_amz_copy_source, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator, x_amz_copy_source, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK, MB_TO_BYTES(1));
 }
 
 /**
@@ -5537,7 +5562,12 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
     struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
 
     return s_test_s3_copy_object_from_x_amz_copy_source(
-        allocator, x_amz_copy_source, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK);
+        allocator,
+        x_amz_copy_source,
+        destination_key,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK,
+        MB_TO_BYTES(256));
 }
 
 static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
