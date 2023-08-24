@@ -13,7 +13,6 @@
 
 const uint32_t s_conservative_max_requests_in_flight = 8;
 const struct aws_byte_cursor g_application_xml_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("application/xml");
-const struct aws_byte_cursor g_object_size_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ActualObjectSize");
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request);
 
@@ -426,7 +425,9 @@ finish:;
     return future;
 }
 
-/* Check the finish result of meta request, in case of the request failed because of downloading an empty file */
+/* Check the finish result of meta request.
+ * Return true if the request failed because it downloaded an empty file.
+ * Return false if the request failed for any other reason */
 static bool s_check_empty_file_download_error(struct aws_s3_request *failed_request) {
     struct aws_http_headers *failed_headers = failed_request->send_data.response_headers;
     struct aws_byte_buf failed_body = failed_request->send_data.response_body;
@@ -437,12 +438,11 @@ static bool s_check_empty_file_download_error(struct aws_s3_request *failed_requ
             /* Content type found */
             if (aws_byte_cursor_eq_ignore_case(&content_type, &g_application_xml_value)) {
                 /* XML response */
-                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&failed_body);
-                struct aws_string *size =
-                    aws_xml_get_top_level_tag(failed_request->allocator, &g_object_size_value, &body_cursor);
-                bool check_size = aws_string_eq_c_str(size, "0");
-                aws_string_destroy(size);
-                if (check_size) {
+                struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&failed_body);
+                const char *path_to_size[] = {"Error", "ActualObjectSize", NULL};
+                struct aws_byte_cursor size = {0};
+                aws_xml_get_body_at_path(failed_request->allocator, xml_doc, path_to_size, &size);
+                if (aws_byte_cursor_eq_c_str(&size, "0")) {
                     return true;
                 }
             }
