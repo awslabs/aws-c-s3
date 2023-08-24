@@ -193,7 +193,7 @@ static bool s_s3_auto_ranged_get_update(
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
                     request->part_range_start = 0;
-                    request->part_range_end = meta_request->part_size - 1;
+                    request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
                     request->discovers_object_size = true;
 
                     ++auto_ranged_get->synced_data.num_parts_requested;
@@ -498,7 +498,7 @@ static int s_discover_object_range_and_content_length(
              * object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
-                object_range_end = total_content_length - 1;
+                object_range_end = total_content_length - 1; /* range-end is inclusive */
             } else if (aws_s3_parse_content_range_response_header(
                            meta_request->allocator,
                            request->send_data.response_headers,
@@ -557,7 +557,7 @@ static int s_discover_object_range_and_content_length(
 
             /* When discovering the object size via first-part, the object range is the entire object. */
             object_range_start = 0;
-            object_range_end = total_content_length - 1;
+            object_range_end = total_content_length - 1; /* range-end is inclusive */
 
             result = AWS_OP_SUCCESS;
             break;
@@ -703,11 +703,13 @@ update_synced_data:
                     if (meta_request->progress_callback != NULL) {
                         struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
                         event.u.progress.info.bytes_transferred = request->send_data.response_body.len;
-                        event.u.progress.info.content_length =
-                            auto_ranged_get->synced_data.object_range_empty
-                                ? 0
-                                : (auto_ranged_get->synced_data.object_range_end + 1 -
-                                   auto_ranged_get->synced_data.object_range_start);
+                        if (auto_ranged_get->synced_data.object_range_empty) {
+                            event.u.progress.info.content_length = 0;
+                        } else {
+                            /* Note that range-end is inclusive */
+                            event.u.progress.info.content_length = auto_ranged_get->synced_data.object_range_end + 1 -
+                                                                   auto_ranged_get->synced_data.object_range_start;
+                        }
                         aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
                     }
 

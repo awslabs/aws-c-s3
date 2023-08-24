@@ -443,6 +443,7 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY: {
             /* Create a new uploadPartCopy message to upload a part. */
             /* compute sub-request range */
+            /* note that range-end is inclusive */
             uint64_t range_start = (request->part_number - 1) * copy_object->synced_data.part_size;
             uint64_t range_end = range_start + copy_object->synced_data.part_size - 1;
             if (range_end >= copy_object->synced_data.content_length) {

@@ -25,7 +25,9 @@ struct aws_s3_auto_ranged_get {
         uint64_t object_range_start;
 
         /* The last byte of the data that will be retrieved from the object.
-         * (ignore this if object_range_empty) */
+         * (ignore this if object_range_empty)
+         * Note this is inclusive: https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests
+         * So if begin=0 and end=0 then 1 byte is being downloaded. */
         uint64_t object_range_end;
 
         /* The total number of parts that are being used in downloading the object range. Note that "part" here
