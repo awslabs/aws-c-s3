@@ -354,14 +354,12 @@ void aws_s3_meta_request_stream_response_body_synced(
 /* Add an event for delivery on the meta-request's io_event_loop thread.
  * These events usually correspond to callbacks that must fire sequentially and non-overlapping,
  * such as delivery of a part's response body. */
-AWS_S3_API
 void aws_s3_meta_request_add_event_for_delivery_synced(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_event *event);
 
 /* Returns whether any events are out for delivery.
  * The meta-request's finish callback must not be invoked until this returns false. */
-AWS_S3_API
 bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
