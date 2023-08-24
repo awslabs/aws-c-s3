@@ -63,10 +63,12 @@ struct aws_s3_meta_request_event {
     } type;
 
     union {
+        /* data for AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY */
         struct {
-            struct aws_s3_request *request;
+            struct aws_s3_request *completed_request;
         } response_body;
 
+        /* data for AWS_S3_META_REQUEST_EVENT_PROGRESS */
         struct {
             struct aws_s3_meta_request_progress info;
         } progress;

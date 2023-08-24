@@ -1376,7 +1376,7 @@ void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_request *next_streaming_request;
     while ((next_streaming_request = s_s3_meta_request_body_streaming_pop_next_synced(meta_request)) != NULL) {
         struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY};
-        event.u.response_body.request = next_streaming_request; /* */
+        event.u.response_body.completed_request = next_streaming_request;
         aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
 
         ++num_streaming_requests;
@@ -1465,7 +1465,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         switch (event.type) {
 
             case AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY: {
-                struct aws_s3_request *request = event.u.response_body.request;
+                struct aws_s3_request *request = event.u.response_body.completed_request;
                 AWS_ASSERT(meta_request == request->meta_request);
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
