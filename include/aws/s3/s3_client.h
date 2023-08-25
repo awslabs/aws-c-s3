@@ -181,7 +181,7 @@ struct aws_s3_meta_request_progress {
  * For PutObject, progress refers to bytes uploaded.
  * For CopyObject, progress refers to bytes copied.
  * For GetObject, progress refers to bytes downloaded.
- * For anything else, progress refers to response bytes received.
+ * For anything else, progress refers to response body bytes received.
  */
 typedef void(aws_s3_meta_request_progress_fn)(
     struct aws_s3_meta_request *meta_request,
