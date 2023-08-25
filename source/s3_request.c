@@ -102,18 +102,18 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     AWS_ZERO_STRUCT(request->send_data);
 }
 
-void aws_s3_request_acquire(struct aws_s3_request *request) {
-    AWS_PRECONDITION(request);
-
-    aws_ref_count_acquire(&request->ref_count);
+struct aws_s3_request *aws_s3_request_acquire(struct aws_s3_request *request) {
+    if (request != NULL) {
+        aws_ref_count_acquire(&request->ref_count);
+    }
+    return request;
 }
 
-void aws_s3_request_release(struct aws_s3_request *request) {
-    if (request == NULL) {
-        return;
+struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request) {
+    if (request != NULL) {
+        aws_ref_count_release(&request->ref_count);
     }
-
-    aws_ref_count_release(&request->ref_count);
+    return NULL;
 }
 
 static void s_s3_request_destroy(void *user_data) {

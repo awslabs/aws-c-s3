@@ -245,7 +245,19 @@ static void s_s3_test_meta_request_progress(
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
 
-    aws_atomic_fetch_add(&meta_request_test_results->total_bytes_uploaded, (size_t)progress->bytes_transferred);
+    meta_request_test_results->progress.total_bytes_transferred += progress->bytes_transferred;
+
+    /* Once content_length is reported, it shouldn't change */
+    if (meta_request_test_results->progress.content_length == 0) {
+        meta_request_test_results->progress.content_length = progress->content_length;
+    } else {
+        AWS_FATAL_ASSERT(meta_request_test_results->progress.content_length == progress->content_length);
+    }
+
+    /* If content_length is known, we shouldn't go over it */
+    if (progress->content_length != 0) {
+        AWS_FATAL_ASSERT(meta_request_test_results->progress.total_bytes_transferred <= progress->content_length);
+    }
 
     if (meta_request_test_results->progress_callback != NULL) {
         meta_request_test_results->progress_callback(meta_request, progress, user_data);
@@ -474,7 +486,6 @@ void aws_s3_meta_request_test_results_init(
     AWS_ZERO_STRUCT(*test_meta_request);
     test_meta_request->allocator = allocator;
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
-    aws_atomic_init_int(&test_meta_request->total_bytes_uploaded, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
@@ -1392,6 +1403,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     struct aws_input_stream *input_stream = NULL;
     struct aws_async_input_stream *async_stream = NULL;
+    size_t upload_size_bytes = 0;
 
     if (meta_request_options.message == NULL) {
         const struct aws_byte_cursor *bucket_name = options->bucket_name;
@@ -1433,17 +1445,17 @@ int aws_s3_tester_send_meta_request_with_options(
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT)) {
 
             uint32_t object_size_mb = options->put_options.object_size_mb;
-            size_t object_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
+            upload_size_bytes = (size_t)object_size_mb * 1024ULL * 1024ULL;
 
             /* This doesn't do what we think it should because
              * g_min_upload_part_size overrides client->part_size */
             if (options->put_options.ensure_multipart) {
-                if (object_size_bytes == 0) {
-                    object_size_bytes = client->part_size * 2;
-                    object_size_mb = (uint32_t)(object_size_bytes / 1024 / 1024);
+                if (upload_size_bytes == 0) {
+                    upload_size_bytes = client->part_size * 2;
+                    object_size_mb = (uint32_t)(upload_size_bytes / 1024 / 1024);
                 }
 
-                ASSERT_TRUE(object_size_bytes > client->part_size);
+                ASSERT_TRUE(upload_size_bytes > client->part_size);
             }
 
             struct aws_byte_buf object_path_buffer;
@@ -1503,7 +1515,7 @@ int aws_s3_tester_send_meta_request_with_options(
             struct aws_async_input_stream_tester_options stream_options = {
                 .base =
                     {
-                        .autogen_length = object_size_bytes,
+                        .autogen_length = upload_size_bytes,
                         .eof_requires_extra_read = options->put_options.eof_requires_extra_read,
                         .max_bytes_per_read = options->put_options.max_bytes_per_read,
                     },
@@ -1572,7 +1584,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     &host_cur,
                     g_test_body_content_type,
                     test_object_path,
-                    object_size_bytes,
+                    upload_size_bytes,
                     options->sse_type);
             }
 
@@ -1614,6 +1626,14 @@ int aws_s3_tester_send_meta_request_with_options(
         aws_string_destroy(host_name);
     } else {
         aws_http_message_acquire(meta_request_options.message);
+
+        if (options->meta_request_type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+            /* Figure out how much is being uploaded from pre-existing message */
+            struct aws_input_stream *mystery_stream = aws_http_message_get_body_stream(meta_request_options.message);
+            if (mystery_stream != NULL) {
+                ASSERT_SUCCESS(aws_input_stream_get_length(mystery_stream, (int64_t *)&upload_size_bytes));
+            }
+        }
     }
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
@@ -1648,21 +1668,6 @@ int aws_s3_tester_send_meta_request_with_options(
         ASSERT_TRUE(aws_s3_meta_request_is_finished(meta_request));
     }
 
-    /* If total_bytes_uploaded wasn't set by the progress callback,
-     * then set it based on number of bytes read from input-stream.
-     * (progress callback isn't currently hooked up for single part upload) */
-    if ((out_results->finished_error_code == AWS_ERROR_SUCCESS) &&
-        (aws_atomic_load_int(&out_results->total_bytes_uploaded) == 0)) {
-
-        uint64_t bytes_read_from_stream = 0;
-        if (input_stream != NULL) {
-            bytes_read_from_stream = aws_input_stream_tester_total_bytes_read(input_stream);
-        } else if (async_stream != NULL) {
-            bytes_read_from_stream = aws_async_input_stream_tester_total_bytes_read(async_stream);
-        }
-        aws_atomic_store_int(&out_results->total_bytes_uploaded, (size_t)bytes_read_from_stream);
-    }
-
     switch (options->validate_type) {
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS:
             ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, out_results->finished_error_code);
@@ -1671,6 +1676,18 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, options->sse_type));
             } else if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
                 ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(out_results, options->sse_type));
+
+                /* Expected number of bytes should have been read from stream, and reported via progress callbacks */
+                if (input_stream != NULL) {
+                    ASSERT_UINT_EQUALS(upload_size_bytes, aws_input_stream_tester_total_bytes_read(input_stream));
+                } else if (async_stream != NULL) {
+                    ASSERT_UINT_EQUALS(upload_size_bytes, aws_async_input_stream_tester_total_bytes_read(async_stream));
+                }
+
+                ASSERT_UINT_EQUALS(upload_size_bytes, out_results->progress.total_bytes_transferred);
+                if (!options->put_options.skip_content_length) {
+                    ASSERT_UINT_EQUALS(upload_size_bytes, out_results->progress.content_length);
+                }
             }
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:
@@ -1857,6 +1874,8 @@ int aws_s3_tester_validate_get_object_results(
         meta_request_test_results->received_body_size);
 
     ASSERT_TRUE(content_length == meta_request_test_results->received_body_size);
+    ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.total_bytes_transferred);
+    ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.content_length);
 
     return AWS_OP_SUCCESS;
 }

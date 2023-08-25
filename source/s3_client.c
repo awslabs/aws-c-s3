@@ -1481,8 +1481,7 @@ static void s_s3_client_prepare_callback_queue_request(
         request_is_noop = request->is_noop != 0;
         s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
 
-        aws_s3_request_release(request);
-        request = NULL;
+        request = aws_s3_request_release(request);
     }
 
     /* BEGIN CRITICAL SECTION */
@@ -1522,8 +1521,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
             s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
 
-            aws_s3_request_release(request);
-            request = NULL;
+            request = aws_s3_request_release(request);
         } else if (
             s_s3_client_get_num_requests_network_io(client, request->meta_request->type) < max_active_connections) {
             s_s3_client_create_connection_for_request(client, request);
@@ -1856,8 +1854,8 @@ reset_connection:
     }
 
     if (connection->request != NULL) {
-        aws_s3_request_release(connection->request);
-        connection->request = NULL;
+
+        connection->request = aws_s3_request_release(connection->request);
     }
 
     aws_retry_token_release(connection->retry_token);

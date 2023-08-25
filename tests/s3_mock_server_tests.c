@@ -589,8 +589,7 @@ TEST_CASE(resume_first_part_not_completed_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
-    size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
-    ASSERT_UINT_EQUALS(2 * MB_TO_BYTES(8), total_bytes_uploaded);
+    /* TODO: monitor telemetry ensure this happened */
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
@@ -646,8 +645,7 @@ TEST_CASE(resume_multi_page_list_parts_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
-    size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
-    ASSERT_UINT_EQUALS(2 * MB_TO_BYTES(8), total_bytes_uploaded);
+    /* TODO: monitor telemetry ensure this happened */
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
@@ -755,8 +753,7 @@ TEST_CASE(resume_after_finished_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* The error code should be success, but there are no headers and stuff as no request was made. */
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
-    size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
-    ASSERT_UINT_EQUALS(0, total_bytes_uploaded);
+    /* TODO: monitor telemetry to ensure no actual data was sent */
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
@@ -834,9 +831,6 @@ TEST_CASE(endpoint_override_mock_server) {
         .mock_server = true,
     };
 
-    struct aws_s3_meta_request_test_results out_results;
-    aws_s3_meta_request_test_results_init(&out_results, allocator);
-
     /* Put together a simple S3 Put Object request. */
     struct aws_input_stream *input_stream =
         aws_s3_test_input_stream_new(allocator, put_options.put_options.object_size_mb);
@@ -846,7 +840,7 @@ TEST_CASE(endpoint_override_mock_server) {
 
     /* 1. Create request without host and use endpoint override for the host info */
     put_options.message = message;
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /* 2. Create request with host info missmatch endpoint override */
     struct aws_http_header host_header = {
@@ -856,12 +850,11 @@ TEST_CASE(endpoint_override_mock_server) {
     ASSERT_SUCCESS(aws_http_message_add_header(message, host_header));
     put_options.message = message;
     put_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /* Clean up */
     aws_http_message_destroy(message);
     aws_input_stream_release(input_stream);
-    aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 

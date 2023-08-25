@@ -192,6 +192,10 @@ static bool s_s3_meta_request_default_update(
         work_remaining = true;
 
     no_work_remaining:
+        /* If some events are still being delivered to caller, then wait for those to finish */
+        if (!work_remaining && aws_s3_meta_request_are_events_out_for_delivery_synced(meta_request)) {
+            work_remaining = true;
+        }
 
         if (!work_remaining) {
             aws_s3_meta_request_set_success_synced(
@@ -366,6 +370,25 @@ static void s_s3_meta_request_default_request_finished(
         meta_request_default->synced_data.request_error_code = error_code;
 
         if (error_code == AWS_ERROR_SUCCESS) {
+            /* Send progress_callback for delivery on io_event_loop thread.
+             * For default meta-requests, we invoke the progress_callback once, after the sole HTTP request completes.
+             * This is simpler than reporting incremental progress as the response body is received,
+             * or the request body is streamed out, since then we'd also need to handle retries that reset
+             * progress back to 0% (our existing API only lets us report forward progress). */
+            if (meta_request->progress_callback != NULL) {
+                struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+                    /* For uploads, report request body size */
+                    event.u.progress.info.bytes_transferred = request->request_body.len;
+                    event.u.progress.info.content_length = request->request_body.len;
+                } else {
+                    /* For anything else, report response body size */
+                    event.u.progress.info.bytes_transferred = request->send_data.response_body.len;
+                    event.u.progress.info.content_length = request->send_data.response_body.len;
+                }
+                aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+            }
+
             aws_s3_meta_request_stream_response_body_synced(meta_request, request);
         } else {
             aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);

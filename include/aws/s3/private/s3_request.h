@@ -224,10 +224,10 @@ AWS_S3_API
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request);
 
 AWS_S3_API
-void aws_s3_request_acquire(struct aws_s3_request *request);
+struct aws_s3_request *aws_s3_request_acquire(struct aws_s3_request *request);
 
 AWS_S3_API
-void aws_s3_request_release(struct aws_s3_request *request);
+struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request);
 
 AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_new(
