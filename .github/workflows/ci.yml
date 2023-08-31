@@ -6,8 +6,8 @@ on:
       - 'main'
 
 env:
-  BUILDER_VERSION: run-test-in-parallel
-  BUILDER_SOURCE: channels
+  BUILDER_VERSION: v0.9.43
+  BUILDER_SOURCE: releases
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
   LINUX_BASE_IMAGE: ubuntu-18-x64
@@ -16,6 +16,7 @@ env:
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
   AWS_REGION: us-east-1
+  CTEST_PARALLEL_LEVEL: 4
 
 jobs:
   linux-compat:
