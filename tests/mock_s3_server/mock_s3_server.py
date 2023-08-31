@@ -16,9 +16,10 @@ import h11
 MAX_RECV = 2**16
 TIMEOUT = 120  # this must be higher than any response's "delay" setting
 
-VERBOSE = False
+VERBOSE = True
 SHOULD_THROTTLE = True
 
+COUNT = 0
 
 class S3Opts(Enum):
     CreateMultipartUpload = 1
@@ -193,8 +194,11 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False, ge
                  "response with", len(body), "bytes")
 
     headers = wrapper.basic_headers()
+    content_length_set = False
     for header in data['headers'].items():
-        headers.append((header[0], header[1]))
+        headers.append((header[0], str(header[1])))
+        if header[0].lower() == "content-length":
+            content_length_set = True
 
     if chunked:
         headers.append(('Transfer-Encoding', "chunked"))
@@ -202,9 +206,18 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False, ge
         await wrapper.send(res)
         await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
     else:
-        headers.append(("Content-Length", str(len(body))))
-        res = h11.Response(status_code=status_code, headers=headers)
-        await wrapper.send(res)
+        print("retry_request_received_times is " + str(COUNT))
+        if COUNT <= 1 and not head_request:
+            headers.append(("Content-Length", str(123456)))
+
+        elif content_length_set is False:
+            headers.append(("Content-Length", str(len(body))))
+        print(headers)
+        try:
+            res = h11.Response(status_code=status_code, headers=headers)
+            await wrapper.send(res)
+        except Exception as e:
+            print(e)
         if head_request:
             await wrapper.send(h11.EndOfMessage())
             return
@@ -230,7 +243,7 @@ async def send_mock_s3_response(wrapper, request_type, path, generate_body=False
             wrapper.info("Throttling")
         # Flip the flag
         wrapper.should_throttle = not wrapper.should_throttle
-    await send_response_from_json(wrapper, response_file, generate_body=generate_body, generate_body_size=generate_body_size)
+    await send_response_from_json(wrapper, response_file, generate_body=generate_body, generate_body_size=generate_body_size, head_request=head_request)
 
 
 async def maybe_send_error_response(wrapper, exc):
@@ -279,7 +292,12 @@ def handle_get_object_modified(start_range, end_range, request):
             return "/get_object_modified_failure", data_length, False
 
 
-def handle_get_object(request, parsed_path):
+def handle_get_object(wrapper, request, parsed_path, head_request=False):
+    global COUNT
+    if parsed_path.path == "/get_object_checksum_retry" and not head_request:
+        COUNT = COUNT + 1
+    else:
+        COUNT = 0
 
     body_range_value = get_request_header_value(request, "range")
 
@@ -340,7 +358,7 @@ async def handle_mock_s3_request(wrapper, request):
         else:
             request_type = S3Opts.GetObject
             response_path, generate_body_size, generate_body = handle_get_object(
-                request, parsed_path)
+                wrapper, request, parsed_path, head_request=method == "HEAD" )
     else:
         # TODO: support more type.
         wrapper.info("unsupported request:", request)
