@@ -207,13 +207,12 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False, ge
         await wrapper.send(res)
         await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
     else:
-        print("retry_request_received_times is " + str(COUNT))
         if COUNT <= 1 and RETRY_TEST:
             headers.append(("Content-Length", str(123456)))
 
         elif content_length_set is False:
             headers.append(("Content-Length", str(len(body))))
-        print(headers)
+
         try:
             res = h11.Response(status_code=status_code, headers=headers)
             await wrapper.send(res)
