@@ -20,6 +20,7 @@ VERBOSE = True
 SHOULD_THROTTLE = True
 
 COUNT = 0
+RETRY_TEST = False
 
 class S3Opts(Enum):
     CreateMultipartUpload = 1
@@ -207,7 +208,7 @@ async def send_response_from_json(wrapper, response_json_path, chunked=False, ge
         await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
     else:
         print("retry_request_received_times is " + str(COUNT))
-        if COUNT <= 1 and not head_request:
+        if COUNT <= 1 and RETRY_TEST:
             headers.append(("Content-Length", str(123456)))
 
         elif content_length_set is False:
@@ -294,10 +295,13 @@ def handle_get_object_modified(start_range, end_range, request):
 
 def handle_get_object(wrapper, request, parsed_path, head_request=False):
     global COUNT
+    global RETRY_TEST
     if parsed_path.path == "/get_object_checksum_retry" and not head_request:
         COUNT = COUNT + 1
+        RETRY_TEST = True
     else:
         COUNT = 0
+        RETRY_TEST = False
 
     body_range_value = get_request_header_value(request, "range")
 
