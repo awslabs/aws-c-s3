@@ -18,7 +18,7 @@ import h11
 MAX_RECV = 2**16
 TIMEOUT = 120  # this must be higher than any response's "delay" setting
 
-VERBOSE = True
+VERBOSE = False
 SHOULD_THROTTLE = True
 
 
