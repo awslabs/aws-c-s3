@@ -8,8 +8,5 @@
       "Content-Range": "bytes 0-65535/65536",
       "Content-Type": "binary/octet-stream",
       "x-amz-checksum-crc32": "q1875w=="
-    },
-    "body": [
-      "less data"
-    ]
+    }
 }
