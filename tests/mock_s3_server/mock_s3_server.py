@@ -39,10 +39,13 @@ class Response:
     path: str
     disconnect_after_headers = False
     generate_body_size: Optional[int] = None
-    response_json_path: str = None
+    json_path: str = None
+    throttle: bool = False
+    force_retry: bool = False
+    should_throttle: bool = SHOULD_THROTTLE
 
     def resolve_file_path(self, wrapper, request_type):
-        if self.response_json_path is None:
+        if self.json_path is None:
             response_file = os.path.join(
                 base_dir, request_type.name, f"{self.path[1:]}.json")
             if os.path.exists(response_file) == False:
@@ -52,21 +55,20 @@ class Response:
                     base_dir, request_type.name, f"default.json")
             if "throttle" in response_file:
                 # We throttle the request half the time to make sure it succeeds after a retry
-                if TrioHTTPWrapper.should_throttle is False:
+                if Response.should_throttle is False:
                     wrapper.info("Skipping throttling")
                     response_file = os.path.join(
                         base_dir, request_type.name, f"default.json")
                 else:
                     wrapper.info("Throttling")
                 # Flip the flag
-                TrioHTTPWrapper.should_throttle = not TrioHTTPWrapper.should_throttle
-            self.response_json_path = response_file
+                Response.should_throttle = not Response.should_throttle
+            self.json_path = response_file
 
 
 class TrioHTTPWrapper:
     _next_id = count()
     retry_request_received_continuous = 0
-    should_throttle = SHOULD_THROTTLE
 
     def __init__(self, stream):
         self.stream = stream
@@ -204,9 +206,9 @@ async def send_simple_response(wrapper, status_code, content_type, body):
 
 
 async def send_response_from_json(wrapper, response, chunked=False, head_request=False):
-    wrapper.info("sending response from json file: ", response.response_json_path,
+    wrapper.info("sending response from json file: ", response.json_path,
                  ".\n generate_body_size: ", response.generate_body_size)
-    with open(response.response_json_path, 'r') as f:
+    with open(response.json_path, 'r') as f:
         data = json.load(f)
 
     # if response has delay, then sleep before sending it
@@ -237,11 +239,10 @@ async def send_response_from_json(wrapper, response, chunked=False, head_request
         await wrapper.send(res)
         await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
     else:
-        if TrioHTTPWrapper.retry_request_received_continuous == 1:
+        if response.force_retry:
             # Use a long `content-length` header to trigger error when we try to send EOM.
             # so that the server will close connection after we send the header.
             headers.append(("Content-Length", str(123456)))
-
         elif content_length_set is False:
             headers.append(("Content-Length", str(len(body))))
 
@@ -305,12 +306,14 @@ def handle_get_object_modified(start_range, end_range, request):
 
 
 def handle_get_object(wrapper, request, parsed_path, head_request=False):
-    wrapper.info("handle_get_object")
+
+    response = Response(parsed_path.path)
     if parsed_path.path == "/get_object_checksum_retry" and not head_request:
         TrioHTTPWrapper.retry_request_received_continuous = TrioHTTPWrapper.retry_request_received_continuous + 1
 
-        wrapper.info("retry_request_received_continuous is " +
-                     str(TrioHTTPWrapper.retry_request_received_continuous))
+        if TrioHTTPWrapper.retry_request_received_continuous == 1:
+            wrapper.info("Force retry on the request")
+            response.force_retry = True
     else:
         TrioHTTPWrapper.retry_request_received_continuous = 0
 
@@ -329,12 +332,12 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
 
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)
-    elif parsed_path.path == "/get_object_invalid_response_missing_content_range":
-        return Response("/get_object_invalid_response_missing_content_range")
-    elif parsed_path.path == "/get_object_invalid_response_missing_etags":
-        return Response("/get_object_invalid_response_missing_etags")
+    elif parsed_path.path == "/get_object_invalid_response_missing_content_range" or parsed_path.path == "/get_object_invalid_response_missing_etags":
+        # Don't generate the body for those requests
+        return response
 
-    return Response(parsed_path.path, data_length)
+    response.generate_body_size = data_length
+    return response
 
 
 def handle_list_parts(parsed_path):
@@ -386,7 +389,7 @@ async def handle_mock_s3_request(wrapper, request):
         response = Response(parsed_path.path)
 
     response.resolve_file_path(wrapper, request_type)
-    wrapper.info("resolved path is " + response.response_json_path)
+    wrapper.info("resolved path is " + response.json_path)
 
     await send_response_from_json(
         wrapper, response, head_request=method == "HEAD")
