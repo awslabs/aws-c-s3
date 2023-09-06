@@ -19,7 +19,10 @@ MAX_RECV = 2**16
 TIMEOUT = 120  # this must be higher than any response's "delay" setting
 
 VERBOSE = False
+
+# Flags to keep between requests
 SHOULD_THROTTLE = True
+RETRY_REQUEST_COUNT = 0
 
 
 base_dir = os.path.dirname(os.path.realpath(__file__))
@@ -52,9 +55,9 @@ class ResponseConfig:
     json_path: str = None
     throttle: bool = False
     force_retry: bool = False
-    should_throttle: bool = SHOULD_THROTTLE
 
     def _resolve_file_path(self, wrapper, request_type):
+        global SHOULD_THROTTLE
         if self.json_path is None:
             response_file = os.path.join(
                 base_dir, request_type.name, f"{self.path[1:]}.json")
@@ -65,14 +68,14 @@ class ResponseConfig:
                     base_dir, request_type.name, f"default.json")
             if "throttle" in response_file:
                 # We throttle the request half the time to make sure it succeeds after a retry
-                if ResponseConfig.should_throttle is False:
+                if SHOULD_THROTTLE is False:
                     wrapper.info("Skipping throttling")
                     response_file = os.path.join(
                         base_dir, request_type.name, f"default.json")
                 else:
                     wrapper.info("Throttling")
                 # Flip the flag
-                ResponseConfig.should_throttle = not ResponseConfig.should_throttle
+                SHOULD_THROTTLE = not SHOULD_THROTTLE
             self.json_path = response_file
 
     def resolve_response(self, wrapper, request_type, chunked=False, head_request=False):
@@ -116,7 +119,6 @@ class ResponseConfig:
 
 class TrioHTTPWrapper:
     _next_id = count()
-    retry_request_received_continuous = 0
 
     def __init__(self, stream):
         self.stream = stream
@@ -324,16 +326,16 @@ def handle_get_object_modified(start_range, end_range, request):
 
 
 def handle_get_object(wrapper, request, parsed_path, head_request=False):
-
+    global RETRY_REQUEST_COUNT
     response_config = ResponseConfig(parsed_path.path)
     if parsed_path.path == "/get_object_checksum_retry" and not head_request:
-        TrioHTTPWrapper.retry_request_received_continuous = TrioHTTPWrapper.retry_request_received_continuous + 1
+        RETRY_REQUEST_COUNT = RETRY_REQUEST_COUNT + 1
 
-        if TrioHTTPWrapper.retry_request_received_continuous == 1:
+        if RETRY_REQUEST_COUNT == 1:
             wrapper.info("Force retry on the request")
             response_config.force_retry = True
     else:
-        TrioHTTPWrapper.retry_request_received_continuous = 0
+        RETRY_REQUEST_COUNT = 0
 
     body_range_value = get_request_header_value(request, "range")
 
