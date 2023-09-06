@@ -36,6 +36,16 @@ class S3Opts(Enum):
 
 @dataclass
 class Response:
+    status_code: int
+    delay: int
+    headers: any
+    data: str
+    chunked: bool
+    head_request: bool
+
+
+@dataclass
+class ResponseConfig:
     path: str
     disconnect_after_headers = False
     generate_body_size: Optional[int] = None
@@ -44,7 +54,7 @@ class Response:
     force_retry: bool = False
     should_throttle: bool = SHOULD_THROTTLE
 
-    def resolve_file_path(self, wrapper, request_type):
+    def _resolve_file_path(self, wrapper, request_type):
         if self.json_path is None:
             response_file = os.path.join(
                 base_dir, request_type.name, f"{self.path[1:]}.json")
@@ -55,15 +65,53 @@ class Response:
                     base_dir, request_type.name, f"default.json")
             if "throttle" in response_file:
                 # We throttle the request half the time to make sure it succeeds after a retry
-                if Response.should_throttle is False:
+                if ResponseConfig.should_throttle is False:
                     wrapper.info("Skipping throttling")
                     response_file = os.path.join(
                         base_dir, request_type.name, f"default.json")
                 else:
                     wrapper.info("Throttling")
                 # Flip the flag
-                Response.should_throttle = not Response.should_throttle
+                ResponseConfig.should_throttle = not ResponseConfig.should_throttle
             self.json_path = response_file
+
+    def resolve_response(self, wrapper, request_type, chunked=False, head_request=False):
+        self._resolve_file_path(wrapper, request_type)
+        wrapper.info("resolving response from json file: ", self.json_path,
+                     ".\n generate_body_size: ", self.generate_body_size)
+        with open(self.json_path, 'r') as f:
+            data = json.load(f)
+
+        # if response has delay, then sleep before sending it
+        delay = data.get('delay', 0)
+        status_code = data['status']
+        if self.generate_body_size is not None:
+            # generate body with a specific size instead
+            body = "a" * self.generate_body_size
+        else:
+            body = "\n".join(data['body'])
+
+        headers = wrapper.basic_headers()
+        content_length_set = False
+        for header in data['headers'].items():
+            headers.append((header[0], str(header[1])))
+            if header[0].lower() == "content-length":
+                content_length_set = True
+
+        if chunked:
+            headers.append(('Transfer-Encoding', "chunked"))
+        else:
+            if self.force_retry:
+                # Use a long `content-length` header to trigger error when we try to send EOM.
+                # so that the server will close connection after we send the header.
+                headers.append(("Content-Length", str(123456)))
+            elif content_length_set is False:
+                headers.append(("Content-Length", str(len(body))))
+
+        response = Response(status_code=status_code, delay=delay, headers=headers,
+                            data=body, chunked=chunked, head_request=head_request)
+
+        return response
 
 
 class TrioHTTPWrapper:
@@ -92,7 +140,7 @@ class TrioHTTPWrapper:
     async def _read_from_peer(self):
         if self.conn.they_are_waiting_for_100_continue:
             self.info("Sending 100 Continue")
-            go_ahead = h11.InformationalResponse(
+            go_ahead = h11.InformationalResponseConfig(
                 status_code=100, headers=self.basic_headers()
             )
             await self.send(go_ahead)
@@ -205,56 +253,26 @@ async def send_simple_response(wrapper, status_code, content_type, body):
     await wrapper.send(h11.EndOfMessage())
 
 
-async def send_response_from_json(wrapper, response, chunked=False, head_request=False):
-    wrapper.info("sending response from json file: ", response.json_path,
-                 ".\n generate_body_size: ", response.generate_body_size)
-    with open(response.json_path, 'r') as f:
-        data = json.load(f)
+async def send_response(wrapper, response):
+    if response.delay > 0:
+        assert response.delay < TIMEOUT
+        await trio.sleep(response.delay)
 
-    # if response has delay, then sleep before sending it
-    delay = data.get('delay', 0)
-    if delay > 0:
-        assert delay < TIMEOUT
-        await trio.sleep(delay)
+    wrapper.info("Sending", response.status_code,
+                 "response with", len(response.data), "bytes")
 
-    status_code = data['status']
-    if response.generate_body_size is not None:
-        # generate body with a specific size instead
-        body = "a" * response.generate_body_size
-    else:
-        body = "\n".join(data['body'])
-    wrapper.info("Sending", status_code,
-                 "response with", len(body), "bytes")
+    res = h11.Response(status_code=response.status_code,
+                       headers=response.headers)
 
-    headers = wrapper.basic_headers()
-    content_length_set = False
-    for header in data['headers'].items():
-        headers.append((header[0], str(header[1])))
-        if header[0].lower() == "content-length":
-            content_length_set = True
-
-    if chunked:
-        headers.append(('Transfer-Encoding', "chunked"))
-        res = h11.Response(status_code=status_code, headers=headers)
+    try:
         await wrapper.send(res)
-        await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
+    except Exception as e:
+        print(e)
+    if response.chunked:
+        await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(response.data), response.data.encode())))
     else:
-        if response.force_retry:
-            # Use a long `content-length` header to trigger error when we try to send EOM.
-            # so that the server will close connection after we send the header.
-            headers.append(("Content-Length", str(123456)))
-        elif content_length_set is False:
-            headers.append(("Content-Length", str(len(body))))
-
-        try:
-            res = h11.Response(status_code=status_code, headers=headers)
-            await wrapper.send(res)
-        except Exception as e:
-            print(e)
-        if head_request:
-            await wrapper.send(h11.EndOfMessage())
-            return
-        await wrapper.send(h11.Data(data=body.encode()))
+        if not response.head_request:
+            await wrapper.send(h11.Data(data=response.data.encode()))
 
     await wrapper.send(h11.EndOfMessage())
 
@@ -290,7 +308,7 @@ def handle_get_object_modified(start_range, end_range, request):
     data_length = end_range - start_range
 
     if start_range == 0:
-        return Response("/get_object_modified_first_part", data_length)
+        return ResponseConfig("/get_object_modified_first_part", data_length)
     else:
         # Check the request header to make sure "If-Match" is set
         etag = get_request_header_value(request, "if-match")
@@ -301,19 +319,19 @@ def handle_get_object_modified(start_range, end_range, request):
         with open(response_file, 'r') as f:
             data = json.load(f)
             if data['headers']['ETag'] == etag:
-                return Response("/get_object_modified_success")
-            return Response("/get_object_modified_failure")
+                return ResponseConfig("/get_object_modified_success")
+            return ResponseConfig("/get_object_modified_failure")
 
 
 def handle_get_object(wrapper, request, parsed_path, head_request=False):
 
-    response = Response(parsed_path.path)
+    response_config = ResponseConfig(parsed_path.path)
     if parsed_path.path == "/get_object_checksum_retry" and not head_request:
         TrioHTTPWrapper.retry_request_received_continuous = TrioHTTPWrapper.retry_request_received_continuous + 1
 
         if TrioHTTPWrapper.retry_request_received_continuous == 1:
             wrapper.info("Force retry on the request")
-            response.force_retry = True
+            response_config.force_retry = True
     else:
         TrioHTTPWrapper.retry_request_received_continuous = 0
 
@@ -334,26 +352,26 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         return handle_get_object_modified(start_range, end_range, request)
     elif parsed_path.path == "/get_object_invalid_response_missing_content_range" or parsed_path.path == "/get_object_invalid_response_missing_etags":
         # Don't generate the body for those requests
-        return response
+        return response_config
 
-    response.generate_body_size = data_length
-    return response
+    response_config.generate_body_size = data_length
+    return response_config
 
 
 def handle_list_parts(parsed_path):
     if parsed_path.path == "/multiple_list_parts":
         if parsed_path.query.find("part-number-marker") != -1:
-            return Response("/multiple_list_parts_2")
+            return ResponseConfig("/multiple_list_parts_2")
         else:
-            return Response("/multiple_list_parts_1")
-    return Response(parsed_path.path)
+            return ResponseConfig("/multiple_list_parts_1")
+    return ResponseConfig(parsed_path.path)
 
 
 async def handle_mock_s3_request(wrapper, request):
     parsed_path, parsed_query = parse_request_path(
         request.target.decode("ascii"))
     method = request.method.decode("utf-8")
-    response = None
+    response_config = None
 
     if method == "POST":
         if parsed_path.query == "uploads":
@@ -370,10 +388,10 @@ async def handle_mock_s3_request(wrapper, request):
         if parsed_path.query.find("uploadId") != -1:
             # GET /Key+?max-parts=MaxParts&part-number-marker=PartNumberMarker&uploadId=UploadId HTTP/1.1 -- List Parts
             request_type = S3Opts.ListParts
-            response = handle_list_parts(parsed_path)
+            response_config = handle_list_parts(parsed_path)
         else:
             request_type = S3Opts.GetObject
-            response = handle_get_object(
+            response_config = handle_get_object(
                 wrapper, request, parsed_path, head_request=method == "HEAD")
     else:
         # TODO: support more type.
@@ -385,14 +403,13 @@ async def handle_mock_s3_request(wrapper, request):
         if type(event) is h11.EndOfMessage:
             break
         assert type(event) is h11.Data
-    if response is None:
-        response = Response(parsed_path.path)
+    if response_config is None:
+        response_config = ResponseConfig(parsed_path.path)
 
-    response.resolve_file_path(wrapper, request_type)
-    wrapper.info("resolved path is " + response.json_path)
+    response = response_config.resolve_response(
+        wrapper, request_type, head_request=method == "HEAD")
 
-    await send_response_from_json(
-        wrapper, response, head_request=method == "HEAD")
+    await send_response(wrapper, response)
 
 
 async def serve(port):
