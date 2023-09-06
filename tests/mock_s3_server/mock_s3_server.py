@@ -196,6 +196,38 @@ class TrioHTTPWrapper:
 # Server main loop
 ################################################################
 
+
+async def send_simple_response(wrapper, status_code, content_type, body):
+    wrapper.info("Sending", status_code, "response with", len(body), "bytes")
+    headers = wrapper.basic_headers()
+    headers.append(("Content-Type", content_type))
+    headers.append(("Content-Length", str(len(body))))
+    res = h11.Response(status_code=status_code, headers=headers)
+    await wrapper.send(res)
+    await wrapper.send(h11.Data(data=body))
+    await wrapper.send(h11.EndOfMessage())
+
+
+async def maybe_send_error_response(wrapper, exc):
+    if wrapper.conn.our_state not in {h11.IDLE, h11.SEND_RESPONSE}:
+        wrapper.info("...but I can't, because our state is",
+                     wrapper.conn.our_state)
+        return
+    try:
+        if isinstance(exc, h11.RemoteProtocolError):
+            status_code = exc.error_status_hint
+        elif isinstance(exc, trio.TooSlowError):
+            status_code = 408  # Request Timeout
+        else:
+            status_code = 500
+        body = str(exc).encode("utf-8")
+        await send_simple_response(
+            wrapper, status_code, "text/plain; charset=utf-8", body
+        )
+    except Exception as exc:
+        wrapper.info("error while sending error response:", exc)
+
+
 async def http_serve(stream):
     wrapper = TrioHTTPWrapper(stream)
     wrapper.info("Got new connection")
@@ -237,24 +269,6 @@ async def http_serve(stream):
 ################################################################
 
 # Helper function
-
-def parse_request_path(request_path):
-    parsed_path = urlparse(request_path)
-    parsed_query = parse_qs(parsed_path.query)
-    return parsed_path, parsed_query
-
-
-async def send_simple_response(wrapper, status_code, content_type, body):
-    wrapper.info("Sending", status_code, "response with", len(body), "bytes")
-    headers = wrapper.basic_headers()
-    headers.append(("Content-Type", content_type))
-    headers.append(("Content-Length", str(len(body))))
-    res = h11.Response(status_code=status_code, headers=headers)
-    await wrapper.send(res)
-    await wrapper.send(h11.Data(data=body))
-    await wrapper.send(h11.EndOfMessage())
-
-
 async def send_response(wrapper, response):
     if response.delay > 0:
         assert response.delay < TIMEOUT
@@ -270,33 +284,14 @@ async def send_response(wrapper, response):
         await wrapper.send(res)
     except Exception as e:
         print(e)
-    if response.chunked:
-        await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(response.data), response.data.encode())))
-    else:
-        if not response.head_request:
+
+    if not response.head_request:
+        if response.chunked:
+            await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(response.data), response.data.encode())))
+        else:
             await wrapper.send(h11.Data(data=response.data.encode()))
 
     await wrapper.send(h11.EndOfMessage())
-
-
-async def maybe_send_error_response(wrapper, exc):
-    if wrapper.conn.our_state not in {h11.IDLE, h11.SEND_RESPONSE}:
-        wrapper.info("...but I can't, because our state is",
-                     wrapper.conn.our_state)
-        return
-    try:
-        if isinstance(exc, h11.RemoteProtocolError):
-            status_code = exc.error_status_hint
-        elif isinstance(exc, trio.TooSlowError):
-            status_code = 408  # Request Timeout
-        else:
-            status_code = 500
-        body = str(exc).encode("utf-8")
-        await send_simple_response(
-            wrapper, status_code, "text/plain; charset=utf-8", body
-        )
-    except Exception as exc:
-        wrapper.info("error while sending error response:", exc)
 
 
 def get_request_header_value(request, header_name):
@@ -370,8 +365,7 @@ def handle_list_parts(parsed_path):
 
 
 async def handle_mock_s3_request(wrapper, request):
-    parsed_path, parsed_query = parse_request_path(
-        request.target.decode("ascii"))
+    parsed_path = urlparse(request.target.decode("ascii"))
     method = request.method.decode("utf-8")
     response_config = None
 
@@ -414,6 +408,10 @@ async def handle_mock_s3_request(wrapper, request):
     await send_response(wrapper, response)
 
 
+################################################################
+# Run the server
+################################################################
+
 async def serve(port):
     print("listening on http://localhost:{}".format(port))
     try:
@@ -421,9 +419,5 @@ async def serve(port):
     except KeyboardInterrupt:
         print("KeyboardInterrupt - shutting down")
 
-
-################################################################
-# Run the server
-################################################################
 if __name__ == "__main__":
     trio.run(serve, 8080)
