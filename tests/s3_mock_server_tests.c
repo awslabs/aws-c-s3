@@ -194,6 +194,50 @@ TEST_CASE(multipart_upload_checksum_with_retry_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+TEST_CASE(multipart_download_checksum_with_retry_mock_server) {
+    (void)ctx;
+    /**
+     * We had a memory leak after the header of the request received successfully, the request failed.
+     * We have allocated memory that never frees.
+     */
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    /* Mock server will response without fake checksum for the body */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_checksum_retry");
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(async_internal_error_from_complete_multipart_mock_server) {
     (void)ctx;
 
