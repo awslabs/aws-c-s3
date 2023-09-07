@@ -1689,7 +1689,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     ASSERT_UINT_EQUALS(upload_size_bytes, out_results->progress.content_length);
                 }
             }
-            ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_being_prepared));
+            ASSERT_UINT_EQUALS(0, client->threaded_data.num_requests_being_prepared);
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_in_flight));
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting));
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_streaming_response));

@@ -766,7 +766,7 @@ static int s_validate_prepared_requests(
 
     ASSERT_TRUE(client->threaded_data.request_queue_size == 0);
     ASSERT_TRUE(aws_linked_list_empty(&client->threaded_data.request_queue));
-    ASSERT_TRUE(aws_atomic_load_int(&client->stats.num_requests_being_prepared) == expected_num_being_prepared);
+    ASSERT_TRUE(client->threaded_data.num_requests_being_prepared == expected_num_being_prepared);
     ASSERT_TRUE(aws_atomic_load_int(&client->stats.num_requests_in_flight) == expected_num_being_prepared);
 
     uint32_t num_meta_requests_in_list = 0;
