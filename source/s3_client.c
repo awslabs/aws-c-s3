@@ -1480,12 +1480,9 @@ static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    if (error_code != AWS_ERROR_SUCCESS || request->is_noop) {
+    if (error_code != AWS_ERROR_SUCCESS) {
         s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
-        if (!request->is_noop) {
-            /* For no-op request, push it into the queue and clean it up when client iterate through the queue. */
-            request = aws_s3_request_release(request);
-        }
+        request = aws_s3_request_release(request);
     }
 
     /* BEGIN CRITICAL SECTION */
@@ -1519,6 +1516,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, request->meta_request);
         if (request->is_noop) {
             /* If request is no-op, the request  */
+            s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_SUCCESS);
             request = aws_s3_request_release(request);
             continue;
         }
