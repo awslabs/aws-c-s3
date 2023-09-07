@@ -283,8 +283,8 @@ struct aws_s3_client {
         /* Number of requests sitting in their meta request priority queue, waiting to be streamed. */
         struct aws_atomic_var num_requests_stream_queued_waiting;
 
-        /* Number of requests currently scheduled to be streamed or are actively being streamed. */
-        struct aws_atomic_var num_requests_streaming;
+        /* Number of requests currently scheduled to be streamed the response body or are actively being streamed. */
+        struct aws_atomic_var num_requests_streaming_response;
 
         /* Number of requests currently being prepared. */
         struct aws_atomic_var num_requests_being_prepared;

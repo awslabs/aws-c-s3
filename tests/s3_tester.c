@@ -810,7 +810,7 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
     }
 
     aws_atomic_init_int(&mock_client->stats.num_requests_stream_queued_waiting, 0);
-    aws_atomic_init_int(&mock_client->stats.num_requests_streaming, 0);
+    aws_atomic_init_int(&mock_client->stats.num_requests_streaming_response, 0);
 
     return mock_client;
 }
@@ -1692,7 +1692,7 @@ int aws_s3_tester_send_meta_request_with_options(
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_being_prepared));
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_in_flight));
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting));
-            ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_streaming));
+            ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_streaming_response));
             ASSERT_UINT_EQUALS(0, client->threaded_data.request_queue_size);
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:

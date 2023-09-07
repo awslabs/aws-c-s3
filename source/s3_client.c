@@ -277,7 +277,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
-    aws_atomic_init_int(&client->stats.num_requests_streaming, 0);
+    aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -1262,18 +1262,22 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
         uint32_t num_requests_stream_queued_waiting =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting);
-        uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming);
+
         uint32_t num_requests_being_prepared =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_being_prepared);
 
+        uint32_t num_requests_streaming_response =
+            (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming_response);
+
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
-                                         num_requests_streaming + num_requests_being_prepared +
+                                         num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
             "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  "
-            "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  Requests-streaming:%d "
+            "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  "
+            "Requests-streaming-response:%d "
             " Endpoints(in-table/allocated):%d/%d",
             (void *)client,
             total_approx_requests,
@@ -1285,7 +1289,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             num_auto_default_network_io,
             num_requests_network_io,
             num_requests_stream_queued_waiting,
-            num_requests_streaming,
+            num_requests_streaming_response,
             num_endpoints_in_table,
             num_endpoints_allocated);
     }
