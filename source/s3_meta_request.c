@@ -982,12 +982,12 @@ static void s_get_response_part_finish_checksum_helper(struct aws_s3_connection 
         request->validation_algorithm = request->request_level_running_response_sum->algorithm;
         aws_byte_buf_clean_up(&response_body_sum);
         aws_byte_buf_clean_up(&encoded_response_body_sum);
-        aws_checksum_destroy(request->request_level_running_response_sum);
-        aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
-        request->request_level_running_response_sum = NULL;
     } else {
         request->did_validate = false;
     }
+    aws_checksum_destroy(request->request_level_running_response_sum);
+    aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
+    request->request_level_running_response_sum = NULL;
 }
 
 static int s_s3_meta_request_incoming_headers(
