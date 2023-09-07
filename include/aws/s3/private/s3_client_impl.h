@@ -285,6 +285,9 @@ struct aws_s3_client {
 
         /* Number of requests currently scheduled to be streamed or are actively being streamed. */
         struct aws_atomic_var num_requests_streaming;
+
+        /* Number of requests currently being prepared. */
+        struct aws_atomic_var num_requests_being_prepared;
     } stats;
 
     struct {
@@ -341,10 +344,6 @@ struct aws_s3_client {
 
         /* Number of requests in the request_queue linked_list. */
         uint32_t request_queue_size;
-
-        /* Number of requests currently being prepared. */
-        uint32_t num_requests_being_prepared;
-
     } threaded_data;
 };
 

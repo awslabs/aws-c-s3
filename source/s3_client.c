@@ -270,6 +270,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_linked_list_init(&client->threaded_data.request_queue);
 
     aws_atomic_init_int(&client->stats.num_requests_in_flight, 0);
+    aws_atomic_init_int(&client->stats.num_requests_being_prepared, 0);
 
     for (uint32_t i = 0; i < (uint32_t)AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
         aws_atomic_init_int(&client->stats.num_requests_network_io[i], 0);
@@ -1193,27 +1194,8 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     uint32_t num_requests_queued =
         aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
 
-    {
-        int sub_result = aws_sub_u32_checked(
-            client->threaded_data.num_requests_being_prepared,
-            num_requests_queued,
-            &client->threaded_data.num_requests_being_prepared);
-
-        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
-        (void)sub_result;
-    }
-
-    {
-        int sub_result = aws_sub_u32_checked(
-            client->threaded_data.num_requests_being_prepared,
-            client->synced_data.num_failed_prepare_requests,
-            &client->threaded_data.num_requests_being_prepared);
-
-        client->synced_data.num_failed_prepare_requests = 0;
-
-        AWS_ASSERT(sub_result == AWS_OP_SUCCESS);
-        (void)sub_result;
-    }
+    aws_atomic_fetch_sub(&client->stats.num_requests_being_prepared, num_requests_queued);
+    aws_atomic_fetch_sub(&client->stats.num_requests_being_prepared, client->synced_data.num_failed_prepare_requests);
 
     uint32_t num_endpoints_in_table = (uint32_t)aws_hash_table_get_entry_count(&client->synced_data.endpoints);
     uint32_t num_endpoints_allocated = client->synced_data.num_endpoints_allocated;
@@ -1280,9 +1262,11 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         uint32_t num_requests_stream_queued_waiting =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting);
         uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming);
+        uint32_t num_requests_being_prepared =
+            (uint32_t)aws_atomic_load_int(&client->stats.num_requests_being_prepared);
 
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
-                                         num_requests_streaming + client->threaded_data.num_requests_being_prepared +
+                                         num_requests_streaming + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
         AWS_LOGF(
             s_log_level_client_stats,
@@ -1293,7 +1277,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             (void *)client,
             total_approx_requests,
             num_requests_tracked_requests,
-            client->threaded_data.num_requests_being_prepared,
+            num_requests_being_prepared,
             client->threaded_data.request_queue_size,
             num_auto_ranged_get_network_io,
             num_auto_ranged_put_network_io,
@@ -1365,6 +1349,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_requests_work_remaining);
 
     uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+    uint32_t num_requests_being_prepared = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_being_prepared);
 
     const uint32_t pass_flags[] = {
         AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE,
@@ -1384,8 +1369,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
          * Then update meta requests to get new requests that can then be prepared (reading from any streams, signing,
          * etc.) for sending.
          */
-        while ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) <
-                   max_requests_prepare &&
+        while ((num_requests_being_prepared + client->threaded_data.request_queue_size) < max_requests_prepare &&
                num_requests_in_flight < max_requests_in_flight &&
                !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 
@@ -1404,8 +1388,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
              * ramping up requests just yet. If there is already enough in the queue for one address (even if those
              * aren't for this particular endpoint) we skip over this meta request for now. */
-            if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
-                                        client->threaded_data.request_queue_size) >= g_max_num_connections_per_vip) {
+            if (num_known_vips == 0 && (num_requests_being_prepared + client->threaded_data.request_queue_size) >=
+                                           g_max_num_connections_per_vip) {
                 aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
                 aws_linked_list_push_back(
                     &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
@@ -1428,7 +1412,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 } else {
                     request->tracked_by_client = true;
 
-                    ++client->threaded_data.num_requests_being_prepared;
+                    num_requests_being_prepared =
+                        (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_being_prepared, 1) + 1;
 
                     num_requests_in_flight =
                         (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
@@ -1491,6 +1476,8 @@ static void s_s3_client_prepare_callback_queue_request(
         if (error_code == AWS_ERROR_SUCCESS) {
             if (!request_is_noop) {
                 aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+            } else {
+                aws_atomic_fetch_sub(&client->stats.num_requests_being_prepared, 1);
             }
         } else {
             ++client->synced_data.num_failed_prepare_requests;

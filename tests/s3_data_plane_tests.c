@@ -766,7 +766,7 @@ static int s_validate_prepared_requests(
 
     ASSERT_TRUE(client->threaded_data.request_queue_size == 0);
     ASSERT_TRUE(aws_linked_list_empty(&client->threaded_data.request_queue));
-    ASSERT_TRUE(client->threaded_data.num_requests_being_prepared == expected_num_being_prepared);
+    ASSERT_TRUE(aws_atomic_load_int(&client->stats.num_requests_being_prepared) == expected_num_being_prepared);
     ASSERT_TRUE(aws_atomic_load_int(&client->stats.num_requests_in_flight) == expected_num_being_prepared);
 
     uint32_t num_meta_requests_in_list = 0;
@@ -2200,6 +2200,7 @@ static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws
  */
 AWS_TEST_CASE(test_s3_put_object_no_content_length_multiple, s_test_s3_put_object_no_content_length_multiple)
 static int s_test_s3_put_object_no_content_length_multiple(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -2230,6 +2231,7 @@ static int s_test_s3_put_object_no_content_length_multiple(struct aws_allocator 
     for (int i = 0; i < 6; i++) {
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
     }
+    /* Sleep more than the DNS ttl to purge all records. */
     aws_thread_current_sleep(aws_timestamp_convert(60, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
 
     /* After sleep for a while, make another meta request */

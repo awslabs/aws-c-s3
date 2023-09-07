@@ -160,7 +160,8 @@ static void s_s3_fail_prepare_finish_destroy(struct aws_s3_client *client) {
     struct s3_fail_prepare_test_data *test_data = tester->user_data;
     AWS_ASSERT(test_data != NULL);
 
-    test_data->num_requests_being_prepared_is_correct = client->threaded_data.num_requests_being_prepared == 0;
+    test_data->num_requests_being_prepared_is_correct =
+        aws_atomic_load_int(&client->stats.num_requests_being_prepared) == 0;
 
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
