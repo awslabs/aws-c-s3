@@ -31,17 +31,6 @@
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif
 
-/* A function level attribute to disable ThreadSanitizer instrumentation. */
-#if defined(__clang__)
-#    if __has_feature(thread_sanitizer)
-#        define NO_SANITIZE_THREAD __attribute__((no_sanitize_thread))
-#    else
-#        define NO_SANITIZE_THREAD
-#    endif // __has_feature(thread_sanitizer)
-#else
-#    define NO_SANITIZE_THREAD
-#endif // __clang__
-
 const struct aws_byte_cursor g_mock_server_uri = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("http://localhost:8080/");
 
 const struct aws_byte_cursor g_test_mrap_endpoint =
@@ -1347,7 +1336,7 @@ int aws_s3_tester_client_new(
 }
 
 /* Disable tsan as we hack into the client threaded data */
-NO_SANITIZE_THREAD
+AWS_SUPPRESS_TSAN
 static int s_tester_check_client_thread_data(struct aws_s3_client *client) {
     ASSERT_UINT_EQUALS(0, client->threaded_data.num_requests_being_prepared);
     ASSERT_UINT_EQUALS(0, client->threaded_data.request_queue_size);
