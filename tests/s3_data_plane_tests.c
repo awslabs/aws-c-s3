@@ -2188,6 +2188,60 @@ static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws
     return 0;
 }
 
+/**
+ * Once upon a time, we have a bug that without content-length, we will schedule more requests to prepare than needed.
+ * And those extra request will be cleaned up, however, the client level count of `num_requests_being_prepared` will
+ * still keep record for those.
+ *
+ * To reproduce, we create bunch of requests with less than a part body. And then sleep for a while to let dns resolve
+ * purge all records. (Otherwise, we will always have one valid request to be available to send.) to trigger not going
+ * full speed code. And we will hang.
+ *
+ */
+AWS_TEST_CASE(test_s3_put_object_no_content_length_multiple, s_test_s3_put_object_no_content_length_multiple)
+static int s_test_s3_put_object_no_content_length_multiple(struct aws_allocator *allocator, void *ctx) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    aws_s3_set_dns_ttl(55);
+
+    ASSERT_TRUE(client != NULL);
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_size_mb = 1,
+                .skip_content_length = true,
+            },
+    };
+    for (int i = 0; i < 6; i++) {
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    }
+    aws_thread_current_sleep(aws_timestamp_convert(60, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+
+    /* After sleep for a while, make another meta request */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 /* Test async-input-stream when we're not doing multipart upload */
 AWS_TEST_CASE(test_s3_put_object_async_singlepart, s_test_s3_put_object_async_singlepart)
 static int s_test_s3_put_object_async_singlepart(struct aws_allocator *allocator, void *ctx) {
