@@ -305,7 +305,7 @@ def handle_get_object_modified(start_range, end_range, request):
     data_length = end_range - start_range
 
     if start_range == 0:
-        return ResponseConfig("/get_object_modified_first_part", data_length)
+        return ResponseConfig("/get_object_modified_first_part", generate_body_size=data_length)
     else:
         # Check the request header to make sure "If-Match" is set
         etag = get_request_header_value(request, "if-match")
@@ -399,6 +399,7 @@ async def handle_mock_s3_request(wrapper, request):
         if type(event) is h11.EndOfMessage:
             break
         assert type(event) is h11.Data
+
     if response_config is None:
         response_config = ResponseConfig(parsed_path.path)
 
