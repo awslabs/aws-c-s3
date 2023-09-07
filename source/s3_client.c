@@ -1196,6 +1196,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     aws_atomic_fetch_sub(&client->stats.num_requests_being_prepared, num_requests_queued);
     aws_atomic_fetch_sub(&client->stats.num_requests_being_prepared, client->synced_data.num_failed_prepare_requests);
+    client->synced_data.num_failed_prepare_requests = 0;
 
     uint32_t num_endpoints_in_table = (uint32_t)aws_hash_table_get_entry_count(&client->synced_data.endpoints);
     uint32_t num_endpoints_allocated = client->synced_data.num_endpoints_allocated;
