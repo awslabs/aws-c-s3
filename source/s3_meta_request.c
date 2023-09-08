@@ -1182,8 +1182,9 @@ static void s_s3_meta_request_send_request_finish(
 
     vtable->send_request_finish(connection, stream, error_code);
 }
-
-static bool s_handle_async_error(struct aws_s3_request *request) {
+/* Return whether the response to this request might contain an error, even though we got 200 OK.
+ * see: https://repost.aws/knowledge-center/s3-resolve-200-internalerror */
+static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request *request) {
     /* We handle async error for */
     struct aws_s3_meta_request *meta_request = request->meta_request;
     switch (meta_request->type) {
@@ -1215,48 +1216,39 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
     struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
     struct aws_byte_cursor error_code_string = {0};
 
-    if (response_status == AWS_HTTP_STATUS_CODE_200_OK && s_handle_async_error(request)) {
-        /* Handle Async Error, 200 status code with error in the body. */
-        if (request->send_data.response_body.len == 0) {
-            /* Empty body is success */
-            return AWS_ERROR_SUCCESS;
-        }
-        if (aws_xml_get_body_at_path(request->allocator, response_body_cursor, xml_path, &error_code_string)) {
+    int error_code_from_status = s_s3_meta_request_error_code_from_response_status(response_status);
+    int error_code_from_body = AWS_ERROR_SUCCESS;
 
-            if (aws_last_error() == AWS_ERROR_INVALID_XML || aws_last_error() == AWS_ERROR_STRING_MATCH_NOT_FOUND) {
-                /* The xml body is not Error, we can safely think the request succeed. */
-                aws_reset_error();
-                return AWS_ERROR_SUCCESS;
-            } else {
-                return aws_last_error();
-            }
-        } else {
-            /* Check the error code. Map the S3 error code to CRT error code. */
-            int error_code = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
-            if (error_code == AWS_ERROR_UNKNOWN) {
-                /* All error besides of internal error from async error are not recoverable from retry for now. */
-                error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
-            }
-            return error_code;
-        }
-    } else if (response_status == AWS_HTTP_STATUS_CODE_403_FORBIDDEN) {
+    if (error_code_from_status != AWS_ERROR_SUCCESS || s_should_check_for_error_despite_200_OK(request)) {
+        /* try to get error code from body. */
         if (request->send_data.response_body.len > 0) {
-            /* Parse the error body for `RequestTimeTooSkewed` */
-            if (aws_xml_get_body_at_path(request->allocator, response_body_cursor, xml_path, &error_code_string) ==
-                AWS_OP_SUCCESS) {
-                /* Check the error code. Map the S3 error code to CRT error code. */
-                int error_code = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
-                if (error_code != AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED) {
-                    /* If error code is not too skewed, we report unrecoverable invalid response status for 403 */
-                    error_code = AWS_ERROR_S3_INVALID_RESPONSE_STATUS;
+            if (aws_xml_get_body_at_path(request->allocator, response_body_cursor, xml_path, &error_code_string)) {
+                if (aws_last_error() == AWS_ERROR_INVALID_XML || aws_last_error() == AWS_ERROR_STRING_MATCH_NOT_FOUND) {
+                    /* The xml body is not Error, we can safely think the request succeed. */
+                    aws_reset_error();
+                } else {
+                    /* Failed to parse the body with "real error", bail out */
+                    return aws_last_error();
                 }
-                return error_code;
+            } else {
+                /* Check the error code. Map the S3 error code to CRT error code. */
+                error_code_from_body = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
             }
         }
     }
 
-    /* Not a special error to handle, just use the status code to determin the error. */
-    return s_s3_meta_request_error_code_from_response_status(response_status);
+    if (error_code_from_status == AWS_ERROR_SUCCESS) {
+        if (error_code_from_body == AWS_ERROR_UNKNOWN) {
+            return AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+        }
+    } else {
+        if (error_code_from_body == AWS_ERROR_UNKNOWN || error_code_from_body == AWS_ERROR_SUCCESS) {
+            /* We don't find anything more useful from the body */
+            return error_code_from_status
+        }
+    }
+    /* Return what  */
+    return error_code_from_body;
 }
 
 void aws_s3_meta_request_send_request_finish_default(

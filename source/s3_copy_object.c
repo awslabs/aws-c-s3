@@ -37,7 +37,7 @@ static void s_s3_copy_object_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static int s_s3_copy_object_request_type(struct aws_s3_request *request) {
+static int s_s3_copy_object_request_type(const struct aws_s3_request *request) {
     switch (request->request_tag) {
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE:
             /* It's a HEAD request of GetObject call */

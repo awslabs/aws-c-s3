@@ -22,12 +22,12 @@
 #else
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
 #endif
-#define KB_TO_BYTES(kb) ((kb)*1024)
-#define MB_TO_BYTES(mb) ((mb)*1024 * 1024)
-#define GB_TO_BYTES(gb) ((gb)*1024 * 1024 * 1024ULL)
+#define KB_TO_BYTES(kb) ((kb) * 1024)
+#define MB_TO_BYTES(mb) ((mb) * 1024 * 1024)
+#define GB_TO_BYTES(gb) ((gb) * 1024 * 1024 * 1024ULL)
 
-#define MS_TO_NS(ms) ((uint64_t)(ms)*1000000)
-#define SEC_TO_NS(ms) ((uint64_t)(ms)*1000000000)
+#define MS_TO_NS(ms) ((uint64_t)(ms) * 1000000)
+#define SEC_TO_NS(ms) ((uint64_t)(ms) * 1000000000)
 
 struct aws_allocator;
 struct aws_http_stream;
@@ -164,8 +164,6 @@ extern const struct aws_byte_cursor g_head_method;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_delete_method;
-
-extern const struct aws_byte_cursor g_s3_internal_error_code;
 
 AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
