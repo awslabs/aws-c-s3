@@ -1244,7 +1244,7 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
     } else {
         if (error_code_from_body == AWS_ERROR_UNKNOWN || error_code_from_body == AWS_ERROR_SUCCESS) {
             /* We don't find anything more useful from the body */
-            return error_code_from_status
+            return error_code_from_status;
         }
     }
     /* Return what  */
