@@ -1518,14 +1518,10 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
             /* If request is no-op, finishes and cleans up the request */
             s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_SUCCESS);
             request = aws_s3_request_release(request);
-            continue;
-        }
-
-        /* Unless the request is marked "always send", if this meta request has a finish result, then finish the request
-         * now and release it. */
-        if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
+        } else if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
+            /* Unless the request is marked "always send", if this meta request has a finish result, then finish the
+             * request now and release it. */
             s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
-
             request = aws_s3_request_release(request);
         } else if (
             s_s3_client_get_num_requests_network_io(client, request->meta_request->type) < max_active_connections) {
