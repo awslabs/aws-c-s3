@@ -1515,7 +1515,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, request->meta_request);
         if (request->is_noop) {
-            /* If request is no-op, the request  */
+            /* If request is no-op, finishes and cleans up the request */
             s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_SUCCESS);
             request = aws_s3_request_release(request);
             continue;
