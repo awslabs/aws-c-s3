@@ -54,6 +54,27 @@ struct aws_s3_prepare_request_payload {
     void *user_data;
 };
 
+/* An event to be delivered on the meta-request's io_event_loop thread. */
+struct aws_s3_meta_request_event {
+    enum aws_s3_meta_request_event_type {
+        AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY, /* body_callback */
+        AWS_S3_META_REQUEST_EVENT_PROGRESS,      /* progress_callback */
+        /* TODO: AWS_S3_META_REQUEST_EVENT_TELEMETRY */
+    } type;
+
+    union {
+        /* data for AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY */
+        struct {
+            struct aws_s3_request *completed_request;
+        } response_body;
+
+        /* data for AWS_S3_META_REQUEST_EVENT_PROGRESS */
+        struct {
+            struct aws_s3_meta_request_progress info;
+        } progress;
+    } u;
+};
+
 struct aws_s3_meta_request_vtable {
     /* Update the meta request.  out_request is required to be non-null. Returns true if there is any work in
      * progress, false if there is not. */
@@ -179,11 +200,19 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
-        /* Number of parts that have been successfully delivered to the caller. */
-        uint32_t num_parts_delivery_succeeded;
+        /* Task for delivering events on the meta-request's io_event_loop thread.
+         * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
+         * If `event_delivery_array` has items in it, then this task is scheduled.
+         * If `event_delivery_active` is true, then this task is actively running.
+         * Delivery is not 100% complete until `event_delivery_array` is empty AND `event_delivery_active` is false
+         * (use aws_s3_meta_request_are_events_out_for_delivery_synced()  to check) */
+        struct aws_task event_delivery_task;
 
-        /* Number of parts that have failed while trying to be delivered to the caller. */
-        uint32_t num_parts_delivery_failed;
+        /* Array of `struct aws_s3_meta_request_event` to deliver when the `event_delivery_task` runs. */
+        struct aws_array_list event_delivery_array;
+
+        /* When true, events are actively being delivered to the user. */
+        bool event_delivery_active;
 
         /* The end finish result of the meta request. */
         struct aws_s3_meta_request_result finish_result;
@@ -204,6 +233,14 @@ struct aws_s3_meta_request {
         bool scheduled;
 
     } client_process_work_threaded_data;
+
+    /* Anything in this structure should only ever be accessed by the meta-request from its io_event_loop thread. */
+    struct {
+        /* When delivering events, we swap contents with `synced_data.event_delivery_array`.
+         * This is an optimization, we could have just copied the array when the task runs,
+         * but swapping two array-lists back and forth avoids an allocation. */
+        struct aws_array_list event_delivery_array;
+    } io_threaded_data;
 
     const bool should_compute_content_md5;
 
@@ -308,6 +345,17 @@ AWS_S3_API
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
+
+/* Add an event for delivery on the meta-request's io_event_loop thread.
+ * These events usually correspond to callbacks that must fire sequentially and non-overlapping,
+ * such as delivery of a part's response body. */
+void aws_s3_meta_request_add_event_for_delivery_synced(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_event *event);
+
+/* Returns whether any events are out for delivery.
+ * The meta-request's finish callback must not be invoked until this returns false. */
+bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
  * as reading from the stream could cause user code to call back into aws-c-s3.

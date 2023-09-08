@@ -194,6 +194,50 @@ TEST_CASE(multipart_upload_checksum_with_retry_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+TEST_CASE(multipart_download_checksum_with_retry_mock_server) {
+    (void)ctx;
+    /**
+     * We had a memory leak after the header of the request received successfully, the request failed.
+     * We have allocated memory that never frees.
+     */
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    /* Mock server will response without fake checksum for the body */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_checksum_retry");
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(async_internal_error_from_complete_multipart_mock_server) {
     (void)ctx;
 
@@ -589,8 +633,7 @@ TEST_CASE(resume_first_part_not_completed_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
-    size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
-    ASSERT_UINT_EQUALS(2 * MB_TO_BYTES(8), total_bytes_uploaded);
+    /* TODO: monitor telemetry ensure this happened */
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
@@ -646,8 +689,7 @@ TEST_CASE(resume_multi_page_list_parts_mock_server) {
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* Make Sure we only uploaded 2 parts. */
-    size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
-    ASSERT_UINT_EQUALS(2 * MB_TO_BYTES(8), total_bytes_uploaded);
+    /* TODO: monitor telemetry ensure this happened */
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
@@ -755,8 +797,7 @@ TEST_CASE(resume_after_finished_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     /* The error code should be success, but there are no headers and stuff as no request was made. */
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
-    size_t total_bytes_uploaded = aws_atomic_load_int(&out_results.total_bytes_uploaded);
-    ASSERT_UINT_EQUALS(0, total_bytes_uploaded);
+    /* TODO: monitor telemetry to ensure no actual data was sent */
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
@@ -834,9 +875,6 @@ TEST_CASE(endpoint_override_mock_server) {
         .mock_server = true,
     };
 
-    struct aws_s3_meta_request_test_results out_results;
-    aws_s3_meta_request_test_results_init(&out_results, allocator);
-
     /* Put together a simple S3 Put Object request. */
     struct aws_input_stream *input_stream =
         aws_s3_test_input_stream_new(allocator, put_options.put_options.object_size_mb);
@@ -846,7 +884,7 @@ TEST_CASE(endpoint_override_mock_server) {
 
     /* 1. Create request without host and use endpoint override for the host info */
     put_options.message = message;
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /* 2. Create request with host info missmatch endpoint override */
     struct aws_http_header host_header = {
@@ -856,12 +894,11 @@ TEST_CASE(endpoint_override_mock_server) {
     ASSERT_SUCCESS(aws_http_message_add_header(message, host_header));
     put_options.message = message;
     put_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /* Clean up */
     aws_http_message_destroy(message);
     aws_input_stream_release(input_stream);
-    aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 

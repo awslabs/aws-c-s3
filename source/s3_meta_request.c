@@ -25,6 +25,7 @@
 
 static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
+static const size_t s_default_event_delivery_array_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static void s_s3_meta_request_destroy(void *user_data);
@@ -223,6 +224,18 @@ int aws_s3_meta_request_init_base(
         goto error;
     }
 
+    aws_array_list_init_dynamic(
+        &meta_request->synced_data.event_delivery_array,
+        meta_request->allocator,
+        s_default_event_delivery_array_size,
+        sizeof(struct aws_s3_meta_request_event));
+
+    aws_array_list_init_dynamic(
+        &meta_request->io_threaded_data.event_delivery_array,
+        meta_request->allocator,
+        s_default_event_delivery_array_size,
+        sizeof(struct aws_s3_meta_request_event));
+
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     checksum_config_init(&meta_request->checksum_config, options->checksum_config);
@@ -353,6 +366,16 @@ void aws_s3_meta_request_set_fail_synced(
     AWS_PRECONDITION(meta_request);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
+    /* Protect against bugs */
+    if (error_code == AWS_ERROR_SUCCESS) {
+        AWS_ASSERT(false);
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Meta request failed but error code not set, AWS_ERROR_UNKNOWN will be reported",
+            (void *)meta_request);
+        error_code = AWS_ERROR_UNKNOWN;
+    }
+
     if (meta_request->synced_data.finish_result_set) {
         return;
     }
@@ -447,7 +470,15 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_s3_endpoint_release(meta_request->endpoint);
     meta_request->client = aws_s3_client_release(meta_request->client);
 
+    AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
+
+    AWS_ASSERT(aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 0);
+    aws_array_list_clean_up(&meta_request->synced_data.event_delivery_array);
+
+    AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
+    aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
+
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
     if (meta_request->vtable != NULL) {
@@ -951,12 +982,12 @@ static void s_get_response_part_finish_checksum_helper(struct aws_s3_connection 
         request->validation_algorithm = request->request_level_running_response_sum->algorithm;
         aws_byte_buf_clean_up(&response_body_sum);
         aws_byte_buf_clean_up(&encoded_response_body_sum);
-        aws_checksum_destroy(request->request_level_running_response_sum);
-        aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
-        request->request_level_running_response_sum = NULL;
     } else {
         request->did_validate = false;
     }
+    aws_checksum_destroy(request->request_level_running_response_sum);
+    aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
+    request->request_level_running_response_sum = NULL;
 }
 
 static int s_s3_meta_request_incoming_headers(
@@ -1336,12 +1367,6 @@ void aws_s3_meta_request_finished_request(
     meta_request->vtable->finished_request(meta_request, request, error_code);
 }
 
-struct s3_stream_response_body_payload {
-    struct aws_s3_meta_request *meta_request;
-    struct aws_linked_list requests;
-    struct aws_task task;
-};
-
 /* Pushes a request into the body streaming priority queue. Derived meta request types should not call this--they
  * should instead call aws_s3_meta_request_stream_response_body_synced.*/
 static void s_s3_meta_request_body_streaming_push_synced(
@@ -1354,18 +1379,16 @@ static void s_s3_meta_request_body_streaming_push_synced(
 static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     struct aws_s3_meta_request *meta_request);
 
-static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
+
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(request->part_number > 0);
-
-    struct aws_linked_list streaming_requests;
-    aws_linked_list_init(&streaming_requests);
 
     /* Push it into the priority queue. */
     s_s3_meta_request_body_streaming_push_synced(meta_request, request);
@@ -1374,49 +1397,62 @@ void aws_s3_meta_request_stream_response_body_synced(
     AWS_PRECONDITION(client);
     aws_atomic_fetch_add(&client->stats.num_requests_stream_queued_waiting, 1);
 
-    /* Grab the next request that can be streamed back to the caller. */
-    struct aws_s3_request *next_streaming_request = s_s3_meta_request_body_streaming_pop_next_synced(meta_request);
+    /* Grab any requests that can be streamed back to the caller
+     * and send them for delivery on io_event_loop thread. */
     uint32_t num_streaming_requests = 0;
+    struct aws_s3_request *next_streaming_request;
+    while ((next_streaming_request = s_s3_meta_request_body_streaming_pop_next_synced(meta_request)) != NULL) {
+        struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY};
+        event.u.response_body.completed_request = next_streaming_request;
+        aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
 
-    /* Grab any additional requests that could be streamed to the caller. */
-    while (next_streaming_request != NULL) {
-        aws_atomic_fetch_sub(&client->stats.num_requests_stream_queued_waiting, 1);
-
-        aws_linked_list_push_back(&streaming_requests, &next_streaming_request->node);
         ++num_streaming_requests;
-        next_streaming_request = s_s3_meta_request_body_streaming_pop_next_synced(meta_request);
     }
 
-    if (aws_linked_list_empty(&streaming_requests)) {
+    if (num_streaming_requests == 0) {
         return;
     }
 
     aws_atomic_fetch_add(&client->stats.num_requests_streaming, num_streaming_requests);
+    aws_atomic_fetch_sub(&client->stats.num_requests_stream_queued_waiting, num_streaming_requests);
 
     meta_request->synced_data.num_parts_delivery_sent += num_streaming_requests;
-
-    struct s3_stream_response_body_payload *payload =
-        aws_mem_calloc(client->allocator, 1, sizeof(struct s3_stream_response_body_payload));
-
-    aws_s3_meta_request_acquire(meta_request);
-    payload->meta_request = meta_request;
-
-    aws_linked_list_init(&payload->requests);
-    aws_linked_list_swap_contents(&payload->requests, &streaming_requests);
-
-    aws_task_init(
-        &payload->task, s_s3_meta_request_body_streaming_task, payload, "s_s3_meta_request_body_streaming_task");
-    aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
 }
 
-static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+void aws_s3_meta_request_add_event_for_delivery_synced(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_event *event) {
+
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    aws_array_list_push_back(&meta_request->synced_data.event_delivery_array, event);
+
+    /* If the array was empty before, schedule task to deliver all events in the array.
+     * If the array already had things in it, then the task is already scheduled and will run soon. */
+    if (aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 1) {
+        aws_s3_meta_request_acquire(meta_request);
+
+        aws_task_init(
+            &meta_request->synced_data.event_delivery_task,
+            s_s3_meta_request_event_delivery_task,
+            meta_request,
+            "s3_meta_request_event_delivery");
+        aws_event_loop_schedule_task_now(meta_request->io_event_loop, &meta_request->synced_data.event_delivery_task);
+    }
+}
+
+bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+    return aws_array_list_length(&meta_request->synced_data.event_delivery_array) > 0 ||
+           meta_request->synced_data.event_delivery_active;
+}
+
+/* Deliver events in event_delivery_array.
+ * This task runs on the meta-request's io_event_loop thread. */
+static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     (void)task_status;
-
-    struct s3_stream_response_body_payload *payload = arg;
-    AWS_PRECONDITION(payload);
-
-    struct aws_s3_meta_request *meta_request = payload->meta_request;
+    struct aws_s3_meta_request *meta_request = arg;
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
 
@@ -1426,40 +1462,98 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
-    struct aws_linked_list completed_requests;
-    aws_linked_list_init(&completed_requests);
+    /* Swap contents of synced_data.event_delivery_array into this pre-allocated array-list, then process events */
+    struct aws_array_list *event_delivery_array = &meta_request->io_threaded_data.event_delivery_array;
+    AWS_FATAL_ASSERT(aws_array_list_length(event_delivery_array) == 0);
 
+    /* If an error occurs, don't fire callbacks anymore. */
     int error_code = AWS_ERROR_SUCCESS;
-    uint32_t num_successful = 0;
-    uint32_t num_failed = 0;
+    uint32_t num_parts_delivered = 0;
 
-    while (!aws_linked_list_empty(&payload->requests)) {
-        struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&payload->requests);
-        struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
-        AWS_ASSERT(meta_request == request->meta_request);
-        struct aws_byte_cursor body_buffer_byte_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
 
-        AWS_ASSERT(request->part_number >= 1);
+        aws_array_list_swap_contents(event_delivery_array, &meta_request->synced_data.event_delivery_array);
+        meta_request->synced_data.event_delivery_active = true;
 
-        if (aws_s3_meta_request_has_finish_result(meta_request)) {
-            ++num_failed;
-        } else {
-            if (body_buffer_byte_cursor.len > 0 && error_code == AWS_ERROR_SUCCESS && meta_request->body_callback &&
-                meta_request->body_callback(
-                    meta_request, &body_buffer_byte_cursor, request->part_range_start, meta_request->user_data)) {
-                error_code = aws_last_error_or_unknown();
-            }
-
-            if (error_code == AWS_ERROR_SUCCESS) {
-                ++num_successful;
-            } else {
-                ++num_failed;
-            }
+        if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+            error_code = AWS_ERROR_S3_CANCELED;
         }
 
-        aws_atomic_fetch_sub(&client->stats.num_requests_streaming, 1);
-        aws_s3_request_release(request);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
     }
+    /* END CRITICAL SECTION */
+
+    /* Deliver all events */
+    for (size_t event_i = 0; event_i < aws_array_list_length(event_delivery_array); ++event_i) {
+        struct aws_s3_meta_request_event event;
+        aws_array_list_get_at(event_delivery_array, &event, event_i);
+        switch (event.type) {
+
+            case AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY: {
+                struct aws_s3_request *request = event.u.response_body.completed_request;
+                AWS_ASSERT(meta_request == request->meta_request);
+                struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
+
+                AWS_ASSERT(request->part_number >= 1);
+
+                if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0 && meta_request->body_callback != NULL) {
+                    if (meta_request->body_callback(
+                            meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
+
+                        error_code = aws_last_error_or_unknown();
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p Response body callback raised error %d (%s).",
+                            (void *)meta_request,
+                            error_code,
+                            aws_error_str(error_code));
+                    }
+                }
+
+                ++num_parts_delivered;
+                aws_s3_request_release(request);
+            } break;
+
+            case AWS_S3_META_REQUEST_EVENT_PROGRESS: {
+                if (error_code == AWS_ERROR_SUCCESS && meta_request->progress_callback != NULL) {
+                    /* Don't report 0 byte progress events.
+                     * The reasoning behind this is:
+                     *
+                     * In some code paths, when no data is transferred, there are no progress events,
+                     * but in other code paths there might be one progress event of 0 bytes.
+                     * We want to be consistent, either:
+                     * - REPORT AT LEAST ONCE: even if no data is being transferred.
+                     *   This would require finding every code path where no progress events are sent,
+                     *   and sending an appropriate progress event, even if it's for 0 bytes.
+                     *   One example of ending early is: when resuming a paused upload,
+                     *   we do ListParts on the UploadID, and if that 404s we assume the
+                     *   previous "paused" meta-request actually completed,
+                     *   and so we immediately end the "resuming" meta-request
+                     *   as successful without sending any further HTTP requests.
+                     *   It would be tough to accurately report progress here because
+                     *   we don't know the total size, since we never read the request body,
+                     *   and didn't get any info about the previous upload.
+                     * OR
+                     * - NEVER REPORT ZERO BYTES: even if that means no progress events at all.
+                     *   This is easy to do. We'd only send progress events when data is transferred,
+                     *   and if a 0 byte event slips through somehow, just check before firing the callback.
+                     * Since the NEVER REPORT ZERO BYTES path is simpler to implement, we went with that. */
+                    if (event.u.progress.info.bytes_transferred > 0) {
+                        meta_request->progress_callback(meta_request, &event.u.progress.info, meta_request->user_data);
+                    }
+                }
+            } break;
+
+            default:
+                AWS_FATAL_ASSERT(false);
+        }
+    }
+
+    /* Done delivering events */
+    aws_array_list_clear(event_delivery_array);
+
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -1467,14 +1561,11 @@ static void s_s3_meta_request_body_streaming_task(struct aws_task *task, void *a
             aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
         }
 
-        meta_request->synced_data.num_parts_delivery_completed += (num_failed + num_successful);
-        meta_request->synced_data.num_parts_delivery_failed += num_failed;
-        meta_request->synced_data.num_parts_delivery_succeeded += num_successful;
+        meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
+        meta_request->synced_data.event_delivery_active = false;
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
-    aws_mem_release(client->allocator, payload);
-    payload = NULL;
 
     aws_s3_client_schedule_process_work(client);
     aws_s3_meta_request_release(meta_request);

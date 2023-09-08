@@ -688,6 +688,10 @@ static bool s_s3_auto_ranged_put_update(
         work_remaining = true;
 
     no_work_remaining:
+        /* If some events are still being delivered to caller, then wait for those to finish */
+        if (!work_remaining && aws_s3_meta_request_are_events_out_for_delivery_synced(meta_request)) {
+            work_remaining = true;
+        }
 
         if (!work_remaining) {
             aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
@@ -1569,6 +1573,8 @@ static void s_s3_auto_ranged_put_request_finished(
                             AWS_LS_S3_META_REQUEST, "id=%p Failed to parse list parts response.", (void *)meta_request);
                         error_code = AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED;
                     } else if (!has_more_results) {
+                        uint64_t bytes_previously_uploaded = 0;
+
                         for (size_t part_index = 0;
                              part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
                              part_index++) {
@@ -1578,6 +1584,8 @@ static void s_s3_auto_ranged_put_request_finished(
                                 /* Update the number of parts sent/completed previously */
                                 ++auto_ranged_put->synced_data.num_parts_started;
                                 ++auto_ranged_put->synced_data.num_parts_completed;
+
+                                bytes_previously_uploaded += part->size;
                             }
                         }
 
@@ -1587,6 +1595,14 @@ static void s_s3_auto_ranged_put_request_finished(
                             (void *)meta_request,
                             auto_ranged_put->synced_data.num_parts_completed,
                             auto_ranged_put->total_num_parts_from_content_length);
+
+                        /* Deliver an initial progress_callback to report all previously uploaded parts. */
+                        if (meta_request->progress_callback != NULL && bytes_previously_uploaded > 0) {
+                            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                            event.u.progress.info.bytes_transferred = bytes_previously_uploaded;
+                            event.u.progress.info.content_length = auto_ranged_put->content_length;
+                            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+                        }
                     }
                 }
 
@@ -1713,13 +1729,6 @@ static void s_s3_auto_ranged_put_request_finished(
                         etag = aws_strip_quotes(meta_request->allocator, etag_within_quotes);
                     }
                 }
-                if (error_code == AWS_ERROR_SUCCESS && meta_request->progress_callback != NULL) {
-                    struct aws_s3_meta_request_progress progress = {
-                        .bytes_transferred = request->request_body.len,
-                        .content_length = auto_ranged_put->content_length,
-                    };
-                    meta_request->progress_callback(meta_request, &progress, meta_request->user_data);
-                }
             }
 
             /* BEGIN CRITICAL SECTION */
@@ -1752,6 +1761,14 @@ static void s_s3_auto_ranged_put_request_finished(
                         AWS_ASSERT(etag != NULL);
 
                         ++auto_ranged_put->synced_data.num_parts_successful;
+
+                        /* Send progress_callback for delivery on io_event_loop thread */
+                        if (meta_request->progress_callback != NULL) {
+                            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                            event.u.progress.info.bytes_transferred = request->request_body.len;
+                            event.u.progress.info.content_length = auto_ranged_put->content_length;
+                            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+                        }
 
                         /* Store part's ETag */
                         struct aws_s3_mpu_part_info *part = NULL;
