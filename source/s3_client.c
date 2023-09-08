@@ -616,6 +616,9 @@ uint32_t aws_s3_client_queue_requests_threaded(
     bool queue_front) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request_list);
+    if (aws_linked_list_empty(request_list)) {
+        return 0;
+    }
 
     uint32_t request_list_size = 0;
 
