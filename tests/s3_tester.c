@@ -1335,6 +1335,14 @@ int aws_s3_tester_client_new(
     return AWS_OP_SUCCESS;
 }
 
+/* Disable tsan as we hack into the client threaded data */
+AWS_SUPPRESS_TSAN
+static int s_tester_check_client_thread_data(struct aws_s3_client *client) {
+    ASSERT_UINT_EQUALS(0, client->threaded_data.num_requests_being_prepared);
+    ASSERT_UINT_EQUALS(0, client->threaded_data.request_queue_size);
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_tester *tester,
     struct aws_s3_tester_meta_request_options *options,
@@ -1692,8 +1700,7 @@ int aws_s3_tester_send_meta_request_with_options(
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_in_flight));
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting));
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_streaming_response));
-            ASSERT_UINT_EQUALS(0, client->threaded_data.num_requests_being_prepared);
-            ASSERT_UINT_EQUALS(0, client->threaded_data.request_queue_size);
+            ASSERT_SUCCESS(s_tester_check_client_thread_data(client));
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:
             ASSERT_FALSE(out_results->finished_error_code == AWS_ERROR_SUCCESS);
