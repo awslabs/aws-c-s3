@@ -523,6 +523,13 @@ static void s_s3_client_start_destroy(void *user_data) {
 
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
+        /* Iterate through the endpoints and release the refcount on them */
+        struct aws_hash_table *table = &client->synced_data.endpoints;
+        for (struct aws_hash_iter iter = aws_hash_iter_begin(table); !aws_hash_iter_done(&iter);
+             aws_hash_iter_next(&iter)) {
+            struct aws_s3_endpoint *endpoint = iter.element.value;
+            aws_s3_endpoint_release_synced(endpoint);
+        }
 
         aws_s3_client_unlock_synced_data(client);
     }
@@ -882,6 +889,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 error_occurred = true;
                 goto unlock;
             }
+            /* Keep an extra reference from client to the endpoint. */
+            aws_s3_endpoint_acquire(endpoint, true);
             endpoint_hash_element->value = endpoint;
             ++client->synced_data.num_endpoints_allocated;
         } else {

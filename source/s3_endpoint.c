@@ -260,6 +260,29 @@ void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     }
 }
 
+void aws_s3_endpoint_release_synced(struct aws_s3_endpoint *endpoint) {
+    if (endpoint) {
+        bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+        if (should_destroy) {
+            aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+        } else {
+            --endpoint->client_synced_data.ref_count;
+        }
+
+        aws_s3_client_unlock_synced_data(endpoint->client);
+
+        /* TODO: this should be invoked out of the lock */
+        if (should_destroy) {
+            /* The endpoint may have async cleanup to do (connection manager).
+             * When that's all done we'll invoke a completion callback.
+             * Since it's a crime to hold a lock while invoking a callback,
+             * we make sure that we've released the client's lock before proceeding... */
+            s_s3_endpoint_ref_count_zero(endpoint);
+        }
+        aws_s3_client_lock_synced_data(endpoint->client);
+    }
+}
+
 static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(endpoint->client);

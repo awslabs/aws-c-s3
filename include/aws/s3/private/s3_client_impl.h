@@ -433,6 +433,9 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
  * from the client's hashtable) */
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
 
+/* Release the endpoint with lock held */
+void aws_s3_endpoint_release_synced(struct aws_s3_endpoint *endpoint);
+
 AWS_S3_API
 extern const uint32_t g_max_num_connections_per_vip;
 
