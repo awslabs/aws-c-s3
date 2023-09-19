@@ -152,13 +152,14 @@ static void s_current_read_completes(struct aws_parallel_input_stream_from_file_
     }
     /* TODO: Restore the dest buffer? Or, as the len is not changed, just ignore it. */
     impl->current_read.on_going = false;
+    struct aws_future_bool *end_future = impl->current_read.end_future;
 
     if (error_code) {
         aws_future_bool_set_error(impl->current_read.end_future, error_code);
     } else {
         aws_future_bool_set_result(impl->current_read.end_future, true);
     }
-    impl->current_read.end_future = aws_future_bool_release(impl->current_read.end_future);
+    aws_future_bool_release(end_future);
 }
 
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -179,8 +180,8 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     aws_mem_release(impl->base.alloc, task);
     if (read_completed == impl->num_to_split - 1) {
         /* We just completed the last read, now we can finish the read */
-        int error = aws_atomic_load_int(&impl->current_read.last_error);
-        s_current_read_completes(impl, error);
+        size_t error = aws_atomic_load_int(&impl->current_read.last_error);
+        s_current_read_completes(impl, (int)error);
     }
 }
 
