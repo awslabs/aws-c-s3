@@ -7,7 +7,6 @@
 
 #include <aws/common/atomics.h>
 #include <aws/common/file.h>
-#include <aws/common/future.h>
 #include <aws/common/string.h>
 #include <aws/common/task_scheduler.h>
 
