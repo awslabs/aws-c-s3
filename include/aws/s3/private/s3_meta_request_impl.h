@@ -153,9 +153,12 @@ struct aws_s3_meta_request {
 
     struct aws_s3_endpoint *endpoint;
 
-    /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc...
-     * After the meta request is finished, this will be reset along with the client reference.*/
+    /* Event loop to schedule IO work related on and requires to be serial, ie, reading from non-parallel streams,
+     * streaming parts back to the caller, etc... After the meta request is finished, this will be reset along with the
+     * client reference.*/
     struct aws_event_loop *io_event_loop;
+    /* Event loop group for IO work related on can be paralleled. Shared across the client. */
+    struct aws_event_loop_group *body_streaming_elg;
 
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
@@ -370,10 +373,14 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
  * It may read from the underlying stream multiple times, if that's what it takes to fill the buffer.
  * Returns a future whose result bool indicates whether end of stream was reached.
  * This future may complete on any thread, and may complete synchronously.
+ *
+ * Read from [start_position, end_position)
  */
 AWS_S3_API
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
+    size_t start_position,
+    size_t end_position,
     struct aws_byte_buf *buffer);
 
 bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request);

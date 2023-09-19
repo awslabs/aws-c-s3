@@ -722,7 +722,11 @@ static bool s_s3_auto_ranged_put_update(
  * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
  * part.
  */
-static size_t s_compute_request_body_size(const struct aws_s3_meta_request *meta_request, uint32_t part_number) {
+static size_t s_compute_request_body_size(
+    const struct aws_s3_meta_request *meta_request,
+    uint32_t part_number,
+    size_t *start_pos_out,
+    size_t *end_pos_out) {
     AWS_PRECONDITION(meta_request);
 
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
@@ -736,6 +740,9 @@ static size_t s_compute_request_body_size(const struct aws_s3_meta_request *meta
             request_body_size = content_remainder;
         }
     }
+    /* The part_number starts with 1 */
+    *start_pos_out = (part_number - 1) * meta_request->part_size;
+    *end_pos_out = *start_pos_out + request_body_size;
 
     return request_body_size;
 }
@@ -900,8 +907,11 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
             AWS_ASSERT(skip_job->part_being_skipped != NULL);
             aws_s3_meta_request_unlock_synced_data(meta_request);
             /* END CRITICAL SECTION */
+            size_t start_pos = 0;
+            size_t end_pos = 0;
 
-            size_t request_body_size = s_compute_request_body_size(meta_request, skip_job->part_index + 1);
+            size_t request_body_size =
+                s_compute_request_body_size(meta_request, skip_job->part_index + 1, &start_pos, &end_pos);
             if (request_body_size != skip_job->part_being_skipped->size) {
                 error_code = AWS_ERROR_S3_RESUME_FAILED;
                 AWS_LOGF_ERROR(
@@ -920,7 +930,8 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
                 aws_byte_buf_reset(temp_body_buf, false);
             }
 
-            skip_job->asyncstep_read_each_part = aws_s3_meta_request_read_body(skip_job->meta_request, temp_body_buf);
+            skip_job->asyncstep_read_each_part =
+                aws_s3_meta_request_read_body(skip_job->meta_request, start_pos, end_pos, temp_body_buf);
 
             /* the read may or may not complete immediately */
             if (aws_future_bool_register_callback_if_not_done(
@@ -1095,6 +1106,7 @@ struct aws_future_http_message *s_s3_prepare_create_multipart_upload(struct aws_
     }
     return future;
 }
+
 /* Prepare an UploadPart request */
 struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -1143,11 +1155,14 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
 
     /* Skipping succeeded.
      * Next async step: read body stream for this part into a buffer */
+    size_t start_pos = 0;
+    size_t end_pos = 0;
 
-    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
+    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &start_pos, &end_pos);
     aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
-    part_prep->asyncstep2_read_part = aws_s3_meta_request_read_body(meta_request, &request->request_body);
+    part_prep->asyncstep2_read_part =
+        aws_s3_meta_request_read_body(meta_request, start_pos, end_pos, &request->request_body);
     aws_future_bool_register_callback(
         part_prep->asyncstep2_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
 }

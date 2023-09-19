@@ -283,6 +283,8 @@ if(AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     add_test_case(test_s3_endpoint_resolver_resolve_endpoint_force_path_style)
 endif()
 
+add_test_case(parallel_read_stream_from_file_sanity_test)
+
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
 

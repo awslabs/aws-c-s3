@@ -268,6 +268,7 @@ int aws_s3_meta_request_init_base(
         aws_s3_client_acquire(client);
         meta_request->client = client;
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        meta_request->body_streaming_elg = aws_event_loop_group_acquire(client->body_streaming_elg);
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
     }
 
@@ -1679,10 +1680,14 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     meta_request->endpoint = NULL;
 
     meta_request->io_event_loop = NULL;
+    aws_event_loop_group_release(meta_request->body_streaming_elg);
+    meta_request->body_streaming_elg = NULL;
 }
 
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
+    size_t start_position,
+    size_t end_position,
     struct aws_byte_buf *buffer) {
 
     AWS_PRECONDITION(meta_request);
