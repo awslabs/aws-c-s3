@@ -142,6 +142,9 @@ struct aws_s3_meta_request {
      * NULL if using initial_request_message's synchronous body stream instead.  */
     struct aws_async_input_stream *request_body_async_stream;
 
+    /* Parallel stream for meta request's body. */
+    struct aws_parallel_input_stream *request_body_parallel_stream;
+
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
 

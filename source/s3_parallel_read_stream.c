@@ -159,6 +159,7 @@ static void s_current_read_completes(struct aws_parallel_input_stream_from_file_
     } else {
         aws_future_bool_set_result(impl->current_read.end_future, true);
     }
+    impl->current_read.end_future = aws_future_bool_release(impl->current_read.end_future);
 }
 
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -216,12 +217,15 @@ struct aws_future_bool *s_para_from_file_read(
         return future;
     }
 
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_PARALLEL_INPUT_STREAM, "id=%p: Read from %zu to %zu", (void *)stream, start_position, end_position);
+
     /* Initialize for one read */
     aws_atomic_store_int(&impl->current_read.read_count, 0);
     aws_atomic_store_int(&impl->current_read.read_complete_count, 0);
     impl->current_read.start_position = start_position;
     impl->current_read.total_read_length = read_length;
-    impl->current_read.end_future = future;
+    impl->current_read.end_future = aws_future_bool_acquire(future);
     impl->current_read.on_going = true;
     impl->current_read.dest = dest;
     aws_atomic_store_int(&impl->current_read.last_error, AWS_ERROR_SUCCESS);
@@ -242,13 +246,13 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    const char *file_name,
+    struct aws_byte_cursor file_name,
     struct aws_event_loop_group *reading_elg,
     size_t num_to_split) {
 
     struct aws_parallel_input_stream_from_file_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
-    impl->file_path = aws_string_new_from_c_str(allocator, file_name);
+    impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
     impl->reading_elg = aws_event_loop_group_acquire(reading_elg);
     impl->num_to_split = num_to_split;
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);

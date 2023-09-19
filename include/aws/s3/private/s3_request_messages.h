@@ -37,13 +37,6 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     size_t excluded_headers_size,
     bool exclude_x_amz_meta);
 
-/* Copy message and retain all headers, but replace body with one that reads directly from a filepath. */
-AWS_S3_API
-struct aws_http_message *aws_s3_message_util_copy_http_message_filepath_body_all_headers(
-    struct aws_allocator *allocator,
-    struct aws_http_message *message,
-    struct aws_byte_cursor filepath);
-
 /* Copy headers from one message to the other and exclude specific headers.
  * exclude_x_amz_meta controls whether S3 user metadata headers (prefixed with "x-amz-meta) are excluded.*/
 AWS_S3_API
