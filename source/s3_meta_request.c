@@ -249,7 +249,6 @@ int aws_s3_meta_request_init_base(
         aws_s3_client_acquire(client);
         meta_request->client = client;
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
-        meta_request->body_streaming_elg = aws_event_loop_group_acquire(client->body_streaming_elg);
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
     }
 
@@ -258,8 +257,12 @@ int aws_s3_meta_request_init_base(
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
         meta_request->initial_request_message = aws_http_message_acquire(options->message);
+        AWS_ASSERT(client != NULL);
         meta_request->request_body_parallel_stream = aws_parallel_input_stream_new_from_file(
-            allocator, options->send_filepath, meta_request->body_streaming_elg, 8 /* num_to_split */);
+            allocator, options->send_filepath, client->body_streaming_elg, 8 /* num_to_split */);
+        if (meta_request->request_body_parallel_stream == NULL) {
+            goto error;
+        }
     } else if (options->send_async_stream != NULL) {
         /* Read from async body-stream, but keep original message around for headers, method, etc */
         meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);
@@ -1680,8 +1683,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     meta_request->endpoint = NULL;
 
     meta_request->io_event_loop = NULL;
-    aws_event_loop_group_release(meta_request->body_streaming_elg);
-    meta_request->body_streaming_elg = NULL;
 }
 
 struct aws_future_bool *aws_s3_meta_request_read_body(

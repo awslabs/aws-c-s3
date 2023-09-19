@@ -160,8 +160,6 @@ struct aws_s3_meta_request {
      * streaming parts back to the caller, etc... After the meta request is finished, this will be reset along with the
      * client reference.*/
     struct aws_event_loop *io_event_loop;
-    /* Event loop group for IO work related on can be paralleled. Shared across the client. */
-    struct aws_event_loop_group *body_streaming_elg;
 
     /* User data to be passed to each customer specified callback.*/
     void *user_data;
