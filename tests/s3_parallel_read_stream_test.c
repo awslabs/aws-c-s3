@@ -29,12 +29,12 @@
 
 AWS_STATIC_STRING_FROM_LITERAL(s_parallel_stream_test, "SimpleParallelStreamTest");
 
-static int s_create_read_file(struct aws_allocator *allocator, const char *file_path, size_t length) {
+static int s_create_read_file(const char *file_path, size_t length) {
     remove(file_path);
 
     FILE *file = aws_fopen(file_path, "w");
     size_t loop = length / s_parallel_stream_test->len;
-    for (int i = 0; i < loop; ++i) {
+    for (size_t i = 0; i < loop; ++i) {
         fprintf(file, "%s", (char *)s_parallel_stream_test->bytes);
     }
     int reminder = length % s_parallel_stream_test->len;
@@ -51,7 +51,7 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     const char *file_path = "s3_test_parallel_input_stream_read.txt"; /* unique name */
-    ASSERT_SUCCESS(s_create_read_file(allocator, file_path, s_parallel_stream_test->len));
+    ASSERT_SUCCESS(s_create_read_file(file_path, s_parallel_stream_test->len));
 
     struct aws_parallel_input_stream *parallel_read_stream =
         aws_parallel_input_stream_new_from_file(allocator, aws_byte_cursor_from_c_str(file_path), tester.el_group, 8);
@@ -82,7 +82,7 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
     size_t file_length = MB_TO_BYTES(10);
 
     const char *file_path = "s3_test_parallel_input_stream_read_large.txt"; /* unique name */
-    ASSERT_SUCCESS(s_create_read_file(allocator, file_path, file_length));
+    ASSERT_SUCCESS(s_create_read_file(file_path, file_length));
 
     struct aws_parallel_input_stream *parallel_read_stream =
         aws_parallel_input_stream_new_from_file(allocator, aws_byte_cursor_from_c_str(file_path), tester.el_group, 8);
