@@ -442,7 +442,7 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
 
     /* If the stream is actually async, only allow 1 pending-read.
      * We need to wait for async read() to complete before calling it again. */
-    if (auto_ranged_put->base.request_body_async_stream != NULL) {
+    if (auto_ranged_put->base.request_body_async_stream != NULL || auto_ranged_put->base.request_body_parallel_stream) {
         return auto_ranged_put->synced_data.num_parts_pending_read > 0;
     }
 
