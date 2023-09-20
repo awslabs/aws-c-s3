@@ -138,6 +138,7 @@ static int s_read_from_file(struct aws_parallel_input_stream_from_file_impl *imp
         goto error;
     }
 
+    fclose(file_stream);
     return AWS_OP_SUCCESS;
 
 error:
