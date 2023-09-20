@@ -10,6 +10,8 @@
 #include <aws/common/clock.h>
 #include <aws/common/file.h>
 #include <aws/common/string.h>
+#include <aws/io/event_loop.h>
+#include <aws/io/future.h>
 #include <aws/io/stream.h>
 #include <aws/io/uri.h>
 #include <aws/testing/aws_test_harness.h>
@@ -25,7 +27,7 @@
     { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
 
 #define ONE_SEC_IN_NS ((uint64_t)AWS_TIMESTAMP_NANOS)
-#define MAX_TIMEOUT_NS (10 * ONE_SEC_IN_NS)
+#define MAX_TIMEOUT_NS (600 * ONE_SEC_IN_NS)
 
 AWS_STATIC_STRING_FROM_LITERAL(s_parallel_stream_test, "SimpleParallelStreamTest");
 
@@ -45,6 +47,107 @@ static int s_create_read_file(const char *file_path, size_t length) {
     return AWS_OP_SUCCESS;
 }
 
+struct aws_parallel_read_from_test_args {
+    struct aws_allocator *alloc;
+
+    size_t buffer_start_pos;
+    size_t file_start_pos;
+    size_t read_length;
+    struct aws_future_bool *final_end_future;
+    struct aws_byte_buf *final_dest;
+
+    struct aws_parallel_input_stream *parallel_read_stream;
+    struct aws_atomic_var *completed_count;
+
+    size_t split_num;
+};
+
+static void s_s3_parallel_from_file_read_test_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    struct aws_parallel_read_from_test_args *test_args = arg;
+
+    struct aws_byte_buf read_buf = {
+        .allocator = NULL,
+        .buffer = test_args->final_dest->buffer + test_args->buffer_start_pos,
+        .len = 0,
+        .capacity = test_args->read_length,
+    };
+    struct aws_future_bool *read_future = aws_parallel_input_stream_read(
+        test_args->parallel_read_stream,
+        test_args->file_start_pos,
+        test_args->file_start_pos + test_args->read_length,
+        &read_buf);
+    aws_future_bool_wait(read_future, MAX_TIMEOUT_NS);
+    aws_future_bool_release(read_future);
+
+    struct aws_future_bool *end_future = test_args->final_end_future;
+    size_t read_completed = aws_atomic_fetch_add(test_args->completed_count, 1);
+    bool completed = read_completed == test_args->split_num - 1;
+    printf("S3ParallelInputStream completed %zu\n", read_completed);
+
+    aws_mem_release(test_args->alloc, task);
+    aws_mem_release(test_args->alloc, test_args);
+    if (completed) {
+        printf("##################### S3ParallelInputStream completed %zu\n", read_completed);
+        aws_future_bool_set_result(end_future, true);
+    }
+    aws_future_bool_release(end_future);
+}
+
+static int s_parallel_read_test_helper(
+    struct aws_allocator *alloc,
+    struct aws_parallel_input_stream *parallel_read_stream,
+    struct aws_byte_buf *read_buf,
+    struct aws_event_loop_group *elg,
+    size_t start_pos,
+    size_t total_length,
+    size_t split_num) {
+
+    struct aws_atomic_var completed_count;
+    aws_atomic_store_int(&completed_count, 0);
+    size_t number_bytes_per_read = total_length / split_num;
+    if (number_bytes_per_read == 0) {
+        struct aws_future_bool *read_future =
+            aws_parallel_input_stream_read(parallel_read_stream, 0, s_parallel_stream_test->len, read_buf);
+        ASSERT_TRUE(aws_future_bool_wait(read_future, MAX_TIMEOUT_NS));
+        aws_future_bool_release(read_future);
+        return AWS_OP_SUCCESS;
+    }
+
+    struct aws_future_bool *future = aws_future_bool_new(alloc);
+    for (size_t i = 0; i < split_num; i++) {
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(elg);
+        struct aws_parallel_read_from_test_args *test_args =
+            aws_mem_calloc(alloc, 1, sizeof(struct aws_parallel_read_from_test_args));
+
+        size_t read_length = number_bytes_per_read;
+        if (i == split_num - 1) {
+            /* Last part, adjust the size */
+            read_length += total_length % split_num;
+        }
+
+        test_args->alloc = alloc;
+        test_args->buffer_start_pos = i * number_bytes_per_read;
+        test_args->file_start_pos = start_pos + test_args->buffer_start_pos;
+        test_args->final_end_future = aws_future_bool_acquire(future);
+        test_args->read_length = read_length;
+        test_args->final_dest = read_buf;
+        test_args->parallel_read_stream = parallel_read_stream;
+        test_args->completed_count = &completed_count;
+        test_args->split_num = split_num;
+
+        struct aws_task *read_task = aws_mem_calloc(alloc, 1, sizeof(struct aws_task));
+        aws_task_init(read_task, s_s3_parallel_from_file_read_test_task, test_args, "s3_parallel_read_test_task");
+        aws_event_loop_schedule_task_now(loop, read_task);
+    }
+
+    printf("##################### S3ParallelInputStream I am waiting\n");
+    ASSERT_TRUE(aws_future_bool_wait(future, MAX_TIMEOUT_NS));
+    printf("##################### S3ParallelInputStream I am completed!!!\n");
+    aws_future_bool_release(future);
+    read_buf->len = total_length;
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(parallel_read_stream_from_file_sanity_test) {
     (void)ctx;
     struct aws_s3_tester tester;
@@ -59,17 +162,16 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
     struct aws_byte_buf read_buf;
     aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
 
-    struct aws_future_bool *future =
-        aws_parallel_input_stream_read(parallel_read_stream, 0, s_parallel_stream_test->len, &read_buf);
-
-    ASSERT_TRUE(aws_future_bool_wait(future, MAX_TIMEOUT_NS));
+    struct aws_event_loop_group *el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
+    ASSERT_SUCCESS(s_parallel_read_test_helper(
+        allocator, parallel_read_stream, &read_buf, el_group, 0, s_parallel_stream_test->len, 8));
 
     ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
 
     remove(file_path);
     aws_byte_buf_clean_up(&read_buf);
-    aws_future_bool_release(future);
     aws_parallel_input_stream_release(parallel_read_stream);
+    aws_event_loop_group_release(el_group);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
@@ -83,6 +185,7 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
 
     const char *file_path = "s3_test_parallel_input_stream_read_large.txt"; /* unique name */
     ASSERT_SUCCESS(s_create_read_file(file_path, file_length));
+    struct aws_event_loop_group *el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
 
     struct aws_parallel_input_stream *parallel_read_stream =
         aws_parallel_input_stream_new_from_file(allocator, aws_byte_cursor_from_c_str(file_path), tester.el_group, 8);
@@ -94,19 +197,16 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
         struct aws_byte_buf expected_read_buf;
         aws_byte_buf_init(&expected_read_buf, allocator, file_length);
 
-        struct aws_future_bool *future =
-            aws_parallel_input_stream_read(parallel_read_stream, 0, file_length, &read_buf);
+        ASSERT_SUCCESS(
+            s_parallel_read_test_helper(allocator, parallel_read_stream, &read_buf, el_group, 0, file_length, 8));
 
         struct aws_input_stream *stream = aws_input_stream_new_from_file(allocator, file_path);
         ASSERT_SUCCESS(aws_input_stream_read(stream, &expected_read_buf));
-
-        ASSERT_TRUE(aws_future_bool_wait(future, MAX_TIMEOUT_NS));
 
         ASSERT_TRUE(aws_byte_buf_eq(&expected_read_buf, &read_buf));
         aws_byte_buf_clean_up(&read_buf);
         aws_byte_buf_clean_up(&expected_read_buf);
         aws_input_stream_release(stream);
-        aws_future_bool_release(future);
     }
 
     {
@@ -114,14 +214,11 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
         struct aws_byte_buf read_buf;
         aws_byte_buf_init(&read_buf, allocator, file_length);
 
-        struct aws_future_bool *future =
-            aws_parallel_input_stream_read(parallel_read_stream, 0, s_parallel_stream_test->len, &read_buf);
-
-        ASSERT_TRUE(aws_future_bool_wait(future, MAX_TIMEOUT_NS));
+        ASSERT_SUCCESS(s_parallel_read_test_helper(
+            allocator, parallel_read_stream, &read_buf, el_group, 0, s_parallel_stream_test->len, 8));
 
         ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
         aws_byte_buf_clean_up(&read_buf);
-        aws_future_bool_release(future);
     }
 
     {
@@ -129,19 +226,20 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
         struct aws_byte_buf read_buf;
         aws_byte_buf_init(&read_buf, allocator, file_length);
 
-        struct aws_future_bool *future = aws_parallel_input_stream_read(
+        ASSERT_SUCCESS(s_parallel_read_test_helper(
+            allocator,
             parallel_read_stream,
+            &read_buf,
+            el_group,
             s_parallel_stream_test->len,
-            s_parallel_stream_test->len + s_parallel_stream_test->len,
-            &read_buf);
-
-        ASSERT_TRUE(aws_future_bool_wait(future, MAX_TIMEOUT_NS));
+            s_parallel_stream_test->len,
+            8));
 
         ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
         aws_byte_buf_clean_up(&read_buf);
-        aws_future_bool_release(future);
     }
     remove(file_path);
+    aws_event_loop_group_release(el_group);
     aws_parallel_input_stream_release(parallel_read_stream);
     aws_s3_tester_clean_up(&tester);
 

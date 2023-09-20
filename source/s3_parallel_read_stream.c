@@ -63,127 +63,85 @@ struct aws_parallel_input_stream_from_file_impl {
 
     struct aws_string *file_path;
     struct aws_event_loop_group *reading_elg;
-    size_t num_to_split;
+    size_t num_workers;
 
-    struct {
-        /* TODO: needs to protect this on_going from multi-thread */
-        bool on_going;
-        size_t start_position;
-        size_t total_read_length;
-        struct aws_atomic_var read_count;
-        struct aws_atomic_var read_complete_count;
-        struct aws_future_bool *end_future;
-        struct aws_atomic_var last_error;
-        struct aws_byte_buf *dest;
-    } current_read;
+    struct aws_event_loop **assigned_event_loops;
+    struct aws_input_stream **assigned_file_streams;
+
+    struct aws_atomic_var read_count;
 };
 
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     struct aws_parallel_input_stream_from_file_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
-    AWS_FATAL_ASSERT(impl->current_read.on_going == false);
 
     aws_string_destroy(impl->file_path);
+    for (size_t i = 0; i < impl->num_workers; i++) {
+        aws_input_stream_release(impl->assigned_file_streams[i]);
+    }
+
     aws_event_loop_group_release(impl->reading_elg);
+    aws_mem_release(stream->alloc, impl->assigned_event_loops);
+    aws_mem_release(stream->alloc, impl->assigned_file_streams);
 
     aws_mem_release(stream->alloc, impl);
 
     return;
 }
 
-static int s_read_from_file(struct aws_parallel_input_stream_from_file_impl *impl, size_t read_index) {
+struct aws_parallel_read_from_file_task_args {
+    struct aws_allocator *alloc;
 
-    size_t number_bytes_per_read = impl->current_read.total_read_length / impl->num_to_split;
-    if (number_bytes_per_read == 0) {
-        if (read_index > 0) {
-            return AWS_OP_SUCCESS;
-        } else {
-            number_bytes_per_read = impl->current_read.total_read_length;
-        }
-    }
-    size_t current_read_length = number_bytes_per_read;
-    if (read_index == impl->num_to_split - 1) {
-        /* Last part, adjust the size */
-        current_read_length += impl->current_read.total_read_length % impl->num_to_split;
-    }
+    void *log_id;
 
-    size_t buffer_start_pos = read_index * number_bytes_per_read;
-    size_t file_start_pos = impl->current_read.start_position + buffer_start_pos;
-
-    /* TODO: I am using FILE instead our input stream to read to a certain block of memory instead of byte buffer */
-    FILE *file_stream = aws_fopen(aws_string_c_str(impl->file_path), "rb");
-    if (!file_stream) {
-        AWS_LOGF_ERROR(AWS_LS_S3_PARALLEL_INPUT_STREAM, "id=%p: Error during fopen", (void *)&impl->base);
-        return AWS_OP_ERR;
-    }
-
-    /* seek to the right position and then read */
-    if (aws_fseek(file_stream, (int64_t)file_start_pos, SEEK_SET)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_PARALLEL_INPUT_STREAM, "id=%p: Error during fseek", (void *)&impl->base);
-        goto error;
-    }
-    size_t actually_read =
-        fread(impl->current_read.dest->buffer + buffer_start_pos, 1, current_read_length, file_stream);
-    if (actually_read == 0) {
-        if (ferror(file_stream)) {
-            /* TODO: Some error code */
-            aws_raise_error(AWS_IO_STREAM_READ_FAILED);
-            goto error;
-        }
-    }
-
-    if (actually_read < current_read_length) {
-        /* TODO: Some error code. Maybe read again fill the buffer? */
-        aws_raise_error(AWS_IO_STREAM_READ_FAILED);
-        goto error;
-    }
-
-    fclose(file_stream);
-    return AWS_OP_SUCCESS;
-
-error:
-    fclose(file_stream);
-    return AWS_OP_ERR;
-}
-
-static void s_current_read_completes(struct aws_parallel_input_stream_from_file_impl *impl, int error_code) {
-    if (!error_code) {
-        /* Hack to read into the dest directly */
-        impl->current_read.dest->len = impl->current_read.total_read_length;
-    }
-    /* TODO: Restore the dest buffer? Or, as the len is not changed, just ignore it. */
-    impl->current_read.on_going = false;
-    struct aws_future_bool *end_future = impl->current_read.end_future;
-
-    if (error_code) {
-        aws_future_bool_set_error(impl->current_read.end_future, error_code);
-    } else {
-        aws_future_bool_set_result(impl->current_read.end_future, true);
-    }
-    aws_future_bool_release(end_future);
-}
+    size_t start_position;
+    struct aws_future_bool *end_future;
+    struct aws_byte_buf *dest;
+    struct aws_input_stream *file_stream;
+};
 
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task_status;
-    struct aws_parallel_input_stream_from_file_impl *impl = arg;
-
+    struct aws_parallel_read_from_file_task_args *args = arg;
+    bool error_occurred = true;
     /* TODO: handle the task cancelled. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+    struct aws_future_bool *end_future = args->end_future;
 
-    size_t read_index = aws_atomic_fetch_add(&impl->current_read.read_count, 1);
-
-    if (s_read_from_file(impl, read_index)) {
-        /* If there are multiple errors, we only need the latest one. */
-        aws_atomic_store_int(&impl->current_read.last_error, aws_last_error());
+    if (aws_input_stream_seek(args->file_stream, (int64_t)args->start_position, AWS_SSB_BEGIN)) {
+        goto done;
     }
 
-    size_t read_completed = aws_atomic_fetch_add(&impl->current_read.read_complete_count, 1);
-    aws_mem_release(impl->base.alloc, task);
-    if (read_completed == impl->num_to_split - 1) {
-        /* We just completed the last read, now we can finish the read */
-        size_t error = aws_atomic_load_int(&impl->current_read.last_error);
-        s_current_read_completes(impl, (int)error);
+    /* TODO: check how many we read, check we read as expected */
+    if (aws_input_stream_read(args->file_stream, args->dest)) {
+        goto done;
     }
+
+    error_occurred = false;
+
+done:
+    aws_mem_release(args->alloc, task);
+    aws_mem_release(args->alloc, args);
+    if (error_occurred) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_PARALLEL_INPUT_STREAM,
+            "id=%p: Read from %zu to %zu finished with error %d (%s)",
+            args->log_id,
+            args->start_position,
+            args->start_position + args->dest->len,
+            aws_last_error(),
+            aws_error_str(aws_last_error()));
+        aws_future_bool_set_error(end_future, aws_last_error());
+    } else {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_PARALLEL_INPUT_STREAM,
+            "id=%p: Read from %zu to %zu finished",
+            args->log_id,
+            args->start_position,
+            args->start_position + args->dest->len);
+        aws_future_bool_set_result(end_future, true);
+    }
+    aws_future_bool_release(end_future);
 }
 
 struct aws_future_bool *s_para_from_file_read(
@@ -197,14 +155,6 @@ struct aws_future_bool *s_para_from_file_read(
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
 
     size_t read_length = end_position - start_position;
-    if (impl->current_read.on_going) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_PARALLEL_INPUT_STREAM,
-            "id=%p: Error trying to read while the previous read is still ongoing",
-            (void *)stream);
-        aws_future_bool_set_error(future, AWS_ERROR_INVALID_STATE);
-        return future;
-    }
     if (!read_length) {
         /* Nothing to read. Complete the read with success. */
         aws_future_bool_set_result(future, true);
@@ -218,25 +168,36 @@ struct aws_future_bool *s_para_from_file_read(
         return future;
     }
 
+    /* TODO: Not handling the read_length larger than the dest size for now, maybe just remove the end_position. */
+    AWS_ASSERT(read_length == dest->capacity - dest->len);
+
+    size_t read_count = aws_atomic_fetch_add(&impl->read_count, 1);
+    size_t index = read_count % impl->num_workers;
+
+    /* file handler will be assigned to the same loop every time. */
+    struct aws_event_loop *loop = impl->assigned_event_loops[index];
+    struct aws_input_stream *file_stream = impl->assigned_file_streams[index];
+    struct aws_task *read_task = aws_mem_calloc(impl->base.alloc, 1, sizeof(struct aws_task));
+    struct aws_parallel_read_from_file_task_args *task_args =
+        aws_mem_calloc(impl->base.alloc, 1, sizeof(struct aws_parallel_read_from_file_task_args));
+
+    task_args->alloc = impl->base.alloc;
+    task_args->start_position = start_position;
+    task_args->dest = dest;
+    task_args->end_future = aws_future_bool_acquire(future);
+    task_args->file_stream = file_stream;
+    task_args->log_id = &impl->base;
+
+    aws_task_init(read_task, s_s3_parallel_from_file_read_task, task_args, "s3_parallel_read_task");
+    aws_event_loop_schedule_task_now(loop, read_task);
+
     AWS_LOGF_TRACE(
-        AWS_LS_S3_PARALLEL_INPUT_STREAM, "id=%p: Read from %zu to %zu", (void *)stream, start_position, end_position);
+        AWS_LS_S3_PARALLEL_INPUT_STREAM,
+        "id=%p: Read from %zu to %zu requested",
+        (void *)stream,
+        start_position,
+        end_position);
 
-    /* Initialize for one read */
-    aws_atomic_store_int(&impl->current_read.read_count, 0);
-    aws_atomic_store_int(&impl->current_read.read_complete_count, 0);
-    impl->current_read.start_position = start_position;
-    impl->current_read.total_read_length = read_length;
-    impl->current_read.end_future = aws_future_bool_acquire(future);
-    impl->current_read.on_going = true;
-    impl->current_read.dest = dest;
-    aws_atomic_store_int(&impl->current_read.last_error, AWS_ERROR_SUCCESS);
-
-    for (size_t i = 0; i < impl->num_to_split; i++) {
-        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(impl->reading_elg);
-        struct aws_task *read_task = aws_mem_calloc(impl->base.alloc, 1, sizeof(struct aws_task));
-        aws_task_init(read_task, s_s3_parallel_from_file_read_task, impl, "s3_parallel_read_task");
-        aws_event_loop_schedule_task_now(loop, read_task);
-    }
     return future;
 }
 
@@ -249,16 +210,30 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
     struct aws_event_loop_group *reading_elg,
-    size_t num_to_split) {
+    size_t num_workers) {
 
     struct aws_parallel_input_stream_from_file_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
     impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
     impl->reading_elg = aws_event_loop_group_acquire(reading_elg);
-    impl->num_to_split = num_to_split;
+    impl->num_workers = num_workers;
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
 
-    aws_atomic_store_int(&impl->current_read.read_count, 0);
-    aws_atomic_store_int(&impl->current_read.read_complete_count, 0);
+    aws_atomic_store_int(&impl->read_count, 0);
+    impl->assigned_event_loops = aws_mem_calloc(allocator, num_workers, sizeof(struct aws_event_loop *));
+    impl->assigned_file_streams = aws_mem_calloc(allocator, num_workers, sizeof(struct aws_input_stream *));
+
+    for (size_t i = 0; i < num_workers; i++) {
+        impl->assigned_event_loops[i] = aws_event_loop_group_get_next_loop(reading_elg);
+        impl->assigned_file_streams[i] = aws_input_stream_new_from_file(allocator, aws_string_c_str(impl->file_path));
+        if (!impl->assigned_file_streams[i]) {
+            AWS_LOGF_ERROR(AWS_LS_S3_PARALLEL_INPUT_STREAM, "id=%p: Error during fopen", (void *)&impl->base);
+            goto error;
+        }
+    }
+
     return &impl->base;
+error:
+    s_para_from_file_destroy(&impl->base);
+    return NULL;
 }

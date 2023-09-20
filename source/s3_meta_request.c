@@ -259,7 +259,7 @@ int aws_s3_meta_request_init_base(
         meta_request->initial_request_message = aws_http_message_acquire(options->message);
         AWS_ASSERT(client != NULL);
         meta_request->request_body_parallel_stream = aws_parallel_input_stream_new_from_file(
-            allocator, options->send_filepath, client->body_streaming_elg, 8 /* num_to_split */);
+            allocator, options->send_filepath, client->body_streaming_elg, 8 /* num_workers */);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
@@ -630,7 +630,13 @@ static void s_s3_meta_request_schedule_prepare_request_default(
 
     aws_task_init(
         &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
-    aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
+    /* TODO: check more */
+    if (meta_request->request_body_parallel_stream) {
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        aws_event_loop_schedule_task_now(loop, &payload->task);
+    } else {
+        aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
+    }
 }
 
 static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
