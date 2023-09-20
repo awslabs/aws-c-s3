@@ -3745,7 +3745,7 @@ static int s_test_s3_round_trip_mpu_with_filepath(struct aws_allocator *allocato
     AWS_ZERO_STRUCT(path_buf);
 
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath")));
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu")));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
