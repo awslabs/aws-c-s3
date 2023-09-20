@@ -5,6 +5,7 @@
 
 #include <aws/s3/private/s3_parallel_read_stream.h>
 
+#include "aws/s3/private/s3_tracing.h"
 #include <aws/common/atomics.h>
 #include <aws/common/file.h>
 #include <aws/common/string.h>
@@ -165,6 +166,7 @@ static void s_current_read_completes(struct aws_parallel_input_stream_from_file_
 
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task_status;
+    __itt_task_begin(s3_domain, __itt_null, __itt_null, __itt_string_handle_create("parallel_read"));
     struct aws_parallel_input_stream_from_file_impl *impl = arg;
 
     /* TODO: handle the task cancelled. */
@@ -184,6 +186,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         size_t error = aws_atomic_load_int(&impl->current_read.last_error);
         s_current_read_completes(impl, (int)error);
     }
+    __itt_task_end(s3_domain);
 }
 
 struct aws_future_bool *s_para_from_file_read(
