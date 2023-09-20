@@ -37,9 +37,9 @@ static int s_create_read_file(const char *file_path, size_t length) {
     for (size_t i = 0; i < loop; ++i) {
         fprintf(file, "%s", (char *)s_parallel_stream_test->bytes);
     }
-    int reminder = length % s_parallel_stream_test->len;
+    size_t reminder = length % s_parallel_stream_test->len;
     if (reminder) {
-        fprintf(file, "%.*s", reminder, s_parallel_stream_test->bytes);
+        fprintf(file, "%.*s", (int)reminder, s_parallel_stream_test->bytes);
     }
     fclose(file);
     return AWS_OP_SUCCESS;
