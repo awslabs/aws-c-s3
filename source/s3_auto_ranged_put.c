@@ -1126,11 +1126,16 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
-        s_s3_prepare_upload_part_on_skipping_done((void *)part_prep);
-        // part_prep->asyncstep1_skip_prev_parts = s_skip_parts_from_stream(
-        //     meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
-        // aws_future_void_register_callback(
-        //     part_prep->asyncstep1_skip_prev_parts, s_s3_prepare_upload_part_on_skipping_done, part_prep);
+
+        if (meta_request->request_body_parallel_stream) {
+            /* For parallel read stream, which is seekable, don't need to skip the part by reading from the stream. */
+            s_s3_prepare_upload_part_on_skipping_done((void *)part_prep);
+        } else {
+            part_prep->asyncstep1_skip_prev_parts = s_skip_parts_from_stream(
+                meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
+            aws_future_void_register_callback(
+                part_prep->asyncstep1_skip_prev_parts, s_s3_prepare_upload_part_on_skipping_done, part_prep);
+        }
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */
@@ -1146,14 +1151,14 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
-    // int error_code = aws_future_void_get_error(part_prep->asyncstep1_skip_prev_parts);
-
-    // /* If skipping failed, the prepare-upload-part job has failed. */
-    // if (error_code) {
-    //     s_s3_prepare_upload_part_finish(part_prep, error_code);
-    //     return;
-    // }
-
+    if (part_prep->asyncstep1_skip_prev_parts) {
+        int error_code = aws_future_void_get_error(part_prep->asyncstep1_skip_prev_parts);
+        /* If skipping failed, the prepare-upload-part job has failed. */
+        if (error_code) {
+            s_s3_prepare_upload_part_finish(part_prep, error_code);
+            return;
+        }
+    }
     /* Skipping succeeded.
      * Next async step: read body stream for this part into a buffer */
     size_t start_pos = 0;
