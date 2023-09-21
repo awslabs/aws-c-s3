@@ -121,7 +121,6 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
 
 done:
     aws_mem_release(args->alloc, task);
-    aws_mem_release(args->alloc, args);
     if (error_occurred) {
         AWS_LOGF_TRACE(
             AWS_LS_S3_PARALLEL_INPUT_STREAM,
@@ -131,6 +130,7 @@ done:
             args->start_position + args->dest->len,
             aws_last_error(),
             aws_error_str(aws_last_error()));
+        aws_mem_release(args->alloc, args);
         aws_future_bool_set_error(end_future, aws_last_error());
     } else {
         AWS_LOGF_TRACE(
@@ -139,6 +139,7 @@ done:
             args->log_id,
             args->start_position,
             args->start_position + args->dest->len);
+        aws_mem_release(args->alloc, args);
         aws_future_bool_set_result(end_future, true);
     }
     aws_future_bool_release(end_future);
