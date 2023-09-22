@@ -1692,18 +1692,16 @@ static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocat
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_put_object_multiple, s_test_s3_put_object_multiple)
-static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
+static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator, bool file_on_disk) {
 
-    struct aws_s3_meta_request *meta_requests[2];
-    struct aws_s3_meta_request_test_results meta_request_test_results[2];
-    struct aws_http_message *messages[2];
-    struct aws_input_stream *input_streams[2];
-    struct aws_byte_buf input_stream_buffers[2];
-    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_requests);
+    static int number_requests = 5;
 
-    ASSERT_TRUE(num_meta_requests == AWS_ARRAY_SIZE(meta_request_test_results));
+    struct aws_s3_meta_request *meta_requests[number_requests];
+    struct aws_s3_meta_request_test_results meta_request_test_results[number_requests];
+    struct aws_http_message *messages[number_requests];
+    struct aws_input_stream *input_streams[number_requests];
+    struct aws_byte_buf input_stream_buffers[number_requests];
+    struct aws_string *filepath_str[number_requests];
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -1720,7 +1718,9 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
-    for (size_t i = 0; i < num_meta_requests; ++i) {
+    size_t content_length = MB_TO_BYTES(10);
+
+    for (size_t i = 0; i < number_requests; ++i) {
         aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
         char object_path_buffer[128] = "";
         snprintf(
@@ -1730,18 +1730,26 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
             AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
             i);
         AWS_ZERO_STRUCT(input_stream_buffers[i]);
-        aws_s3_create_test_buffer(allocator, 10 * 1024ULL * 1024ULL, &input_stream_buffers[i]);
+        aws_s3_create_test_buffer(allocator, content_length, &input_stream_buffers[i]);
         struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffers[i]);
         input_streams[i] = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
         struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
         struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
-        messages[i] = aws_s3_test_put_object_request_new(
-            allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
+
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
         options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+        if (file_on_disk) {
+            filepath_str[i] = aws_s3_tester_create_file(allocator, test_object_path, input_streams[i]);
+            messages[i] = aws_s3_test_put_object_request_new_without_body(
+                allocator, &host_cur, g_test_body_content_type, test_object_path, content_length, 0 /*flags*/);
+            options.send_filepath = aws_byte_cursor_from_string(filepath_str[i]);
+        } else {
+            filepath_str[i] = NULL;
+            messages[i] = aws_s3_test_put_object_request_new(
+                allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
+        }
         options.message = messages[i];
-
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
         /* Trigger accelerating of our Put Object request. */
@@ -1757,21 +1765,25 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     aws_s3_tester_unlock_synced_data(&tester);
 
-    for (size_t i = 0; i < num_meta_requests; ++i) {
+    for (size_t i = 0; i < number_requests; ++i) {
         meta_requests[i] = aws_s3_meta_request_release(meta_requests[i]);
     }
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
-    for (size_t i = 0; i < num_meta_requests; ++i) {
+    for (size_t i = 0; i < number_requests; ++i) {
         aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
     }
 
-    for (size_t i = 0; i < num_meta_requests; ++i) {
+    for (size_t i = 0; i < number_requests; ++i) {
         aws_http_message_release(messages[i]);
         aws_input_stream_release(input_streams[i]);
         aws_byte_buf_clean_up(&input_stream_buffers[i]);
+        if (filepath_str[i]) {
+            ASSERT_SUCCESS(aws_file_delete(filepath_str[i]));
+            aws_string_destroy(filepath_str[i]);
+        }
     }
 
     aws_string_destroy(host_name);
@@ -1782,6 +1794,18 @@ static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *
     aws_s3_tester_clean_up(&tester);
 
     return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_multiple, s_test_s3_put_object_multiple)
+static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_test_s3_put_object_multiple_helper(allocator, false);
+}
+
+AWS_TEST_CASE(test_s3_put_object_multiple_with_filepath, s_test_s3_put_object_multiple_with_filepath)
+static int s_test_s3_put_object_multiple_with_filepath(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_test_s3_put_object_multiple_helper(allocator, true);
 }
 
 AWS_TEST_CASE(test_s3_put_object_less_than_part_size, s_test_s3_put_object_less_than_part_size)

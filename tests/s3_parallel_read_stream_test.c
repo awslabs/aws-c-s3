@@ -63,6 +63,7 @@ struct aws_parallel_read_from_test_args {
 };
 
 static void s_s3_parallel_from_file_read_test_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task_status;
     struct aws_parallel_read_from_test_args *test_args = arg;
 
     struct aws_byte_buf read_buf = {
@@ -82,12 +83,10 @@ static void s_s3_parallel_from_file_read_test_task(struct aws_task *task, void *
     struct aws_future_bool *end_future = test_args->final_end_future;
     size_t read_completed = aws_atomic_fetch_add(test_args->completed_count, 1);
     bool completed = read_completed == test_args->split_num - 1;
-    printf("S3ParallelInputStream completed %zu\n", read_completed);
 
     aws_mem_release(test_args->alloc, task);
     aws_mem_release(test_args->alloc, test_args);
     if (completed) {
-        printf("##################### S3ParallelInputStream completed %zu\n", read_completed);
         aws_future_bool_set_result(end_future, true);
     }
     aws_future_bool_release(end_future);
@@ -140,9 +139,7 @@ static int s_parallel_read_test_helper(
         aws_event_loop_schedule_task_now(loop, read_task);
     }
 
-    printf("##################### S3ParallelInputStream I am waiting\n");
     ASSERT_TRUE(aws_future_bool_wait(future, MAX_TIMEOUT_NS));
-    printf("##################### S3ParallelInputStream I am completed!!!\n");
     aws_future_bool_release(future);
     read_buf->len = total_length;
     return AWS_OP_SUCCESS;

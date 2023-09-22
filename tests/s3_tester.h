@@ -15,6 +15,7 @@
 
 #include <aws/common/common.h>
 #include <aws/common/condition_variable.h>
+#include <aws/common/file.h>
 #include <aws/common/logging.h>
 #include <aws/common/mutex.h>
 #include <aws/common/string.h>
@@ -445,6 +446,12 @@ int aws_s3_tester_upload_file_path_init(
     struct aws_allocator *allocator,
     struct aws_byte_buf *out_path_buffer,
     struct aws_byte_cursor file_path);
+
+/* Create a file on disk based on the input stream. Return the file path */
+struct aws_string *aws_s3_tester_create_file(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor test_object_path,
+    struct aws_input_stream *input_stream);
 
 int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uint64_t *out_content_length);
 
