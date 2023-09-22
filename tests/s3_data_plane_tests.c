@@ -1694,7 +1694,7 @@ static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocat
 
 static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator, bool file_on_disk) {
 
-    static int number_requests = 5;
+    const static int number_requests = 5;
 
     struct aws_s3_meta_request *meta_requests[number_requests];
     struct aws_s3_meta_request_test_results meta_request_test_results[number_requests];
