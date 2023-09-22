@@ -1694,14 +1694,13 @@ static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocat
 
 static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator, bool file_on_disk) {
 
-    const static int number_requests = 5;
-
-    struct aws_s3_meta_request *meta_requests[number_requests];
-    struct aws_s3_meta_request_test_results meta_request_test_results[number_requests];
-    struct aws_http_message *messages[number_requests];
-    struct aws_input_stream *input_streams[number_requests];
-    struct aws_byte_buf input_stream_buffers[number_requests];
-    struct aws_string *filepath_str[number_requests];
+#define NUM_REQUESTS 5
+    struct aws_s3_meta_request *meta_requests[NUM_REQUESTS];
+    struct aws_s3_meta_request_test_results meta_request_test_results[NUM_REQUESTS];
+    struct aws_http_message *messages[NUM_REQUESTS];
+    struct aws_input_stream *input_streams[NUM_REQUESTS];
+    struct aws_byte_buf input_stream_buffers[NUM_REQUESTS];
+    struct aws_string *filepath_str[NUM_REQUESTS];
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
@@ -1720,7 +1719,7 @@ static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator,
 
     size_t content_length = MB_TO_BYTES(10);
 
-    for (size_t i = 0; i < number_requests; ++i) {
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
         char object_path_buffer[128] = "";
         snprintf(
@@ -1765,18 +1764,18 @@ static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator,
     ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
     aws_s3_tester_unlock_synced_data(&tester);
 
-    for (size_t i = 0; i < number_requests; ++i) {
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         meta_requests[i] = aws_s3_meta_request_release(meta_requests[i]);
     }
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
-    for (size_t i = 0; i < number_requests; ++i) {
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
     }
 
-    for (size_t i = 0; i < number_requests; ++i) {
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_http_message_release(messages[i]);
         aws_input_stream_release(input_streams[i]);
         aws_byte_buf_clean_up(&input_stream_buffers[i]);
