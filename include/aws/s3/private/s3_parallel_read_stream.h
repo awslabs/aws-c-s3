@@ -34,7 +34,7 @@ struct aws_parallel_input_stream_vtable {
 
     /**
      * Read into the buffer in parallel.
-     * The stream will split into parts and read each part in parallel.
+     * The implementation needs to support this to be invoked concurrently from multiple threads
      *
      * TODO: error handling:
      * - The stream reach end before all parts
@@ -78,14 +78,14 @@ AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_parallel_input_stream *stream);
 
 /**
- * WARNING: Do not read again until the previous read is complete.
+ * Read from the [start_position, end_position).
+ * It's thread safe to be called from multiple threads without waiting for other read to complete
  *
- * @param stream
- * @param start_position
- * @param end_position
- * @param dest
- * @param split_num
- * @return AWS_S3_API struct*
+ * @param stream            The stream to read from
+ * @param start_position    The start_position in the stream to
+ * @param end_position      Read until end_position of the stream
+ * @param dest              The output buffer read to
+ * @return a future to be solved when the current read finishes
  */
 AWS_S3_API
 struct aws_future_bool *aws_parallel_input_stream_read(
@@ -94,6 +94,20 @@ struct aws_future_bool *aws_parallel_input_stream_read(
     size_t end_position,
     struct aws_byte_buf *dest);
 
+/**
+ * Create a new file based parallel input stream implementation.
+ *
+ * This implementation will take `num_workers` event loops from the `reading_elg` to schedule read jobs to.
+ * And will open `num_workers` FILE * to read from the file concurrently.
+ *
+ * Note: we may result in less than the `num_workers` threads to use.
+ *
+ * @param allocator         memory allocator
+ * @param file_name         The file path to read from
+ * @param reading_elg       The eventloop group to assign read work to
+ * @param num_workers       The number of worker to read from file
+ * @return aws_parallel_input_stream
+ */
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
