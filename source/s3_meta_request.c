@@ -1405,7 +1405,7 @@ void aws_s3_meta_request_stream_response_body_synced(
         return;
     }
 
-    aws_atomic_fetch_add(&client->stats.num_requests_streaming, num_streaming_requests);
+    aws_atomic_fetch_add(&client->stats.num_requests_streaming_response, num_streaming_requests);
     aws_atomic_fetch_sub(&client->stats.num_requests_stream_queued_waiting, num_streaming_requests);
 
     meta_request->synced_data.num_parts_delivery_sent += num_streaming_requests;
@@ -1503,6 +1503,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             aws_error_str(error_code));
                     }
                 }
+                aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
                 ++num_parts_delivered;
                 aws_s3_request_release(request);

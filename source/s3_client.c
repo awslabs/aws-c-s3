@@ -276,7 +276,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
-    aws_atomic_init_int(&client->stats.num_requests_streaming, 0);
+    aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -616,6 +616,9 @@ uint32_t aws_s3_client_queue_requests_threaded(
     bool queue_front) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request_list);
+    if (aws_linked_list_empty(request_list)) {
+        return 0;
+    }
 
     uint32_t request_list_size = 0;
 
@@ -1279,28 +1282,33 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
         uint32_t num_requests_stream_queued_waiting =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_stream_queued_waiting);
-        uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming);
+
+        uint32_t num_requests_being_prepared = client->threaded_data.num_requests_being_prepared;
+
+        uint32_t num_requests_streaming_response =
+            (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming_response);
 
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
-                                         num_requests_streaming + client->threaded_data.num_requests_being_prepared +
+                                         num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
             "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  "
-            "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  Requests-streaming:%d "
+            "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  "
+            "Requests-streaming-response:%d "
             " Endpoints(in-table/allocated):%d/%d",
             (void *)client,
             total_approx_requests,
             num_requests_tracked_requests,
-            client->threaded_data.num_requests_being_prepared,
+            num_requests_being_prepared,
             client->threaded_data.request_queue_size,
             num_auto_ranged_get_network_io,
             num_auto_ranged_put_network_io,
             num_auto_default_network_io,
             num_requests_network_io,
             num_requests_stream_queued_waiting,
-            num_requests_streaming,
+            num_requests_streaming_response,
             num_endpoints_in_table,
             num_endpoints_allocated);
     }
@@ -1475,12 +1483,8 @@ static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    bool request_is_noop = false;
-
-    if (error_code != AWS_ERROR_SUCCESS || request->is_noop) {
-        request_is_noop = request->is_noop != 0;
+    if (error_code != AWS_ERROR_SUCCESS) {
         s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
-
         request = aws_s3_request_release(request);
     }
 
@@ -1489,9 +1493,7 @@ static void s_s3_client_prepare_callback_queue_request(
         aws_s3_client_lock_synced_data(client);
 
         if (error_code == AWS_ERROR_SUCCESS) {
-            if (!request_is_noop) {
-                aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
-            }
+            aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
         } else {
             ++client->synced_data.num_failed_prepare_requests;
         }
@@ -1515,12 +1517,14 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, request->meta_request);
-
-        /* Unless the request is marked "always send", if this meta request has a finish result, then finish the request
-         * now and release it. */
-        if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
+        if (request->is_noop) {
+            /* If request is no-op, finishes and cleans up the request */
+            s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_SUCCESS);
+            request = aws_s3_request_release(request);
+        } else if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
+            /* Unless the request is marked "always send", if this meta request has a finish result, then finish the
+             * request now and release it. */
             s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
-
             request = aws_s3_request_release(request);
         } else if (
             s_s3_client_get_num_requests_network_io(client, request->meta_request->type) < max_active_connections) {
