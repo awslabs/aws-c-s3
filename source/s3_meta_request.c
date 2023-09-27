@@ -1182,31 +1182,16 @@ static void s_s3_meta_request_send_request_finish(
 
     vtable->send_request_finish(connection, stream, error_code);
 }
+
 /* Return whether the response to this request might contain an error, even though we got 200 OK.
  * see: https://repost.aws/knowledge-center/s3-resolve-200-internalerror */
 static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request *request) {
-    /* We handle async error for */
+    /* We handle async error for every request BUT get object. */
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    switch (meta_request->type) {
-        case AWS_S3_META_REQUEST_TYPE_DEFAULT:
-        case AWS_S3_META_REQUEST_TYPE_COPY_OBJECT:
-            /**
-             * Handle async error for default type of request. Mostly for single part copy object.
-             * Also handle it for all copy object requests.
-             **/
-            return true;
-        case AWS_S3_META_REQUEST_TYPE_GET_OBJECT:
-            return false;
-        case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT:
-            if (meta_request->vtable->get_request_type &&
-                meta_request->vtable->get_request_type(request) == AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
-                /* Only handle the async error for complete multipart upload. */
-                return true;
-            }
-            return false;
-        default:
-            return false;
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        return false;
     }
+    return true;
 }
 
 static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *request) {
