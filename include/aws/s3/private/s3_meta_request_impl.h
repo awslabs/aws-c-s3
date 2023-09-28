@@ -119,7 +119,7 @@ struct aws_s3_meta_request_vtable {
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
     /* Get the type of the aws_s3_request */
-    int (*get_request_type)(struct aws_s3_request *request);
+    int (*get_request_type)(const struct aws_s3_request *request);
 };
 
 /**
@@ -327,13 +327,6 @@ void aws_s3_meta_request_sign_request_default(
 /* Default implementation for when a request finishes a particular send. */
 AWS_S3_API
 void aws_s3_meta_request_send_request_finish_default(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code);
-
-/* Implementation for when a request finishes a particular send to handle possible async error from S3. */
-AWS_S3_API
-void aws_s3_meta_request_send_request_finish_handle_async_error(
     struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code);
