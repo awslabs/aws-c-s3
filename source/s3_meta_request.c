@@ -1196,44 +1196,47 @@ static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request 
 
 static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
-    int response_status = request->send_data.response_status;
-    const char *xml_path[] = {"Error", "Code", NULL};
-    struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
-    struct aws_byte_cursor error_code_string = {0};
 
-    int error_code_from_status = s_s3_meta_request_error_code_from_response_status(response_status);
-    int error_code_from_body = AWS_ERROR_SUCCESS;
+    int error_code_from_status = s_s3_meta_request_error_code_from_response_status(request->send_data.response_status);
 
+    /* Response body might be XML with an <Error><Code> inside.
+     * The is very likely when status-code is bad.
+     * In some cases, it's even possible after 200 OK. */
+    int error_code_from_xml = AWS_ERROR_SUCCESS;
     if (error_code_from_status != AWS_ERROR_SUCCESS || s_should_check_for_error_despite_200_OK(request)) {
-        /* try to get error code from body. */
         if (request->send_data.response_body.len > 0) {
-            if (aws_xml_get_body_at_path(request->allocator, response_body_cursor, xml_path, &error_code_string)) {
-                if (aws_last_error() == AWS_ERROR_INVALID_XML || aws_last_error() == AWS_ERROR_STRING_MATCH_NOT_FOUND) {
-                    /* The xml body is not Error, we can safely think the request succeed. */
-                    aws_reset_error();
-                } else {
-                    /* Failed to parse the body with "real error", bail out */
-                    return aws_last_error();
-                }
-            } else {
-                /* Check the error code. Map the S3 error code to CRT error code. */
-                error_code_from_body = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
+            /* Attempt to read as XML, it's fine if this fails. */
+            struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
+            struct aws_byte_cursor error_code_string = {0};
+            const char *xml_path[] = {"Error", "Code", NULL};
+            if (aws_xml_get_body_at_path(request->allocator, xml_doc, xml_path, &error_code_string) == AWS_OP_SUCCESS) {
+                /* Found an <Error><Code> string! Map it to CRT error code. */
+                error_code_from_xml = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
             }
         }
     }
 
     if (error_code_from_status == AWS_ERROR_SUCCESS) {
-        if (error_code_from_body == AWS_ERROR_UNKNOWN) {
-            return AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+        /* Status-code was OK, so assume everything's good, unless we found an <Error><Code> in the XML */
+        switch (error_code_from_xml) {
+            case AWS_ERROR_SUCCESS:
+                return AWS_ERROR_SUCCESS;
+            case AWS_ERROR_UNKNOWN:
+                return AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+            default:
+                return error_code_from_xml;
         }
     } else {
-        if (error_code_from_body == AWS_ERROR_UNKNOWN || error_code_from_body == AWS_ERROR_SUCCESS) {
-            /* We don't find anything more useful from the body */
-            return error_code_from_status;
+        /* Return error based on status-code, unless we got something more specific from XML */
+        switch (error_code_from_xml) {
+            case AWS_ERROR_SUCCESS:
+                return error_code_from_status;
+            case AWS_ERROR_UNKNOWN:
+                return error_code_from_status;
+            default:
+                return error_code_from_xml;
         }
     }
-    /* Return what  */
-    return error_code_from_body;
 }
 
 void aws_s3_meta_request_send_request_finish_default(
