@@ -117,7 +117,6 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
 
     error_occurred = false;
 
-done:
     aws_mem_release(args->alloc, task);
     if (error_occurred) {
         AWS_LOGF_TRACE(
