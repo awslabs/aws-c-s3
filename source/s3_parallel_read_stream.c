@@ -113,6 +113,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     struct aws_future_bool *end_future = args->end_future;
 
     memcpy(args->dest->buffer, args->content + args->start_position, args->dest->capacity - args->dest->len);
+    args->dest->len = args->dest->capacity;
 
     error_occurred = false;
 
