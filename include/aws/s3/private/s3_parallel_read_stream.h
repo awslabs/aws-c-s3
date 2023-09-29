@@ -111,7 +111,7 @@ struct aws_future_bool *aws_parallel_input_stream_read(
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor file_name,
+    const char *file_name,
     struct aws_event_loop_group *reading_elg,
     size_t num_workers);
 

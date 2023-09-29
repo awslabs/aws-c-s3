@@ -258,8 +258,11 @@ int aws_s3_meta_request_init_base(
         /* Create parallel read stream from file */
         meta_request->initial_request_message = aws_http_message_acquire(options->message);
         AWS_ASSERT(client != NULL);
+        /* TODO: cannot just use the ptr* */
+        struct aws_string *file_path_str = aws_string_new_from_cursor(allocator, &options->send_filepath);
         meta_request->request_body_parallel_stream = aws_parallel_input_stream_new_from_file(
-            allocator, options->send_filepath, client->body_streaming_elg, 8 /* num_workers */);
+            allocator, aws_string_c_str(file_path_str), client->body_streaming_elg, 8 /* num_workers */);
+
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
