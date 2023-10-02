@@ -24,9 +24,9 @@
 struct aws_mmap_context_win_impl {
     struct aws_allocator *allocator;
 
-    HANDLE hFile;
-    HANDLE hMapping;
-    LPVOID lpMapAddress;
+    HANDLE file_handler;
+    HANDLE mapping_handler;
+    LPVOID mapped_address;
 };
 
 struct aws_mmap_context *s_mmap_context_destroy(struct aws_mmap_context *context) {
@@ -34,14 +34,14 @@ struct aws_mmap_context *s_mmap_context_destroy(struct aws_mmap_context *context
         return NULL;
     }
     struct aws_mmap_context_win_impl *impl = context->impl;
-    if (impl->lpMapAddress) {
-        UnmapViewOfFile(impl->lpMapAddress);
+    if (impl->mapped_address) {
+        UnmapViewOfFile(impl->mapped_address);
     }
-    if (impl->hMapping) {
-        CloseHandle(impl->hMapping);
+    if (impl->mapping_handler) {
+        CloseHandle(impl->mapping_handler);
     }
-    if (impl->hFile) {
-        CloseHandle(impl->hFile);
+    if (impl->file_handler) {
+        CloseHandle(impl->file_handler);
     }
     aws_mem_release(impl->allocator, context);
     return NULL;
@@ -62,7 +62,7 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     context->impl = impl;
 
     impl->allocator = allocator;
-    impl->hFile = CreateFile(
+    impl->file_handler = CreateFile(
         file_name,
         GENERIC_READ,
         FILE_SHARE_READ,
@@ -70,19 +70,19 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
         NULL /*TemplateFile*/);
-    if (impl->hFile == INVALID_HANDLE_VALUE) {
+    if (impl->file_handler == INVALID_HANDLE_VALUE) {
         goto error;
     }
-    impl->hMapping = CreateFileMapping(impl->hFile, NULL, PAGE_READONLY, 0, 0, NULL /*Name*/);
-    if (impl->hMapping == NULL) {
+    impl->mapping_handler = CreateFileMapping(impl->file_handler, NULL, PAGE_READONLY, 0, 0, NULL /*Name*/);
+    if (impl->mapping_handler == NULL) {
         goto error;
     }
-    impl->lpMapAddress = MapViewOfFile(impl->hMapping, FILE_MAP_READ, 0, 0, 0);
-    if (impl->lpMapAddress == NULL) {
+    impl->mapped_address = MapViewOfFile(impl->mapping_handler, FILE_MAP_READ, 0, 0, 0);
+    if (impl->mapped_address == NULL) {
         goto error;
     }
 
-    context->content = (char *)impl->lpMapAddress;
+    context->content = (char *)impl->mapped_address;
     return context;
 error:
     /* TODO: LOG and raise AWS ERRORs */
@@ -132,7 +132,7 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     impl->allocator = allocator;
     context->impl = impl;
 
-    impl->fd = open(file_name, O_RDWR);
+    impl->fd = open(file_name, O_RDONLY);
     if (impl->fd == -1) {
         goto error;
     }
@@ -141,7 +141,7 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     if (fstat(impl->fd, &file_stat) == -1) {
         goto error;
     }
-    void *mapped_data = mmap(NULL, file_stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, impl->fd, 0);
+    void *mapped_data = mmap(NULL, file_stat.st_size, PROT_READ, MAP_SHARED, impl->fd, 0);
     if (mapped_data == MAP_FAILED) {
         goto error;
     }
