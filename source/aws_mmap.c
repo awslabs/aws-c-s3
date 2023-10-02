@@ -10,6 +10,7 @@
 #ifdef _WIN32
 #    include <windows.h>
 #else
+#    include <errno.h>
 #    include <sys/mman.h>
 #    include <sys/stat.h>
 #    include <unistd.h>
@@ -55,6 +56,10 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     struct aws_mmap_context_win_impl *impl = NULL;
     aws_mem_acquire_many(
         allocator, 2, &context, sizeof(struct aws_mmap_context), &impl, sizeof(struct aws_mmap_context_win_impl));
+    AWS_ZERO_STRUCT(*context);
+    AWS_ZERO_STRUCT(*impl);
+
+    context->impl = impl;
 
     impl->allocator = allocator;
     impl->hFile = CreateFile(
@@ -78,10 +83,19 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     }
 
     context->content = (char *)impl->lpMapAddress;
-    context->impl = impl;
     return context;
 error:
     /* TODO: LOG and raise AWS ERRORs */
+    int error = GetLastError();
+    if (error == ERROR_FILE_NOT_FOUND) {
+        aws_raise_error(AWS_ERROR_FILE_INVALID_PATH);
+    }
+
+    if (error == ERROR_ACCESS_DENIED) {
+        aws_raise_error(AWS_ERROR_NO_PERMISSION);
+    }
+
+    /* TODO: more errors and maybe same interface as `aws_translate_and_raise_io_error` */
     return s_mmap_context_destroy(context);
 }
 #else
@@ -112,9 +126,13 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     struct aws_mmap_context_posix_impl *impl = NULL;
     aws_mem_acquire_many(
         allocator, 2, &context, sizeof(struct aws_mmap_context), &impl, sizeof(struct aws_mmap_context_posix_impl));
+    AWS_ZERO_STRUCT(*context);
+    AWS_ZERO_STRUCT(*impl);
+
+    impl->allocator = allocator;
+    context->impl = impl;
 
     impl->fd = open(file_name, O_RDWR);
-    impl->allocator = allocator;
     if (impl->fd == -1) {
         goto error;
     }
@@ -129,10 +147,10 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     }
 
     context->content = (char *)mapped_data;
-    context->impl = impl;
     return context;
 error:
     /* TODO: LOG and raise AWS ERRORs */
+    aws_translate_and_raise_io_error(errno);
     return s_mmap_context_destroy(context);
 }
 #endif /* _WIN32 */
