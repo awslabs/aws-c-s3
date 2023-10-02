@@ -15,13 +15,6 @@
 #include <aws/io/future.h>
 #include <aws/io/stream.h>
 
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 void aws_parallel_input_stream_init_base(
     struct aws_parallel_input_stream *stream,
     struct aws_allocator *alloc,
