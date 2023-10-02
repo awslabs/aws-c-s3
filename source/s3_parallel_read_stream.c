@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/s3/private/s3_parallel_read_stream.h>
+#include "aws/s3/private/s3_parallel_read_stream.h"
+#include "aws/s3/private/aws_mmap.h"
 
 #include <aws/common/atomics.h>
 #include <aws/common/file.h>
@@ -68,9 +69,8 @@ struct aws_future_bool *aws_parallel_input_stream_read(
 struct aws_parallel_input_stream_from_file_impl {
     struct aws_parallel_input_stream base;
 
-    int fd;
-    size_t file_size;
-    char *content;
+    struct aws_mmap_context *mmap_context;
+    const char *content;
 
     struct aws_event_loop_group *reading_elg;
     size_t num_workers;
@@ -83,7 +83,7 @@ struct aws_parallel_input_stream_from_file_impl {
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     struct aws_parallel_input_stream_from_file_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
-    close(impl->fd);
+    aws_mmap_context_release(impl->mmap_context);
 
     aws_event_loop_group_release(impl->reading_elg);
     aws_mem_release(stream->alloc, impl->assigned_event_loops);
@@ -101,7 +101,7 @@ struct aws_parallel_read_from_file_task_args {
     size_t start_position;
     struct aws_future_bool *end_future;
     struct aws_byte_buf *dest;
-    char *content;
+    const char *content;
 };
 
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -218,24 +218,12 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     aws_atomic_store_int(&impl->read_count, 0);
     impl->assigned_event_loops = aws_mem_calloc(allocator, num_workers, sizeof(struct aws_event_loop *));
 
-    impl->fd = open(file_name, O_RDWR);
-    if (impl->fd == -1) {
-        /* LOG */
+    impl->mmap_context = aws_mmap_context_new(allocator, file_name);
+    if (!impl->mmap_context) {
         goto error;
     }
 
-    struct stat file_stat;
-    if (fstat(impl->fd, &file_stat) == -1) {
-        goto error;
-    }
-    impl->file_size = (size_t)file_stat.st_size;
-    void *mapped_data = mmap(NULL, file_stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, impl->fd, 0);
-    if (mapped_data == MAP_FAILED) {
-        goto error;
-    }
-
-    // Now, you can work with the mapped data as if it were an array
-    impl->content = (char *)mapped_data;
+    impl->content = impl->mmap_context->content;
 
     for (size_t i = 0; i < num_workers; i++) {
         impl->assigned_event_loops[i] = aws_event_loop_group_get_next_loop(reading_elg);

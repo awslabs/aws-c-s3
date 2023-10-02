@@ -155,6 +155,7 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
 
     struct aws_parallel_input_stream *parallel_read_stream =
         aws_parallel_input_stream_new_from_file(allocator, file_path, tester.el_group, 8);
+    ASSERT_NOT_NULL(parallel_read_stream);
 
     struct aws_byte_buf read_buf;
     aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
@@ -186,6 +187,7 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
 
     struct aws_parallel_input_stream *parallel_read_stream =
         aws_parallel_input_stream_new_from_file(allocator, file_path, tester.el_group, 8);
+    ASSERT_NOT_NULL(parallel_read_stream);
 
     {
         /* The whole file */
