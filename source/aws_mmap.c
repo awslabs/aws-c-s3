@@ -57,15 +57,27 @@ void *aws_mmap_context_map_content(
     size_t length,
     size_t offset,
     void **out_start_addr) {
-    //     AWS_PRECONDITION(context);
-    //     struct aws_mmap_context_win_impl *impl = context->impl;
 
-    //     void *mapped_address = MapViewOfFile(impl->mapping_handler, FILE_MAP_READ, 0, 0, 0);
-    //     if (mapped_address == NULL) {
-    //         goto error;
-    //     }
-    //     return mapped_address;
-    // error:
+    AWS_PRECONDITION(context);
+    struct aws_mmap_context_win_impl *impl = context->impl;
+
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    uint64_t page_size = si.dwAllocationGranularity;
+    uint64_t number_pages = offset / page_size;
+    uint64_t page_starts_offset = page_size * number_pages;
+    uint64_t in_page_offset = offset - page_starts_offset;
+    DWORD page_starts_offset_high = (DWORD)((page_starts_offset >> 32) & 0xFFFFFFFF);
+    DWORD page_starts_offset_low = (DWORD)(page_starts_offset & 0xFFFFFFFF);
+
+    void *mapped_address = MapViewOfFile(
+        impl->mapping_handler, FILE_MAP_READ, page_starts_offset_high, page_starts_offset_low, length + in_page_offset);
+    if (mapped_address == NULL) {
+        goto error;
+    }
+    *out_start_addr = mapped_address;
+    return (char *)mapped_address + in_page_offset;
+error:
     /* TODO: LOG and raise AWS ERRORs */
     aws_raise_error(AWS_ERROR_SYS_CALL_FAILURE);
     return NULL;
