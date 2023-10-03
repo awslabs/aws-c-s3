@@ -32,12 +32,21 @@ AWS_S3_API struct aws_mmap_context *aws_mmap_context_release(struct aws_mmap_con
 
 /**
  * Get mapped content. OS will load the content into memory when the content is accessed.
- * You need to invoke `aws_mmap_context_unmap_content` once read from the memory, otherwise, leak will happen
+ * You need to invoke `aws_mmap_context_unmap_content` on the `out_start_addr` once read from the memory is done,
+ * otherwise, leak will happen
  *
- * @param context       The mmap context
- * @return              The mapped address
+ * @param context           The mmap context
+ * @param length            The length of memory to map
+ * @param offset            The offset starting at the file to map.
+ * @param out_start_addr    The start address for the mapped memory, it will be a multiple
+ *                          of the page size as returned by sysconf(_SC_PAGE_SIZE)
+ * @return                  The mapped address starts from `offset` of the file
  **/
-AWS_S3_API void *aws_mmap_context_map_content(struct aws_mmap_context *context);
+AWS_S3_API void *aws_mmap_context_map_content(
+    struct aws_mmap_context *context,
+    size_t length,
+    size_t offset,
+    void **out_start_addr);
 
 /**
  * Remove any mappings for those entire pages containing any part of the address space of the process starting at addr
@@ -45,7 +54,7 @@ AWS_S3_API void *aws_mmap_context_map_content(struct aws_mmap_context *context);
  *
  * @param mapped_addr   The start address of the mapped content
  * @param len           The length to free
- * @return AWS_OP_SUCCESS on succes, AWS_OP_ERR on error.
+ * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on error.
  **/
 AWS_S3_API int aws_mmap_context_unmap_content(void *mapped_addr, size_t len);
 

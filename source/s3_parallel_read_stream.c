@@ -103,17 +103,19 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     /* TODO: handle the task cancelled. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
     struct aws_future_bool *end_future = args->end_future;
-    void *content = aws_mmap_context_map_content(args->mmap_context);
+    void *out_start_addr = NULL;
     size_t read_length = args->dest->capacity - args->dest->len;
+    void *content =
+        aws_mmap_context_map_content(args->mmap_context, read_length, args->start_position, &out_start_addr);
 
     if (content == NULL) {
         goto error;
     }
 
-    memcpy(args->dest->buffer, (char *)content + args->start_position, read_length);
+    memcpy(args->dest->buffer, content, read_length);
     args->dest->len = args->dest->capacity;
 
-    int error = aws_mmap_context_unmap_content(content, read_length);
+    int error = aws_mmap_context_unmap_content(out_start_addr, read_length);
     /**
      * unmpa only fails on:
      *  - Addresses in the range [addr,addr+len) are outside the valid range for the address space of a process.

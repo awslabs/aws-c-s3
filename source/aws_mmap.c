@@ -52,16 +52,20 @@ struct aws_mmap_context *aws_mmap_context_release(struct aws_mmap_context *conte
     return s_mmap_context_destroy(context);
 }
 
-void *aws_mmap_context_map_content(struct aws_mmap_context *context) {
-    AWS_PRECONDITION(context);
-    struct aws_mmap_context_win_impl *impl = context->impl;
+void *aws_mmap_context_map_content(
+    struct aws_mmap_context *context,
+    size_t length,
+    size_t offset,
+    void **out_start_addr) {
+    //     AWS_PRECONDITION(context);
+    //     struct aws_mmap_context_win_impl *impl = context->impl;
 
-    void *mapped_address = MapViewOfFile(impl->mapping_handler, FILE_MAP_READ, 0, 0, 0);
-    if (mapped_address == NULL) {
-        goto error;
-    }
-    return mapped_address;
-error:
+    //     void *mapped_address = MapViewOfFile(impl->mapping_handler, FILE_MAP_READ, 0, 0, 0);
+    //     if (mapped_address == NULL) {
+    //         goto error;
+    //     }
+    //     return mapped_address;
+    // error:
     /* TODO: LOG and raise AWS ERRORs */
     aws_raise_error(AWS_ERROR_SYS_CALL_FAILURE);
     return NULL;
@@ -139,19 +143,25 @@ struct aws_mmap_context *aws_mmap_context_release(struct aws_mmap_context *conte
     return s_mmap_context_destroy(context);
 }
 
-void *aws_mmap_context_map_content(struct aws_mmap_context *context) {
+void *aws_mmap_context_map_content(
+    struct aws_mmap_context *context,
+    size_t length,
+    size_t offset,
+    void **out_start_addr) {
     AWS_PRECONDITION(context);
     struct aws_mmap_context_posix_impl *impl = context->impl;
 
-    struct stat file_stat;
-    if (fstat(impl->fd, &file_stat) == -1) {
-        goto error;
-    }
-    void *mapped_data = mmap(NULL, file_stat.st_size, PROT_READ, MAP_SHARED, impl->fd, 0);
+    long page_size = sysconf(_SC_PAGE_SIZE);
+    uint64_t number_pages = offset / page_size;
+    uint64_t page_starts_offset = page_size * number_pages;
+    uint64_t in_page_offset = offset - page_starts_offset;
+
+    void *mapped_data = mmap(NULL, length + in_page_offset, PROT_READ, MAP_SHARED, impl->fd, page_starts_offset);
     if (mapped_data == MAP_FAILED) {
         goto error;
     }
-    return mapped_data;
+    *out_start_addr = mapped_data;
+    return (char *)mapped_data + in_page_offset;
 error:
     /* TODO: LOG and raise AWS ERRORs */
     aws_translate_and_raise_io_error(errno);
