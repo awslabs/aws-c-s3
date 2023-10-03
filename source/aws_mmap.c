@@ -71,7 +71,11 @@ void *aws_mmap_context_map_content(
     DWORD page_starts_offset_low = (DWORD)(page_starts_offset & 0xFFFFFFFF);
 
     void *mapped_address = MapViewOfFile(
-        impl->mapping_handler, FILE_MAP_READ, page_starts_offset_high, page_starts_offset_low, length + in_page_offset);
+        impl->mapping_handler,
+        FILE_MAP_READ,
+        page_starts_offset_high,
+        page_starts_offset_low,
+        (SIZE_T)(length + in_page_offset));
     if (mapped_address == NULL) {
         goto error;
     }
