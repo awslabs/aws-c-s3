@@ -63,7 +63,6 @@ struct aws_parallel_input_stream_from_file_impl {
     struct aws_parallel_input_stream base;
 
     struct aws_mmap_context *mmap_context;
-    const char *content;
 
     struct aws_event_loop_group *reading_elg;
     size_t num_workers;
@@ -94,7 +93,7 @@ struct aws_parallel_read_from_file_task_args {
     size_t start_position;
     struct aws_future_bool *end_future;
     struct aws_byte_buf *dest;
-    const char *content;
+    struct aws_mmap_context *mmap_context;
 };
 
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -104,12 +103,29 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     /* TODO: handle the task cancelled. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
     struct aws_future_bool *end_future = args->end_future;
+    void *content = aws_mmap_context_map_content(args->mmap_context);
+    size_t read_length = args->dest->capacity - args->dest->len;
 
-    memcpy(args->dest->buffer, args->content + args->start_position, args->dest->capacity - args->dest->len);
+    if (content == NULL) {
+        goto error;
+    }
+
+    memcpy(args->dest->buffer, (char *)content + args->start_position, read_length);
     args->dest->len = args->dest->capacity;
 
-    error_occurred = false;
+    int error = aws_mmap_context_unmap_content(content, read_length);
+    /**
+     * unmpa only fails on:
+     *  - Addresses in the range [addr,addr+len) are outside the valid range for the address space of a process.
+     *  - The len argument is 0.
+     *  - The addr argument is not a multiple of the page size as returned by sysconf().
+     *
+     * None of them should happen here.
+     */
+    AWS_FATAL_ASSERT(!error);
 
+    error_occurred = false;
+error:
     aws_mem_release(args->alloc, task);
     if (error_occurred) {
         AWS_LOGF_TRACE(
@@ -175,7 +191,7 @@ struct aws_future_bool *s_para_from_file_read(
     task_args->start_position = start_position;
     task_args->dest = dest;
     task_args->end_future = aws_future_bool_acquire(future);
-    task_args->content = impl->content;
+    task_args->mmap_context = impl->mmap_context;
     task_args->log_id = &impl->base;
 
     aws_task_init(read_task, s_s3_parallel_from_file_read_task, task_args, "s3_parallel_read_task");
@@ -215,8 +231,6 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     if (!impl->mmap_context) {
         goto error;
     }
-
-    impl->content = impl->mmap_context->content;
 
     for (size_t i = 0; i < num_workers; i++) {
         impl->assigned_event_loops[i] = aws_event_loop_group_get_next_loop(reading_elg);

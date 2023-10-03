@@ -20,13 +20,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+struct aws_mmap_context {
+    void *impl;
+};
+
 #ifdef _WIN32
 struct aws_mmap_context_win_impl {
     struct aws_allocator *allocator;
 
     HANDLE file_handler;
     HANDLE mapping_handler;
-    LPVOID mapped_address;
 };
 
 struct aws_mmap_context *s_mmap_context_destroy(struct aws_mmap_context *context) {
@@ -34,9 +37,7 @@ struct aws_mmap_context *s_mmap_context_destroy(struct aws_mmap_context *context
         return NULL;
     }
     struct aws_mmap_context_win_impl *impl = context->impl;
-    if (impl->mapped_address) {
-        UnmapViewOfFile(impl->mapped_address);
-    }
+
     if (impl->mapping_handler) {
         CloseHandle(impl->mapping_handler);
     }
@@ -49,6 +50,29 @@ struct aws_mmap_context *s_mmap_context_destroy(struct aws_mmap_context *context
 
 struct aws_mmap_context *aws_mmap_context_release(struct aws_mmap_context *context) {
     return s_mmap_context_destroy(context);
+}
+
+void *aws_mmap_context_map_content(struct aws_mmap_context *context) {
+    AWS_PRECONDITION(context);
+    struct aws_mmap_context_win_impl *impl = context->impl;
+
+    void *mapped_address = MapViewOfFile(impl->mapping_handler, FILE_MAP_READ, 0, 0, 0);
+    if (mapped_address == NULL) {
+        goto error;
+    }
+    return mapped_address;
+error:
+    /* TODO: LOG and raise AWS ERRORs */
+    aws_raise_error(AWS_ERROR_SYS_CALL_FAILURE);
+    return NULL;
+}
+
+int aws_mmap_context_unmap_content(void *mapped_addr, size_t len) {
+    (void)len;
+    if (mapped_addr) {
+        UnmapViewOfFile(mapped_addr);
+    }
+    return AWS_OP_SUCCESS;
 }
 
 struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, const char *file_name) {
@@ -77,12 +101,6 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
     if (impl->mapping_handler == NULL) {
         goto error;
     }
-    impl->mapped_address = MapViewOfFile(impl->mapping_handler, FILE_MAP_READ, 0, 0, 0);
-    if (impl->mapped_address == NULL) {
-        goto error;
-    }
-
-    context->content = (char *)impl->mapped_address;
     return context;
 error:
     /* TODO: LOG and raise AWS ERRORs */
@@ -121,6 +139,36 @@ struct aws_mmap_context *aws_mmap_context_release(struct aws_mmap_context *conte
     return s_mmap_context_destroy(context);
 }
 
+void *aws_mmap_context_map_content(struct aws_mmap_context *context) {
+    AWS_PRECONDITION(context);
+    struct aws_mmap_context_posix_impl *impl = context->impl;
+
+    struct stat file_stat;
+    if (fstat(impl->fd, &file_stat) == -1) {
+        goto error;
+    }
+    void *mapped_data = mmap(NULL, file_stat.st_size, PROT_READ, MAP_SHARED, impl->fd, 0);
+    if (mapped_data == MAP_FAILED) {
+        goto error;
+    }
+    return mapped_data;
+error:
+    /* TODO: LOG and raise AWS ERRORs */
+    aws_translate_and_raise_io_error(errno);
+    return NULL;
+}
+
+int aws_mmap_context_unmap_content(void *mapped_addr, size_t len) {
+    if (!mapped_addr) {
+        return AWS_OP_SUCCESS;
+    }
+    if (munmap(mapped_addr, len)) {
+
+        return aws_translate_and_raise_io_error(errno);
+    }
+    return AWS_OP_SUCCESS;
+}
+
 struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, const char *file_name) {
     struct aws_mmap_context *context = NULL;
     struct aws_mmap_context_posix_impl *impl = NULL;
@@ -137,16 +185,6 @@ struct aws_mmap_context *aws_mmap_context_new(struct aws_allocator *allocator, c
         goto error;
     }
 
-    struct stat file_stat;
-    if (fstat(impl->fd, &file_stat) == -1) {
-        goto error;
-    }
-    void *mapped_data = mmap(NULL, file_stat.st_size, PROT_READ, MAP_SHARED, impl->fd, 0);
-    if (mapped_data == MAP_FAILED) {
-        goto error;
-    }
-
-    context->content = (char *)mapped_data;
     return context;
 error:
     /* TODO: LOG and raise AWS ERRORs */
