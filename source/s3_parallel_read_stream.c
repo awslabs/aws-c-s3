@@ -4,7 +4,6 @@
  */
 
 #include "aws/s3/private/s3_parallel_read_stream.h"
-#include "aws/s3/private/aws_mmap.h"
 
 #include <aws/common/atomics.h>
 #include <aws/common/file.h>
@@ -117,9 +116,7 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    const char *file_name,
-    struct aws_event_loop_group *reading_elg,
-    size_t num_workers) {
+    const char *file_name) {
 
     struct aws_parallel_input_stream_from_file_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
@@ -127,7 +124,6 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     impl->file_path = aws_string_new_from_c_str(allocator, file_name);
 
     return &impl->base;
-error:
     s_para_from_file_destroy(&impl->base);
     return NULL;
 }

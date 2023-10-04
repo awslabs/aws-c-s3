@@ -260,8 +260,8 @@ int aws_s3_meta_request_init_base(
         AWS_ASSERT(client != NULL);
         /* TODO: cannot just use the ptr* */
         struct aws_string *file_path_str = aws_string_new_from_cursor(allocator, &options->send_filepath);
-        meta_request->request_body_parallel_stream = aws_parallel_input_stream_new_from_file(
-            allocator, aws_string_c_str(file_path_str), client->body_streaming_elg, 8 /* num_workers */);
+        meta_request->request_body_parallel_stream =
+            aws_parallel_input_stream_new_from_file(allocator, aws_string_c_str(file_path_str));
         aws_string_destroy(file_path_str);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
