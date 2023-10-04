@@ -189,6 +189,13 @@ int aws_mmap_context_unmap_content(void *mapped_addr, size_t len) {
         return AWS_OP_SUCCESS;
     }
     if (munmap(mapped_addr, len)) {
+        /**
+         * Remove any mappings for those entire pages containing any part of the address space of the process starting
+         * at addr and continuing for len bytes.
+         *
+         * So, even if the len is not the exact match of the length of bytes we mapped, we will still free the number of
+         * pages we allocated.
+         **/
 
         return aws_translate_and_raise_io_error(errno);
     }
