@@ -97,6 +97,11 @@ struct aws_future_bool *s_para_from_file_read(
     bool success = false;
     uint64_t last_modified_time = 0;
     struct aws_input_stream *file_stream = NULL;
+    struct aws_stream_status status = {
+        .is_end_of_stream = false,
+        .is_valid = true,
+    };
+
     if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &last_modified_time)) {
         goto done;
     }
@@ -109,10 +114,6 @@ struct aws_future_bool *s_para_from_file_read(
     if (aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN)) {
         goto done;
     }
-    struct aws_stream_status status = {
-        .is_end_of_stream = false,
-        .is_valid = true,
-    };
     /* Keep reading until fill the buffer */
     while ((dest->len < dest->capacity) && !status.is_end_of_stream) {
         /* Read from stream */
