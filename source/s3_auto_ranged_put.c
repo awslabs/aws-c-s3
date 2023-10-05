@@ -725,7 +725,7 @@ static bool s_s3_auto_ranged_put_update(
 static size_t s_compute_request_body_size(
     const struct aws_s3_meta_request *meta_request,
     uint32_t part_number,
-    size_t *offset_out) {
+    uint64_t *offset_out) {
     AWS_PRECONDITION(meta_request);
 
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
