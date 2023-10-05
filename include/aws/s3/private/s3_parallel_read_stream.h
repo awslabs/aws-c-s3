@@ -35,12 +35,6 @@ struct aws_parallel_input_stream_vtable {
     /**
      * Read into the buffer in parallel.
      * The implementation needs to support this to be invoked concurrently from multiple threads
-     *
-     * TODO: error handling:
-     * - The stream reach end before all parts
-     * - Failed to create a elg task to read
-     * - Asyc related stuff as the original async stream (If we cannot fill the dest, we wait?)
-     * - etc.
      */
     struct aws_future_bool *(*read)(struct aws_parallel_input_stream *stream, size_t offset, struct aws_byte_buf *dest);
 };
@@ -91,10 +85,8 @@ struct aws_future_bool *aws_parallel_input_stream_read(
 /**
  * Create a new file based parallel input stream implementation.
  *
- * This implementation will take `num_workers` event loops from the `reading_elg` to schedule read jobs to.
- * And will open `num_workers` FILE * to read from the file concurrently.
- *
- * Note: we may result in less than the `num_workers` threads to use.
+ * This implementation will open a file handler when the read happens, and seek to the offset to start reading. Close
+ * the file handler as read finishes. It's caller's responsibility to control how many parallelisms will happen.
  *
  * @param allocator         memory allocator
  * @param file_name         The file path to read from

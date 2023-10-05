@@ -14,6 +14,9 @@
 #include <aws/io/future.h>
 #include <aws/io/stream.h>
 
+#include <errno.h>
+#include <sys/stat.h>
+
 void aws_parallel_input_stream_init_base(
     struct aws_parallel_input_stream *stream,
     struct aws_allocator *alloc,
@@ -60,6 +63,7 @@ struct aws_parallel_input_stream_from_file_impl {
     struct aws_parallel_input_stream base;
 
     struct aws_string *file_path;
+    uint64_t last_modified_time;
 };
 
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
@@ -73,6 +77,15 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     return;
 }
 
+static int s_get_last_modified_time(const char *file_name, uint64_t *out_time) {
+    struct stat attrib;
+    if (stat(file_name, &attrib)) {
+        return aws_translate_and_raise_io_error(errno);
+    }
+    *out_time = (uint64_t)attrib.st_mtime;
+    return AWS_OP_SUCCESS;
+}
+
 struct aws_future_bool *s_para_from_file_read(
     struct aws_parallel_input_stream *stream,
     size_t offset,
@@ -82,7 +95,14 @@ struct aws_future_bool *s_para_from_file_read(
     struct aws_parallel_input_stream_from_file_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
     bool success = false;
-
+    uint64_t last_modified_time = 0;
+    if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &last_modified_time)) {
+        goto done;
+    }
+    if (!last_modified_time == impl->last_modified_time) {
+        aws_raise_error(AWS_ERROR_S3_FILE_MODIFIED);
+        goto done;
+    }
     struct aws_input_stream *file_stream =
         aws_input_stream_new_from_file(stream->alloc, aws_string_c_str(impl->file_path));
     if (aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN)) {
@@ -130,6 +150,12 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
     impl->file_path = aws_string_new_from_cursor(allocator, file_name);
+    if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &impl->last_modified_time)) {
+        goto error;
+    }
 
     return &impl->base;
+error:
+    s_para_from_file_destroy(&impl->base);
+    return NULL;
 }
