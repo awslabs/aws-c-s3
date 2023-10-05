@@ -72,11 +72,8 @@ static void s_s3_parallel_from_file_read_test_task(struct aws_task *task, void *
         .len = 0,
         .capacity = test_args->read_length,
     };
-    struct aws_future_bool *read_future = aws_parallel_input_stream_read(
-        test_args->parallel_read_stream,
-        test_args->file_start_pos,
-        test_args->file_start_pos + test_args->read_length,
-        &read_buf);
+    struct aws_future_bool *read_future =
+        aws_parallel_input_stream_read(test_args->parallel_read_stream, test_args->file_start_pos, &read_buf);
     aws_future_bool_wait(read_future, MAX_TIMEOUT_NS);
     aws_future_bool_release(read_future);
 
@@ -105,8 +102,7 @@ static int s_parallel_read_test_helper(
     aws_atomic_store_int(&completed_count, 0);
     size_t number_bytes_per_read = total_length / split_num;
     if (number_bytes_per_read == 0) {
-        struct aws_future_bool *read_future =
-            aws_parallel_input_stream_read(parallel_read_stream, 0, s_parallel_stream_test->len, read_buf);
+        struct aws_future_bool *read_future = aws_parallel_input_stream_read(parallel_read_stream, 0, read_buf);
         ASSERT_TRUE(aws_future_bool_wait(read_future, MAX_TIMEOUT_NS));
         aws_future_bool_release(read_future);
         return AWS_OP_SUCCESS;
@@ -152,9 +148,10 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
 
     const char *file_path = "s3_test_parallel_input_stream_read.txt"; /* unique name */
     ASSERT_SUCCESS(s_create_read_file(file_path, s_parallel_stream_test->len));
+    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, file_path);
+        aws_parallel_input_stream_new_from_file(allocator, &path_cursor);
     ASSERT_NOT_NULL(parallel_read_stream);
 
     struct aws_byte_buf read_buf;
@@ -184,9 +181,10 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
     const char *file_path = "s3_test_parallel_input_stream_read_large.txt"; /* unique name */
     ASSERT_SUCCESS(s_create_read_file(file_path, file_length));
     struct aws_event_loop_group *el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
+    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, file_path);
+        aws_parallel_input_stream_new_from_file(allocator, &path_cursor);
     ASSERT_NOT_NULL(parallel_read_stream);
 
     {

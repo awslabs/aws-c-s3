@@ -258,11 +258,8 @@ int aws_s3_meta_request_init_base(
         /* Create parallel read stream from file */
         meta_request->initial_request_message = aws_http_message_acquire(options->message);
         AWS_ASSERT(client != NULL);
-        /* TODO: cannot just use the ptr* */
-        struct aws_string *file_path_str = aws_string_new_from_cursor(allocator, &options->send_filepath);
         meta_request->request_body_parallel_stream =
-            aws_parallel_input_stream_new_from_file(allocator, aws_string_c_str(file_path_str));
-        aws_string_destroy(file_path_str);
+            aws_parallel_input_stream_new_from_file(allocator, &options->send_filepath);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
@@ -633,7 +630,6 @@ static void s_s3_meta_request_schedule_prepare_request_default(
 
     aws_task_init(
         &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
-    /* TODO: check more */
     if (meta_request->request_body_parallel_stream) {
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         aws_event_loop_schedule_task_now(loop, &payload->task);
@@ -1696,8 +1692,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
-    size_t start_position,
-    size_t end_position,
+    size_t offset,
     struct aws_byte_buf *buffer) {
 
     AWS_PRECONDITION(meta_request);
@@ -1708,8 +1703,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
     }
     if (meta_request->request_body_parallel_stream != NULL) {
-        return aws_parallel_input_stream_read(
-            meta_request->request_body_parallel_stream, start_position, end_position, buffer);
+        return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
     }
 
     /* Else synchronous aws_input_stream */

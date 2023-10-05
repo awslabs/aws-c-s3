@@ -42,11 +42,7 @@ struct aws_parallel_input_stream_vtable {
      * - Asyc related stuff as the original async stream (If we cannot fill the dest, we wait?)
      * - etc.
      */
-    struct aws_future_bool *(*read)(
-        struct aws_parallel_input_stream *stream,
-        size_t start_position,
-        size_t end_position,
-        struct aws_byte_buf *dest);
+    struct aws_future_bool *(*read)(struct aws_parallel_input_stream *stream, size_t offset, struct aws_byte_buf *dest);
 };
 
 AWS_EXTERN_C_BEGIN
@@ -78,20 +74,18 @@ AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_parallel_input_stream *stream);
 
 /**
- * Read from the [start_position, end_position).
+ * Read from the offset until fill the dest, or EOS reached.
  * It's thread safe to be called from multiple threads without waiting for other read to complete
  *
  * @param stream            The stream to read from
- * @param start_position    The start_position in the stream to
- * @param end_position      Read until end_position of the stream
+ * @param offset            The offset in the stream from beginning to start reading
  * @param dest              The output buffer read to
  * @return a future to be solved when the current read finishes
  */
 AWS_S3_API
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
-    size_t start_position,
-    size_t end_position,
+    size_t offset,
     struct aws_byte_buf *dest);
 
 /**
@@ -104,14 +98,12 @@ struct aws_future_bool *aws_parallel_input_stream_read(
  *
  * @param allocator         memory allocator
  * @param file_name         The file path to read from
- * @param reading_elg       The eventloop group to assign read work to
- * @param num_workers       The number of worker to read from file
  * @return aws_parallel_input_stream
  */
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    const char *file_name);
+    const struct aws_byte_cursor *file_name);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

@@ -375,13 +375,12 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
  * Returns a future whose result bool indicates whether end of stream was reached.
  * This future may complete on any thread, and may complete synchronously.
  *
- * Read from [start_position, end_position)
+ * Read from offset to fill the buffer
  */
 AWS_S3_API
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
-    size_t start_position,
-    size_t end_position,
+    size_t offset,
     struct aws_byte_buf *buffer);
 
 bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request);
