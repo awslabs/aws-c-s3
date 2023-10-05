@@ -86,10 +86,10 @@ static void s_s3_parallel_from_file_read_test_task(struct aws_task *task, void *
     }
     bool completed = read_completed == test_args->split_num - 1;
 
+    bool reached_eos = aws_atomic_load_int(test_args->end_of_stream) == 1;
     aws_mem_release(test_args->alloc, task);
     aws_mem_release(test_args->alloc, test_args);
     if (completed) {
-        bool reached_eos = aws_atomic_load_int(test_args->end_of_stream) == 1;
         aws_future_bool_set_result(end_future, reached_eos);
     }
     aws_future_bool_release(end_future);
