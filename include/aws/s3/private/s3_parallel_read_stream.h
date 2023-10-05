@@ -75,7 +75,8 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
  * @param stream            The stream to read from
  * @param offset            The offset in the stream from beginning to start reading
  * @param dest              The output buffer read to
- * @return a future to be solved when the current read finishes
+ * @return                  a future, which will contain an error code if something went wrong,
+ *                          or a result bool indicating whether EOF has been reached.
  */
 AWS_S3_API
 struct aws_future_bool *aws_parallel_input_stream_read(

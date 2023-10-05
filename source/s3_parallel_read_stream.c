@@ -128,7 +128,7 @@ struct aws_future_bool *s_para_from_file_read(
     success = true;
 done:
     if (success) {
-        aws_future_bool_set_result(future, true);
+        aws_future_bool_set_result(future, status.is_end_of_stream);
     } else {
         aws_future_bool_set_error(future, aws_last_error());
     }

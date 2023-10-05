@@ -3714,6 +3714,7 @@ static int s_test_s3_round_trip_with_filepath(struct aws_allocator *allocator, v
                 .object_size_mb = 1,
                 .object_path_override = object_path,
                 .file_on_disk = true,
+                .skip_content_length = true,
             },
     };
 
@@ -3782,6 +3783,7 @@ static int s_test_s3_round_trip_mpu_with_filepath(struct aws_allocator *allocato
                 .object_size_mb = 50,
                 .object_path_override = object_path,
                 .file_on_disk = true,
+                .skip_content_length = true,
             },
     };
 

@@ -58,6 +58,7 @@ struct aws_parallel_read_from_test_args {
 
     struct aws_parallel_input_stream *parallel_read_stream;
     struct aws_atomic_var *completed_count;
+    struct aws_atomic_var *end_of_stream;
 
     size_t split_num;
 };
@@ -75,16 +76,21 @@ static void s_s3_parallel_from_file_read_test_task(struct aws_task *task, void *
     struct aws_future_bool *read_future =
         aws_parallel_input_stream_read(test_args->parallel_read_stream, test_args->file_start_pos, &read_buf);
     aws_future_bool_wait(read_future, MAX_TIMEOUT_NS);
+    bool end_of_stream = aws_future_bool_get_result(read_future);
     aws_future_bool_release(read_future);
 
     struct aws_future_bool *end_future = test_args->final_end_future;
     size_t read_completed = aws_atomic_fetch_add(test_args->completed_count, 1);
+    if (end_of_stream) {
+        aws_atomic_store_int(test_args->end_of_stream, 1);
+    }
     bool completed = read_completed == test_args->split_num - 1;
 
     aws_mem_release(test_args->alloc, task);
     aws_mem_release(test_args->alloc, test_args);
     if (completed) {
-        aws_future_bool_set_result(end_future, true);
+        bool reached_eos = aws_atomic_load_int(test_args->end_of_stream) == 1;
+        aws_future_bool_set_result(end_future, reached_eos);
     }
     aws_future_bool_release(end_future);
 }
@@ -96,10 +102,13 @@ static int s_parallel_read_test_helper(
     struct aws_event_loop_group *elg,
     size_t start_pos,
     size_t total_length,
-    size_t split_num) {
+    size_t split_num,
+    bool *out_eos) {
 
     struct aws_atomic_var completed_count;
     aws_atomic_store_int(&completed_count, 0);
+    struct aws_atomic_var end_of_stream;
+    aws_atomic_store_int(&end_of_stream, 0);
     size_t number_bytes_per_read = total_length / split_num;
     if (number_bytes_per_read == 0) {
         struct aws_future_bool *read_future = aws_parallel_input_stream_read(parallel_read_stream, 0, read_buf);
@@ -128,6 +137,7 @@ static int s_parallel_read_test_helper(
         test_args->final_dest = read_buf;
         test_args->parallel_read_stream = parallel_read_stream;
         test_args->completed_count = &completed_count;
+        test_args->end_of_stream = &end_of_stream;
         test_args->split_num = split_num;
 
         struct aws_task *read_task = aws_mem_calloc(alloc, 1, sizeof(struct aws_task));
@@ -136,6 +146,7 @@ static int s_parallel_read_test_helper(
     }
 
     ASSERT_TRUE(aws_future_bool_wait(future, MAX_TIMEOUT_NS));
+    *out_eos = aws_future_bool_get_result(future);
     aws_future_bool_release(future);
     read_buf->len = total_length;
     return AWS_OP_SUCCESS;
@@ -154,17 +165,33 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
         aws_parallel_input_stream_new_from_file(allocator, &path_cursor);
     ASSERT_NOT_NULL(parallel_read_stream);
 
-    struct aws_byte_buf read_buf;
-    aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
-
     struct aws_event_loop_group *el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
-    ASSERT_SUCCESS(s_parallel_read_test_helper(
-        allocator, parallel_read_stream, &read_buf, el_group, 0, s_parallel_stream_test->len, 8));
+    {
+        struct aws_byte_buf read_buf;
+        aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
+        bool eos_reached = false;
+        ASSERT_SUCCESS(s_parallel_read_test_helper(
+            allocator, parallel_read_stream, &read_buf, el_group, 0, s_parallel_stream_test->len, 8, &eos_reached));
 
-    ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
+        /* Read the exact number of bytes will not reach to the EOS */
+        ASSERT_FALSE(eos_reached);
+        ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
+        aws_byte_buf_clean_up(&read_buf);
+    }
+    {
+        size_t extra_byte_len = s_parallel_stream_test->len + 1;
+        struct aws_byte_buf read_buf;
+        aws_byte_buf_init(&read_buf, allocator, extra_byte_len);
+        bool eos_reached = false;
+        ASSERT_SUCCESS(s_parallel_read_test_helper(
+            allocator, parallel_read_stream, &read_buf, el_group, 0, extra_byte_len, 8, &eos_reached));
+
+        /* Read the exact number of bytes will not reach to the EOS */
+        ASSERT_TRUE(eos_reached);
+        aws_byte_buf_clean_up(&read_buf);
+    }
 
     remove(file_path);
-    aws_byte_buf_clean_up(&read_buf);
     aws_parallel_input_stream_release(parallel_read_stream);
     aws_event_loop_group_release(el_group);
     aws_s3_tester_clean_up(&tester);
@@ -193,10 +220,13 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
         aws_byte_buf_init(&read_buf, allocator, file_length);
         struct aws_byte_buf expected_read_buf;
         aws_byte_buf_init(&expected_read_buf, allocator, file_length);
+        bool eos_reached = false;
 
-        ASSERT_SUCCESS(
-            s_parallel_read_test_helper(allocator, parallel_read_stream, &read_buf, el_group, 0, file_length, 8));
+        ASSERT_SUCCESS(s_parallel_read_test_helper(
+            allocator, parallel_read_stream, &read_buf, el_group, 0, file_length, 8, &eos_reached));
 
+        /* Read the exact number of bytes will not reach to the EOS */
+        ASSERT_FALSE(eos_reached);
         struct aws_input_stream *stream = aws_input_stream_new_from_file(allocator, file_path);
         ASSERT_SUCCESS(aws_input_stream_read(stream, &expected_read_buf));
 
@@ -210,10 +240,12 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
         /* First string */
         struct aws_byte_buf read_buf;
         aws_byte_buf_init(&read_buf, allocator, file_length);
+        bool eos_reached = true;
 
         ASSERT_SUCCESS(s_parallel_read_test_helper(
-            allocator, parallel_read_stream, &read_buf, el_group, 0, s_parallel_stream_test->len, 8));
+            allocator, parallel_read_stream, &read_buf, el_group, 0, s_parallel_stream_test->len, 8, &eos_reached));
 
+        ASSERT_FALSE(eos_reached);
         ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
         aws_byte_buf_clean_up(&read_buf);
     }
@@ -223,6 +255,7 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
         struct aws_byte_buf read_buf;
         aws_byte_buf_init(&read_buf, allocator, file_length);
 
+        bool eos_reached = true;
         ASSERT_SUCCESS(s_parallel_read_test_helper(
             allocator,
             parallel_read_stream,
@@ -230,8 +263,10 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
             el_group,
             s_parallel_stream_test->len,
             s_parallel_stream_test->len,
-            8));
+            8,
+            &eos_reached));
 
+        ASSERT_FALSE(eos_reached);
         ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
         aws_byte_buf_clean_up(&read_buf);
     }
