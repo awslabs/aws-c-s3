@@ -5975,7 +5975,7 @@ static void s_meta_request_finished_request_patched_for_pause_resume_tests(
         aws_atomic_fetch_add(&test_data->total_bytes_uploaded, request->request_body.len);
 
         size_t total_bytes_uploaded = aws_atomic_load_int(&test_data->total_bytes_uploaded);
-        size_t offset_to_pause = aws_atomic_load_int(&test_data->request_pause_offset);
+        uint64_t offset_to_pause = aws_atomic_load_int(&test_data->request_pause_offset);
 
         if (total_bytes_uploaded >= offset_to_pause) {
             /* offset of the upload at which we should pause was reached. let's pause the upload */

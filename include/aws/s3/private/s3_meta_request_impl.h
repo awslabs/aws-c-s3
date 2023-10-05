@@ -380,7 +380,7 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
 AWS_S3_API
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
-    size_t offset,
+    uint64_t offset,
     struct aws_byte_buf *buffer);
 
 bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request);

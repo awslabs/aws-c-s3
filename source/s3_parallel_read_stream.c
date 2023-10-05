@@ -46,7 +46,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
 
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
-    size_t offset,
+    uint64_t offset,
     struct aws_byte_buf *dest) {
     /* Ensure the buffer has space available */
     if (dest->len == dest->capacity) {
@@ -88,7 +88,7 @@ static int s_get_last_modified_time(const char *file_name, uint64_t *out_time) {
 
 struct aws_future_bool *s_para_from_file_read(
     struct aws_parallel_input_stream *stream,
-    size_t offset,
+    uint64_t offset,
     struct aws_byte_buf *dest) {
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
@@ -96,15 +96,16 @@ struct aws_future_bool *s_para_from_file_read(
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
     bool success = false;
     uint64_t last_modified_time = 0;
+    struct aws_input_stream *file_stream = NULL;
     if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &last_modified_time)) {
         goto done;
     }
-    if (!last_modified_time == impl->last_modified_time) {
+    /* Check if file modified after we create the input stream */
+    if (last_modified_time != impl->last_modified_time) {
         aws_raise_error(AWS_ERROR_S3_FILE_MODIFIED);
         goto done;
     }
-    struct aws_input_stream *file_stream =
-        aws_input_stream_new_from_file(stream->alloc, aws_string_c_str(impl->file_path));
+    file_stream = aws_input_stream_new_from_file(stream->alloc, aws_string_c_str(impl->file_path));
     if (aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN)) {
         goto done;
     }

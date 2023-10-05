@@ -905,7 +905,7 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
             AWS_ASSERT(skip_job->part_being_skipped != NULL);
             aws_s3_meta_request_unlock_synced_data(meta_request);
             /* END CRITICAL SECTION */
-            size_t offset = 0;
+            uint64_t offset = 0;
 
             size_t request_body_size = s_compute_request_body_size(meta_request, skip_job->part_index + 1, &offset);
             if (request_body_size != skip_job->part_being_skipped->size) {
@@ -1157,7 +1157,7 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
     }
     /* Skipping succeeded.
      * Next async step: read body stream for this part into a buffer */
-    size_t offset = 0;
+    uint64_t offset = 0;
 
     size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
     aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);

@@ -36,7 +36,8 @@ struct aws_parallel_input_stream_vtable {
      * Read into the buffer in parallel.
      * The implementation needs to support this to be invoked concurrently from multiple threads
      */
-    struct aws_future_bool *(*read)(struct aws_parallel_input_stream *stream, size_t offset, struct aws_byte_buf *dest);
+    struct aws_future_bool *(
+        *read)(struct aws_parallel_input_stream *stream, uint64_t offset, struct aws_byte_buf *dest);
 };
 
 AWS_EXTERN_C_BEGIN
@@ -79,7 +80,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
 AWS_S3_API
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
-    size_t offset,
+    uint64_t offset,
     struct aws_byte_buf *dest);
 
 /**

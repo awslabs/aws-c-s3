@@ -1692,7 +1692,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
-    size_t offset,
+    uint64_t offset,
     struct aws_byte_buf *buffer) {
 
     AWS_PRECONDITION(meta_request);
