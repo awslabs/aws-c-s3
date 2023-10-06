@@ -631,6 +631,8 @@ static void s_s3_meta_request_schedule_prepare_request_default(
     aws_task_init(
         &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
     if (meta_request->request_body_parallel_stream) {
+        /* The body stream supports to be read in parallel, so, we can prepare requests in parallel. Grab a thread from
+         * IO thread pool instead of using the thread to the meta request to prepare request. */
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         aws_event_loop_schedule_task_now(loop, &payload->task);
     } else {
