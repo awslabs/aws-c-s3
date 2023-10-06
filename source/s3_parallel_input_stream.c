@@ -82,7 +82,7 @@ static int s_get_last_modified_time(const char *file_name, uint64_t *out_time) {
     if (stat(file_name, &attrib)) {
         return aws_translate_and_raise_io_error(errno);
     }
-    *out_time = (uint64_t)attrib.st_mtime;
+    *out_time = (uint64_t)attrib.st_mtimespec.tv_nsec;
     return AWS_OP_SUCCESS;
 }
 
