@@ -8,6 +8,7 @@
 #include <aws/auth/auth.h>
 #include <aws/common/error.h>
 #include <aws/common/hash_table.h>
+#include <aws/common/system_info.h>
 #include <aws/http/http.h>
 
 #define AWS_DEFINE_ERROR_INFO_S3(CODE, STR) AWS_DEFINE_ERROR_INFO(CODE, STR, "aws-c-s3")
@@ -174,4 +175,22 @@ struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instan
         "static: compute platform info for instance type " PRInSTR " not found",
         AWS_BYTE_CURSOR_PRI(instance_type_name));
     return NULL;
+}
+
+static struct aws_byte_cursor s_instance_type_allow_list[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4d"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1")
+};
+
+bool aws_s3_is_optimized_for_system_env(struct aws_system_environment *env) {
+    struct aws_byte_cursor product_name = aws_system_environment_get_virtualization_product_name(env);
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_instance_type_allow_list); ++i) {
+        if (aws_byte_cursor_starts_with_ignore_case(&product_name, &s_instance_type_allow_list[i])) {
+            return true;
+        }
+    }
+
+    return false;
 }

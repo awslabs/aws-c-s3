@@ -83,6 +83,8 @@ struct aws_s3_compute_platform_info {
 #    pragma warning(pop)
 #endif
 
+struct aws_system_environment;
+
 AWS_EXTERN_C_BEGIN
 
 /**
@@ -98,6 +100,9 @@ void aws_s3_library_init(struct aws_allocator *allocator);
 AWS_S3_API
 struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instance_type(
     const struct aws_byte_cursor instance_type_name);
+
+AWS_S3_API
+bool aws_s3_is_optimized_for_system_env(struct aws_system_environment *env);
 
 /**
  * Shuts down the internal datastructures used by aws-c-s3.
