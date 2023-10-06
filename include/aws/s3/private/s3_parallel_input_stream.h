@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#ifndef AWS_S3_PARALLEL_READ_STREAM_H
-#define AWS_S3_PARALLEL_READ_STREAM_H
+#ifndef AWS_S3_PARALLEL_INPUT_STREAM_H
+#define AWS_S3_PARALLEL_INPUT_STREAM_H
 
 #include <aws/s3/s3.h>
 
@@ -102,4 +102,4 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
-#endif /* AWS_S3_PARALLEL_READ_STREAM_H */
+#endif /* AWS_S3_PARALLEL_INPUT_STREAM_H */
