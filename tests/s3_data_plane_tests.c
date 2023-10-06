@@ -3712,7 +3712,7 @@ static int s_test_s3_round_trip_with_filepath_helper(
         .client = client,
         .put_options =
             {
-                .object_size_mb = 1,
+                .object_size_mb = object_size_mb,
                 .object_path_override = object_path,
                 .file_on_disk = true,
                 .skip_content_length = unknown_content_length,
