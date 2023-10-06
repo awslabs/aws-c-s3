@@ -558,7 +558,7 @@ static bool s_s3_auto_ranged_put_update(
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
                 /* If request already uploaded, the request is noop, we keep working on it to prepare. */
-                request->is_noop = request_uploaded;
+                request->already_uploaded = request_uploaded;
 
                 ++auto_ranged_put->threaded_update_data.next_part_number;
                 ++auto_ranged_put->synced_data.num_parts_started;
@@ -979,18 +979,11 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             (void *)meta_request);
         goto on_done;
     }
-    bool request_was_uploaded = false;
     struct aws_s3_mpu_part_info *uploaded_part_info = NULL;
-    if (request->is_noop) {
-        /* We read a noop request, which means the request has already been upload */
-        request_was_uploaded = true;
-    } else {
-        /* Check if we read empty body as we may prepare more than needed. */
-        request->is_noop =
-            request->part_number >
-                1 && /* allow first part to have 0 length to support empty unknown content length objects. */
-            request->request_body.len == 0;
-    }
+
+    request->is_noop = request->part_number >
+                           1 && /* allow first part to have 0 length to support empty unknown content length objects. */
+                       request->request_body.len == 0;
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -999,10 +992,12 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         --auto_ranged_put->synced_data.num_parts_pending_read;
 
         auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
-        if (request_was_uploaded) {
+        if (request->already_uploaded) {
             aws_array_list_get_at(
                 &auto_ranged_put->synced_data.part_list, &uploaded_part_info, request->part_number - 1);
             AWS_ASSERT(uploaded_part_info != NULL);
+            /* Already uploaded, set the noop to be true. */
+            request->is_noop = true;
         }
 
         if (!request->is_noop) {
@@ -1372,6 +1367,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         error_code = AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED;
                     } else if (!has_more_results) {
                         uint64_t bytes_previously_uploaded = 0;
+                        int parts_previously_uploaded = 0;
 
                         for (size_t part_index = 0;
                              part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
@@ -1380,9 +1376,7 @@ static void s_s3_auto_ranged_put_request_finished(
                             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
                             if (part != NULL) {
                                 /* Update the number of parts sent/completed previously */
-                                ++auto_ranged_put->synced_data.num_parts_started;
-                                ++auto_ranged_put->synced_data.num_parts_completed;
-
+                                ++parts_previously_uploaded;
                                 bytes_previously_uploaded += part->size;
                             }
                         }
@@ -1391,7 +1385,7 @@ static void s_s3_auto_ranged_put_request_finished(
                             AWS_LS_S3_META_REQUEST,
                             "id=%p: Resuming PutObject. %d out of %d parts have completed during previous request.",
                             (void *)meta_request,
-                            auto_ranged_put->synced_data.num_parts_completed,
+                            parts_previously_uploaded,
                             auto_ranged_put->total_num_parts_from_content_length);
 
                         /* Deliver an initial progress_callback to report all previously uploaded parts. */

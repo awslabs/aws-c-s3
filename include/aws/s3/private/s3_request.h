@@ -202,6 +202,9 @@ struct aws_s3_request {
      * requests for uploading data after the end of the stream (those requests
      * will use below flag to indicate that they should not be sent). */
     uint32_t is_noop : 1;
+
+    /* When true, this request has already been uploaded. we still prepare the request to check the durability. */
+    uint32_t already_uploaded : 1;
 };
 
 AWS_EXTERN_C_BEGIN
