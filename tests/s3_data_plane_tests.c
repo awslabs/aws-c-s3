@@ -5974,7 +5974,10 @@ static void s_meta_request_finished_request_patched_for_pause_resume_tests(
     if ((error_code == AWS_ERROR_SUCCESS) && (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) &&
         (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART)) {
 
-        aws_atomic_fetch_add(&test_data->total_bytes_uploaded, request->request_body.len);
+        if (!request->is_noop) {
+            /* If the request is noop, we are not really uploading the part */
+            aws_atomic_fetch_add(&test_data->total_bytes_uploaded, request->request_body.len);
+        }
 
         size_t total_bytes_uploaded = aws_atomic_load_int(&test_data->total_bytes_uploaded);
         uint64_t offset_to_pause = aws_atomic_load_int(&test_data->request_pause_offset);
