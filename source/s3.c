@@ -183,11 +183,17 @@ static struct aws_byte_cursor s_instance_type_allow_list[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1")
 };
 
-bool aws_s3_is_optimized_for_system_env(struct aws_system_environment *env) {
+bool aws_s3_is_optimized_for_system_env(const struct aws_system_environment *env, const struct aws_byte_cursor *opt_instance_override) {
     struct aws_byte_cursor product_name = aws_system_environment_get_virtualization_product_name(env);
 
+    const struct aws_byte_cursor *to_compare = &product_name;
+
+    if (opt_instance_override && opt_instance_override->len) {
+        to_compare = opt_instance_override;
+    }
+
     for (size_t i = 0; i < AWS_ARRAY_SIZE(s_instance_type_allow_list); ++i) {
-        if (aws_byte_cursor_starts_with_ignore_case(&product_name, &s_instance_type_allow_list[i])) {
+        if (aws_byte_cursor_starts_with_ignore_case(to_compare, &s_instance_type_allow_list[i])) {
             return true;
         }
     }

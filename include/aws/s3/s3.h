@@ -102,7 +102,7 @@ struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instan
     const struct aws_byte_cursor instance_type_name);
 
 AWS_S3_API
-bool aws_s3_is_optimized_for_system_env(struct aws_system_environment *env);
+bool aws_s3_is_optimized_for_system_env(const struct aws_system_environment *env, const struct aws_byte_cursor *opt_instance_type_override);
 
 /**
  * Shuts down the internal datastructures used by aws-c-s3.
