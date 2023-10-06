@@ -28,7 +28,7 @@ static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static int s_s3_auto_ranged_get_request_type(struct aws_s3_request *request);
+static int s_s3_auto_ranged_get_request_type(const struct aws_s3_request *request);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
@@ -42,7 +42,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .get_request_type = s_s3_auto_ranged_get_request_type,
 };
 
-static int s_s3_auto_ranged_get_request_type(struct aws_s3_request *request) {
+static int s_s3_auto_ranged_get_request_type(const struct aws_s3_request *request) {
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
             return AWS_S3_REQUEST_TYPE_HEAD_OBJECT;

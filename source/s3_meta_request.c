@@ -7,7 +7,7 @@
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
-#include "aws/s3/private/s3_parallel_read_stream.h"
+#include "aws/s3/private/s3_parallel_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/signable.h>
@@ -1190,40 +1190,66 @@ static void s_s3_meta_request_send_request_finish(
     vtable->send_request_finish(connection, stream, error_code);
 }
 
-static int s_s3_meta_request_error_code_from_response_body(struct aws_s3_request *request) {
-    AWS_PRECONDITION(request);
-    if (request->send_data.response_body.len == 0) {
-        /* Empty body is success */
-        return AWS_ERROR_SUCCESS;
+/* Return whether the response to this request might contain an error, even though we got 200 OK.
+ * see: https://repost.aws/knowledge-center/s3-resolve-200-internalerror */
+static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request *request) {
+    /* We handle async error for every request BUT get object. */
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        return false;
     }
-    struct aws_byte_cursor response_body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
-    struct aws_byte_cursor error_code_string = {0};
-    const char *xml_path[] = {"Error", "Code", NULL};
-    if (aws_xml_get_body_at_path(request->allocator, response_body_cursor, xml_path, &error_code_string)) {
+    return true;
+}
 
-        if (aws_last_error() == AWS_ERROR_INVALID_XML || aws_last_error() == AWS_ERROR_STRING_MATCH_NOT_FOUND) {
-            /* The xml body is not Error, we can safely think the request succeed. */
-            aws_reset_error();
-            return AWS_ERROR_SUCCESS;
-        } else {
-            return aws_last_error();
+static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+
+    int error_code_from_status = s_s3_meta_request_error_code_from_response_status(request->send_data.response_status);
+
+    /* Response body might be XML with an <Error><Code> inside.
+     * The is very likely when status-code is bad.
+     * In some cases, it's even possible after 200 OK. */
+    int error_code_from_xml = AWS_ERROR_SUCCESS;
+    if (error_code_from_status != AWS_ERROR_SUCCESS || s_should_check_for_error_despite_200_OK(request)) {
+        if (request->send_data.response_body.len > 0) {
+            /* Attempt to read as XML, it's fine if this fails. */
+            struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
+            struct aws_byte_cursor error_code_string = {0};
+            const char *xml_path[] = {"Error", "Code", NULL};
+            if (aws_xml_get_body_at_path(request->allocator, xml_doc, xml_path, &error_code_string) == AWS_OP_SUCCESS) {
+                /* Found an <Error><Code> string! Map it to CRT error code. */
+                error_code_from_xml = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
+            }
+        }
+    }
+
+    if (error_code_from_status == AWS_ERROR_SUCCESS) {
+        /* Status-code was OK, so assume everything's good, unless we found an <Error><Code> in the XML */
+        switch (error_code_from_xml) {
+            case AWS_ERROR_SUCCESS:
+                return AWS_ERROR_SUCCESS;
+            case AWS_ERROR_UNKNOWN:
+                return AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+            default:
+                return error_code_from_xml;
         }
     } else {
-        /* Check the error code. Map the S3 error code to CRT error code. */
-        int error_code = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
-        if (error_code == AWS_ERROR_UNKNOWN) {
-            /* All error besides of internal error from async error are not recoverable from retry for now. */
-            error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+        /* Return error based on status-code, unless we got something more specific from XML */
+        switch (error_code_from_xml) {
+            case AWS_ERROR_SUCCESS:
+                return error_code_from_status;
+            case AWS_ERROR_UNKNOWN:
+                return error_code_from_status;
+            default:
+                return error_code_from_xml;
         }
-        return error_code;
     }
 }
 
-static void s_s3_meta_request_send_request_finish_helper(
+void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
-    int error_code,
-    bool handle_async_error) {
+    int error_code) {
 
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
@@ -1238,12 +1264,7 @@ static void s_s3_meta_request_send_request_finish_helper(
     /* If our error code is currently success, then we have some other calls to make that could still indicate a
      * failure. */
     if (error_code == AWS_ERROR_SUCCESS) {
-        if (handle_async_error && response_status == AWS_HTTP_STATUS_CODE_200_OK) {
-            error_code = s_s3_meta_request_error_code_from_response_body(request);
-        } else {
-            error_code = s_s3_meta_request_error_code_from_response_status(response_status);
-        }
-
+        error_code = s_s3_meta_request_error_code_from_response(request);
         if (error_code != AWS_ERROR_SUCCESS) {
             aws_raise_error(error_code);
         }
@@ -1320,20 +1341,6 @@ static void s_s3_meta_request_send_request_finish_helper(
     }
 
     aws_s3_client_notify_connection_finished(client, connection, error_code, finish_code);
-}
-
-void aws_s3_meta_request_send_request_finish_default(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code) {
-    s_s3_meta_request_send_request_finish_helper(connection, stream, error_code, false /*async error*/);
-}
-
-void aws_s3_meta_request_send_request_finish_handle_async_error(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code) {
-    s_s3_meta_request_send_request_finish_helper(connection, stream, error_code, true /*async error*/);
 }
 
 void aws_s3_meta_request_finished_request(

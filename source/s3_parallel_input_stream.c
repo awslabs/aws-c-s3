@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_parallel_read_stream.h"
+#include "aws/s3/private/s3_parallel_input_stream.h"
 
 #include <aws/common/atomics.h>
 #include <aws/common/file.h>

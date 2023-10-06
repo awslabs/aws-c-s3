@@ -165,8 +165,6 @@ extern const struct aws_byte_cursor g_head_method;
 AWS_S3_API
 extern const struct aws_byte_cursor g_delete_method;
 
-extern const struct aws_byte_cursor g_s3_internal_error_code;
-
 AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
 
