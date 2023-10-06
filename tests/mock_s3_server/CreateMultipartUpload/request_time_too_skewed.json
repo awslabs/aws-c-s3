@@ -1,0 +1,15 @@
+{
+    "status": 403,
+    "headers": {"x-amz-request-id": "12345"},
+    "body": [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "",
+        "<Error>",
+         "<Code>RequestTimeTooSkewed</Code>",
+         "<Message>The difference between the request time and the current time is too large.</Message>",
+         "<RequestTime>20230725T161257Z</RequestTime>",
+         "<ServerTime>2023-07-25T16:27:59Z</ServerTime>",
+         "<MaxAllowedSkewMilliseconds>900000</MaxAllowedSkewMilliseconds>",
+        "</Error>"
+    ]
+  }

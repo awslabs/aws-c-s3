@@ -109,11 +109,6 @@ static void s_s3_auto_ranged_put_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static void s_s3_auto_ranged_put_send_request_finish(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code);
-
 static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **resume_token);
@@ -303,7 +298,7 @@ static int s_try_init_resume_state_from_persisted_data(
     return AWS_OP_SUCCESS;
 }
 
-static int s_s3_auto_ranged_put_request_type(struct aws_s3_request *request) {
+static int s_s3_auto_ranged_put_request_type(const struct aws_s3_request *request) {
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS:
             return AWS_S3_REQUEST_TYPE_LIST_PARTS;
@@ -322,7 +317,7 @@ static int s_s3_auto_ranged_put_request_type(struct aws_s3_request *request) {
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
-    .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
@@ -1555,30 +1550,6 @@ on_done:
     aws_future_http_message_release(request_prep->asyncstep_prepare_message);
     aws_future_void_release(request_prep->on_complete);
     aws_mem_release(request_prep->allocator, request_prep);
-}
-
-/* Invoked before retry */
-static void s_s3_auto_ranged_put_send_request_finish(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code) {
-
-    const struct aws_s3_request *request = connection->request;
-    AWS_PRECONDITION(request);
-
-    /* Request tag is different from different type of meta requests */
-    switch (request->request_tag) {
-
-        case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
-            /* For complete multipart upload, the server may return async error. */
-            aws_s3_meta_request_send_request_finish_handle_async_error(connection, stream, error_code);
-            break;
-        }
-
-        default:
-            aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
-            break;
-    }
 }
 
 /* Invoked when no-retry will happen */
