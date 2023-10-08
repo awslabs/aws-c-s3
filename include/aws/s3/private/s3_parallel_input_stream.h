@@ -97,7 +97,7 @@ struct aws_future_bool *aws_parallel_input_stream_read(
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    const struct aws_byte_cursor *file_name);
+    struct aws_byte_cursor file_name);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

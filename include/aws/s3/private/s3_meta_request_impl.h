@@ -138,11 +138,11 @@ struct aws_s3_meta_request {
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
 
-    /* Async stream for meta request's body.
-     * NULL if using initial_request_message's synchronous body stream instead.  */
+    /* The meta request's outgoing body comes from one of these:
+     * 1) request_body_async_stream: if set, then async stream 1 part at a time
+     * 2) request_body_parallel_stream: if set, then stream multiple parts in parallel
+     * 3) initial_request_message's body_stream: else synchronously stream parts */
     struct aws_async_input_stream *request_body_async_stream;
-
-    /* Parallel stream for meta request's body. */
     struct aws_parallel_input_stream *request_body_parallel_stream;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
@@ -156,9 +156,8 @@ struct aws_s3_meta_request {
 
     struct aws_s3_endpoint *endpoint;
 
-    /* Event loop to schedule IO work related on and requires to be serial, ie, reading from non-parallel streams,
-     * streaming parts back to the caller, etc... After the meta request is finished, this will be reset along with the
-     * client reference.*/
+    /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc...
+     * After the meta request is finished, this will be reset along with the client reference.*/
     struct aws_event_loop *io_event_loop;
 
     /* User data to be passed to each customer specified callback.*/

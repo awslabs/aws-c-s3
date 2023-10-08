@@ -41,7 +41,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
     if (stream != NULL) {
         aws_ref_count_release(&stream->ref_count);
     }
-    return stream;
+    return NULL;
 }
 
 struct aws_future_bool *aws_parallel_input_stream_read(
@@ -54,7 +54,6 @@ struct aws_future_bool *aws_parallel_input_stream_read(
         aws_future_bool_set_error(future, AWS_ERROR_SHORT_BUFFER);
         return future;
     }
-    /* TODO: restore the buffer on failure. */
     struct aws_future_bool *future = stream->vtable->read(stream, offset, dest);
     return future;
 }
@@ -67,8 +66,7 @@ struct aws_parallel_input_stream_from_file_impl {
 };
 
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
-    struct aws_parallel_input_stream_from_file_impl *impl =
-        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
+    struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
 
     aws_string_destroy(impl->file_path);
 
@@ -148,12 +146,12 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    const struct aws_byte_cursor *file_name) {
+    struct aws_byte_cursor file_name) {
 
     struct aws_parallel_input_stream_from_file_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
-    impl->file_path = aws_string_new_from_cursor(allocator, file_name);
+    impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
     if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &impl->last_modified_time)) {
         goto error;
     }

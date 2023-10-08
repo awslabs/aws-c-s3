@@ -259,7 +259,7 @@ int aws_s3_meta_request_init_base(
         meta_request->initial_request_message = aws_http_message_acquire(options->message);
         AWS_ASSERT(client != NULL);
         meta_request->request_body_parallel_stream =
-            aws_parallel_input_stream_new_from_file(allocator, &options->send_filepath);
+            aws_parallel_input_stream_new_from_file(allocator, options->send_filepath);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }

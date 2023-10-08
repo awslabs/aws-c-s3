@@ -162,7 +162,7 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
     struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, &path_cursor);
+        aws_parallel_input_stream_new_from_file(allocator, path_cursor);
     ASSERT_NOT_NULL(parallel_read_stream);
 
     aws_parallel_input_stream_acquire(parallel_read_stream);
@@ -262,7 +262,7 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
     struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, &path_cursor);
+        aws_parallel_input_stream_new_from_file(allocator, path_cursor);
     ASSERT_NOT_NULL(parallel_read_stream);
 
     {
