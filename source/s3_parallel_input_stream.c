@@ -71,8 +71,6 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     aws_string_destroy(impl->file_path);
 
     aws_mem_release(stream->alloc, impl);
-
-    return;
 }
 
 static int s_get_last_modified_time(const char *file_name, uint64_t *out_time) {
@@ -92,8 +90,7 @@ struct aws_future_bool *s_para_from_file_read(
     struct aws_byte_buf *dest) {
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
-    struct aws_parallel_input_stream_from_file_impl *impl =
-        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
+    struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
     bool success = false;
     uint64_t last_modified_time = 0;
     struct aws_input_stream *file_stream = NULL;
@@ -114,7 +111,8 @@ struct aws_future_bool *s_para_from_file_read(
     if (aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN)) {
         goto done;
     }
-    /* Keep reading until fill the buffer */
+    /* Keep reading until fill the buffer.
+     * Note that we must read() after seek() to determine if we're EOF, the seek alone won't trigger it. */
     while ((dest->len < dest->capacity) && !status.is_end_of_stream) {
         /* Read from stream */
         if (aws_input_stream_read(file_stream, dest) != AWS_OP_SUCCESS) {
