@@ -10,6 +10,8 @@
 #include <aws/io/future.h>
 #include <aws/io/stream.h>
 
+#include <errno.h>
+
 void aws_parallel_input_stream_init_base(
     struct aws_parallel_input_stream *stream,
     struct aws_allocator *alloc,
