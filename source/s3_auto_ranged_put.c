@@ -734,7 +734,7 @@ static size_t s_compute_request_body_size(
             request_body_size = content_remainder;
         }
     }
-    /* The part_number starts with 1 */
+    /* The part_number starts at 1 */
     *offset_out = (part_number - 1) * meta_request->part_size;
 
     return request_body_size;
