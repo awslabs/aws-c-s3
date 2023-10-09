@@ -204,7 +204,7 @@ struct aws_s3_request {
     uint32_t is_noop : 1;
 
     /* When true, this request has already been uploaded. we still prepare the request to check the durability. */
-    uint32_t already_uploaded : 1;
+    uint32_t uploaded_before_resume : 1;
 };
 
 AWS_EXTERN_C_BEGIN

@@ -58,7 +58,7 @@ struct aws_s3_prepare_upload_part_job {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
     /* async step: read this part from input stream */
-    struct aws_future_bool *read_part;
+    struct aws_future_bool *asyncstep_read_part;
     /* future to set when this job completes */
     struct aws_future_http_message *on_complete;
 };
@@ -119,6 +119,7 @@ static int s_process_part_info_synced(const struct aws_s3_part_info *info, void 
     struct aws_s3_mpu_part_info *part = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
     part->size = info->size;
     part->etag = aws_strip_quotes(meta_request->allocator, info->e_tag);
+    part->uploaded_before_resume = true;
 
     const struct aws_byte_cursor *checksum_cur = NULL;
     switch (auto_ranged_put->base.checksum_config.checksum_algorithm) {
@@ -517,6 +518,7 @@ static bool s_s3_auto_ranged_put_update(
                 struct aws_s3_mpu_part_info *part = NULL;
                 aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
                 if (part != NULL) {
+                    AWS_ASSERT(part->uploaded_before_resume == true);
                     /* This part has been uploaded. */
                     request_uploaded = true;
                 }
@@ -553,7 +555,7 @@ static bool s_s3_auto_ranged_put_update(
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
                 /* If request already uploaded, the request is noop, we keep working on it to prepare. */
-                request->already_uploaded = request_uploaded;
+                request->uploaded_before_resume = request_uploaded;
 
                 ++auto_ranged_put->threaded_update_data.next_part_number;
                 ++auto_ranged_put->synced_data.num_parts_started;
@@ -931,8 +933,9 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
         aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
-        part_prep->read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
-        aws_future_bool_register_callback(part_prep->read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
+        part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
+        aws_future_bool_register_callback(
+            part_prep->asyncstep_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */
@@ -950,7 +953,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
     bool has_content_length = auto_ranged_put->has_content_length != 0;
 
-    int error_code = aws_future_bool_get_error(part_prep->read_part);
+    int error_code = aws_future_bool_get_error(part_prep->asyncstep_read_part);
 
     /* If reading failed, the prepare-upload-part job has failed */
     if (error_code != AWS_ERROR_SUCCESS) {
@@ -963,7 +966,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         goto on_done;
     }
     /* Reading succeeded. */
-    bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->read_part);
+    bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
 
     /* If Content-Length is defined, check that we read the expected amount */
     if (has_content_length && (request->request_body.len < request->request_body.capacity)) {
@@ -987,10 +990,10 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         --auto_ranged_put->synced_data.num_parts_pending_read;
 
         auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
-        if (request->already_uploaded) {
+        if (request->uploaded_before_resume) {
             aws_array_list_get_at(
                 &auto_ranged_put->synced_data.part_list, &uploaded_part_info, request->part_number - 1);
-            AWS_ASSERT(uploaded_part_info != NULL);
+            AWS_ASSERT(uploaded_part_info != NULL && uploaded_part_info->uploaded_before_resume == true);
             /* Already uploaded, set the noop to be true. */
             request->is_noop = true;
         }
@@ -1104,7 +1107,7 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
 
 on_done:
     AWS_FATAL_ASSERT(aws_future_http_message_is_done(part_prep->on_complete));
-    aws_future_bool_release(part_prep->read_part);
+    aws_future_bool_release(part_prep->asyncstep_read_part);
     aws_future_http_message_release(part_prep->on_complete);
     aws_mem_release(part_prep->allocator, part_prep);
 }

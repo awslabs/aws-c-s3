@@ -263,6 +263,7 @@ struct aws_s3_mpu_part_info {
     uint64_t size;
     struct aws_string *etag;
     struct aws_byte_buf checksum_base64;
+    bool uploaded_before_resume;
 };
 
 AWS_EXTERN_C_BEGIN
