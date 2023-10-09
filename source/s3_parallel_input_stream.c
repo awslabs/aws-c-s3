@@ -41,7 +41,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
     if (stream != NULL) {
         aws_ref_count_release(&stream->ref_count);
     }
-    return stream;
+    return NULL;
 }
 
 struct aws_future_bool *aws_parallel_input_stream_read(
@@ -54,7 +54,6 @@ struct aws_future_bool *aws_parallel_input_stream_read(
         aws_future_bool_set_error(future, AWS_ERROR_SHORT_BUFFER);
         return future;
     }
-    /* TODO: restore the buffer on failure. */
     struct aws_future_bool *future = stream->vtable->read(stream, offset, dest);
     return future;
 }
@@ -63,27 +62,14 @@ struct aws_parallel_input_stream_from_file_impl {
     struct aws_parallel_input_stream base;
 
     struct aws_string *file_path;
-    uint64_t last_modified_time;
 };
 
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
-    struct aws_parallel_input_stream_from_file_impl *impl =
-        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
+    struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
 
     aws_string_destroy(impl->file_path);
 
     aws_mem_release(stream->alloc, impl);
-
-    return;
-}
-
-static int s_get_last_modified_time(const char *file_name, uint64_t *out_time) {
-    struct stat attrib;
-    if (stat(file_name, &attrib)) {
-        return aws_translate_and_raise_io_error(errno);
-    }
-    *out_time = (uint64_t)attrib.st_mtime;
-    return AWS_OP_SUCCESS;
 }
 
 struct aws_future_bool *s_para_from_file_read(
@@ -92,29 +78,24 @@ struct aws_future_bool *s_para_from_file_read(
     struct aws_byte_buf *dest) {
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
-    struct aws_parallel_input_stream_from_file_impl *impl =
-        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
+    struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
     bool success = false;
-    uint64_t last_modified_time = 0;
     struct aws_input_stream *file_stream = NULL;
     struct aws_stream_status status = {
         .is_end_of_stream = false,
         .is_valid = true,
     };
 
-    if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &last_modified_time)) {
-        goto done;
-    }
-    /* Check if file modified after we create the input stream */
-    if (last_modified_time != impl->last_modified_time) {
-        aws_raise_error(AWS_ERROR_S3_FILE_MODIFIED);
-        goto done;
-    }
     file_stream = aws_input_stream_new_from_file(stream->alloc, aws_string_c_str(impl->file_path));
+    if (!file_stream) {
+        goto done;
+    }
+
     if (aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN)) {
         goto done;
     }
-    /* Keep reading until fill the buffer */
+    /* Keep reading until fill the buffer.
+     * Note that we must read() after seek() to determine if we're EOF, the seek alone won't trigger it. */
     while ((dest->len < dest->capacity) && !status.is_end_of_stream) {
         /* Read from stream */
         if (aws_input_stream_read(file_stream, dest) != AWS_OP_SUCCESS) {
@@ -146,16 +127,17 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    const struct aws_byte_cursor *file_name) {
+    struct aws_byte_cursor file_name) {
 
     struct aws_parallel_input_stream_from_file_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
-    impl->file_path = aws_string_new_from_cursor(allocator, file_name);
-    if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &impl->last_modified_time)) {
+    impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
+    if (!aws_path_exists(impl->file_path)) {
+        /* If file path not exists, raise error from errno. */
+        aws_translate_and_raise_io_error(errno);
         goto error;
     }
-
     return &impl->base;
 error:
     s_para_from_file_destroy(&impl->base);

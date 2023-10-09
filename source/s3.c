@@ -61,10 +61,6 @@ static struct aws_log_subject_info s_s3_log_subject_infos[] = {
         "S3MetaRequest",
         "Subject for aws-c-s3 logging from an aws_s3_meta_request."),
     DEFINE_LOG_SUBJECT_INFO(AWS_LS_S3_ENDPOINT, "S3Endpoint", "Subject for aws-c-s3 logging from an aws_s3_endpoint."),
-    DEFINE_LOG_SUBJECT_INFO(
-        AWS_LS_S3_PARALLEL_INPUT_STREAM,
-        "S3ParallelInputStream",
-        "Subject for aws-c-s3 logging from an aws_parallel_input_stream."),
 };
 
 static struct aws_log_subject_info_list s_s3_log_subject_list = {

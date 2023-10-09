@@ -88,7 +88,7 @@ struct aws_future_bool *aws_parallel_input_stream_read(
  * Create a new file based parallel input stream implementation.
  *
  * This implementation will open a file handler when the read happens, and seek to the offset to start reading. Close
- * the file handler as read finishes. It's caller's responsibility to control how many parallelisms will happen.
+ * the file handler as read finishes.
  *
  * @param allocator         memory allocator
  * @param file_name         The file path to read from
@@ -97,7 +97,7 @@ struct aws_future_bool *aws_parallel_input_stream_read(
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
-    const struct aws_byte_cursor *file_name);
+    struct aws_byte_cursor file_name);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

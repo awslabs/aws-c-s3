@@ -162,10 +162,13 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
     struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, &path_cursor);
+        aws_parallel_input_stream_new_from_file(allocator, path_cursor);
     ASSERT_NOT_NULL(parallel_read_stream);
 
+    aws_parallel_input_stream_acquire(parallel_read_stream);
+    aws_parallel_input_stream_release(parallel_read_stream);
     struct aws_event_loop_group *el_group = aws_event_loop_group_new_default(allocator, 0, NULL);
+
     {
         struct aws_byte_buf read_buf;
         aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
@@ -178,6 +181,7 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
         ASSERT_TRUE(aws_string_eq_byte_buf(s_parallel_stream_test, &read_buf));
         aws_byte_buf_clean_up(&read_buf);
     }
+
     {
         size_t extra_byte_len = s_parallel_stream_test->len + 1;
         struct aws_byte_buf read_buf;
@@ -189,6 +193,37 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
         /* Read the exact number of bytes will not reach to the EOS */
         ASSERT_TRUE(eos_reached);
         aws_byte_buf_clean_up(&read_buf);
+    }
+
+    {
+        /* Failure from short buffer */
+        struct aws_byte_buf read_buf;
+        aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
+        /* Set the buffer length to be capacity */
+        read_buf.len = s_parallel_stream_test->len;
+        struct aws_future_bool *read_future = aws_parallel_input_stream_read(parallel_read_stream, 0, &read_buf);
+        ASSERT_TRUE(aws_future_bool_is_done(read_future));
+        int error = aws_future_bool_get_error(read_future);
+        ASSERT_UINT_EQUALS(AWS_ERROR_SHORT_BUFFER, error);
+        aws_byte_buf_clean_up(&read_buf);
+        aws_future_bool_release(read_future);
+    }
+
+    {
+        /* offset larger than the length of file, will read nothing and return EOS */
+        struct aws_byte_buf read_buf;
+        aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
+        struct aws_future_bool *read_future =
+            aws_parallel_input_stream_read(parallel_read_stream, 2 * s_parallel_stream_test->len, &read_buf);
+        ASSERT_TRUE(aws_future_bool_is_done(read_future));
+        int error = aws_future_bool_get_error(read_future);
+        bool eos = aws_future_bool_get_result(read_future);
+        /* Seek to offset larger than the length will not fail. */
+        ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, error);
+        ASSERT_TRUE(eos);
+        ASSERT_UINT_EQUALS(0, read_buf.len);
+        aws_byte_buf_clean_up(&read_buf);
+        aws_future_bool_release(read_future);
     }
 
     remove(file_path);
@@ -211,7 +246,7 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
     struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, &path_cursor);
+        aws_parallel_input_stream_new_from_file(allocator, path_cursor);
     ASSERT_NOT_NULL(parallel_read_stream);
 
     {
