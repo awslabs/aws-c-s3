@@ -226,22 +226,6 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
         aws_future_bool_release(read_future);
     }
 
-    {
-        /* Failure from file changed after stream created */
-        /* Recreate the file causing the file to be changed */
-        /* Sleep one sec to make sure we have different last modified time, as the time is in secs */
-        aws_thread_current_sleep(aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-        ASSERT_SUCCESS(s_create_read_file(file_path, s_parallel_stream_test->len));
-        struct aws_byte_buf read_buf;
-        aws_byte_buf_init(&read_buf, allocator, s_parallel_stream_test->len);
-        struct aws_future_bool *read_future = aws_parallel_input_stream_read(parallel_read_stream, 0, &read_buf);
-        ASSERT_TRUE(aws_future_bool_is_done(read_future));
-        int error = aws_future_bool_get_error(read_future);
-        ASSERT_UINT_EQUALS(AWS_ERROR_S3_FILE_MODIFIED, error);
-        aws_byte_buf_clean_up(&read_buf);
-        aws_future_bool_release(read_future);
-    }
-
     remove(file_path);
     aws_parallel_input_stream_release(parallel_read_stream);
     aws_event_loop_group_release(el_group);

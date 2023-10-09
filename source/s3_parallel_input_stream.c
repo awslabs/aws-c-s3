@@ -62,7 +62,6 @@ struct aws_parallel_input_stream_from_file_impl {
     struct aws_parallel_input_stream base;
 
     struct aws_string *file_path;
-    uint64_t last_modified_time;
 };
 
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
@@ -73,17 +72,6 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     aws_mem_release(stream->alloc, impl);
 }
 
-static int s_get_last_modified_time(const char *file_name, uint64_t *out_time) {
-    struct stat attrib;
-    if (stat(file_name, &attrib)) {
-        return aws_translate_and_raise_io_error(errno);
-    }
-    /* The time stamp in in secs, it's quite a pain to support nanoseconds for different platform, we can support it
-     * when we need to. */
-    *out_time = (uint64_t)attrib.st_mtime;
-    return AWS_OP_SUCCESS;
-}
-
 struct aws_future_bool *s_para_from_file_read(
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
@@ -92,22 +80,17 @@ struct aws_future_bool *s_para_from_file_read(
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
     struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
     bool success = false;
-    uint64_t last_modified_time = 0;
     struct aws_input_stream *file_stream = NULL;
     struct aws_stream_status status = {
         .is_end_of_stream = false,
         .is_valid = true,
     };
 
-    if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &last_modified_time)) {
-        goto done;
-    }
-    /* Check if file modified after we create the input stream */
-    if (last_modified_time != impl->last_modified_time) {
-        aws_raise_error(AWS_ERROR_S3_FILE_MODIFIED);
-        goto done;
-    }
     file_stream = aws_input_stream_new_from_file(stream->alloc, aws_string_c_str(impl->file_path));
+    if (!file_stream) {
+        goto done;
+    }
+
     if (aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN)) {
         goto done;
     }
@@ -150,10 +133,11 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
     impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
-    if (s_get_last_modified_time(aws_string_c_str(impl->file_path), &impl->last_modified_time)) {
+    if (!aws_path_exists(impl->file_path)) {
+        /* If file path not exists, raise error from errno. */
+        aws_translate_and_raise_io_error(errno);
         goto error;
     }
-
     return &impl->base;
 error:
     s_para_from_file_destroy(&impl->base);
