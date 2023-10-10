@@ -455,6 +455,10 @@ struct aws_string *aws_s3_tester_create_file(
 
 int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uint64_t *out_content_length);
 
+struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file_failure_tester(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor file_name);
+
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 
 extern const struct aws_byte_cursor g_mock_server_uri;

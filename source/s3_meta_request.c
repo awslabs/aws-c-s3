@@ -256,7 +256,7 @@ int aws_s3_meta_request_init_base(
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
-            aws_parallel_input_stream_new_from_file(allocator, options->send_filepath);
+            client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
