@@ -23,6 +23,7 @@ struct aws_future_bool *s_para_from_file_failure_read(
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
     struct aws_byte_buf *dest) {
+    (void)offset;
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
     struct aws_parallel_input_stream_from_file_failure_impl *impl = stream->impl;
