@@ -4598,14 +4598,14 @@ static int s_test_s3_put_fail_object_bad_parallel_read_stream(struct aws_allocat
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
-                .object_size_mb = 10,
+                .object_size_mb = 100,
                 .file_on_disk = true,
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
 
-    ASSERT_TRUE(meta_request_test_results.finished_error_code != AWS_ERROR_SUCCESS);
+    ASSERT_UINT_EQUALS(AWS_ERROR_UNIMPLEMENTED, meta_request_test_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     client = aws_s3_client_release(client);

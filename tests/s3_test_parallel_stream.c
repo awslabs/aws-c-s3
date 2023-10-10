@@ -29,7 +29,7 @@ struct aws_future_bool *s_para_from_file_failure_read(
     size_t previous_number_read = aws_atomic_fetch_add(&impl->number_read, 1);
     if (previous_number_read == 1) {
         /* TODO: make the failure configurable */
-        aws_future_bool_set_error(future, AWS_ERROR_FILE_INVALID_PATH);
+        aws_future_bool_set_error(future, AWS_ERROR_UNIMPLEMENTED);
     } else {
 
         struct aws_byte_cursor test_string = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("This is an S3 test.");
