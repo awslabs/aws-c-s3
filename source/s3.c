@@ -103,6 +103,16 @@ static struct aws_hash_table s_compute_platform_info_table;
 static bool s_library_initialized = false;
 static struct aws_allocator *s_library_allocator = NULL;
 
+static struct aws_string *s_detected_instance_type = NULL;
+static struct aws_mutex s_detected_instance_type_mutex = AWS_MUTEX_INIT;
+static struct aws_system_environment *s_env = NULL;
+
+static struct aws_byte_cursor s_instance_type_allow_list[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4d"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1"),
+};
+
 void aws_s3_library_init(struct aws_allocator *allocator) {
     if (s_library_initialized) {
         return;
@@ -139,6 +149,9 @@ void aws_s3_library_init(struct aws_allocator *allocator) {
             NULL) &&
         "hash table put failed!");
 
+    s_env = aws_system_environment_load(allocator);
+    AWS_FATAL_ASSERT(s_env && "Environment detection failed!");
+
     s_library_initialized = true;
 }
 
@@ -148,6 +161,13 @@ void aws_s3_library_clean_up(void) {
     }
 
     s_library_initialized = false;
+
+    if (s_detected_instance_type) {
+        aws_string_destroy(s_detected_instance_type);
+        s_detected_instance_type = NULL;
+    }
+
+    aws_system_environment_destroy(s_env);
     aws_thread_join_all_managed();
 
     aws_hash_table_clean_up(&s_compute_platform_info_table);
@@ -183,24 +203,11 @@ struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instan
     return NULL;
 }
 
-static struct aws_byte_cursor s_instance_type_allow_list[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4d"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1")};
-
-bool aws_s3_is_optimized_for_system_env(
-    const struct aws_system_environment *env,
-    const struct aws_byte_cursor *discovered_instance_type) {
-    struct aws_byte_cursor product_name = aws_system_environment_get_virtualization_product_name(env);
-
-    const struct aws_byte_cursor *to_compare = &product_name;
-
-    if (discovered_instance_type && discovered_instance_type->len) {
-        to_compare = discovered_instance_type;
-    }
+bool aws_is_build_optimized_for_environment(void) {
+    struct aws_byte_cursor instance_type = aws_s3_get_ec2_instance_type();
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(s_instance_type_allow_list); ++i) {
-        if (aws_byte_cursor_starts_with_ignore_case(to_compare, &s_instance_type_allow_list[i])) {
+        if (aws_byte_cursor_starts_with_ignore_case(&instance_type, &s_instance_type_allow_list[i])) {
             return true;
         }
     }
@@ -251,29 +258,47 @@ static bool s_completion_predicate(void *arg) {
     return info->error_code != 0 || info->instance_type != NULL;
 }
 
-struct aws_string *aws_s3_get_ec2_instance_type(
-    struct aws_allocator *allocator,
-    const struct aws_system_environment *env) {
-    if (aws_s3_is_running_on_ec2(env)) {
+struct aws_byte_cursor aws_s3_get_ec2_instance_type(void) {
+
+    struct aws_byte_cursor return_cur;
+    AWS_ZERO_STRUCT(return_cur);
+
+    aws_mutex_lock(&s_detected_instance_type_mutex);
+    if (s_detected_instance_type) {
+        AWS_LOGF_TRACE(AWS_LS_S3_CLIENT,
+                       "static: Instance type has already been determined to be %s. Returning cached version.",
+                       aws_string_bytes(s_detected_instance_type));
+        goto return_instance_and_unlock;
+    }
+
+    AWS_LOGF_TRACE(AWS_LS_S3_CLIENT,
+                   "static: Instance type has not been determined, checking to see if running in EC2 nitro environment.");
+
+    if (aws_s3_is_running_on_ec2_nitro()) {
+        AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "static: Detected Amazon EC2 with nitro as the current environment.");
         /* easy case not requiring any calls out to IMDS. If we detected we're running on ec2, then the dmi info is
          * correct, and we can use it if we have it. Otherwise call out to IMDS. */
-        struct aws_byte_cursor product_name = aws_system_environment_get_virtualization_product_name(env);
+        struct aws_byte_cursor product_name = aws_system_environment_get_virtualization_product_name(s_env);
 
         if (product_name.len) {
-            return aws_string_new_from_cursor(allocator, &product_name);
+            s_detected_instance_type = aws_string_new_from_cursor(s_library_allocator, &product_name);
+            AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "static: Determined instance type to be %s, from dmi info. Caching.",
+                          aws_string_bytes(s_detected_instance_type));
+            goto return_instance_and_unlock;
         }
 
+        AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "static: DMI info was insufficient to determine instance type. Making call to IMDS to determine");
         struct imds_callback_info callback_info = {
             .mutex = AWS_MUTEX_INIT,
             .c_var = AWS_CONDITION_VARIABLE_INIT,
-            .allocator = allocator,
+            .allocator = s_library_allocator,
         };
 
         struct aws_event_loop_group *el_group = NULL;
         struct aws_host_resolver *resolver = NULL;
         struct aws_client_bootstrap *client_bootstrap = NULL;
         /* now call IMDS */
-        el_group = aws_event_loop_group_new_default(allocator, 1, NULL);
+        el_group = aws_event_loop_group_new_default(s_library_allocator, 1, NULL);
 
         if (!el_group) {
             goto tear_down;
@@ -284,7 +309,7 @@ struct aws_string *aws_s3_get_ec2_instance_type(
             .el_group = el_group,
         };
 
-        resolver = aws_host_resolver_new_default(allocator, &resolver_options);
+        resolver = aws_host_resolver_new_default(s_library_allocator, &resolver_options);
 
         if (!resolver) {
             goto tear_down;
@@ -295,7 +320,7 @@ struct aws_string *aws_s3_get_ec2_instance_type(
             .host_resolver = resolver,
         };
 
-        client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+        client_bootstrap = aws_client_bootstrap_new(s_library_allocator, &bootstrap_options);
 
         if (!client_bootstrap) {
             goto tear_down;
@@ -312,7 +337,7 @@ struct aws_string *aws_s3_get_ec2_instance_type(
             .shutdown_options = imds_shutdown_options,
         };
 
-        struct aws_imds_client *imds_client = aws_imds_client_new(allocator, &imds_options);
+        struct aws_imds_client *imds_client = aws_imds_client_new(s_library_allocator, &imds_options);
 
         if (!imds_client) {
             goto tear_down;
@@ -325,8 +350,20 @@ struct aws_string *aws_s3_get_ec2_instance_type(
 
         aws_condition_variable_wait_pred(
             &callback_info.c_var, &callback_info.mutex, s_client_shutdown_predicate, &callback_info);
-
+        aws_mutex_unlock(&callback_info.mutex);
         aws_imds_client_release(imds_client);
+
+        if (callback_info.error_code) {
+            aws_raise_error(callback_info.error_code);
+            AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "static: IMDS call failed with error %s.",
+                           aws_error_debug_str(callback_info.error_code));
+        }
+
+        if (callback_info.instance_type) {
+            s_detected_instance_type = callback_info.instance_type;
+            AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "static: Determined instance type to be %s, from IMDS. Caching.",
+                          aws_string_bytes(s_detected_instance_type));
+        }
 
     tear_down:
         if (client_bootstrap) {
@@ -340,20 +377,19 @@ struct aws_string *aws_s3_get_ec2_instance_type(
         if (el_group) {
             aws_event_loop_group_release(el_group);
         }
-
-        if (callback_info.instance_type) {
-            return callback_info.instance_type;
-        }
-
-        if (callback_info.error_code) {
-            aws_raise_error(callback_info.error_code);
-        }
     }
-    return NULL;
+
+return_instance_and_unlock:
+    if (s_detected_instance_type) {
+        return_cur = aws_byte_cursor_from_string(s_detected_instance_type);
+    }
+    aws_mutex_unlock(&s_detected_instance_type_mutex);
+
+    return return_cur;
 }
 
-bool aws_s3_is_running_on_ec2(const struct aws_system_environment *env) {
-    struct aws_byte_cursor system_virt_name = aws_system_environment_get_virtualization_vendor(env);
+bool aws_s3_is_running_on_ec2_nitro(void) {
+    struct aws_byte_cursor system_virt_name = aws_system_environment_get_virtualization_vendor(s_env);
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&system_virt_name, "amazon ec2")) {
         return true;

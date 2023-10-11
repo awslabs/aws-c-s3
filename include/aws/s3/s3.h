@@ -99,20 +99,42 @@ void aws_s3_library_init(struct aws_allocator *allocator);
  */
 AWS_S3_API
 struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instance_type(
-    const struct aws_byte_cursor instance_type_name);
+    struct aws_byte_cursor instance_type_name);
 
+/**
+ * Returns true if this build of this library has been pre-optimized for the environment this process is running in.
+ *
+ * Note: This does not mean this library has not been generically optimized the way most applications are. It means this
+ * build of the application was specifically optimized for the current environment with a known optimal configuration.
+ *
+ * @return true if it is optimized, false if it is not.
+ */
 AWS_S3_API
-bool aws_s3_is_optimized_for_system_env(
-    const struct aws_system_environment *env,
-    const struct aws_byte_cursor *opt_instance_type_override);
+bool aws_is_build_optimized_for_environment(void);
 
+/**
+ * Returns true if the current process is running on an Amazon EC2 instance powered by Nitro.
+ */
 AWS_S3_API
-bool aws_s3_is_running_on_ec2(const struct aws_system_environment *env);
+bool aws_s3_is_running_on_ec2_nitro(void);
 
+/**
+ * Returns an EC2 instance type assuming this executable is running on Amazon EC2 powered by nitro.
+ *
+ * First this function will check it's running on EC2 via. attempting to read DMI info to avoid making IMDS calls.
+ *
+ * If the function detects it's on EC2, and it was able to detect the instance type without a call to IMDS
+ * it will return it.
+ *
+ * Finally, it will call IMDS and return the instance type from there.
+ *
+ * Note that in the case of the IMDS call, a new client stack is spun up using 1 background thread. The call is made
+ * synchronously with a 1 second timeout: It's not cheap. To make this easier, the underlying result is cached internally
+ * and will be freed when aws_s3_library_clean_up() is called.
+ * @return byte_cursor containing the instance type. If this is empty, the instance type could not be determined.
+ */
 AWS_S3_API
-struct aws_string *aws_s3_get_ec2_instance_type(
-    struct aws_allocator *allocator,
-    const struct aws_system_environment *env);
+struct aws_byte_cursor aws_s3_get_ec2_instance_type(void);
 
 /**
  * Shuts down the internal datastructures used by aws-c-s3.
