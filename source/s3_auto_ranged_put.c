@@ -722,7 +722,7 @@ static size_t s_compute_request_body_size(
             request_body_size = content_remainder;
         }
     }
-    /* The part_number starts with 1 */
+    /* The part_number starts at 1 */
     *offset_out = (part_number - 1) * meta_request->part_size;
 
     return request_body_size;
@@ -999,6 +999,15 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         }
 
         if (!request->is_noop) {
+
+            /* The part can finish out of order. Resize array-list to be long enough to hold this part,
+             * filling any intermediate slots with NULL. */
+
+            aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, request->part_number);
+            while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < request->part_number) {
+                struct aws_s3_mpu_part_info *null_part = NULL;
+                aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
+            }
 
             /* Add part to array-list */
             struct aws_s3_mpu_part_info *part =

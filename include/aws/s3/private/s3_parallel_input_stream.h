@@ -69,7 +69,7 @@ AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_parallel_input_stream *stream);
 
 /**
- * Read from the offset until fill the dest, or EOS reached.
+ * Read from the offset until fill the dest, or EOF reached.
  * It's thread safe to be called from multiple threads without waiting for other read to complete
  *
  * @param stream            The stream to read from
@@ -85,7 +85,7 @@ struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_byte_buf *dest);
 
 /**
- * Create a new file based parallel input stream implementation.
+ * Create a new file based parallel input stream.
  *
  * This implementation will open a file handler when the read happens, and seek to the offset to start reading. Close
  * the file handler as read finishes.

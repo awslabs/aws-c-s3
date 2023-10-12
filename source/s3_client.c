@@ -9,6 +9,7 @@
 #include "aws/s3/private/s3_copy_object.h"
 #include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_parallel_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 
@@ -126,6 +127,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .process_work = s_s3_client_process_work_default,
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
+    .parallel_input_stream_new_from_file = aws_parallel_input_stream_new_from_file,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {

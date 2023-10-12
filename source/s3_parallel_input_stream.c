@@ -5,17 +5,12 @@
 
 #include "aws/s3/private/s3_parallel_input_stream.h"
 
-#include <aws/common/atomics.h>
 #include <aws/common/file.h>
-#include <aws/common/string.h>
-#include <aws/common/task_scheduler.h>
 
-#include <aws/io/event_loop.h>
 #include <aws/io/future.h>
 #include <aws/io/stream.h>
 
 #include <errno.h>
-#include <sys/stat.h>
 
 void aws_parallel_input_stream_init_base(
     struct aws_parallel_input_stream *stream,

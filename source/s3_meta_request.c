@@ -246,8 +246,7 @@ int aws_s3_meta_request_init_base(
 
     /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
     if (client != NULL) {
-        aws_s3_client_acquire(client);
-        meta_request->client = client;
+        meta_request->client = aws_s3_client_acquire(client);
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
     }
@@ -256,13 +255,14 @@ int aws_s3_meta_request_init_base(
      * (we checked earlier that it's not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
-        meta_request->initial_request_message = aws_http_message_acquire(options->message);
-        AWS_ASSERT(client != NULL);
         meta_request->request_body_parallel_stream =
-            aws_parallel_input_stream_new_from_file(allocator, options->send_filepath);
+            client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
+
+        /* but keep original message around for headers, method, etc */
+        meta_request->initial_request_message = aws_http_message_acquire(options->message);
     } else if (options->send_async_stream != NULL) {
         /* Read from async body-stream, but keep original message around for headers, method, etc */
         meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);
@@ -631,8 +631,8 @@ static void s_s3_meta_request_schedule_prepare_request_default(
     aws_task_init(
         &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
     if (meta_request->request_body_parallel_stream) {
-        /* The body stream supports to be read in parallel, so, we can prepare requests in parallel. Grab a thread from
-         * IO thread pool instead of using the thread to the meta request to prepare request. */
+        /* The body stream supports reading in parallel, so schedule task on any I/O thread.
+         * If we always used the meta-request's dedicated io_event_loop, we wouldn't get any parallelism. */
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         aws_event_loop_schedule_task_now(loop, &payload->task);
     } else {
@@ -1711,6 +1711,8 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     if (meta_request->request_body_async_stream != NULL) {
         return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
     }
+
+    /* If parallel-stream, simply call read(), which must fill the buffer and/or EOF */
     if (meta_request->request_body_parallel_stream != NULL) {
         return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
     }
