@@ -47,19 +47,6 @@ struct aws_s3_auto_ranged_put {
         uint32_t next_part_number;
     } threaded_update_data;
 
-    /*
-     * Should only be used during prepare requests. Note: stream reads must be sequential,
-     * so prepare currently never runs concurrently with another prepare
-     */
-    struct {
-        /*
-         * Start index of skipping parts.
-         * This is used to keep track of how many parts have been read from input steam and where to try to start
-         * skipping parts from.
-         */
-        uint32_t part_index_for_skipping;
-    } prepare_data;
-
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
         /* Array list of `struct aws_s3_mpu_part_info *`
