@@ -138,9 +138,12 @@ struct aws_s3_meta_request {
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
 
-    /* Async stream for meta request's body.
-     * NULL if using initial_request_message's synchronous body stream instead.  */
+    /* The meta request's outgoing body comes from one of these:
+     * 1) request_body_async_stream: if set, then async stream 1 part at a time
+     * 2) request_body_parallel_stream: if set, then stream multiple parts in parallel
+     * 3) initial_request_message's body_stream: else synchronously stream parts */
     struct aws_async_input_stream *request_body_async_stream;
+    struct aws_parallel_input_stream *request_body_parallel_stream;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
@@ -363,10 +366,13 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
  * It may read from the underlying stream multiple times, if that's what it takes to fill the buffer.
  * Returns a future whose result bool indicates whether end of stream was reached.
  * This future may complete on any thread, and may complete synchronously.
+ *
+ * Read from offset to fill the buffer
  */
 AWS_S3_API
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
+    uint64_t offset,
     struct aws_byte_buf *buffer);
 
 bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request);

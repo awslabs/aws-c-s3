@@ -162,6 +162,9 @@ struct aws_s3_client_vtable {
     void (*endpoint_shutdown_callback)(struct aws_s3_client *client);
 
     void (*finish_destroy)(struct aws_s3_client *client);
+
+    struct aws_parallel_input_stream *(
+        *parallel_input_stream_new_from_file)(struct aws_allocator *allocator, struct aws_byte_cursor file_name);
 };
 
 /* Represents the state of the S3 client. */

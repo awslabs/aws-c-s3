@@ -717,7 +717,10 @@ static bool s_s3_auto_ranged_put_update(
  * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
  * part.
  */
-static size_t s_compute_request_body_size(const struct aws_s3_meta_request *meta_request, uint32_t part_number) {
+static size_t s_compute_request_body_size(
+    const struct aws_s3_meta_request *meta_request,
+    uint32_t part_number,
+    uint64_t *offset_out) {
     AWS_PRECONDITION(meta_request);
 
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
@@ -731,6 +734,8 @@ static size_t s_compute_request_body_size(const struct aws_s3_meta_request *meta
             request_body_size = content_remainder;
         }
     }
+    /* The part_number starts at 1 */
+    *offset_out = (part_number - 1) * meta_request->part_size;
 
     return request_body_size;
 }
@@ -895,8 +900,9 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
             AWS_ASSERT(skip_job->part_being_skipped != NULL);
             aws_s3_meta_request_unlock_synced_data(meta_request);
             /* END CRITICAL SECTION */
+            uint64_t offset = 0;
 
-            size_t request_body_size = s_compute_request_body_size(meta_request, skip_job->part_index + 1);
+            size_t request_body_size = s_compute_request_body_size(meta_request, skip_job->part_index + 1, &offset);
             if (request_body_size != skip_job->part_being_skipped->size) {
                 error_code = AWS_ERROR_S3_RESUME_FAILED;
                 AWS_LOGF_ERROR(
@@ -915,7 +921,8 @@ static void s_skip_parts_from_stream_loop(void *user_data) {
                 aws_byte_buf_reset(temp_body_buf, false);
             }
 
-            skip_job->asyncstep_read_each_part = aws_s3_meta_request_read_body(skip_job->meta_request, temp_body_buf);
+            skip_job->asyncstep_read_each_part =
+                aws_s3_meta_request_read_body(skip_job->meta_request, offset, temp_body_buf);
 
             /* the read may or may not complete immediately */
             if (aws_future_bool_register_callback_if_not_done(
@@ -1090,6 +1097,7 @@ struct aws_future_http_message *s_s3_prepare_create_multipart_upload(struct aws_
     }
     return future;
 }
+
 /* Prepare an UploadPart request */
 struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
@@ -1109,10 +1117,16 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
          * from an upload that had been paused) */
-        part_prep->asyncstep1_skip_prev_parts = s_skip_parts_from_stream(
-            meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
-        aws_future_void_register_callback(
-            part_prep->asyncstep1_skip_prev_parts, s_s3_prepare_upload_part_on_skipping_done, part_prep);
+
+        if (meta_request->request_body_parallel_stream) {
+            /* For parallel read stream, which is seekable, don't need to skip the part by reading from the stream. */
+            s_s3_prepare_upload_part_on_skipping_done((void *)part_prep);
+        } else {
+            part_prep->asyncstep1_skip_prev_parts = s_skip_parts_from_stream(
+                meta_request, auto_ranged_put->prepare_data.part_index_for_skipping, request->part_number - 1);
+            aws_future_void_register_callback(
+                part_prep->asyncstep1_skip_prev_parts, s_s3_prepare_upload_part_on_skipping_done, part_prep);
+        }
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */
@@ -1128,21 +1142,22 @@ static void s_s3_prepare_upload_part_on_skipping_done(void *user_data) {
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
-    int error_code = aws_future_void_get_error(part_prep->asyncstep1_skip_prev_parts);
-
-    /* If skipping failed, the prepare-upload-part job has failed. */
-    if (error_code) {
-        s_s3_prepare_upload_part_finish(part_prep, error_code);
-        return;
+    if (part_prep->asyncstep1_skip_prev_parts) {
+        int error_code = aws_future_void_get_error(part_prep->asyncstep1_skip_prev_parts);
+        /* If skipping failed, the prepare-upload-part job has failed. */
+        if (error_code) {
+            s_s3_prepare_upload_part_finish(part_prep, error_code);
+            return;
+        }
     }
-
     /* Skipping succeeded.
      * Next async step: read body stream for this part into a buffer */
+    uint64_t offset = 0;
 
-    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number);
+    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
     aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
-    part_prep->asyncstep2_read_part = aws_s3_meta_request_read_body(meta_request, &request->request_body);
+    part_prep->asyncstep2_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
     aws_future_bool_register_callback(
         part_prep->asyncstep2_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
 }
@@ -1194,6 +1209,15 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
 
         if (!request->is_noop) {
             auto_ranged_put->prepare_data.part_index_for_skipping = request->part_number;
+
+            /* The part can finish out of order. Resize array-list to be long enough to hold this part,
+             * filling any intermediate slots with NULL. */
+
+            aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, request->part_number);
+            while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < request->part_number) {
+                struct aws_s3_mpu_part_info *null_part = NULL;
+                aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
+            }
 
             /* Add part to array-list */
             struct aws_s3_mpu_part_info *part =
