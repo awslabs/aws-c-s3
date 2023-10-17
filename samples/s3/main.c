@@ -19,6 +19,7 @@
 
 int s3_ls_main(int argc, char *const argv[], const char *command_name, void *user_data);
 int s3_cp_main(int argc, char *const argv[], const char *command_name, void *user_data);
+int s3_compute_platform_info_main(int argc, char *const argv[], const char *command_name, void *user_data);
 
 static struct aws_cli_subcommand_dispatch s_dispatch_table[] = {
     {
@@ -29,7 +30,10 @@ static struct aws_cli_subcommand_dispatch s_dispatch_table[] = {
         .command_name = "cp",
         .subcommand_fn = s3_cp_main,
     },
-};
+    {
+        .command_name = "platform-info",
+        .subcommand_fn = s3_compute_platform_info_main,
+    }};
 
 static void s_usage(int exit_code) {
 
@@ -102,11 +106,6 @@ static void s_parse_app_ctx(int argc, char *const argv[], struct app_ctx *app_ct
     }
 
     if (!app_ctx->help_requested) {
-        if (!app_ctx->region) {
-            fprintf(stderr, "region is a required argument\n");
-            s_usage(1);
-        }
-
         if (app_ctx->log_level != AWS_LOG_LEVEL_NONE) {
             s_setup_logger(app_ctx);
         }
