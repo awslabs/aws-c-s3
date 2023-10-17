@@ -113,7 +113,7 @@ int s3_compute_platform_info_main(int argc, char *argv[], const char *command_na
         fprintf(stdout, "\n");
     }
     fprintf(stdout, "\t]\n");
-    fprintf(stdout, "}");
+    fprintf(stdout, "}\n");
 
     return 0;
 }

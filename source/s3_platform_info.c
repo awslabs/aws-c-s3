@@ -447,6 +447,10 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platfo
 
         if (product_name.len) {
             loader->lock_data.detected_instance_type = aws_string_new_from_cursor(loader->allocator, &product_name);
+            loader->lock_data.current_env_platform_info.instance_type =
+                aws_byte_cursor_from_string(loader->lock_data.detected_instance_type);
+            s_add_platform_info_to_table(loader, &loader->lock_data.current_env_platform_info);
+
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT,
                 "id=%p: Determined instance type to be %s, from dmi info. Caching.",
