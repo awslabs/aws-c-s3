@@ -295,6 +295,8 @@ void s_add_platform_info_to_table(
         info->max_throughput_gbps = existing->max_throughput_gbps;
     } else {
         size_t total_cpus = aws_system_environment_get_processor_count(loader->current_env);
+        /* go ahead and set a default. */
+        info->max_throughput_gbps = 5;
 
         if (aws_s3_is_running_on_ec2_nitro(loader)) {
             size_t bandwidth_factor = 4;
@@ -338,8 +340,6 @@ void s_add_platform_info_to_table(
                 loader->lock_data.current_env_platform_info.max_throughput_gbps,
                 AWS_BYTE_CURSOR_PRI(loader->lock_data.current_env_platform_info.instance_type));
         } else {
-            /* if we couldn't figure it out, for now just default to 5. */
-            info->max_throughput_gbps = 5;
         }
         AWS_FATAL_ASSERT(
             !aws_hash_table_put(
