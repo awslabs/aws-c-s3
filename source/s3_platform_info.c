@@ -301,10 +301,19 @@ void s_add_platform_info_to_table(
 static void s_destroy_loader(void *arg) {
     struct aws_s3_compute_platform_info_loader *loader = arg;
 
+    /* clean up the memory we allocated in init() */
     aws_hash_table_clean_up(&loader->lock_data.compute_platform_info_table);
     aws_mutex_clean_up(&loader->lock_data.lock);
 
-    /* clean up the memory we allocated in init() */
+    size_t cpu_group_arr_len = loader->lock_data.current_env_platform_info.cpu_group_info_array_length;
+    for (size_t i = 0; i < cpu_group_arr_len; ++i) {
+        struct aws_s3_cpu_group_info *group = &loader->lock_data.current_env_platform_info.cpu_group_info_array[i];
+
+        if (group->nic_name_array) {
+            aws_mem_release(loader->allocator, group->nic_name_array);
+        }
+    }
+
     aws_mem_release(loader->allocator, loader->lock_data.current_env_platform_info.cpu_group_info_array);
 
     if (loader->lock_data.detected_instance_type) {
@@ -338,7 +347,26 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
         struct aws_s3_cpu_group_info *group_info = &loader->lock_data.current_env_platform_info.cpu_group_info_array[i];
         group_info->cpu_group = i;
         group_info->cpus_in_group = aws_get_cpu_count_for_group(i);
-        /* when we have the ability to detect NIC affinity add that here. */
+    }
+
+    size_t network_card_count = aws_system_environment_get_network_card_count(loader->current_env);
+    const struct aws_string **network_cards = aws_system_environment_get_network_cards(loader->current_env);
+
+    for (size_t i = 0; i < network_card_count; ++i) {
+        const struct aws_string *network_card_name = network_cards[i];
+        uint16_t group_idx = aws_system_environment_get_cpu_group_for_network_card(loader->current_env, i);
+        AWS_FATAL_ASSERT(group_idx < loader->lock_data.current_env_platform_info.cpu_group_info_array_length);
+
+        if (loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array) {
+            size_t current_length = loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array_length;
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array[current_length] = aws_byte_cursor_from_string(network_card_name);
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array_length += 1;
+        } else {
+            /* there aren't that many, and it saves us an extra loop. Just allocate the array to be large enough for all NICs and be done with it. */
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array = aws_mem_calloc(allocator, network_card_count, sizeof(struct aws_byte_cursor));
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array[0] = aws_byte_cursor_from_string(network_card_name);
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array_length = 1;
+        }
     }
 
     AWS_FATAL_ASSERT(
