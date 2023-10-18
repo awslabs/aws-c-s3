@@ -289,6 +289,7 @@ void s_add_platform_info_to_table(
             }
         }
         info->has_recommended_configuration = existing->has_recommended_configuration;
+        /* always prefer a pre-known bandwidth, as we estimate low on EC2 by default for safety. */
         info->max_throughput_gbps = existing->max_throughput_gbps;
     } else {
         AWS_FATAL_ASSERT(
@@ -358,14 +359,39 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
         AWS_FATAL_ASSERT(group_idx < loader->lock_data.current_env_platform_info.cpu_group_info_array_length);
 
         if (loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array) {
-            size_t current_length = loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array_length;
-            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array[current_length] = aws_byte_cursor_from_string(network_card_name);
+            size_t current_length =
+                loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array_length;
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array[current_length] =
+                aws_byte_cursor_from_string(network_card_name);
             loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array_length += 1;
         } else {
-            /* there aren't that many, and it saves us an extra loop. Just allocate the array to be large enough for all NICs and be done with it. */
-            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array = aws_mem_calloc(allocator, network_card_count, sizeof(struct aws_byte_cursor));
-            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array[0] = aws_byte_cursor_from_string(network_card_name);
+            /* there aren't that many, and it saves us an extra loop. Just allocate the array to be large enough for all
+             * NICs and be done with it. */
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array =
+                aws_mem_calloc(allocator, network_card_count, sizeof(struct aws_byte_cursor));
+            loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array[0] =
+                aws_byte_cursor_from_string(network_card_name);
             loader->lock_data.current_env_platform_info.cpu_group_info_array[group_idx].nic_name_array_length = 1;
+        }
+    }
+
+    size_t total_cpus = aws_system_environment_get_processor_count(loader->current_env);
+
+    if (aws_s3_is_running_on_ec2_nitro(loader)) {
+        /* these rules come from EC2's doc pages and we will only do this on EC2. It's pegged to the bottom range for
+         * the moment, so it's a best safe guess for the instance type based purely on CPU info. see:
+         * https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-network-bandwidth.html */
+
+        /* the current rule we're using for in-region, multi-flow traffic is 16 CPUs per 5Gbps.
+         * 16CPU machines are usually "up-to" 10 Gbps, so just let them be 5. */
+        if (total_cpus <= 16) {
+            loader->lock_data.current_env_platform_info.max_throughput_gbps = 5;
+        } else {
+            size_t estimated_bandwidth = (total_cpus / 16) * 5;
+
+            if (estimated_bandwidth <= UINT16_MAX) {
+                loader->lock_data.current_env_platform_info.max_throughput_gbps = estimated_bandwidth;
+            }
         }
     }
 
