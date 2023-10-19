@@ -443,9 +443,10 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     }
     aws_array_list_clean_up(&auto_ranged_put->synced_data.part_list);
 
+    AWS_LOGF_DEBUG(0, "pool size destroy %zu", aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool));
     for (size_t i = 0; i < aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool); ++i) {
         struct aws_byte_buf buf;
-        aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &buf, i);
+        aws_array_list_get_at(&auto_ranged_put->threaded_update_data.buffer_pool, &buf, i);
         aws_byte_buf_clean_up(&buf);
     }
     aws_array_list_clean_up(&auto_ranged_put->threaded_update_data.buffer_pool);
@@ -585,14 +586,16 @@ static bool s_s3_auto_ranged_put_update(
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
      
-                if(aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool) > 0) {
+                AWS_ZERO_STRUCT(request->request_body);
+                uint64_t offset = 0;
+                size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+                if( request_body_size == meta_request->part_size &&
+                    aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool) > 0) {
                     struct aws_byte_buf pooled;
                     aws_array_list_back(&auto_ranged_put->threaded_update_data.buffer_pool, &pooled);
                     request->request_body = pooled;
                     aws_array_list_pop_back(&auto_ranged_put->threaded_update_data.buffer_pool);
-                } else {
-                    uint64_t offset = 0;
-                    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+                } else {  
                     if (request_body_size == meta_request->part_size) {
                         aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
                     }   
@@ -947,8 +950,9 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         /* Read the body */
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-        if (request->request_body.len != request_body_size) {
+        if (request->request_body.capacity == 0) {
             aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+        } else {
         }
 
         part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
@@ -1570,8 +1574,14 @@ static void s_s3_auto_ranged_put_request_finished(
                     }
                 }
                 
-                aws_byte_buf_reset(&request->request_body, false);
-                aws_array_list_push_back(&auto_ranged_put->threaded_update_data.buffer_pool, &request->request_body);
+
+                if (meta_request->part_size == request->request_body.len) {
+                    aws_byte_buf_reset(&request->request_body, false);
+                    aws_array_list_push_back(&auto_ranged_put->threaded_update_data.buffer_pool, &request->request_body);
+                } else {
+                    aws_byte_buf_clean_up(&request->request_body);
+                }
+                AWS_ZERO_STRUCT(request->request_body);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }
