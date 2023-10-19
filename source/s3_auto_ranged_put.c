@@ -589,6 +589,7 @@ static bool s_s3_auto_ranged_put_update(
                     struct aws_byte_buf pooled;
                     aws_array_list_back(&auto_ranged_put->threaded_update_data.buffer_pool, &pooled);
                     request->request_body = pooled;
+                    aws_array_list_pop_back(&auto_ranged_put->threaded_update_data.buffer_pool);
                 } else {
                     uint64_t offset = 0;
                     size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
