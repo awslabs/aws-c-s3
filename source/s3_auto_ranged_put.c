@@ -102,6 +102,34 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **resume_token);
 
+/**
+ * Helper to compute request body size.
+ * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
+ * part.
+ */
+static size_t s_compute_request_body_size(
+    const struct aws_s3_meta_request *meta_request,
+    uint32_t part_number,
+    uint64_t *offset_out) {
+    AWS_PRECONDITION(meta_request);
+
+    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    size_t request_body_size = meta_request->part_size;
+    /* Last part--adjust size to match remaining content length. */
+    if (auto_ranged_put->has_content_length && part_number == auto_ranged_put->total_num_parts_from_content_length) {
+        size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+
+        if (content_remainder > 0) {
+            request_body_size = content_remainder;
+        }
+    }
+    /* The part_number starts at 1 */
+    *offset_out = (part_number - 1) * meta_request->part_size;
+
+    return request_body_size;
+}
+
 static int s_process_part_info_synced(const struct aws_s3_part_info *info, void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
     struct aws_s3_meta_request *meta_request = &auto_ranged_put->base;
@@ -371,6 +399,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     aws_array_list_init_dynamic(
         &auto_ranged_put->synced_data.part_list, allocator, initial_num_parts, sizeof(struct aws_s3_mpu_part_info *));
 
+    aws_array_list_init_dynamic(
+        &auto_ranged_put->threaded_update_data.buffer_pool, allocator, 10, sizeof(struct aws_byte_buf));
+
     if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
         goto error_clean_up;
     }
@@ -411,6 +442,13 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
         }
     }
     aws_array_list_clean_up(&auto_ranged_put->synced_data.part_list);
+
+    for (size_t i = 0; i < aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool); ++i) {
+        struct aws_byte_buf buf;
+        aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &buf, i);
+        aws_byte_buf_clean_up(&buf);
+    }
+    aws_array_list_clean_up(&auto_ranged_put->threaded_update_data.buffer_pool);
 
     aws_string_destroy(auto_ranged_put->synced_data.list_parts_continuation_token);
 
@@ -546,6 +584,18 @@ static bool s_s3_auto_ranged_put_update(
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
+     
+                if(aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool) > 0) {
+                    struct aws_byte_buf pooled;
+                    aws_array_list_back(&auto_ranged_put->threaded_update_data.buffer_pool, &pooled);
+                    request->request_body = pooled;
+                } else {
+                    uint64_t offset = 0;
+                    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+                    if (request_body_size == meta_request->part_size) {
+                        aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+                    }   
+                }
 
                 /* If request was previously uploaded, we prepare it to ensure checksums still match,
                  * but ultimately it gets marked no-op and we don't send it */
@@ -692,34 +742,6 @@ static bool s_s3_auto_ranged_put_update(
     }
 
     return work_remaining;
-}
-
-/**
- * Helper to compute request body size.
- * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
- * part.
- */
-static size_t s_compute_request_body_size(
-    const struct aws_s3_meta_request *meta_request,
-    uint32_t part_number,
-    uint64_t *offset_out) {
-    AWS_PRECONDITION(meta_request);
-
-    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-
-    size_t request_body_size = meta_request->part_size;
-    /* Last part--adjust size to match remaining content length. */
-    if (auto_ranged_put->has_content_length && part_number == auto_ranged_put->total_num_parts_from_content_length) {
-        size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
-
-        if (content_remainder > 0) {
-            request_body_size = content_remainder;
-        }
-    }
-    /* The part_number starts at 1 */
-    *offset_out = (part_number - 1) * meta_request->part_size;
-
-    return request_body_size;
 }
 
 static int s_verify_part_matches_checksum(
@@ -924,7 +946,9 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         /* Read the body */
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-        aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+        if (request->request_body.len != request_body_size) {
+            aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+        }
 
         part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
         aws_future_bool_register_callback(
@@ -1544,6 +1568,9 @@ static void s_s3_auto_ranged_put_request_finished(
                         aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
                     }
                 }
+                
+                aws_byte_buf_reset(&request->request_body, false);
+                aws_array_list_push_back(&auto_ranged_put->threaded_update_data.buffer_pool, &request->request_body);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }

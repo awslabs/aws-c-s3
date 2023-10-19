@@ -45,6 +45,8 @@ struct aws_s3_auto_ranged_put {
          * Throughout codebase 0 based part numbers are usually referred to as part index.
          */
         uint32_t next_part_number;
+
+        struct aws_array_list buffer_pool;
     } threaded_update_data;
 
     /* Members to only be used when the mutex in the base type is locked. */
