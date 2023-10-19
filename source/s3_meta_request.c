@@ -856,6 +856,7 @@ struct s3_upload_time_task_args {
 void s_s3_upload_part_timeout_task(struct aws_task *task, void *arg, enum aws_task_status status) {
     struct s3_upload_time_task_args *task_args = arg;
     if (status == AWS_TASK_STATUS_CANCELED) {
+        // AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "ip=%p: upload timeout cancelled", task_args->log_id);
         goto cleanup;
     }
     /* Time out happened, close the connection manually */
@@ -895,8 +896,7 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         options.on_metrics = s_s3_meta_request_stream_metrics;
     }
     options.on_complete = s_s3_meta_request_stream_complete;
-    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
-        request->request_tag == AWS_S3_REQUEST_TYPE_UPLOAD_PART) {
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && request->request_tag == 2) {
         struct aws_channel *channel = aws_http_connection_get_channel(connection->http_connection);
         struct aws_event_loop *connection_loop = aws_channel_get_event_loop(channel);
         /* Schedule the timeout task from connection thread. */
@@ -904,16 +904,13 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         connection->upload_timeout_task = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_task));
         struct s3_upload_time_task_args *task_args =
             aws_mem_calloc(meta_request->allocator, 1, sizeof(struct s3_upload_time_task_args));
-        aws_task_init(
-            connection->upload_timeout_task,
-            s_s3_upload_part_timeout_task,
-            connection,
-            "s_s3_upload_part_timeout_task");
         task_args->allocator = meta_request->allocator;
         task_args->connection = connection;
         task_args->log_id = (void *)meta_request;
         uint64_t now_ns = 0;
         int error = aws_channel_current_clock_time(channel, &now_ns);
+        aws_task_init(
+            connection->upload_timeout_task, s_s3_upload_part_timeout_task, task_args, "s_s3_upload_part_timeout_task");
         AWS_FATAL_ASSERT(!error);
         /* 1 sec timeout */
         uint64_t reschedule_interval_ns = aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
