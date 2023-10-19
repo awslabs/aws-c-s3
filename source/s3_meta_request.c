@@ -14,6 +14,7 @@
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
 #include <aws/auth/signing_result.h>
+#include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -846,6 +847,32 @@ finish:
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
+struct s3_upload_time_task_args {
+    struct aws_allocator *allocator;
+    struct aws_s3_connection *connection;
+    void *log_id;
+};
+
+void s_s3_upload_part_timeout_task(struct aws_task *task, void *arg, enum aws_task_status status) {
+    struct s3_upload_time_task_args *task_args = arg;
+    if (status == AWS_TASK_STATUS_CANCELED) {
+        goto cleanup;
+    }
+    /* Time out happened, close the connection manually */
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "ip=%p: upload timeout, closing connection: %p",
+        task_args->log_id,
+        (void *)task_args->connection);
+    aws_http_connection_close(task_args->connection->http_connection);
+    task_args->connection->upload_timeout_task = NULL;
+
+cleanup:
+    aws_mem_release(task_args->allocator, task);
+    aws_mem_release(task_args->allocator, task_args);
+}
+
 void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(connection);
@@ -868,6 +895,31 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         options.on_metrics = s_s3_meta_request_stream_metrics;
     }
     options.on_complete = s_s3_meta_request_stream_complete;
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
+        request->request_tag == AWS_S3_REQUEST_TYPE_UPLOAD_PART) {
+        struct aws_channel *channel = aws_http_connection_get_channel(connection->http_connection);
+        struct aws_event_loop *connection_loop = aws_channel_get_event_loop(channel);
+        /* Schedule the timeout task from connection thread. */
+
+        connection->upload_timeout_task = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_task));
+        struct s3_upload_time_task_args *task_args =
+            aws_mem_calloc(meta_request->allocator, 1, sizeof(struct s3_upload_time_task_args));
+        aws_task_init(
+            connection->upload_timeout_task,
+            s_s3_upload_part_timeout_task,
+            connection,
+            "s_s3_upload_part_timeout_task");
+        task_args->allocator = meta_request->allocator;
+        task_args->connection = connection;
+        task_args->log_id = (void *)meta_request;
+        uint64_t now_ns = 0;
+        int error = aws_channel_current_clock_time(channel, &now_ns);
+        AWS_FATAL_ASSERT(!error);
+        /* 1 sec timeout */
+        uint64_t reschedule_interval_ns = aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+        aws_event_loop_schedule_task_future(
+            connection_loop, connection->upload_timeout_task, now_ns + reschedule_interval_ns);
+    }
 
     struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
 
@@ -1168,6 +1220,13 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
+    if (connection->upload_timeout_task) {
+        /* Cancel the task. Save here as it the same connection thread */
+        struct aws_channel *channel = aws_http_connection_get_channel(connection->http_connection);
+        struct aws_event_loop *connection_loop = aws_channel_get_event_loop(channel);
+        aws_event_loop_cancel_task(connection_loop, connection->upload_timeout_task);
+        connection->upload_timeout_task = NULL;
+    }
     if (connection->request->meta_request->checksum_config.validate_response_checksum) {
         s_get_response_part_finish_checksum_helper(connection, error_code);
     }

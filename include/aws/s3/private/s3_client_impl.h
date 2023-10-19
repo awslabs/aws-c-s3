@@ -136,6 +136,8 @@ struct aws_s3_connection {
 
     /* Current retry token for the request. If it has never been retried, this will be NULL. */
     struct aws_retry_token *retry_token;
+
+    struct aws_task *upload_timeout_task;
 };
 
 struct aws_s3_client_vtable {
