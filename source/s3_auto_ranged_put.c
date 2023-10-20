@@ -587,18 +587,11 @@ static bool s_s3_auto_ranged_put_update(
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
      
                 AWS_ZERO_STRUCT(request->request_body);
-                uint64_t offset = 0;
-                size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-                if( request_body_size == meta_request->part_size &&
-                    aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool) > 0) {
+                if(aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool) > 0) {
                     struct aws_byte_buf pooled;
                     aws_array_list_back(&auto_ranged_put->threaded_update_data.buffer_pool, &pooled);
                     request->request_body = pooled;
                     aws_array_list_pop_back(&auto_ranged_put->threaded_update_data.buffer_pool);
-                } else {  
-                    if (request_body_size == meta_request->part_size) {
-                        aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
-                    }   
                 }
 
                 /* If request was previously uploaded, we prepare it to ensure checksums still match,
@@ -952,7 +945,6 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
         if (request->request_body.capacity == 0) {
             aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
-        } else {
         }
 
         part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
@@ -1575,13 +1567,11 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
                 
 
-                if (meta_request->part_size == request->request_body.len) {
+                if (meta_request->part_size == request->request_body.capacity) {
                     aws_byte_buf_reset(&request->request_body, false);
                     aws_array_list_push_back(&auto_ranged_put->threaded_update_data.buffer_pool, &request->request_body);
-                } else {
-                    aws_byte_buf_clean_up(&request->request_body);
+                    AWS_ZERO_STRUCT(request->request_body);
                 }
-                AWS_ZERO_STRUCT(request->request_body);
 
                 aws_s3_meta_request_unlock_synced_data(meta_request);
             }
