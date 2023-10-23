@@ -179,6 +179,13 @@ struct aws_s3_meta_request {
 
     enum aws_s3_meta_request_type type;
 
+    /**
+     * a timeout in MS for upload request.
+     * S3 less than 0.01% upload part will result in a larger than 1 secs response time after the request finished
+     * sending.
+     */
+    struct aws_atomic_var upload_timeout_ms;
+
     struct {
         struct aws_mutex lock;
 

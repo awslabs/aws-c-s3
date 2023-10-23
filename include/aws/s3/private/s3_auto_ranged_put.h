@@ -71,6 +71,10 @@ struct aws_s3_auto_ranged_put {
          * work to do*/
         uint32_t num_parts_noop;
 
+        /* Track the rate of upload part request timeout. */
+        uint32_t num_upload_requests_timed_out;
+        uint32_t num_upload_requests_completed;
+
         /* Number of parts we've started, but they're not done reading from stream yet.
          * Though reads are serial (only 1 part can be reading from stream at a time)
          * we may queue up more to minimize delays between each read. */
