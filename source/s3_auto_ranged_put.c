@@ -455,6 +455,9 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
         aws_s3_meta_request_lock_synced_data(meta_request);
         ++auto_ranged_put->synced_data.num_upload_requests_completed;
 
+        uint64_t current_timeout_ns = aws_timestamp_convert(
+            aws_atomic_load_int(&meta_request->upload_timeout_ms), AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+        uint64_t updated_timeout_ns = 0;
         if (error_code == AWS_ERROR_HTTP_CHANNEL_THROUGHPUT_FAILURE) {
             /* Upload part failed with timedout. */
             ++auto_ranged_put->synced_data.num_upload_requests_timed_out;
@@ -465,10 +468,14 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                 ++timeout_threshold;
             }
             if (auto_ranged_put->synced_data.num_upload_requests_timed_out > timeout_threshold) {
-                /* Timeout rate is way too high, double the timeout. */
-                size_t current_timeout = aws_atomic_load_int(&meta_request->upload_timeout_ms);
-                size_t updated_timeout = aws_mul_size_saturating(current_timeout, 2);
-                aws_atomic_store_int(&meta_request->upload_timeout_ms, updated_timeout);
+                /* Timeout rate is way too high, add 1 secs. */
+                updated_timeout_ns = aws_add_u64_saturating(
+                    current_timeout_ns, aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Updating timeout, current is %zu.",
+                    (void *)meta_request,
+                    (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
             }
         } else if (error_code == AWS_ERROR_SUCCESS) {
             AWS_ASSERT(request->send_data.metrics != NULL);
@@ -478,15 +485,23 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                 request->send_data.metrics->time_metrics.receive_start_timestamp_ns,
                 request->send_data.metrics->time_metrics.send_end_timestamp_ns);
 
-            uint64_t expected_timeout_ns = succeed_time_ns * 2;
-            uint64_t old_timeout_ns = aws_timestamp_convert(
-                aws_atomic_load_int(&meta_request->upload_timeout_ms), AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+            uint64_t expected_timeout_ns = aws_add_u64_saturating(
+                succeed_time_ns, aws_timestamp_convert(500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
 
-            uint64_t adjusted_timeout_ns = 0.9 * old_timeout_ns + 0.1 * expected_timeout_ns;
-            aws_atomic_store_int(
-                &meta_request->upload_timeout_ms,
-                (size_t)aws_timestamp_convert(adjusted_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+            updated_timeout_ns = 0.9 * current_timeout_ns + 0.1 * expected_timeout_ns;
+            if (auto_ranged_put->synced_data.num_upload_requests_completed % 100 == 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Adjusted timeout is %zu, expected timeout is %zu",
+                    (void *)meta_request,
+                    (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL),
+                    (size_t)aws_timestamp_convert(
+                        expected_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+            }
         }
+        aws_atomic_store_int(
+            &meta_request->upload_timeout_ms,
+            (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
     }
