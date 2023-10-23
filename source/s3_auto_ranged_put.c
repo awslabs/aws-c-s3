@@ -443,7 +443,6 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
     }
     aws_array_list_clean_up(&auto_ranged_put->synced_data.part_list);
 
-    AWS_LOGF_DEBUG(0, "pool size destroy %zu", aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool));
     for (size_t i = 0; i < aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool); ++i) {
         struct aws_byte_buf buf;
         aws_array_list_get_at(&auto_ranged_put->threaded_update_data.buffer_pool, &buf, i);
@@ -585,9 +584,9 @@ static bool s_s3_auto_ranged_put_update(
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
-     
+
                 AWS_ZERO_STRUCT(request->request_body);
-                if(aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool) > 0) {
+                if (aws_array_list_length(&auto_ranged_put->threaded_update_data.buffer_pool) > 0) {
                     struct aws_byte_buf pooled;
                     aws_array_list_back(&auto_ranged_put->threaded_update_data.buffer_pool, &pooled);
                     request->request_body = pooled;
@@ -1565,11 +1564,12 @@ static void s_s3_auto_ranged_put_request_finished(
                         aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
                     }
                 }
-                
 
                 if (meta_request->part_size == request->request_body.capacity) {
+                    /* Steal the buffer from request for reuse. */
                     aws_byte_buf_reset(&request->request_body, false);
-                    aws_array_list_push_back(&auto_ranged_put->threaded_update_data.buffer_pool, &request->request_body);
+                    aws_array_list_push_back(
+                        &auto_ranged_put->threaded_update_data.buffer_pool, &request->request_body);
                     AWS_ZERO_STRUCT(request->request_body);
                 }
 
