@@ -851,7 +851,7 @@ finish:
 
 static bool s_s3_request_is_upload_part(struct aws_s3_request *request) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
+    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && meta_request->vtable->get_request_type &&
            meta_request->vtable->get_request_type(request) == AWS_S3_REQUEST_TYPE_UPLOAD_PART;
 }
 
