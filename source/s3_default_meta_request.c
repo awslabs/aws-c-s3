@@ -243,7 +243,8 @@ static struct aws_future_void *s_s3_default_prepare_request(struct aws_s3_reques
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
         /* Kick off the async read */
-        request_prep->step1_read_body = aws_s3_meta_request_read_body(meta_request, &request->request_body);
+        request_prep->step1_read_body =
+            aws_s3_meta_request_read_body(meta_request, 0 /*offset*/, &request->request_body);
         aws_future_bool_register_callback(
             request_prep->step1_read_body, s_s3_default_prepare_request_on_read_done, request_prep);
     } else {

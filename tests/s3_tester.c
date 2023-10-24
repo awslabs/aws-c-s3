@@ -11,7 +11,6 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/environment.h>
-#include <aws/common/file.h>
 #include <aws/common/system_info.h>
 #include <aws/common/uri.h>
 #include <aws/http/request_response.h>
@@ -1548,35 +1547,7 @@ int aws_s3_tester_send_meta_request_with_options(
             /* if uploading via filepath, write input_stream out as tmp file on disk, and then upload that */
             if (options->put_options.file_on_disk) {
                 ASSERT_NOT_NULL(input_stream);
-                struct aws_byte_buf filepath_buf;
-                aws_byte_buf_init(&filepath_buf, allocator, 128);
-                struct aws_byte_cursor filepath_prefix = aws_byte_cursor_from_c_str("tmp");
-                aws_byte_buf_append_dynamic(&filepath_buf, &filepath_prefix);
-                aws_byte_buf_append_dynamic(&filepath_buf, &test_object_path);
-                for (size_t i = 0; i < filepath_buf.len; ++i) {
-                    if (!isalnum(filepath_buf.buffer[i])) {
-                        filepath_buf.buffer[i] = '_'; /* sanitize filename */
-                    }
-                }
-                filepath_str = aws_string_new_from_buf(allocator, &filepath_buf);
-                aws_byte_buf_clean_up(&filepath_buf);
-
-                FILE *file = aws_fopen(aws_string_c_str(filepath_str), "wb");
-                ASSERT_NOT_NULL(file, "Cannot open file for write: %s", aws_string_c_str(filepath_str));
-
-                int64_t stream_length = 0;
-                ASSERT_SUCCESS(aws_input_stream_get_length(input_stream, &stream_length));
-
-                struct aws_byte_buf data_buf;
-                ASSERT_SUCCESS(aws_byte_buf_init(&data_buf, allocator, (size_t)stream_length));
-                ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data_buf));
-                ASSERT_UINT_EQUALS((size_t)stream_length, data_buf.len);
-
-                ASSERT_UINT_EQUALS(data_buf.len, fwrite(data_buf.buffer, 1, data_buf.len, file));
-                fclose(file);
-                aws_byte_buf_clean_up(&data_buf);
-
-                /* use filepath instead of input_stream */
+                filepath_str = aws_s3_tester_create_file(allocator, test_object_path, input_stream);
                 meta_request_options.send_filepath = aws_byte_cursor_from_string(filepath_str);
                 input_stream = aws_input_stream_release(input_stream);
             }
@@ -2046,4 +2017,39 @@ int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uin
 
     ASSERT_SUCCESS(aws_byte_cursor_utf8_parse_u64(value_cursor, out_content_length));
     return AWS_OP_SUCCESS;
+}
+
+struct aws_string *aws_s3_tester_create_file(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor test_object_path,
+    struct aws_input_stream *input_stream) {
+
+    struct aws_byte_buf filepath_buf;
+    aws_byte_buf_init(&filepath_buf, allocator, 128);
+    struct aws_byte_cursor filepath_prefix = aws_byte_cursor_from_c_str("tmp");
+    aws_byte_buf_append_dynamic(&filepath_buf, &filepath_prefix);
+    aws_byte_buf_append_dynamic(&filepath_buf, &test_object_path);
+    for (size_t i = 0; i < filepath_buf.len; ++i) {
+        if (!isalnum(filepath_buf.buffer[i])) {
+            filepath_buf.buffer[i] = '_'; /* sanitize filename */
+        }
+    }
+    struct aws_string *filepath_str = aws_string_new_from_buf(allocator, &filepath_buf);
+    aws_byte_buf_clean_up(&filepath_buf);
+
+    FILE *file = aws_fopen(aws_string_c_str(filepath_str), "wb");
+    AWS_FATAL_ASSERT(file != NULL);
+
+    int64_t stream_length = 0;
+    AWS_FATAL_ASSERT(aws_input_stream_get_length(input_stream, &stream_length) == AWS_OP_SUCCESS);
+
+    struct aws_byte_buf data_buf;
+    AWS_FATAL_ASSERT(aws_byte_buf_init(&data_buf, allocator, (size_t)stream_length) == AWS_OP_SUCCESS);
+    AWS_FATAL_ASSERT(aws_input_stream_read(input_stream, &data_buf) == AWS_OP_SUCCESS);
+    AWS_FATAL_ASSERT((size_t)stream_length == data_buf.len);
+    AWS_FATAL_ASSERT(data_buf.len == fwrite(data_buf.buffer, 1, data_buf.len, file));
+    fclose(file);
+    aws_byte_buf_clean_up(&data_buf);
+
+    return filepath_str;
 }

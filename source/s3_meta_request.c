@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_parallel_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/signable.h>
@@ -243,16 +244,25 @@ int aws_s3_meta_request_init_base(
         meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
     }
 
+    /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
+    if (client != NULL) {
+        meta_request->client = aws_s3_client_acquire(client);
+        meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        meta_request->synced_data.read_window_running_total = client->initial_read_window;
+    }
+
     /* Set initial_meta_request, based on how the request's body is being passed in
      * (we checked earlier that it's not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
-        /* Create copy of original message, but with body-stream that reads directly from file */
-        meta_request->initial_request_message = aws_s3_message_util_copy_http_message_filepath_body_all_headers(
-            allocator, options->message, options->send_filepath);
-        if (meta_request->initial_request_message == NULL) {
+        /* Create parallel read stream from file */
+        meta_request->request_body_parallel_stream =
+            client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
+        if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
 
+        /* but keep original message around for headers, method, etc */
+        meta_request->initial_request_message = aws_http_message_acquire(options->message);
     } else if (options->send_async_stream != NULL) {
         /* Read from async body-stream, but keep original message around for headers, method, etc */
         meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);
@@ -261,14 +271,6 @@ int aws_s3_meta_request_init_base(
     } else {
         /* Keep original message around, we'll read from its synchronous body-stream */
         meta_request->initial_request_message = aws_http_message_acquire(options->message);
-    }
-
-    /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
-    if (client != NULL) {
-        aws_s3_client_acquire(client);
-        meta_request->client = client;
-        meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
-        meta_request->synced_data.read_window_running_total = client->initial_read_window;
     }
 
     meta_request->synced_data.next_streaming_part = 1;
@@ -628,7 +630,14 @@ static void s_s3_meta_request_schedule_prepare_request_default(
 
     aws_task_init(
         &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
-    aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
+    if (meta_request->request_body_parallel_stream) {
+        /* The body stream supports reading in parallel, so schedule task on any I/O thread.
+         * If we always used the meta-request's dedicated io_event_loop, we wouldn't get any parallelism. */
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        aws_event_loop_schedule_task_now(loop, &payload->task);
+    } else {
+        aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
+    }
 }
 
 static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -1674,6 +1683,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
      * that, the downstream high level language doesn't need to wait for shutdown to clean related resource (eg: input
      * stream) */
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
+    meta_request->request_body_parallel_stream =
+        aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
     if (meta_request->finish_callback != NULL) {
@@ -1690,6 +1701,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
 struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
+    uint64_t offset,
     struct aws_byte_buf *buffer) {
 
     AWS_PRECONDITION(meta_request);
@@ -1698,6 +1710,11 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     /* If async-stream, simply call read_to_fill() */
     if (meta_request->request_body_async_stream != NULL) {
         return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
+    }
+
+    /* If parallel-stream, simply call read(), which must fill the buffer and/or EOF */
+    if (meta_request->request_body_parallel_stream != NULL) {
+        return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
     }
 
     /* Else synchronous aws_input_stream */
