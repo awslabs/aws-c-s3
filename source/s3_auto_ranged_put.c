@@ -458,7 +458,7 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
         size_t current_timeout_ms = aws_atomic_load_int(&meta_request->upload_timeout_ms);
         uint64_t current_timeout_ns =
             aws_timestamp_convert(current_timeout_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
-        uint64_t updated_timeout_ns = current_timeout_ns;
+        uint64_t updated_timeout_ns = 0;
         if (error_code == AWS_ERROR_HTTP_CHANNEL_THROUGHPUT_FAILURE) {
             /* Upload part failed with timedout. We want to keep the timeout rate around 0.1%. */
             ++auto_ranged_put->synced_data.num_upload_requests_timed_out;
@@ -492,9 +492,6 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                             updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL),
                         current_timeout_ms,
                         request->upload_timeout_ms);
-                } else {
-                    /* Don't update the timer */
-                    goto unlock;
                 }
             } else if (auto_ranged_put->synced_data.num_upload_requests_timed_out > warning_threshold) {
                 if (request->upload_timeout_ms + 100 > current_timeout_ms) {
@@ -508,13 +505,7 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                         (void *)meta_request,
                         (size_t)aws_timestamp_convert(
                             updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
-                } else {
-                    /* Don't update the timer */
-                    goto unlock;
                 }
-            } else {
-                /* Don't update the timer */
-                goto unlock;
             }
         } else if (error_code == AWS_ERROR_SUCCESS) {
             AWS_ASSERT(request->send_data.metrics != NULL);
@@ -537,13 +528,14 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                     (size_t)aws_timestamp_convert(
                         expected_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
             }
-        } else {
-            goto unlock;
         }
-        aws_atomic_store_int(
-            &meta_request->upload_timeout_ms,
-            (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
-    unlock:
+
+        if (updated_timeout_ns != 0) {
+            aws_atomic_store_int(
+                &meta_request->upload_timeout_ms,
+                (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+        }
+
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
     }
