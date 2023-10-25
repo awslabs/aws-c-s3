@@ -138,11 +138,6 @@ int s3_ls_main(int argc, char *argv[], const char *command_name, void *user_data
         s_usage(0);
     }
 
-    if (!app_ctx->region) {
-        fprintf(stderr, "region is a required argument\n");
-        s_usage(1);
-    }
-
     struct s3_ls_app_data impl_data = {
         .app_ctx = app_ctx,
         .mutex = AWS_MUTEX_INIT,

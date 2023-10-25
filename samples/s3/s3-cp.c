@@ -122,11 +122,6 @@ int s3_cp_main(int argc, char *argv[], const char *command_name, void *user_data
         s_usage(0);
     }
 
-    if (!app_ctx->region) {
-        fprintf(stderr, "region is a required argument\n");
-        s_usage(1);
-    }
-
     struct cp_app_ctx cp_app_ctx = {
         .app_ctx = app_ctx,
         .mutex = AWS_MUTEX_INIT,
