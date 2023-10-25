@@ -63,24 +63,6 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
     struct aws_s3_compute_platform_info_loader *loader);
 
 /**
- * Retrieves the pre-configured metadata for a given ec2 instance type. If no such pre-configuration exists, returns
- * NULL.
- */
-AWS_S3_API
-const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instance_type(
-    struct aws_s3_compute_platform_info_loader *loader,
-    struct aws_byte_cursor instance_type_name);
-
-/**
- * Retrieves the  metadata for the current environment. If EC2 instance type is unknown, or it is not an EC2 instance at
- * all, this value will still include the information about the system that could be determined. This value will never
- * be NULL.
- */
-AWS_S3_API
-const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_current_environment(
-    struct aws_s3_compute_platform_info_loader *loader);
-
-/**
  * Returns true if the current process is running on an Amazon EC2 instance powered by Nitro.
  */
 AWS_S3_API
