@@ -323,11 +323,12 @@ void s_add_platform_info_to_table(
                     loader->lock_data.current_env_platform_info.max_throughput_gbps,
                     AWS_BYTE_CURSOR_PRI(loader->lock_data.current_env_platform_info.instance_type));
         }
-        AWS_FATAL_ASSERT(
-            !aws_hash_table_put(
-                &loader->lock_data.compute_platform_info_table, &info->instance_type, (void *)info, NULL) &&
-            "hash table put failed!");
     }
+
+    AWS_FATAL_ASSERT(
+        !aws_hash_table_put(
+            &loader->lock_data.compute_platform_info_table, &info->instance_type, (void *)info, NULL) &&
+        "hash table put failed!");
 }
 
 static void s_destroy_loader(void *arg) {
