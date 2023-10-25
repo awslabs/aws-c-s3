@@ -458,7 +458,7 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
         size_t current_timeout_ms = aws_atomic_load_int(&meta_request->upload_timeout_ms);
         uint64_t current_timeout_ns =
             aws_timestamp_convert(current_timeout_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
-        uint64_t updated_timeout_ns = 0;
+        uint64_t updated_timeout_ns = current_timeout_ns;
         if (error_code == AWS_ERROR_HTTP_CHANNEL_THROUGHPUT_FAILURE) {
             /* Upload part failed with timedout. We want to keep the timeout rate around 0.1%. */
             ++auto_ranged_put->synced_data.num_upload_requests_timed_out;
@@ -474,22 +474,28 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                 ++warning_threshold;
             }
             if (auto_ranged_put->synced_data.num_upload_requests_timed_out > timeout_threshold) {
+                /**
+                 * Restore the count, as we are larger than 1%.
+                 */
+                auto_ranged_put->synced_data.num_upload_requests_completed = 0;
+                auto_ranged_put->synced_data.num_upload_requests_timed_out = 0;
                 if (request->upload_timeout_ms + 1000 > current_timeout_ms) {
                     /* Update the timeout by adding 1 secs. */
                     updated_timeout_ns = aws_add_u64_saturating(
                         current_timeout_ns, aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
-                        "id=%p: Updating timeout as the timeout rate is greater than 1 percent, current is %zu.",
+                        "id=%p: Updating timeout as the timeout rate is greater than 1 percent, current is %zu ms. "
+                        "Previous timeout is %zu ms. Request->upload_tiemoutms is %zu",
                         (void *)meta_request,
                         (size_t)aws_timestamp_convert(
-                            updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+                            updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL),
+                        current_timeout_ms,
+                        request->upload_timeout_ms);
+                } else {
+                    /* Don't update the timer */
+                    goto unlock;
                 }
-                /**
-                 * Restore the count, as we are larger than 1%.
-                 */
-                auto_ranged_put->synced_data.num_upload_requests_completed = 0;
-                auto_ranged_put->synced_data.num_upload_requests_timed_out = 0;
             } else if (auto_ranged_put->synced_data.num_upload_requests_timed_out > warning_threshold) {
                 if (request->upload_timeout_ms + 100 > current_timeout_ms) {
                     /* Only update the timeout by adding 100 ms if the request was made with a longer time out. */
@@ -498,11 +504,17 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                         aws_timestamp_convert(100, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
-                        "id=%p: Updating timeout as the timeout rate is greater than 0.1 percent, current is %zu.",
+                        "id=%p: Updating timeout as the timeout rate is greater than 0.1 percent, current is %zu ms.",
                         (void *)meta_request,
                         (size_t)aws_timestamp_convert(
                             updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+                } else {
+                    /* Don't update the timer */
+                    goto unlock;
                 }
+            } else {
+                /* Don't update the timer */
+                goto unlock;
             }
         } else if (error_code == AWS_ERROR_SUCCESS) {
             AWS_ASSERT(request->send_data.metrics != NULL);
@@ -525,10 +537,13 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                     (size_t)aws_timestamp_convert(
                         expected_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
             }
+        } else {
+            goto unlock;
         }
         aws_atomic_store_int(
             &meta_request->upload_timeout_ms,
             (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+    unlock:
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
     }
