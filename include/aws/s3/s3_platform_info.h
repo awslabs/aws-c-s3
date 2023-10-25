@@ -55,10 +55,12 @@ AWS_S3_API
 struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_new(struct aws_allocator *allocator);
 
 AWS_S3_API
-void aws_s3_compute_platform_info_loader_acquire(struct aws_s3_compute_platform_info_loader *loader);
+struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_acquire(
+    struct aws_s3_compute_platform_info_loader *loader);
 
 AWS_S3_API
-void aws_s3_compute_platform_info_loader_release(struct aws_s3_compute_platform_info_loader *loader);
+struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_release(
+    struct aws_s3_compute_platform_info_loader *loader);
 
 /**
  * Retrieves the pre-configured metadata for a given ec2 instance type. If no such pre-configuration exists, returns

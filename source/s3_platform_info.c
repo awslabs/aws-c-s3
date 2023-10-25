@@ -364,14 +364,18 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
     return loader;
 }
 
-void aws_s3_compute_platform_info_loader_acquire(struct aws_s3_compute_platform_info_loader *loader) {
+struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_acquire(
+    struct aws_s3_compute_platform_info_loader *loader) {
     aws_ref_count_acquire(&loader->ref_count);
+    return loader;
 }
 
-void aws_s3_compute_platform_info_loader_release(struct aws_s3_compute_platform_info_loader *loader) {
+struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_release(
+    struct aws_s3_compute_platform_info_loader *loader) {
     if (loader) {
         aws_ref_count_release(&loader->ref_count);
     }
+    return NULL;
 }
 
 struct imds_callback_info {
