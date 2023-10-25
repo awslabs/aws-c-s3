@@ -630,6 +630,9 @@ struct aws_s3_meta_request_result {
 AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
+struct aws_client_bootstrap *aws_s3_client_bootstrap_new_from_environment_defaults(struct aws_allocator *allocator);
+
+AWS_S3_API
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config);

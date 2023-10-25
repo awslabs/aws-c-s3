@@ -11,6 +11,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
+#include "aws/s3/s3_platform_info.h"
 
 #include <aws/auth/credentials.h>
 #include <aws/common/assert.h>
@@ -112,6 +113,134 @@ static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
 static void s_s3_client_endpoint_shutdown_callback(struct aws_s3_client *client);
+
+/** Current implementation:
+ * If we're on a NUMA architecture, first see how many NICs are present in total
+ * along with how many CPUs are on those NUMA nodes.
+ *
+ * We want the amount of streaming threads to roughly correspond to the amount of networking io threads,
+ * so if there's a difference in the amount of CPUs with NIC affinity and those without, steal some threads
+ * from the affinity set for streaming while still making sure the networking threads get bound to the correct node
+ * evenly.
+ *
+ * Create an event loop group for each node containing a NIC, then merge all of them into a single group. This allows
+ * the client to have a NIC on the NUMA node the networking is running from, (hopefully) substantially improving memory
+ * throughput.
+ *
+ *
+ * @param allocator
+ * @return
+ */
+struct aws_client_bootstrap *aws_s3_client_bootstrap_new_from_environment_defaults(struct aws_allocator *allocator) {
+    const struct aws_s3_compute_platform_info *platform_info = aws_s3_current_compute_platform_info();
+
+    struct aws_event_loop_group *event_loop_group = NULL;
+
+    /* If we're on NUMA, create an event-loop-group encompassing each node that has a NIC on it. */
+    if (platform_info->cpu_group_info_array_length > 1) {
+        size_t cpus_with_nic_affinity = 0;
+        size_t cpus_with_no_nic_affinity = 0;
+        size_t nic_count = 0;
+
+        for (size_t i = 0; i < platform_info->cpu_group_info_array_length; ++i) {
+            size_t nic_count_loop = platform_info->cpu_group_info_array[i].nic_name_array_length;
+            nic_count += nic_count_loop;
+            if (nic_count_loop) {
+                /* filter out hyper-thread cores. */
+                cpus_with_nic_affinity += platform_info->cpu_group_info_array[i].cpus_in_group / 2;
+            } else {
+                /* filter out hyper-thread cores. */
+                cpus_with_no_nic_affinity += platform_info->cpu_group_info_array[i].cpus_in_group / 2;
+            }
+        }
+
+        size_t cpus_to_bind_for_network_io = cpus_with_nic_affinity;
+        AWS_FATAL_ASSERT(
+            cpus_to_bind_for_network_io && "no cpus for all the NICs should be impossible. Assert and exit.");
+
+        /* in the other case? We aren't going to go faster by adding more cpus that don't have NIC affinity,
+         * so just leave them for other programs. */
+        if (cpus_with_no_nic_affinity < cpus_with_nic_affinity) {
+            /* steal some */
+            size_t difference = cpus_with_nic_affinity - cpus_with_no_nic_affinity;
+            size_t target = difference / 2;
+            cpus_to_bind_for_network_io = cpus_with_nic_affinity - target;
+        }
+
+        size_t cpus_per_nic = cpus_to_bind_for_network_io / nic_count;
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "static: detected %zu NUMA nodes, %zu CPU accessible network cards, "
+            "and will be using %zu CPUs for each network card.",
+            platform_info->cpu_group_info_array_length,
+            nic_count,
+            cpus_per_nic);
+
+        for (size_t i = 0; i < platform_info->cpu_group_info_array_length; ++i) {
+            size_t nic_count_loop = platform_info->cpu_group_info_array[i].nic_name_array_length;
+
+            if (nic_count_loop) {
+                size_t cpus_to_use = nic_count_loop * cpus_per_nic;
+                size_t group_id = platform_info->cpu_group_info_array[i].cpu_group;
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_CLIENT,
+                    "static: for NUMA node %zu has %zu usable network cards. Creating %zu threads pinned to node.",
+                    group_id,
+                    nic_count_loop,
+                    cpus_to_use);
+                if (!event_loop_group) {
+                    event_loop_group =
+                        aws_event_loop_group_new_default_pinned_to_cpu_group(allocator, cpus_to_use, group_id, NULL);
+                } else {
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_CLIENT,
+                        "static: Merging existing event loop group with a new one bound to node %zu.",
+                        group_id);
+                    struct aws_event_loop_group *group_to_merge =
+                        aws_event_loop_group_new_default_pinned_to_cpu_group(allocator, cpus_to_use, group_id, NULL);
+                    struct aws_event_loop_group *temp = event_loop_group;
+                    event_loop_group = aws_event_loop_group_new_from_merge(allocator, temp, group_to_merge, NULL);
+                    aws_event_loop_group_release(group_to_merge);
+                    aws_event_loop_group_release(temp);
+                }
+            }
+        }
+    } else {
+        /* only use half of the physical cores. Notice that half the cores aren't even part of the discussion as they're
+         * hyper-threads. */
+        size_t cores_to_use = platform_info->cpu_group_info_array[0].cpus_in_group / 4;
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "static: not running on a NUMA architecture. Using platform defaults with %zu unpinned networking threads",
+            cores_to_use);
+        event_loop_group = aws_event_loop_group_new_default(allocator, cores_to_use, NULL);
+    }
+
+    size_t max_throughput = platform_info->max_throughput_gbps;
+    double number_of_vips = (double)max_throughput / s_throughput_per_vip_gbps;
+    size_t number_of_vips_uint = (size_t)ceil(number_of_vips);
+    AWS_LOGF_INFO(
+        AWS_LS_S3_CLIENT,
+        "static: creating bootstrap with resolver allowing %llu DNS entries",
+        (unsigned long long)number_of_vips_uint);
+    struct aws_host_resolver_default_options resolver_options = {
+        .el_group = event_loop_group,
+        .max_entries = number_of_vips_uint,
+    };
+
+    struct aws_host_resolver *resolver = aws_host_resolver_new_default(allocator, &resolver_options);
+
+    struct aws_client_bootstrap_options bootstrap_options = {
+        .host_resolver = resolver,
+        .event_loop_group = event_loop_group,
+    };
+
+    struct aws_client_bootstrap *bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+    aws_host_resolver_release(resolver);
+    aws_event_loop_group_release(event_loop_group);
+
+    return bootstrap;
+}
 
 /* Default factory function for creating a meta request. */
 static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
@@ -381,6 +510,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     /* Set up body streaming ELG */
     {
+
         uint16_t num_event_loops =
             (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
         uint16_t num_streaming_threads = num_event_loops;
@@ -394,13 +524,11 @@ struct aws_s3_client *aws_s3_client_new(
             .shutdown_callback_user_data = client,
         };
 
-        if (aws_get_cpu_group_count() > 1) {
-            client->body_streaming_elg = aws_event_loop_group_new_default_pinned_to_cpu_group(
-                client->allocator, num_streaming_threads, 1, &body_streaming_elg_shutdown_options);
-        } else {
-            client->body_streaming_elg = aws_event_loop_group_new_default(
-                client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
-        }
+        /* don't worry about NUMA, we've already clamped the network IO to cores with NICs. Now let the kernel
+         * figure out the rest. */
+        client->body_streaming_elg = aws_event_loop_group_new_default(
+            client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
+
         if (!client->body_streaming_elg) {
             /* Fail to create elg, we should fail the call */
             goto on_error;
