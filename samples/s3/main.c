@@ -139,22 +139,8 @@ int main(int argc, char *argv[]) {
     app_ctx.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&app_ctx.mutex);
 
-    /* event loop */
-    struct aws_event_loop_group *event_loop_group = aws_event_loop_group_new_default(allocator, 0, NULL);
+    app_ctx.client_bootstrap = aws_s3_client_bootstrap_new_from_environment_defaults(allocator);
 
-    /* resolver */
-    struct aws_host_resolver_default_options resolver_options = {
-        .el_group = event_loop_group,
-        .max_entries = 8,
-    };
-    struct aws_host_resolver *resolver = aws_host_resolver_new_default(allocator, &resolver_options);
-
-    /* client bootstrap */
-    struct aws_client_bootstrap_options bootstrap_options = {
-        .event_loop_group = event_loop_group,
-        .host_resolver = resolver,
-    };
-    app_ctx.client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
     if (app_ctx.client_bootstrap == NULL) {
         printf("ERROR initializing client bootstrap\n");
         return -1;
@@ -179,8 +165,6 @@ int main(int argc, char *argv[]) {
     aws_s3_client_release(app_ctx.client);
     aws_credentials_provider_release(app_ctx.credentials_provider);
     aws_client_bootstrap_release(app_ctx.client_bootstrap);
-    aws_host_resolver_release(resolver);
-    aws_event_loop_group_release(event_loop_group);
     aws_mutex_clean_up(&app_ctx.mutex);
     aws_s3_library_clean_up();
 
