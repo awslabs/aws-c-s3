@@ -204,13 +204,7 @@ static struct aws_s3_compute_platform_info s_trn1_n_platform_info = {
 };
 
 struct aws_byte_cursor s_trn1_socket1_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth1"),
-};
-
-static struct aws_byte_cursor s_trn1_socket2_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth3"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth4"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ens32"),
 };
 
 static struct aws_s3_cpu_group_info s_trn1_cpu_group_info_array[] = {
@@ -222,8 +216,8 @@ static struct aws_s3_cpu_group_info s_trn1_cpu_group_info_array[] = {
     },
     {
         .cpu_group = 1u,
-        .nic_name_array = s_trn1_socket2_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_trn1_socket2_array),
+        .nic_name_array = NULL,
+        .nic_name_array_length = 0,
         .cpus_in_group = 64,
     },
 };
