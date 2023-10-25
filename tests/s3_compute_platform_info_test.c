@@ -69,8 +69,9 @@ AWS_TEST_CASE(test_get_nonexistent_compute_platform_info, s_test_get_nonexistent
 static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocator *allocator, void *arg) {
     (void)arg;
     aws_s3_library_init(allocator);
-
-    const struct aws_s3_compute_platform_info *platform_info = aws_s3_current_compute_platform_info();
+    struct aws_s3_compute_platform_info_loader *loader = aws_s3_compute_platform_info_loader_new(allocator);
+    const struct aws_s3_compute_platform_info *platform_info =
+        aws_s3_get_compute_platform_info_for_current_environment(loader);
     ASSERT_NOT_NULL(platform_info);
     ASSERT_NOT_NULL(platform_info->cpu_group_info_array);
     ASSERT_TRUE(platform_info->cpu_group_info_array_length > 0);
