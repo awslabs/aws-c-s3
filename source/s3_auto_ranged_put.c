@@ -455,11 +455,12 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
         aws_s3_meta_request_lock_synced_data(meta_request);
         ++auto_ranged_put->synced_data.num_upload_requests_completed;
 
-        uint64_t current_timeout_ns = aws_timestamp_convert(
-            aws_atomic_load_int(&meta_request->upload_timeout_ms), AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+        size_t current_timeout_ms = aws_atomic_load_int(&meta_request->upload_timeout_ms);
+        uint64_t current_timeout_ns =
+            aws_timestamp_convert(current_timeout_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
         uint64_t updated_timeout_ns = 0;
         if (error_code == AWS_ERROR_HTTP_CHANNEL_THROUGHPUT_FAILURE) {
-            /* Upload part failed with timedout. */
+            /* Upload part failed with timedout. We want to keep the timeout rate around 0.1%. */
             ++auto_ranged_put->synced_data.num_upload_requests_timed_out;
             /* If timed out parts is larger than the 1% of requests we made, we double the timeout */
             size_t timeout_threshold = auto_ranged_put->synced_data.num_upload_requests_completed / 100;
@@ -467,15 +468,41 @@ static void s_update_upload_timeout(struct aws_s3_request *request, int error_co
                 /* Use the ceiling of 1% of made request as threshold */
                 ++timeout_threshold;
             }
+            size_t warning_threshold = auto_ranged_put->synced_data.num_upload_requests_completed / 1000;
+            if (auto_ranged_put->synced_data.num_upload_requests_completed % 1000 > 0) {
+                /* Use the ceiling of 1% of made request as threshold */
+                ++warning_threshold;
+            }
             if (auto_ranged_put->synced_data.num_upload_requests_timed_out > timeout_threshold) {
-                /* Timeout rate is way too high, add 1 secs. */
-                updated_timeout_ns = aws_add_u64_saturating(
-                    current_timeout_ns, aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Updating timeout, current is %zu.",
-                    (void *)meta_request,
-                    (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+                if (request->upload_timeout_ms + 1000 > current_timeout_ms) {
+                    /* Update the timeout by adding 1 secs. */
+                    updated_timeout_ns = aws_add_u64_saturating(
+                        current_timeout_ns, aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Updating timeout as the timeout rate is greater than 1 percent, current is %zu.",
+                        (void *)meta_request,
+                        (size_t)aws_timestamp_convert(
+                            updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+                }
+                /**
+                 * Restore the count, as we are larger than 1%.
+                 */
+                auto_ranged_put->synced_data.num_upload_requests_completed = 0;
+                auto_ranged_put->synced_data.num_upload_requests_timed_out = 0;
+            } else if (auto_ranged_put->synced_data.num_upload_requests_timed_out > warning_threshold) {
+                if (request->upload_timeout_ms + 100 > current_timeout_ms) {
+                    /* Only update the timeout by adding 100 ms if the request was made with a longer time out. */
+                    updated_timeout_ns = aws_add_u64_saturating(
+                        current_timeout_ns,
+                        aws_timestamp_convert(100, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Updating timeout as the timeout rate is greater than 0.1 percent, current is %zu.",
+                        (void *)meta_request,
+                        (size_t)aws_timestamp_convert(
+                            updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+                }
             }
         } else if (error_code == AWS_ERROR_SUCCESS) {
             AWS_ASSERT(request->send_data.metrics != NULL);

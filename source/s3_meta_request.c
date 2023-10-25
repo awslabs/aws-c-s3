@@ -879,6 +879,7 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     options.on_complete = s_s3_meta_request_stream_complete;
     if (s_s3_request_is_upload_part(request)) {
         options.idle_timeout_ms = aws_atomic_load_int(&meta_request->upload_timeout_ms);
+        request->upload_timeout_ms = options.idle_timeout_ms;
     }
 
     struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
