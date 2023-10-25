@@ -276,8 +276,7 @@ void s_add_platform_info_to_table(
         info->has_recommended_configuration = existing->has_recommended_configuration;
         /* always prefer a pre-known bandwidth, as we estimate low on EC2 by default for safety. */
         info->max_throughput_gbps = existing->max_throughput_gbps;
-    } else {
-        if (info->max_throughput_gbps == 0) {
+    } else if (info->max_throughput_gbps == 0) {
             size_t total_cpus = aws_system_environment_get_processor_count(loader->current_env);
             /* go ahead and set a default. */
             info->max_throughput_gbps = 5;
@@ -323,7 +322,6 @@ void s_add_platform_info_to_table(
                     (void *)loader,
                     loader->lock_data.current_env_platform_info.max_throughput_gbps,
                     AWS_BYTE_CURSOR_PRI(loader->lock_data.current_env_platform_info.instance_type));
-            }
         }
         AWS_FATAL_ASSERT(
             !aws_hash_table_put(
