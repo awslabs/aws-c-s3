@@ -248,7 +248,9 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platfo
     AWS_ZERO_STRUCT(return_cur);
 
 return_instance_and_unlock:
-    return_cur = aws_byte_cursor_from_string(loader->lock_data.detected_instance_type);
+    if (loader->lock_data.detected_instance_type != NULL) {
+        return_cur = aws_byte_cursor_from_string(loader->lock_data.detected_instance_type);
+    }
     aws_mutex_unlock(&loader->lock_data.lock);
 
     return return_cur;
