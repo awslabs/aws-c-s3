@@ -321,7 +321,9 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
 
     for (size_t i = 0; i < loader->lock_data.current_env_platform_info.cpu_group_info_array_length; ++i) {
         struct aws_s3_cpu_group_info *group_info = &loader->lock_data.current_env_platform_info.cpu_group_info_array[i];
+
         group_info->cpu_group = (uint16_t)i;
+
         group_info->cpus_in_group = aws_get_cpu_count_for_group(i);
         /* when we have the ability to detect NIC affinity add that here. */
     }
