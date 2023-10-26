@@ -258,19 +258,33 @@ void s_add_platform_info_to_table(
          * The other data should be identical and we don't want to add complications to the memory model.
          * You're guaranteed only one instance of an instance type's info, the initial load is static memory */
         struct aws_s3_compute_platform_info *existing = platform_info_element->value;
-        AWS_FATAL_ASSERT(info->cpu_group_info_array_length == existing->cpu_group_info_array_length);
+        /* only do this if we were able to actually load numa info and it's the same as the pre-computed variants. */
+        if (info->cpu_group_info_array_length == existing->cpu_group_info_array_length) {
+            for (size_t i = 0; i < existing->cpu_group_info_array_length; ++i) {
 
-        for (size_t i = 0; i < existing->cpu_group_info_array_length; ++i) {
-            if (info->cpu_group_info_array[i].nic_name_array_length) {
-                existing->cpu_group_info_array[i].nic_name_array = info->cpu_group_info_array[i].nic_name_array;
-
-                /* intentionally not changing `existing->cpu_group_info_array[i].nic_name_array` value because we
-                 * restrict the amount of known NICs to accommodate
-                 * some hardware weirdness, so we don't want to override any such restrictions. We do... however,
-                 * want to steal the names, and we only need them to be on that node: which they will be, and instead
-                 * are mutating the input to reflect the explicit configuration. */
-                info->cpu_group_info_array[i].nic_name_array_length =
-                    existing->cpu_group_info_array[i].nic_name_array_length;
+                /* if we detected the same amount or more nics on a given node as the existing config, only copy over
+                 * the names up to the existing NIC count. This is because the pre-made configs sometimes use less
+                 * NICs than the system reports. */
+                if (info->cpu_group_info_array[i].nic_name_array_length >= existing->cpu_group_info_array[i].nic_name_array_length) {
+                    existing->cpu_group_info_array[i].nic_name_array = info->cpu_group_info_array[i].nic_name_array;
+                    /* use the existing NIC count */
+                    info->cpu_group_info_array[i].nic_name_array_length =
+                        existing->cpu_group_info_array[i].nic_name_array_length;
+                /* in this case, ignore what we detected and use the pre-configured config. */
+                } else {
+                    size_t existing_len = existing->cpu_group_info_array[i].nic_name_array_length;
+                    /* info's nic arrays are dynamically allocated, and cleaned up at shutdown, so just reallocate
+                     * them and copy. */
+                    if (info->cpu_group_info_array[i].nic_name_array == NULL) {
+                        info->cpu_group_info_array[i].nic_name_array =
+                            aws_mem_calloc(loader->allocator, existing_len, sizeof(struct aws_byte_cursor));
+                    } else {
+                        aws_mem_release(loader->allocator, info->cpu_group_info_array[i].nic_name_array);
+                        info->cpu_group_info_array[i].nic_name_array =
+                            aws_mem_calloc(loader->allocator, existing_len, sizeof(struct aws_byte_cursor));
+                    }
+                    memcpy(info->cpu_group_info_array[i].nic_name_array, existing->cpu_group_info_array[i].nic_name_array, existing_len);
+                }
             }
         }
         info->has_recommended_configuration = existing->has_recommended_configuration;
@@ -296,11 +310,12 @@ void s_add_platform_info_to_table(
                     bandwidth_factor = 25;
                 }
 
-                /* these rules come from EC2's doc pages and we will only do this on EC2. It's pegged to the bottom range for the moment, so it's a best safe guess for the instance type based purely on CPU info. see:
-             * https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-network-bandwidth.html */
+                /* these rules come from EC2's doc pages and we will only do this on EC2. It's pegged to the bottom range
+                 * for the moment, so it's a best safe guess for the instance type based purely on CPU info. see:
+                 * https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-network-bandwidth.html */
 
                 /* the current rule we're using for in-region, multi-flow traffic is 16 CPUs per 5Gbps.
-             * 16CPU machines are usually "up-to" 10 Gbps, so just let them be 5. */
+                 * 16CPU machines are usually "up-to" 10 Gbps, so just let them be 5. */
                 if (total_cpus <= 16) {
                     loader->lock_data.current_env_platform_info.max_throughput_gbps = bandwidth_factor;
                 } else {
@@ -383,6 +398,7 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
     }
 
     size_t network_card_count = aws_system_environment_get_network_card_count(loader->current_env);
+    /* this string array is attached to loader->current_env and does not need to be freed. */
     const struct aws_string **network_cards = aws_system_environment_get_network_cards(loader->current_env);
 
     for (size_t i = 0; i < network_card_count; ++i) {
