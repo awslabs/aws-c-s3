@@ -104,8 +104,7 @@ void aws_s3_library_clean_up(void) {
     }
 
     s_library_initialized = false;
-    aws_s3_compute_platform_info_loader_release(s_loader);
-    s_loader = NULL;
+    s_loader = aws_s3_compute_platform_info_loader_release(s_loader);
     aws_thread_join_all_managed();
 
     aws_unregister_log_subject_info_list(&s_s3_log_subject_list);

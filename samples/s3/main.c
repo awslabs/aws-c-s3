@@ -21,19 +21,18 @@ int s3_ls_main(int argc, char *const argv[], const char *command_name, void *use
 int s3_cp_main(int argc, char *const argv[], const char *command_name, void *user_data);
 int s3_compute_platform_info_main(int argc, char *const argv[], const char *command_name, void *user_data);
 
-static struct aws_cli_subcommand_dispatch s_dispatch_table[] = {
-    {
-        .command_name = "ls",
-        .subcommand_fn = s3_ls_main,
-    },
-    {
-        .command_name = "cp",
-        .subcommand_fn = s3_cp_main,
-    },
-    {
-        .command_name = "platform-info",
-        .subcommand_fn = s3_compute_platform_info_main,
-    }};
+static struct aws_cli_subcommand_dispatch s_dispatch_table[] = {{
+                                                                    .command_name = "ls",
+                                                                    .subcommand_fn = s3_ls_main,
+                                                                },
+                                                                {
+                                                                    .command_name = "cp",
+                                                                    .subcommand_fn = s3_cp_main,
+                                                                },
+                                                                {
+                                                                    .command_name = "platform-info",
+                                                                    .subcommand_fn = s3_compute_platform_info_main,
+                                                                }};
 
 static void s_usage(int exit_code) {
 
