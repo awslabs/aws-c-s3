@@ -271,29 +271,93 @@ void s_add_platform_info_to_table(
          * The other data should be identical and we don't want to add complications to the memory model.
          * You're guaranteed only one instance of an instance type's info, the initial load is static memory */
         struct aws_s3_compute_platform_info *existing = platform_info_element->value;
-        AWS_FATAL_ASSERT(info->cpu_group_info_array_length == existing->cpu_group_info_array_length);
+        /* only do this if we were able to actually load numa info and it's the same as the pre-computed variants. */
+        if (info->cpu_group_info_array_length == existing->cpu_group_info_array_length) {
+            for (size_t i = 0; i < existing->cpu_group_info_array_length; ++i) {
 
-        for (size_t i = 0; i < existing->cpu_group_info_array_length; ++i) {
-            if (info->cpu_group_info_array[i].nic_name_array_length) {
-                existing->cpu_group_info_array[i].nic_name_array = info->cpu_group_info_array[i].nic_name_array;
-
-                /* intentionally not changing `existing->cpu_group_info_array[i].nic_name_array` value because we
-                 * restrict the amount of known NICs to accommodate
-                 * some hardware weirdness, so we don't want to override any such restrictions. We do... however,
-                 * want to steal the names, and we only need them to be on that node: which they will be, and instead
-                 * are mutating the input to reflect the explicit configuration. */
-                info->cpu_group_info_array[i].nic_name_array_length =
-                    existing->cpu_group_info_array[i].nic_name_array_length;
+                /* if we detected the same amount or more nics on a given node as the existing config, only copy over
+                 * the names up to the existing NIC count. This is because the pre-made configs sometimes use less
+                 * NICs than the system reports. */
+                if (info->cpu_group_info_array[i].nic_name_array_length >=
+                    existing->cpu_group_info_array[i].nic_name_array_length) {
+                    existing->cpu_group_info_array[i].nic_name_array = info->cpu_group_info_array[i].nic_name_array;
+                    /* use the existing NIC count */
+                    info->cpu_group_info_array[i].nic_name_array_length =
+                        existing->cpu_group_info_array[i].nic_name_array_length;
+                    /* in this case, ignore what we detected and use the pre-configured config. */
+                } else {
+                    size_t existing_len = existing->cpu_group_info_array[i].nic_name_array_length;
+                    /* info's nic arrays are dynamically allocated, and cleaned up at shutdown, so just reallocate
+                     * them and copy. */
+                    if (info->cpu_group_info_array[i].nic_name_array == NULL) {
+                        info->cpu_group_info_array[i].nic_name_array =
+                            aws_mem_calloc(loader->allocator, existing_len, sizeof(struct aws_byte_cursor));
+                    } else {
+                        aws_mem_release(loader->allocator, info->cpu_group_info_array[i].nic_name_array);
+                        info->cpu_group_info_array[i].nic_name_array =
+                            aws_mem_calloc(loader->allocator, existing_len, sizeof(struct aws_byte_cursor));
+                    }
+                    memcpy(
+                        info->cpu_group_info_array[i].nic_name_array,
+                        existing->cpu_group_info_array[i].nic_name_array,
+                        existing_len);
+                }
             }
         }
         info->has_recommended_configuration = existing->has_recommended_configuration;
+        /* always prefer a pre-known bandwidth, as we estimate low on EC2 by default for safety. */
         info->max_throughput_gbps = existing->max_throughput_gbps;
-    } else {
-        AWS_FATAL_ASSERT(
-            !aws_hash_table_put(
-                &loader->lock_data.compute_platform_info_table, &info->instance_type, (void *)info, NULL) &&
-            "hash table put failed!");
+    } else if (info->max_throughput_gbps == 0) {
+        size_t total_cpus = aws_system_environment_get_processor_count(loader->current_env);
+        /* go ahead and set a default. */
+        info->max_throughput_gbps = 5;
+
+        if (aws_s3_is_running_on_ec2_nitro(loader)) {
+            size_t bandwidth_factor = 4;
+
+            /* check if we're on a nitro networking optimized instance. if we are we can use a factor of 25 */
+            struct aws_byte_cursor nitro_name_id = aws_byte_cursor_from_c_str("n.");
+            struct aws_byte_cursor output_var_not_used;
+            AWS_ZERO_STRUCT(output_var_not_used);
+
+            if (aws_byte_cursor_find_exact(
+                    &loader->lock_data.current_env_platform_info.instance_type, &nitro_name_id, &output_var_not_used) ==
+                AWS_OP_SUCCESS) {
+                bandwidth_factor = 25;
+            }
+
+            /* these rules come from EC2's doc pages and we will only do this on EC2. It's pegged to the bottom range
+             * for the moment, so it's a best safe guess for the instance type based purely on CPU info. see:
+             * https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-network-bandwidth.html */
+
+            /* the current rule we're using for in-region, multi-flow traffic is 16 CPUs per 5Gbps.
+             * 16CPU machines are usually "up-to" 10 Gbps, so just let them be 5. */
+            if (total_cpus <= 16) {
+                loader->lock_data.current_env_platform_info.max_throughput_gbps = bandwidth_factor;
+            } else {
+                size_t cpus_to_use_for_calc = total_cpus;
+                /* crazy things start happening past this point. */
+                if (total_cpus > 96) {
+                    cpus_to_use_for_calc = 96;
+                }
+                size_t estimated_bandwidth =
+                    (size_t)(((double)cpus_to_use_for_calc / (double)16) * (double)bandwidth_factor);
+                loader->lock_data.current_env_platform_info.max_throughput_gbps = estimated_bandwidth;
+                info->max_throughput_gbps = estimated_bandwidth;
+            }
+
+            AWS_LOGF_INFO(
+                AWS_LS_S3_GENERAL,
+                "id=%p: calculated %hu Gbps for target bandwidth based on Amazon EC2 instance type of " PRInSTR ".",
+                (void *)loader,
+                loader->lock_data.current_env_platform_info.max_throughput_gbps,
+                AWS_BYTE_CURSOR_PRI(loader->lock_data.current_env_platform_info.instance_type));
+        }
     }
+
+    AWS_FATAL_ASSERT(
+        !aws_hash_table_put(&loader->lock_data.compute_platform_info_table, &info->instance_type, (void *)info, NULL) &&
+        "hash table put failed!");
 }
 
 static void s_destroy_loader(void *arg) {
