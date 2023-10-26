@@ -1,5 +1,5 @@
-#ifndef AWS_S3_S3_PLATFORM_INFO_H
-#define AWS_S3_S3_PLATFORM_INFO_H
+#ifndef AWS_S3_S3_COMPUTE_PLATFORM_INFO_H
+#define AWS_S3_S3_COMPUTE_PLATFORM_INFO_H
 /**
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
@@ -110,4 +110,4 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platfo
 
 AWS_EXTERN_C_END
 
-#endif /* AWS_S3_S3_PLATFORM_INFO_H */
+#endif /* AWS_S3_S3_COMPUTE_PLATFORM_INFO_H */

@@ -4,8 +4,8 @@
  */
 
 #include <aws/s3/s3.h>
+#include <aws/s3/s3_compute_platform_info.h>
 
-#include "aws/s3/s3_platform_info.h"
 #include <aws/auth/auth.h>
 #include <aws/common/error.h>
 #include <aws/common/hash_table.h>
