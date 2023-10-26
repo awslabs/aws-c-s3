@@ -65,6 +65,9 @@ AWS_EXTERN_C_BEGIN
 AWS_S3_API
 void aws_s3_library_init(struct aws_allocator *allocator);
 
+AWS_S3_API
+const struct aws_s3_compute_platform_info *aws_s3_current_compute_platform_info(void);
+
 /**
  * Shuts down the internal datastructures used by aws-c-s3.
  */

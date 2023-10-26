@@ -71,6 +71,7 @@ static struct aws_log_subject_info_list s_s3_log_subject_list = {
 
 static bool s_library_initialized = false;
 static struct aws_allocator *s_library_allocator = NULL;
+static struct aws_s3_compute_platform_info_loader *s_loader;
 
 void aws_s3_library_init(struct aws_allocator *allocator) {
     if (s_library_initialized) {
@@ -88,8 +89,13 @@ void aws_s3_library_init(struct aws_allocator *allocator) {
 
     aws_register_error_info(&s_error_list);
     aws_register_log_subject_info_list(&s_s3_log_subject_list);
+    s_loader = aws_s3_compute_platform_info_loader_new(allocator);
 
     s_library_initialized = true;
+}
+
+const struct aws_s3_compute_platform_info *aws_s3_current_compute_platform_info(void) {
+    return aws_s3_get_compute_platform_info_for_current_environment(s_loader);
 }
 
 void aws_s3_library_clean_up(void) {
@@ -98,6 +104,8 @@ void aws_s3_library_clean_up(void) {
     }
 
     s_library_initialized = false;
+    aws_s3_compute_platform_info_loader_release(s_loader);
+    s_loader = NULL;
     aws_thread_join_all_managed();
 
     aws_unregister_log_subject_info_list(&s_s3_log_subject_list);

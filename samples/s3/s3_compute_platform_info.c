@@ -66,8 +66,7 @@ int s3_compute_platform_info_main(int argc, char *argv[], const char *command_na
         exit(-1);
     }
 
-    const struct aws_s3_compute_platform_info *platform_info =
-        aws_s3_get_compute_platform_info_for_current_environment(loader);
+    const struct aws_s3_compute_platform_info *platform_info = aws_s3_current_compute_platform_info();
 
     if (compute_platform_app_ctx.instance_type.len) {
         platform_info =
