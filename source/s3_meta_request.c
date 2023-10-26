@@ -1779,6 +1779,12 @@ void aws_s3_meta_request_result_setup(
 
             aws_byte_buf_init_copy(
                 result->error_response_body, meta_request->allocator, &request->send_data.response_body);
+        } else if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT) {
+            result->error_response_body = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
+            aws_byte_buf_init_copy_from_cursor(
+                result->error_response_body,
+                meta_request->allocator,
+                aws_byte_cursor_from_c_str(aws_http_status_text(response_status)));
         }
     }
 
