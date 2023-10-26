@@ -98,6 +98,10 @@ const struct aws_s3_compute_platform_info *aws_s3_current_compute_platform_info(
     return aws_s3_get_compute_platform_info_for_current_environment(s_loader);
 }
 
+bool aws_s3_current_platform_has_recommended_configuration(void) {
+    return aws_s3_get_compute_platform_info_for_current_environment(s_loader)->has_recommended_configuration;
+}
+
 void aws_s3_library_clean_up(void) {
     if (!s_library_initialized) {
         return;

@@ -65,14 +65,23 @@ AWS_EXTERN_C_BEGIN
 AWS_S3_API
 void aws_s3_library_init(struct aws_allocator *allocator);
 
-AWS_S3_API
-const struct aws_s3_compute_platform_info *aws_s3_current_compute_platform_info(void);
-
 /**
  * Shuts down the internal datastructures used by aws-c-s3.
  */
 AWS_S3_API
 void aws_s3_library_clean_up(void);
+
+/*
+ * Returns the aws_s3_compute_platform_info for current platform
+ */
+AWS_S3_API
+const struct aws_s3_compute_platform_info *aws_s3_current_compute_platform_info(void);
+
+/*
+ * Returns whether the current platform has a preconfigured recommended S3 configuration.
+ */
+AWS_S3_API
+bool aws_s3_current_platform_has_recommended_configuration(void);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
