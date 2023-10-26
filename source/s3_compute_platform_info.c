@@ -368,7 +368,6 @@ struct imds_callback_info {
     struct aws_string *instance_type;
     struct aws_condition_variable c_var;
     int error_code;
-    struct aws_s3_compute_platform_info_loader *loader;
     bool shutdown_completed;
     struct aws_mutex mutex;
 };
@@ -397,9 +396,6 @@ static void s_imds_client_on_get_instance_info_callback(
         info->error_code = error_code;
     } else {
         info->instance_type = aws_string_new_from_cursor(info->allocator, &instance_info->instance_type);
-        info->loader->lock_data.current_env_platform_info.instance_type =
-            aws_byte_cursor_from_string(info->instance_type);
-        s_add_platform_info_to_table(info->loader, &info->loader->lock_data.current_env_platform_info);
     }
     aws_mutex_unlock(&info->mutex);
     aws_condition_variable_notify_all(&info->c_var);
@@ -412,6 +408,9 @@ static bool s_completion_predicate(void *arg) {
 
 struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platform_info_loader *loader) {
     aws_mutex_lock(&loader->lock_data.lock);
+    struct aws_byte_cursor return_cur;
+    AWS_ZERO_STRUCT(return_cur);
+
     if (loader->lock_data.detected_instance_type) {
         AWS_LOGF_TRACE(
             AWS_LS_S3_CLIENT,
@@ -455,7 +454,6 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platfo
             .mutex = AWS_MUTEX_INIT,
             .c_var = AWS_CONDITION_VARIABLE_INIT,
             .allocator = loader->allocator,
-            .loader = loader,
         };
 
         struct aws_event_loop_group *el_group = NULL;
@@ -528,6 +526,9 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platfo
 
         if (callback_info.instance_type) {
             loader->lock_data.detected_instance_type = callback_info.instance_type;
+            loader->lock_data.current_env_platform_info.instance_type =
+                aws_byte_cursor_from_string(callback_info.instance_type);
+            s_add_platform_info_to_table(loader, &loader->lock_data.current_env_platform_info);
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT,
                 "id=%p: Determined instance type to be %s, from IMDS. Caching.",
@@ -548,9 +549,6 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platfo
             aws_event_loop_group_release(el_group);
         }
     }
-
-    struct aws_byte_cursor return_cur;
-    AWS_ZERO_STRUCT(return_cur);
 
 return_instance_and_unlock:
     return_cur = loader->lock_data.current_env_platform_info.instance_type;
