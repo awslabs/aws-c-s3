@@ -73,15 +73,10 @@ void aws_s3_library_clean_up(void);
 
 /*
  * Returns the aws_s3_compute_platform_info for current platform
+ * NOTE: THIS API IS EXPERIMENTAL AND UNSTABLE
  */
 AWS_S3_API
 const struct aws_s3_compute_platform_info *aws_s3_current_compute_platform_info(void);
-
-/*
- * Returns whether the current platform has a preconfigured recommended S3 configuration.
- */
-AWS_S3_API
-bool aws_s3_current_platform_has_recommended_configuration(void);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
