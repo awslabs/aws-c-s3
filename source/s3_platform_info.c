@@ -340,8 +340,8 @@ void s_add_platform_info_to_table(
                 if (total_cpus > 96) {
                     cpus_to_use_for_calc = 96;
                 }
-                size_t estimated_bandwidth =
-                    (size_t)(((double)cpus_to_use_for_calc / (double)16) * (double)bandwidth_factor);
+                uint16_t estimated_bandwidth =
+                    (uint16_t)(((double)cpus_to_use_for_calc / (double)16) * (double)bandwidth_factor);
                 loader->lock_data.current_env_platform_info.max_throughput_gbps = estimated_bandwidth;
                 info->max_throughput_gbps = estimated_bandwidth;
             }
