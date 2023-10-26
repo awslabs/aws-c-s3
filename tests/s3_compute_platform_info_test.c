@@ -76,6 +76,7 @@ static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocat
     ASSERT_TRUE(platform_info->cpu_group_info_array_length > 0);
 
     if (platform_info->instance_type.len) {
+        struct aws_s3_compute_platform_info_loader *loader = aws_s3_compute_platform_info_loader_new(allocator);
         const struct aws_s3_compute_platform_info *by_name_info =
             aws_s3_get_compute_platform_info_for_instance_type(loader, platform_info->instance_type);
         if (by_name_info) {
@@ -87,8 +88,9 @@ static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocat
             ASSERT_UINT_EQUALS(platform_info->cpu_group_info_array_length, by_name_info->cpu_group_info_array_length);
             ASSERT_UINT_EQUALS(platform_info->max_throughput_gbps, by_name_info->max_throughput_gbps);
         }
+
+        aws_s3_compute_platform_info_loader_release(loader);
     }
-    aws_s3_compute_platform_info_loader_release(loader);
 
     aws_s3_library_clean_up();
     return AWS_OP_SUCCESS;

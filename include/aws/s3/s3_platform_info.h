@@ -10,7 +10,7 @@ struct aws_s3_cpu_group_info {
     /* group index, this usually refers to a particular numa node */
     uint16_t cpu_group;
     /* array of network devices on this node */
-    const struct aws_byte_cursor *nic_name_array;
+    struct aws_byte_cursor *nic_name_array;
     /* length of network devices array */
     size_t nic_name_array_length;
     size_t cpus_in_group;
