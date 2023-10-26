@@ -4225,6 +4225,38 @@ static int s_test_s3_get_object_fail_headers_callback(struct aws_allocator *allo
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_fail_key_does_not_exist, s_test_s3_get_object_fail_key_does_not_exist)
+static int s_test_s3_get_object_fail_key_does_not_exist(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/does_not_exist"),
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+    ASSERT_INT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
+    struct aws_byte_cursor expected_error = aws_byte_cursor_from_c_str("Not Found");
+
+    ASSERT_BIN_ARRAYS_EQUALS(
+        meta_request_test_results.error_response_body.buffer,
+        meta_request_test_results.error_response_body.len,
+        expected_error.ptr,
+        expected_error.len);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_get_object_fail_body_callback, s_test_s3_get_object_fail_body_callback)
 static int s_test_s3_get_object_fail_body_callback(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
