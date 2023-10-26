@@ -4,6 +4,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
+
+/**
+ * NOTE: THIS IS AN EXPERIMENTAL AND UNSTABLE API
+ */
 #include <aws/s3/s3.h>
 
 struct aws_s3_cpu_group_info {
