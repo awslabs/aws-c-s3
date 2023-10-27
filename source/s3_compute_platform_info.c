@@ -249,9 +249,7 @@ struct aws_s3_platform_info_loader {
     struct aws_system_environment *current_env;
 };
 
-void s_add_platform_info_to_table(
-    struct aws_s3_platform_info_loader *loader,
-    struct aws_s3_platform_info *info) {
+void s_add_platform_info_to_table(struct aws_s3_platform_info_loader *loader, struct aws_s3_platform_info *info) {
     AWS_PRECONDITION(info->instance_type.len > 0);
     AWS_LOGF_TRACE(
         AWS_LS_S3_GENERAL,
@@ -351,14 +349,12 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
     return loader;
 }
 
-struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_acquire(
-    struct aws_s3_platform_info_loader *loader) {
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_acquire(struct aws_s3_platform_info_loader *loader) {
     aws_ref_count_acquire(&loader->ref_count);
     return loader;
 }
 
-struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_release(
-    struct aws_s3_platform_info_loader *loader) {
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_release(struct aws_s3_platform_info_loader *loader) {
     if (loader) {
         aws_ref_count_release(&loader->ref_count);
     }
