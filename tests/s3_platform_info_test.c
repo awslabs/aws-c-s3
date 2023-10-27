@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/s3/private/s3_platform_info.h>
 #include <aws/s3/s3.h>
-#include <aws/s3/s3_platform_info.h>
 
 #include <aws/testing/aws_test_harness.h>
 

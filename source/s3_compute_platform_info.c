@@ -12,7 +12,7 @@
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
-#include <aws/s3/s3_platform_info.h>
+#include <aws/s3/private/s3_platform_info.h>
 
 /**** Configuration info for the c5n.18xlarge *****/
 static struct aws_byte_cursor s_c5n_nic_array[] = {AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0")};

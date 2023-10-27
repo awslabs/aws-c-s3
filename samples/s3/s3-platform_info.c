@@ -60,25 +60,8 @@ int s3_compute_platform_info_main(int argc, char *argv[], const char *command_na
 
     s_parse_options(argc, argv, &compute_platform_app_ctx);
 
-    struct aws_s3_compute_platform_info_loader *loader = aws_s3_compute_platform_info_loader_new(app_ctx->allocator);
-    if (!loader) {
-        fprintf(stderr, "failed to load configuration info with error %s", aws_error_debug_str(aws_last_error()));
-        exit(-1);
-    }
-
     const struct aws_s3_platform_info *platform_info = aws_s3_get_current_platform_info();
 
-    if (compute_platform_app_ctx.instance_type.len) {
-        platform_info =
-            aws_s3_get_compute_platform_info_for_instance_type(loader, compute_platform_app_ctx.instance_type);
-        if (!platform_info) {
-            fprintf(
-                stderr,
-                "unknown instance type \"" PRInSTR "\"",
-                AWS_BYTE_CURSOR_PRI(compute_platform_app_ctx.instance_type));
-            exit(-1);
-        }
-    }
     fprintf(stdout, "{\n");
     fprintf(stdout, "\t'instance_type': '" PRInSTR "',\n", AWS_BYTE_CURSOR_PRI(platform_info->instance_type));
     fprintf(stdout, "\t'max_throughput_gbps': %d,\n", (int)platform_info->max_throughput_gbps);

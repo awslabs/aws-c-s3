@@ -76,6 +76,7 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_instance_type(
  * Retrieves the  metadata for the current environment. If EC2 instance type is unknown, or it is not an EC2 instance at
  * all, this value will still include the information about the system that could be determined. This value will never
  * be NULL.
+ * This API is not thread safe.
  */
 AWS_S3_API
 const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environment(
