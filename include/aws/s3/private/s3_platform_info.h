@@ -5,9 +5,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-/**
- * NOTE: THIS IS AN EXPERIMENTAL AND UNSTABLE API
- */
 #include <aws/s3/s3.h>
 
 struct aws_s3_platform_info_loader;
