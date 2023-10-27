@@ -54,7 +54,7 @@ enum aws_s3_subject {
     AWS_LS_S3_LAST = AWS_LOG_SUBJECT_END_RANGE(AWS_C_S3_PACKAGE_ID)
 };
 
-struct aws_s3_compute_platform_info;
+struct aws_s3_platform_info;
 
 AWS_EXTERN_C_BEGIN
 
@@ -72,11 +72,11 @@ AWS_S3_API
 void aws_s3_library_clean_up(void);
 
 /*
- * Returns the aws_s3_compute_platform_info for current platform
+ * Returns the aws_s3_platform_info for current platform
  * NOTE: THIS API IS EXPERIMENTAL AND UNSTABLE
  */
 AWS_S3_API
-const struct aws_s3_compute_platform_info *aws_s3_current_compute_platform_info(void);
+const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

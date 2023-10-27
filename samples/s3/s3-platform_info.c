@@ -4,7 +4,7 @@
  */
 
 #include <aws/common/command_line_parser.h>
-#include <aws/s3/s3_compute_platform_info.h>
+#include <aws/s3/s3_platform_info.h>
 
 #include "app_ctx.h"
 
@@ -66,7 +66,7 @@ int s3_compute_platform_info_main(int argc, char *argv[], const char *command_na
         exit(-1);
     }
 
-    const struct aws_s3_compute_platform_info *platform_info = aws_s3_current_compute_platform_info();
+    const struct aws_s3_platform_info *platform_info = aws_s3_get_current_platform_info();
 
     if (compute_platform_app_ctx.instance_type.len) {
         platform_info =

@@ -188,8 +188,8 @@ add_test_case(test_s3_mpu_get_part_size_and_num_parts)
 add_test_case(test_s3_aws_xml_get_body_at_path)
 add_test_case(test_add_user_agent_header)
 
-add_test_case(test_get_existing_compute_platform_info)
-add_test_case(test_get_nonexistent_compute_platform_info)
+add_test_case(test_get_existing_platform_info)
+add_test_case(test_get_nonexistent_platform_info)
 add_net_test_case(load_platform_info_from_global_state_sanity_test)
 
 add_net_test_case(sha1_nist_test_case_1)

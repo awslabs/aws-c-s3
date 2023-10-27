@@ -1,5 +1,5 @@
-#ifndef AWS_S3_S3_COMPUTE_PLATFORM_INFO_H
-#define AWS_S3_S3_COMPUTE_PLATFORM_INFO_H
+#ifndef AWS_S3_S3_PLATFORM_INFO_H
+#define AWS_S3_S3_PLATFORM_INFO_H
 /**
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
@@ -26,7 +26,7 @@ struct aws_s3_cpu_group_info {
 #    pragma warning(disable : 5027) /* move assignment operator was implicitly defined as deleted */
 #endif
 
-struct aws_s3_compute_platform_info {
+struct aws_s3_platform_info {
     /* name of the instance-type: example c5n.18xlarge */
     struct aws_byte_cursor instance_type;
     /* max throughput for this instance type, in gigabits per second */
@@ -45,7 +45,7 @@ struct aws_s3_compute_platform_info {
 #    pragma warning(pop)
 #endif
 
-struct aws_s3_compute_platform_info_loader;
+struct aws_s3_platform_info_loader;
 
 AWS_EXTERN_C_BEGIN
 
@@ -56,23 +56,23 @@ AWS_EXTERN_C_BEGIN
  * Returns NULL if an unrecoverable error occurs.
  */
 AWS_S3_API
-struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_new(struct aws_allocator *allocator);
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_allocator *allocator);
 
 AWS_S3_API
-struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_acquire(
-    struct aws_s3_compute_platform_info_loader *loader);
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_acquire(
+    struct aws_s3_platform_info_loader *loader);
 
 AWS_S3_API
-struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_release(
-    struct aws_s3_compute_platform_info_loader *loader);
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_release(
+    struct aws_s3_platform_info_loader *loader);
 
 /**
  * Retrieves the pre-configured metadata for a given ec2 instance type. If no such pre-configuration exists, returns
  * NULL.
  */
 AWS_S3_API
-const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instance_type(
-    struct aws_s3_compute_platform_info_loader *loader,
+const struct aws_s3_platform_info *aws_s3_get_platform_info_for_instance_type(
+    struct aws_s3_platform_info_loader *loader,
     struct aws_byte_cursor instance_type_name);
 
 /**
@@ -81,14 +81,14 @@ const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_
  * be NULL.
  */
 AWS_S3_API
-const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_current_environment(
-    struct aws_s3_compute_platform_info_loader *loader);
+const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environment(
+    struct aws_s3_platform_info_loader *loader);
 
 /**
  * Returns true if the current process is running on an Amazon EC2 instance powered by Nitro.
  */
 AWS_S3_API
-bool aws_s3_is_running_on_ec2_nitro(struct aws_s3_compute_platform_info_loader *loader);
+bool aws_s3_is_running_on_ec2_nitro(struct aws_s3_platform_info_loader *loader);
 
 /**
  * Returns an EC2 instance type assuming this executable is running on Amazon EC2 powered by nitro.
@@ -106,8 +106,8 @@ bool aws_s3_is_running_on_ec2_nitro(struct aws_s3_compute_platform_info_loader *
  * @return byte_cursor containing the instance type. If this is empty, the instance type could not be determined.
  */
 AWS_S3_API
-struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platform_info_loader *loader);
+struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_loader *loader);
 
 AWS_EXTERN_C_END
 
-#endif /* AWS_S3_S3_COMPUTE_PLATFORM_INFO_H */
+#endif /* AWS_S3_S3_PLATFORM_INFO_H */

@@ -12,7 +12,7 @@
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
 #include <aws/io/host_resolver.h>
-#include <aws/s3/s3_compute_platform_info.h>
+#include <aws/s3/s3_platform_info.h>
 
 /**** Configuration info for the c5n.18xlarge *****/
 static struct aws_byte_cursor s_c5n_nic_array[] = {AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0")};
@@ -32,7 +32,7 @@ static struct aws_s3_cpu_group_info s_c5n_18xlarge_cpu_group_info_array[] = {
     },
 };
 
-static struct aws_s3_compute_platform_info s_c5n_18xlarge_platform_info = {
+static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.18xlarge"),
     .max_throughput_gbps = 100u,
     .cpu_group_info_array = s_c5n_18xlarge_cpu_group_info_array,
@@ -41,7 +41,7 @@ static struct aws_s3_compute_platform_info s_c5n_18xlarge_platform_info = {
     .has_recommended_configuration = false,
 };
 
-static struct aws_s3_compute_platform_info s_c5n_metal_platform_info = {
+static struct aws_s3_platform_info s_c5n_metal_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.metal"),
     .max_throughput_gbps = 100u,
     .cpu_group_info_array = s_c5n_18xlarge_cpu_group_info_array,
@@ -62,7 +62,7 @@ static struct aws_s3_cpu_group_info s_c5n_9xlarge_cpu_group_info_array[] = {
     },
 };
 
-static struct aws_s3_compute_platform_info s_c5n_9xlarge_platform_info = {
+static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.9xlarge"),
     .max_throughput_gbps = 50u,
     .cpu_group_info_array = s_c5n_9xlarge_cpu_group_info_array,
@@ -95,7 +95,7 @@ static struct aws_s3_cpu_group_info s_p4d_cpu_group_info_array[] = {
     },
 };
 
-static struct aws_s3_compute_platform_info s_p4d_platform_info = {
+static struct aws_s3_platform_info s_p4d_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4d.24xlarge"),
     .max_throughput_gbps = 400u,
     .cpu_group_info_array = s_p4d_cpu_group_info_array,
@@ -103,7 +103,7 @@ static struct aws_s3_compute_platform_info s_p4d_platform_info = {
     .has_recommended_configuration = true,
 };
 
-static struct aws_s3_compute_platform_info s_p4de_platform_info = {
+static struct aws_s3_platform_info s_p4de_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4de.24xlarge"),
     .max_throughput_gbps = 400u,
     .cpu_group_info_array = s_p4d_cpu_group_info_array,
@@ -149,7 +149,7 @@ static struct aws_s3_cpu_group_info s_p5_cpu_group_info_array[] = {
     },
 };
 
-struct aws_s3_compute_platform_info s_p5_platform_info = {
+struct aws_s3_platform_info s_p5_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5.48xlarge"),
     .max_throughput_gbps = 400u,
     .cpu_group_info_array = s_p5_cpu_group_info_array,
@@ -190,7 +190,7 @@ static struct aws_s3_cpu_group_info s_trn1_n_cpu_group_info_array[] = {
     },
 };
 
-static struct aws_s3_compute_platform_info s_trn1_n_platform_info = {
+static struct aws_s3_platform_info s_trn1_n_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1n.32xlarge"),
     /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
     .max_throughput_gbps = 800,
@@ -224,7 +224,7 @@ static struct aws_s3_cpu_group_info s_trn1_cpu_group_info_array[] = {
     },
 };
 
-static struct aws_s3_compute_platform_info s_trn1_platform_info = {
+static struct aws_s3_platform_info s_trn1_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1.32xlarge"),
     /* not all of the advertised 800 Gbps bandwidth can be hit from the cpu in user-space */
     .max_throughput_gbps = 600,
@@ -235,13 +235,13 @@ static struct aws_s3_compute_platform_info s_trn1_platform_info = {
 
 /**** End trn1.x32_large ******/
 
-struct aws_s3_compute_platform_info_loader {
+struct aws_s3_platform_info_loader {
     struct aws_allocator *allocator;
     struct aws_ref_count ref_count;
     struct {
         struct aws_string *detected_instance_type;
-        struct aws_s3_compute_platform_info current_env_platform_info;
-        /* aws_hash_table<aws_byte_cursor*, aws_s3_compute_platform_info *>
+        struct aws_s3_platform_info current_env_platform_info;
+        /* aws_hash_table<aws_byte_cursor*, aws_s3_platform_info *>
          * the table does not "own" any of the data inside it. */
         struct aws_hash_table compute_platform_info_table;
         struct aws_mutex lock;
@@ -250,8 +250,8 @@ struct aws_s3_compute_platform_info_loader {
 };
 
 void s_add_platform_info_to_table(
-    struct aws_s3_compute_platform_info_loader *loader,
-    struct aws_s3_compute_platform_info *info) {
+    struct aws_s3_platform_info_loader *loader,
+    struct aws_s3_platform_info *info) {
     AWS_PRECONDITION(info->instance_type.len > 0);
     AWS_LOGF_TRACE(
         AWS_LS_S3_GENERAL,
@@ -272,7 +272,7 @@ void s_add_platform_info_to_table(
          * so copy over any better info than we have. Assume if info has NIC data, it was discovered at runtime.
          * The other data should be identical and we don't want to add complications to the memory model.
          * You're guaranteed only one instance of an instance type's info, the initial load is static memory */
-        struct aws_s3_compute_platform_info *existing = platform_info_element->value;
+        struct aws_s3_platform_info *existing = platform_info_element->value;
         // TODO: sync the cpu group and NIC data
         info->has_recommended_configuration = existing->has_recommended_configuration;
         /* always prefer a pre-known bandwidth, as we estimate low on EC2 by default for safety. */
@@ -286,7 +286,7 @@ void s_add_platform_info_to_table(
 }
 
 static void s_destroy_loader(void *arg) {
-    struct aws_s3_compute_platform_info_loader *loader = arg;
+    struct aws_s3_platform_info_loader *loader = arg;
 
     aws_hash_table_clean_up(&loader->lock_data.compute_platform_info_table);
     aws_mutex_clean_up(&loader->lock_data.lock);
@@ -302,9 +302,9 @@ static void s_destroy_loader(void *arg) {
     aws_mem_release(loader->allocator, loader);
 }
 
-struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_new(struct aws_allocator *allocator) {
-    struct aws_s3_compute_platform_info_loader *loader =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_compute_platform_info_loader));
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_allocator *allocator) {
+    struct aws_s3_platform_info_loader *loader =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_platform_info_loader));
 
     loader->allocator = allocator;
     loader->current_env = aws_system_environment_load(allocator);
@@ -351,14 +351,14 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
     return loader;
 }
 
-struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_acquire(
-    struct aws_s3_compute_platform_info_loader *loader) {
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_acquire(
+    struct aws_s3_platform_info_loader *loader) {
     aws_ref_count_acquire(&loader->ref_count);
     return loader;
 }
 
-struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_release(
-    struct aws_s3_compute_platform_info_loader *loader) {
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_release(
+    struct aws_s3_platform_info_loader *loader) {
     if (loader) {
         aws_ref_count_release(&loader->ref_count);
     }
@@ -498,7 +498,7 @@ tear_down:
     return callback_info.instance_type;
 }
 
-struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platform_info_loader *loader) {
+struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_loader *loader) {
     aws_mutex_lock(&loader->lock_data.lock);
     struct aws_byte_cursor return_cur;
     AWS_ZERO_STRUCT(return_cur);
@@ -562,16 +562,16 @@ return_instance_and_unlock:
     return return_cur;
 }
 
-const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_current_environment(
-    struct aws_s3_compute_platform_info_loader *loader) {
+const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environment(
+    struct aws_s3_platform_info_loader *loader) {
     /* getting the instance type will set it on the loader the first time if it can */
     aws_s3_get_ec2_instance_type(loader);
     /* will never be mutated after the above call. */
     return &loader->lock_data.current_env_platform_info;
 }
 
-const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instance_type(
-    struct aws_s3_compute_platform_info_loader *loader,
+const struct aws_s3_platform_info *aws_s3_get_platform_info_for_instance_type(
+    struct aws_s3_platform_info_loader *loader,
     struct aws_byte_cursor instance_type_name) {
     aws_mutex_lock(&loader->lock_data.lock);
     struct aws_hash_element *platform_info_element = NULL;
@@ -585,7 +585,7 @@ const struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_
     return NULL;
 }
 
-bool aws_s3_is_running_on_ec2_nitro(struct aws_s3_compute_platform_info_loader *loader) {
+bool aws_s3_is_running_on_ec2_nitro(struct aws_s3_platform_info_loader *loader) {
     struct aws_byte_cursor system_virt_name = aws_system_environment_get_virtualization_vendor(loader->current_env);
 
     if (aws_byte_cursor_eq_c_str_ignore_case(&system_virt_name, "amazon ec2")) {
