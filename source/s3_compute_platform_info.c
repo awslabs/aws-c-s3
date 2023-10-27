@@ -408,6 +408,96 @@ static bool s_completion_predicate(void *arg) {
     return info->error_code != 0 || info->instance_type != NULL;
 }
 
+struct aws_string *s_query_imds_for_instance_type(struct aws_allocator *allocator) {
+
+    struct imds_callback_info callback_info = {
+        .mutex = AWS_MUTEX_INIT,
+        .c_var = AWS_CONDITION_VARIABLE_INIT,
+        .allocator = allocator,
+    };
+
+    struct aws_event_loop_group *el_group = NULL;
+    struct aws_host_resolver *resolver = NULL;
+    struct aws_client_bootstrap *client_bootstrap = NULL;
+    /* now call IMDS */
+    el_group = aws_event_loop_group_new_default(allocator, 1, NULL);
+
+    if (!el_group) {
+        goto tear_down;
+    }
+
+    struct aws_host_resolver_default_options resolver_options = {
+        .max_entries = 1,
+        .el_group = el_group,
+    };
+
+    resolver = aws_host_resolver_new_default(allocator, &resolver_options);
+
+    if (!resolver) {
+        goto tear_down;
+    }
+
+    struct aws_client_bootstrap_options bootstrap_options = {
+        .event_loop_group = el_group,
+        .host_resolver = resolver,
+    };
+
+    client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+
+    if (!client_bootstrap) {
+        goto tear_down;
+    }
+
+    struct aws_imds_client_shutdown_options imds_shutdown_options = {
+        .shutdown_callback = s_imds_client_shutdown_completed,
+        .shutdown_user_data = &callback_info,
+    };
+
+    struct aws_imds_client_options imds_options = {
+        .bootstrap = client_bootstrap,
+        .imds_version = IMDS_PROTOCOL_V2,
+        .shutdown_options = imds_shutdown_options,
+    };
+
+    struct aws_imds_client *imds_client = aws_imds_client_new(allocator, &imds_options);
+
+    if (!imds_client) {
+        goto tear_down;
+    }
+
+    aws_mutex_lock(&callback_info.mutex);
+
+    aws_imds_client_get_instance_info(imds_client, s_imds_client_on_get_instance_info_callback, &callback_info);
+    aws_condition_variable_wait_for_pred(
+        &callback_info.c_var, &callback_info.mutex, AWS_TIMESTAMP_SECS, s_completion_predicate, &callback_info);
+
+    aws_imds_client_release(imds_client);
+    aws_condition_variable_wait_pred(
+        &callback_info.c_var, &callback_info.mutex, s_client_shutdown_predicate, &callback_info);
+
+    aws_mutex_unlock(&callback_info.mutex);
+
+    if (callback_info.error_code) {
+        aws_raise_error(callback_info.error_code);
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT, "IMDS call failed with error %s.", aws_error_debug_str(callback_info.error_code));
+    }
+
+tear_down:
+    if (client_bootstrap) {
+        aws_client_bootstrap_release(client_bootstrap);
+    }
+
+    if (resolver) {
+        aws_host_resolver_release(resolver);
+    }
+
+    if (el_group) {
+        aws_event_loop_group_release(el_group);
+    }
+    return callback_info.instance_type;
+}
+
 struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platform_info_loader *loader) {
     aws_mutex_lock(&loader->lock_data.lock);
     struct aws_byte_cursor return_cur;
@@ -452,103 +542,16 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_compute_platfo
         AWS_LOGF_DEBUG(
             AWS_LS_S3_CLIENT,
             "static: DMI info was insufficient to determine instance type. Making call to IMDS to determine");
-        struct imds_callback_info callback_info = {
-            .mutex = AWS_MUTEX_INIT,
-            .c_var = AWS_CONDITION_VARIABLE_INIT,
-            .allocator = loader->allocator,
-        };
-
-        struct aws_event_loop_group *el_group = NULL;
-        struct aws_host_resolver *resolver = NULL;
-        struct aws_client_bootstrap *client_bootstrap = NULL;
-        /* now call IMDS */
-        el_group = aws_event_loop_group_new_default(loader->allocator, 1, NULL);
-
-        if (!el_group) {
-            goto tear_down;
-        }
-
-        struct aws_host_resolver_default_options resolver_options = {
-            .max_entries = 1,
-            .el_group = el_group,
-        };
-
-        resolver = aws_host_resolver_new_default(loader->allocator, &resolver_options);
-
-        if (!resolver) {
-            goto tear_down;
-        }
-
-        struct aws_client_bootstrap_options bootstrap_options = {
-            .event_loop_group = el_group,
-            .host_resolver = resolver,
-        };
-
-        client_bootstrap = aws_client_bootstrap_new(loader->allocator, &bootstrap_options);
-
-        if (!client_bootstrap) {
-            goto tear_down;
-        }
-
-        struct aws_imds_client_shutdown_options imds_shutdown_options = {
-            .shutdown_callback = s_imds_client_shutdown_completed,
-            .shutdown_user_data = &callback_info,
-        };
-
-        struct aws_imds_client_options imds_options = {
-            .bootstrap = client_bootstrap,
-            .imds_version = IMDS_PROTOCOL_V2,
-            .shutdown_options = imds_shutdown_options,
-        };
-
-        struct aws_imds_client *imds_client = aws_imds_client_new(loader->allocator, &imds_options);
-
-        if (!imds_client) {
-            goto tear_down;
-        }
-
-        aws_mutex_lock(&callback_info.mutex);
-        aws_imds_client_get_instance_info(imds_client, s_imds_client_on_get_instance_info_callback, &callback_info);
-        aws_condition_variable_wait_for_pred(
-            &callback_info.c_var, &callback_info.mutex, AWS_TIMESTAMP_SECS, s_completion_predicate, &callback_info);
-
-        aws_condition_variable_wait_pred(
-            &callback_info.c_var, &callback_info.mutex, s_client_shutdown_predicate, &callback_info);
-        aws_mutex_unlock(&callback_info.mutex);
-        aws_imds_client_release(imds_client);
-
-        if (callback_info.error_code) {
-            aws_raise_error(callback_info.error_code);
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p: IMDS call failed with error %s.",
-                (void *)loader,
-                aws_error_debug_str(callback_info.error_code));
-        }
-
-        if (callback_info.instance_type) {
-            loader->lock_data.detected_instance_type = callback_info.instance_type;
-            loader->lock_data.current_env_platform_info.instance_type =
-                aws_byte_cursor_from_string(callback_info.instance_type);
+        struct aws_string *instance_type = s_query_imds_for_instance_type(loader->allocator);
+        if (instance_type) {
+            loader->lock_data.detected_instance_type = instance_type;
+            loader->lock_data.current_env_platform_info.instance_type = aws_byte_cursor_from_string(instance_type);
             s_add_platform_info_to_table(loader, &loader->lock_data.current_env_platform_info);
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT,
-                "id=%p: Determined instance type to be %s, from IMDS. Caching.",
+                "id=%p: Determined instance type to be %s, from IMDS.",
                 (void *)loader,
                 aws_string_bytes(loader->lock_data.detected_instance_type));
-        }
-
-    tear_down:
-        if (client_bootstrap) {
-            aws_client_bootstrap_release(client_bootstrap);
-        }
-
-        if (resolver) {
-            aws_host_resolver_release(resolver);
-        }
-
-        if (el_group) {
-            aws_event_loop_group_release(el_group);
         }
     }
 

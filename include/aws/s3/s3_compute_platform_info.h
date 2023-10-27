@@ -30,7 +30,7 @@ struct aws_s3_compute_platform_info {
     /* name of the instance-type: example c5n.18xlarge */
     struct aws_byte_cursor instance_type;
     /* max throughput for this instance type, in gigabits per second */
-    uint16_t max_throughput_gbps;
+    double max_throughput_gbps;
     /* array of cpu group info. This will always have at least one entry. */
     struct aws_s3_cpu_group_info *cpu_group_info_array;
     /* length of cpu group info array */
