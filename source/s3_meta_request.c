@@ -1779,10 +1779,8 @@ void aws_s3_meta_request_result_setup(
 
             aws_byte_buf_init_copy(
                 result->error_response_body, meta_request->allocator, &failed_request->send_data.response_body);
-        } else if (
-            failed_request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT &&
-            error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
-            /*  S3 does not send an error explanation in the body if the HEAD_OBJECT request fails.
+        } else if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
+            /*  Sometimes S3 does not send an error explanation in the body such as if the HEAD_OBJECT request fails.
              * Populate the error_response with aws_http_status_text to have something reasonable instead of
              * empty error_response_body
              */
