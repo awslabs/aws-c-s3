@@ -54,13 +54,16 @@ enum aws_s3_subject {
     AWS_LS_S3_LAST = AWS_LOG_SUBJECT_END_RANGE(AWS_C_S3_PACKAGE_ID)
 };
 
+struct aws_s3_platform_info;
+
 struct aws_s3_cpu_group_info {
     /* group index, this usually refers to a particular numa node */
     uint16_t cpu_group;
     /* array of network devices on this node */
-    const struct aws_byte_cursor *nic_name_array;
+    struct aws_byte_cursor *nic_name_array;
     /* length of network devices array */
     size_t nic_name_array_length;
+    size_t cpus_in_group;
 };
 
 #ifdef _MSC_VER
@@ -69,15 +72,19 @@ struct aws_s3_cpu_group_info {
 #    pragma warning(disable : 5027) /* move assignment operator was implicitly defined as deleted */
 #endif
 
-struct aws_s3_compute_platform_info {
+struct aws_s3_platform_info {
     /* name of the instance-type: example c5n.18xlarge */
-    const struct aws_byte_cursor instance_type;
-    /* max throughput for this instance type */
-    uint16_t max_throughput_gbps;
+    struct aws_byte_cursor instance_type;
+    /* max throughput for this instance type, in gigabits per second */
+    double max_throughput_gbps;
     /* array of cpu group info. This will always have at least one entry. */
-    const struct aws_s3_cpu_group_info *cpu_group_info_array;
+    struct aws_s3_cpu_group_info *cpu_group_info_array;
     /* length of cpu group info array */
     size_t cpu_group_info_array_length;
+
+    /* The current build of this library specifically knows an optimal configuration for this
+     * platform */
+    bool has_recommended_configuration;
 };
 
 #ifdef _MSC_VER
@@ -94,17 +101,17 @@ AWS_S3_API
 void aws_s3_library_init(struct aws_allocator *allocator);
 
 /**
- * Retrieves the pre-configured metadata for an ec2 instance type. If no such pre-configuration exists, returns NULL.
- */
-AWS_S3_API
-struct aws_s3_compute_platform_info *aws_s3_get_compute_platform_info_for_instance_type(
-    const struct aws_byte_cursor instance_type_name);
-
-/**
  * Shuts down the internal datastructures used by aws-c-s3.
  */
 AWS_S3_API
 void aws_s3_library_clean_up(void);
+
+/*
+ * Returns the aws_s3_platform_info for current platform
+ * NOTE: THIS API IS EXPERIMENTAL AND UNSTABLE
+ */
+AWS_S3_API
+const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
