@@ -446,107 +446,14 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     return auto_ranged_put->synced_data.num_parts_pending_read >= s_max_parts_pending_read;
 }
 
-static void s_update_upload_timeout(struct aws_s3_request *request, int error_code) {
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
-        /* Handle upload part timeout issue. */
-        /* BEGIN CRITICAL SECTION */
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        ++auto_ranged_put->synced_data.num_upload_requests_completed;
-
-        size_t current_timeout_ms = aws_atomic_load_int(&meta_request->upload_timeout_ms);
-        uint64_t current_timeout_ns =
-            aws_timestamp_convert(current_timeout_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
-        uint64_t updated_timeout_ns = 0;
-        if (error_code == AWS_ERROR_HTTP_CHANNEL_THROUGHPUT_FAILURE) {
-            /* Upload part failed with timedout. We want to keep the timeout rate around 0.1%. */
-            ++auto_ranged_put->synced_data.num_upload_requests_timed_out;
-            /* If timed out parts is larger than the 1% of requests we made, we double the timeout */
-            size_t timeout_threshold = auto_ranged_put->synced_data.num_upload_requests_completed / 100;
-            if (auto_ranged_put->synced_data.num_upload_requests_completed % 100 > 0) {
-                /* Use the ceiling of 1% of made request as threshold */
-                ++timeout_threshold;
-            }
-            size_t warning_threshold = auto_ranged_put->synced_data.num_upload_requests_completed / 1000;
-            if (auto_ranged_put->synced_data.num_upload_requests_completed % 1000 > 0) {
-                /* Use the ceiling of 1% of made request as threshold */
-                ++warning_threshold;
-            }
-            if (auto_ranged_put->synced_data.num_upload_requests_timed_out > timeout_threshold) {
-                /**
-                 * Restore the count, as we are larger than 1%.
-                 */
-                auto_ranged_put->synced_data.num_upload_requests_completed = 0;
-                auto_ranged_put->synced_data.num_upload_requests_timed_out = 0;
-                if (request->upload_timeout_ms + 1000 > current_timeout_ms) {
-                    /* Update the timeout by adding 1 secs. */
-                    updated_timeout_ns = aws_add_u64_saturating(
-                        current_timeout_ns, aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: Updating timeout as the timeout rate is greater than 1 percent, current is %zu ms. "
-                        "Previous timeout is %zu ms. Request->upload_tiemoutms is %zu",
-                        (void *)meta_request,
-                        (size_t)aws_timestamp_convert(
-                            updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL),
-                        current_timeout_ms,
-                        request->upload_timeout_ms);
-                }
-            } else if (auto_ranged_put->synced_data.num_upload_requests_timed_out > warning_threshold) {
-                if (request->upload_timeout_ms + 100 > current_timeout_ms) {
-                    /* Only update the timeout by adding 100 ms if the request was made with a longer time out. */
-                    updated_timeout_ns = aws_add_u64_saturating(
-                        current_timeout_ns,
-                        aws_timestamp_convert(100, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: Updating timeout as the timeout rate is greater than 0.1 percent, current is %zu ms.",
-                        (void *)meta_request,
-                        (size_t)aws_timestamp_convert(
-                            updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
-                }
-            }
-        } else if (error_code == AWS_ERROR_SUCCESS) {
-            AWS_ASSERT(request->send_data.metrics != NULL);
-            AWS_ASSERT(request->send_data.metrics->time_metrics.receive_start_timestamp_ns > 0);
-            AWS_ASSERT(request->send_data.metrics->time_metrics.send_end_timestamp_ns > 0);
-            uint64_t succeed_time_ns = aws_sub_u64_saturating(
-                request->send_data.metrics->time_metrics.receive_start_timestamp_ns,
-                request->send_data.metrics->time_metrics.send_end_timestamp_ns);
-
-            uint64_t expected_timeout_ns = aws_add_u64_saturating(
-                succeed_time_ns, aws_timestamp_convert(500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
-
-            updated_timeout_ns = 0.9 * current_timeout_ns + 0.1 * expected_timeout_ns;
-            if (auto_ranged_put->synced_data.num_upload_requests_completed % 100 == 0) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Adjusted timeout is %zu, expected timeout is %zu",
-                    (void *)meta_request,
-                    (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL),
-                    (size_t)aws_timestamp_convert(
-                        expected_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
-            }
-        }
-
-        if (updated_timeout_ns != 0) {
-            aws_atomic_store_int(
-                &meta_request->upload_timeout_ms,
-                (size_t)aws_timestamp_convert(updated_timeout_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
-        }
-
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-        /* END CRITICAL SECTION */
-    }
-}
-
 static void s_s3_auto_ranged_put_send_request_finish(
     struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code) {
     struct aws_s3_request *request = connection->request;
-    s_update_upload_timeout(request, error_code);
+    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+        aws_s3_client_update_upload_part_timeout(request->meta_request->client, request, error_code);
+    }
     aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
 }
 
