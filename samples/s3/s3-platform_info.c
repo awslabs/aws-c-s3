@@ -76,9 +76,7 @@ int s3_compute_platform_info_main(int argc, char *argv[], const char *command_na
 
         for (size_t j = 0; j < platform_info->cpu_group_info_array[i].nic_name_array_length; j++) {
             printf(
-                stdout,
-                "\t\t\t'" PRInSTR "'",
-                AWS_BYTE_CURSOR_PRI(platform_info->cpu_group_info_array[i].nic_name_array[j]));
+                "\t\t\t'" PRInSTR "'", AWS_BYTE_CURSOR_PRI(platform_info->cpu_group_info_array[i].nic_name_array[j]));
             if (j < platform_info->cpu_group_info_array[i].nic_name_array_length - 1) {
                 printf(",");
             }
