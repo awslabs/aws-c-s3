@@ -241,6 +241,8 @@ struct aws_s3_compute_platform_info_loader {
     struct {
         struct aws_string *detected_instance_type;
         struct aws_s3_compute_platform_info current_env_platform_info;
+        /* aws_hash_table<aws_byte_cursor*, aws_s3_compute_platform_info *>
+         * the table does not "own" any of the data inside it. */
         struct aws_hash_table compute_platform_info_table;
         struct aws_mutex lock;
     } lock_data;
