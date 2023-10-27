@@ -4,7 +4,6 @@
  */
 
 #include <aws/common/command_line_parser.h>
-#include <aws/s3/s3_platform_info.h>
 
 #include "app_ctx.h"
 
