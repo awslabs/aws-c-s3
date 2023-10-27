@@ -90,7 +90,7 @@ void aws_s3_library_init(struct aws_allocator *allocator) {
     aws_register_error_info(&s_error_list);
     aws_register_log_subject_info_list(&s_s3_log_subject_list);
     s_loader = aws_s3_platform_info_loader_new(allocator);
-
+    AWS_FATAL_ASSERT(s_loader);
     s_library_initialized = true;
 }
 

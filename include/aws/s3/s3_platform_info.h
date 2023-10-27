@@ -52,19 +52,16 @@ AWS_EXTERN_C_BEGIN
 /**
  * Initializes and returns a loader for querying the compute platform for information needed for making configuration
  * decisions.
- *
- * Returns NULL if an unrecoverable error occurs.
+ * This will never be NULL.
  */
 AWS_S3_API
 struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_allocator *allocator);
 
 AWS_S3_API
-struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_acquire(
-    struct aws_s3_platform_info_loader *loader);
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_acquire(struct aws_s3_platform_info_loader *loader);
 
 AWS_S3_API
-struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_release(
-    struct aws_s3_platform_info_loader *loader);
+struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_release(struct aws_s3_platform_info_loader *loader);
 
 /**
  * Retrieves the pre-configured metadata for a given ec2 instance type. If no such pre-configuration exists, returns
