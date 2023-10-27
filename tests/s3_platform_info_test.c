@@ -22,12 +22,12 @@ static int s_test_get_existing_platform_info(struct aws_allocator *allocator, vo
 
     ASSERT_BIN_ARRAYS_EQUALS(
         instance_type.ptr, instance_type.len, platform_info->instance_type.ptr, platform_info->instance_type.len);
-    ASSERT_UINT_EQUALS(100, (uint16_t)platform_info->max_throughput_gbps);
-    ASSERT_UINT_EQUALS(2, (uint16_t)platform_info->cpu_group_info_array_length);
+    ASSERT_UINT_EQUALS(100, (int)platform_info->max_throughput_gbps);
+    ASSERT_UINT_EQUALS(2, (int)platform_info->cpu_group_info_array_length);
     ASSERT_NOT_NULL(platform_info->cpu_group_info_array);
-    ASSERT_UINT_EQUALS(0, (uint16_t)platform_info->cpu_group_info_array[0].cpu_group);
+    ASSERT_UINT_EQUALS(0, (int)platform_info->cpu_group_info_array[0].cpu_group);
     ASSERT_NOT_NULL(platform_info->cpu_group_info_array[0].nic_name_array);
-    ASSERT_UINT_EQUALS(1, (uint16_t)platform_info->cpu_group_info_array[0].nic_name_array_length);
+    ASSERT_UINT_EQUALS(1, (int)platform_info->cpu_group_info_array[0].nic_name_array_length);
 
     struct aws_byte_cursor nic_name = aws_byte_cursor_from_c_str("eth0");
     ASSERT_BIN_ARRAYS_EQUALS(
