@@ -332,7 +332,7 @@ struct aws_s3_compute_platform_info_loader *aws_s3_compute_platform_info_loader_
             allocator,
             32,
             aws_hash_byte_cursor_ptr_ignore_case,
-            (bool (*)(const void *, const void *))aws_byte_cursor_eq_ignore_case,
+            (aws_hash_callback_eq_fn *)aws_byte_cursor_eq_ignore_case,
             NULL,
             NULL) &&
         "Hash table init failed!");
