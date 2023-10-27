@@ -86,7 +86,7 @@ static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocat
                 by_name_info->instance_type.ptr,
                 by_name_info->instance_type.len);
             ASSERT_UINT_EQUALS(platform_info->cpu_group_info_array_length, by_name_info->cpu_group_info_array_length);
-            ASSERT_UINT_EQUALS(platform_info->max_throughput_gbps, by_name_info->max_throughput_gbps);
+            ASSERT_TRUE(platform_info->max_throughput_gbps == by_name_info->max_throughput_gbps);
         }
 
         aws_s3_platform_info_loader_release(loader);
