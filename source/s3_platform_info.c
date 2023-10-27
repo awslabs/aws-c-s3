@@ -512,7 +512,10 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_
         AWS_LS_S3_CLIENT,
         "id=%p: Instance type has not been determined, checking to see if running in EC2 nitro environment.",
         (void *)loader);
-
+    /*
+     * We want to only imds call if we know that we are on an ec2 instance. All new instances are Nitro and we don't
+     * care about the old ones.
+     */
     if (aws_s3_is_running_on_ec2_nitro(loader)) {
         AWS_LOGF_INFO(
             AWS_LS_S3_CLIENT, "id=%p: Detected Amazon EC2 with nitro as the current environment.", (void *)loader);
