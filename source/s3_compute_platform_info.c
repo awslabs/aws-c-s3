@@ -378,8 +378,8 @@ static void s_imds_client_shutdown_completed(void *user_data) {
     struct imds_callback_info *info = user_data;
     aws_mutex_lock(&info->mutex);
     info->shutdown_completed = true;
-    aws_mutex_unlock(&info->mutex);
     aws_condition_variable_notify_all(&info->c_var);
+    aws_mutex_unlock(&info->mutex);
 }
 
 static bool s_client_shutdown_predicate(void *arg) {
