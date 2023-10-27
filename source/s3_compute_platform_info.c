@@ -399,8 +399,8 @@ static void s_imds_client_on_get_instance_info_callback(
     } else {
         info->instance_type = aws_string_new_from_cursor(info->allocator, &instance_info->instance_type);
     }
-    aws_mutex_unlock(&info->mutex);
     aws_condition_variable_notify_all(&info->c_var);
+    aws_mutex_unlock(&info->mutex);
 }
 
 static bool s_completion_predicate(void *arg) {
