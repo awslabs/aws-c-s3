@@ -61,41 +61,38 @@ int s3_compute_platform_info_main(int argc, char *argv[], const char *command_na
 
     const struct aws_s3_platform_info *platform_info = aws_s3_get_current_platform_info();
 
-    fprintf(stdout, "{\n");
-    fprintf(stdout, "\t'instance_type': '" PRInSTR "',\n", AWS_BYTE_CURSOR_PRI(platform_info->instance_type));
-    fprintf(stdout, "\t'max_throughput_gbps': %d,\n", (int)platform_info->max_throughput_gbps);
-    fprintf(
-        stdout,
-        "\t'has_recommended_configuration': %s,\n",
-        platform_info->has_recommended_configuration ? "true" : "false");
+    printf("{\n");
+    printf("\t'instance_type': '" PRInSTR "',\n", AWS_BYTE_CURSOR_PRI(platform_info->instance_type));
+    printf("\t'max_throughput_gbps': %d,\n", (int)platform_info->max_throughput_gbps);
+    printf("\t'has_recommended_configuration': %s,\n", platform_info->has_recommended_configuration ? "true" : "false");
 
-    fprintf(stdout, "\t'cpu_groups': [\n");
+    printf("\t'cpu_groups': [\n");
 
     for (size_t i = 0; i < platform_info->cpu_group_info_array_length; ++i) {
-        fprintf(stdout, "\t{\n");
-        fprintf(stdout, "\t\t'cpu_group_index': %d,\n", (int)platform_info->cpu_group_info_array[i].cpu_group);
-        fprintf(stdout, "\t\t'cpus_in_group': %d,\n", (int)platform_info->cpu_group_info_array[i].cpus_in_group);
-        fprintf(stdout, "\t\t'usable_network_devices': [\n");
+        printf("\t{\n");
+        printf("\t\t'cpu_group_index': %d,\n", (int)platform_info->cpu_group_info_array[i].cpu_group);
+        printf("\t\t'cpus_in_group': %d,\n", (int)platform_info->cpu_group_info_array[i].cpus_in_group);
+        printf("\t\t'usable_network_devices': [\n");
 
         for (size_t j = 0; j < platform_info->cpu_group_info_array[i].nic_name_array_length; j++) {
-            fprintf(
+            printf(
                 stdout,
                 "\t\t\t'" PRInSTR "'",
                 AWS_BYTE_CURSOR_PRI(platform_info->cpu_group_info_array[i].nic_name_array[j]));
             if (j < platform_info->cpu_group_info_array[i].nic_name_array_length - 1) {
-                fprintf(stdout, ",");
+                printf(",");
             }
-            fprintf(stdout, "\n");
+            printf("\n");
         }
-        fprintf(stdout, "\t\t]\n");
-        fprintf(stdout, "\t}");
+        printf("\t\t]\n");
+        printf("\t}");
         if (i < platform_info->cpu_group_info_array_length - 1) {
-            fprintf(stdout, ",");
+            printf(",");
         }
-        fprintf(stdout, "\n");
+        printf("\n");
     }
-    fprintf(stdout, "\t]\n");
-    fprintf(stdout, "}\n");
+    printf("\t]\n");
+    printf("}\n");
 
     return 0;
 }

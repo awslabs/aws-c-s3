@@ -463,10 +463,10 @@ struct aws_string *s_query_imds_for_instance_type(struct aws_allocator *allocato
 
     aws_mutex_lock(&callback_info.mutex);
 
-    aws_imds_client_get_instance_info(imds_client, s_imds_client_on_get_instance_info_callback, &callback_info);
-    aws_condition_variable_wait_for_pred(
-        &callback_info.c_var, &callback_info.mutex, AWS_TIMESTAMP_SECS, s_completion_predicate, &callback_info);
-
+    if (aws_imds_client_get_instance_info(imds_client, s_imds_client_on_get_instance_info_callback, &callback_info)) {
+        aws_condition_variable_wait_for_pred(
+            &callback_info.c_var, &callback_info.mutex, AWS_TIMESTAMP_SECS, s_completion_predicate, &callback_info);
+    }
     aws_imds_client_release(imds_client);
     aws_condition_variable_wait_pred(
         &callback_info.c_var, &callback_info.mutex, s_client_shutdown_predicate, &callback_info);
