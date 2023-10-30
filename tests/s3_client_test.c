@@ -20,10 +20,10 @@
 
 static void s_init_mock_s3_request_upload_part_timeout(
     struct aws_s3_request *mock_request,
-    size_t original_upload_timeout_ms,
+    uint64_t original_upload_timeout_ms,
     uint64_t request_time_ns,
     uint64_t response_to_first_byte_time_ns) {
-    mock_request->upload_timeout_ms = original_upload_timeout_ms;
+    mock_request->upload_timeout_ms = (size_t)original_upload_timeout_ms;
     struct aws_s3_request_metrics *metrics = mock_request->send_data.metrics;
 
     metrics->time_metrics.send_start_timestamp_ns = 0;
@@ -60,6 +60,7 @@ TEST_CASE(client_update_upload_part_timeout) {
     struct aws_s3_client *client = NULL;
     struct aws_s3_tester_client_options client_options = {
         .part_size = MB_TO_BYTES(8),
+        .tls_usage = AWS_S3_TLS_DISABLED,
     };
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     struct aws_s3_request mock_request;
