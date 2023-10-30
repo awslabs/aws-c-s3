@@ -2137,7 +2137,8 @@ void aws_s3_client_update_upload_part_timeout(
             uint64_t expected_timeout_ns = average_response_to_first_byte_time_ns +
                                            aws_timestamp_convert(500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
 
-            updated_timeout_ns = (uint64_t)(0.99 * (double)current_timeout_ns + 0.01 * (double)expected_timeout_ns);
+            updated_timeout_ns =
+                (uint64_t)(0.99 * (long double)current_timeout_ns + 0.01 * (long double)expected_timeout_ns);
             break;
         case AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT:
             if (stats->num_upload_requests_succeed < 10) {
