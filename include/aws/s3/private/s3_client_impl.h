@@ -168,16 +168,20 @@ struct aws_s3_client_vtable {
 };
 
 struct aws_s3_upload_part_timeout_stats {
-    /* Total number of requests in track */
-    size_t num_upload_requests_in_track;
     bool stop_timeout;
-    /* To gether the time for the decision we need a timeout or not */
+
+    /* Total number of upload request succeed */
+    size_t num_upload_requests_succeed;
+
+    /* Stats for the request time of first 10 succeed requests */
     uint64_t request_time_sum_ns;
     uint64_t number_request_time;
 
+    /* Track the timeout rate. */
     size_t num_rate_track_completed;
     size_t num_rate_track_timed_out;
-    /* To gether the time for the decision we need a timeout or not */
+
+    /* Stats for the response to first byte time of tracked succeed requests */
     uint64_t response_to_first_byte_time_ns_sum;
     uint64_t response_to_first_byte_time_ns_number;
 };
@@ -353,7 +357,7 @@ struct aws_s3_client {
         /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
         uint32_t finish_destroy : 1;
 
-        struct aws_s3_upload_part_timeout_stats upload_stats;
+        struct aws_s3_upload_part_timeout_stats upload_part_stats;
     } synced_data;
 
     struct {
