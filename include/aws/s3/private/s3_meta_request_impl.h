@@ -412,7 +412,7 @@ AWS_S3_API
 void aws_s3_meta_request_result_setup(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_result *result,
-    struct aws_s3_request *request,
+    struct aws_s3_request *failed_request,
     int response_status,
     int error_code);
 

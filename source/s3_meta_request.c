@@ -1775,21 +1775,31 @@ bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request 
 void aws_s3_meta_request_result_setup(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_result *result,
-    struct aws_s3_request *request,
+    struct aws_s3_request *failed_request,
     int response_status,
     int error_code) {
 
-    if (request != NULL) {
-        if (request->send_data.response_headers != NULL) {
-            result->error_response_headers = request->send_data.response_headers;
+    if (failed_request != NULL) {
+        if (failed_request->send_data.response_headers != NULL) {
+            result->error_response_headers = failed_request->send_data.response_headers;
             aws_http_headers_acquire(result->error_response_headers);
         }
 
-        if (request->send_data.response_body.capacity > 0) {
+        if (failed_request->send_data.response_body.capacity > 0) {
             result->error_response_body = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
 
             aws_byte_buf_init_copy(
-                result->error_response_body, meta_request->allocator, &request->send_data.response_body);
+                result->error_response_body, meta_request->allocator, &failed_request->send_data.response_body);
+        } else if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
+            /*  Sometimes S3 does not send an error explanation in the body such as if the HEAD_OBJECT request fails.
+             * Populate the error_response with aws_http_status_text to have something reasonable instead of
+             * empty error_response_body
+             */
+            result->error_response_body = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
+            aws_byte_buf_init_copy_from_cursor(
+                result->error_response_body,
+                meta_request->allocator,
+                aws_byte_cursor_from_c_str(aws_http_status_text(response_status)));
         }
     }
 

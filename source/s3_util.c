@@ -205,7 +205,7 @@ struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
 
     AWS_ASSERT(aws_byte_cursor_is_valid(&signing_config->signed_body_value));
 
-    if (signing_config->service.len > 0) {
+    if (signing_config->signed_body_value.len > 0) {
         cached_signing_config->signed_body_value =
             aws_string_new_from_cursor(allocator, &signing_config->signed_body_value);
 
