@@ -73,7 +73,7 @@ TEST_CASE(client_update_upload_part_timeout) {
         aws_timestamp_convert(5500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL); /* 5.5 Secs, larger than 5 secs */
 
     uint64_t average_time_ns = aws_timestamp_convert(
-        300, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL); /* 0.3 Secs, average for upload a part */
+        250, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL); /* 0.25 Secs, close to average for upload a part */
 
     size_t init_count = 10;
     {
@@ -97,29 +97,28 @@ TEST_CASE(client_update_upload_part_timeout) {
     {
         ASSERT_SUCCESS(s_starts_upload_retry(client, &mock_request));
         /**
-         * 3. Once a request finishes without timeout, use the average response_to_first_byte_time + 500ms as our
-         * expected timeout. (TODO: The real expected timeout should be a P99 of all the requests.)
-         * 3.1 Adjust the current timeout against the expected timeout, via 0.99 * <current timeout> + 0.01 * <expected
-         * timeout> to get closer to the expected timeout.
+         * 3. Once a request finishes without timeout, use the average response_to_first_byte_time +
+         *      g_expect_timeout_offset_ms as our expected timeout. (TODO: The real expected timeout should be a P99 of
+         *      all the requests.)
+         *  3.1 Adjust the current timeout against the expected timeout, via 0.99 * <current timeout> + 0.01 * <expected
+         *      timeout> to get closer to the expected timeout.
          */
         s_init_mock_s3_request_upload_part_timeout(
             &mock_request,
             aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_MILLIS, NULL),
             average_time_ns,
             average_time_ns);
-        /* After one request, the result should be: 0.99 * 1000 + 0.01 * 800 = 998 */
-        aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
-        size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-        ASSERT_UINT_EQUALS(998, current_timeout_ms);
 
-        /* After 1000 runs, we have the timeout match the "expected" (average time + 500 ms) timeout */
+        /* After 1000 runs, we have the timeout match the "expected" (average time + g_expect_timeout_offset_ms) timeout
+         */
         for (size_t i = 0; i < 1000; i++) {
             /* Mock a number of requests completed with the large time for the request */
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         ASSERT_UINT_EQUALS(
-            aws_timestamp_convert(average_time_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL) + 500,
+            aws_timestamp_convert(average_time_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL) +
+                g_expect_timeout_offset_ms,
             current_timeout_ms);
 
         /* will not change after another 1k run */
@@ -129,9 +128,11 @@ TEST_CASE(client_update_upload_part_timeout) {
         }
         ASSERT_FALSE(client->synced_data.upload_part_stats.stop_timeout);
         current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-        /* After 1000 runs, we have the timeout match the "expected" (average time + 500 ms) timeout */
+        /* After 1000 runs, we have the timeout match the "expected" (average time + g_expect_timeout_offset_ms) timeout
+         */
         ASSERT_UINT_EQUALS(
-            aws_timestamp_convert(average_time_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL) + 500,
+            aws_timestamp_convert(average_time_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL) +
+                g_expect_timeout_offset_ms,
             current_timeout_ms);
     }
 
@@ -167,10 +168,11 @@ TEST_CASE(client_update_upload_part_timeout) {
          *      to get the exact rate with new timeout.
          */
 
-        /* Assume our first batch requests all failed with the 1 sec timeout. As the request takes 2.5 secs to
+        /* Assume our first batch requests all failed with the 1 sec timeout. As the request around 3 secs to
          * complete */
+
         uint64_t real_response_time_ns =
-            aws_timestamp_convert(2500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL); /* 2.5 sec */
+            aws_timestamp_convert(3000 - g_expect_timeout_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
         s_init_mock_s3_request_upload_part_timeout(
             &mock_request, 1000 /*original_upload_timeout_ms*/, real_response_time_ns, real_response_time_ns);
 

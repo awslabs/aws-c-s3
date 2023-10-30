@@ -2056,6 +2056,8 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
 }
 
 static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
+const size_t g_expect_timeout_offset_ms =
+    700; /* 0.7 Secs. From experienments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
 
 /**
  * S3 upload part request has a very low rate (around 0.1%) result in a very high time to first byte latency (5
@@ -2069,8 +2071,8 @@ static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
  *      request takes. We decide if it's worth to set a timeout or not. (If the average of request takes more than 5
  *      secs or not)
  * 2. If it is worth to retry, start a timeout default to 1 sec.
- * 3. Once a request finishes without timeout, use the average response_to_first_byte_time + 500ms as our expected
- *      timeout. (TODO: The real expected timeout should be a P99 of all the requests.)
+ * 3. Once a request finishes without timeout, use the average response_to_first_byte_time + g_expect_timeout_offset_ms
+ *      as our expected timeout. (TODO: The real expected timeout should be a P99 of all the requests.)
  *  3.1 Adjust the current timeout against the expected timeout, via 0.99 * <current timeout> + 0.01 * <expected
  *      timeout> to get closer to the expected timeout.
  * 4. Once request finishes with timeout. We check the timeout rate.
@@ -2134,11 +2136,11 @@ void aws_s3_client_update_upload_part_timeout(
 
             uint64_t average_response_to_first_byte_time_ns =
                 stats->response_to_first_byte_time_ns_sum / stats->response_to_first_byte_time_ns_number;
-            uint64_t expected_timeout_ns = average_response_to_first_byte_time_ns +
-                                           aws_timestamp_convert(500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+            uint64_t expected_timeout_ns =
+                average_response_to_first_byte_time_ns +
+                aws_timestamp_convert(g_expect_timeout_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
 
-            updated_timeout_ns =
-                (uint64_t)(0.99 * (long double)current_timeout_ns + 0.01 * (long double)expected_timeout_ns);
+            updated_timeout_ns = (uint64_t)((double)current_timeout_ns * 0.99 + (double)expected_timeout_ns * 0.01);
             break;
         case AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT:
             if (stats->num_upload_requests_succeed < 10) {
@@ -2164,6 +2166,14 @@ void aws_s3_client_update_upload_part_timeout(
                 /**
                  * Restore the rate track, as we are larger than 1%, it goes off the record.
                  */
+
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Client upload part timeout rate is larger than expected, current timeout is %zu, bump it "
+                    "up. Request original timeout is: %zu",
+                    (void *)client,
+                    current_timeout_ms,
+                    finished_upload_part_request->upload_timeout_ms);
                 stats->num_rate_track_completed = 0;
                 stats->num_rate_track_timed_out = 0;
                 if (finished_upload_part_request->upload_timeout_ms + 1000 > current_timeout_ms) {
