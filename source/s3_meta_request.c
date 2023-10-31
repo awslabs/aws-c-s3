@@ -1779,16 +1779,6 @@ void aws_s3_meta_request_result_setup(
 
             aws_byte_buf_init_copy(
                 result->error_response_body, meta_request->allocator, &failed_request->send_data.response_body);
-        } else if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS) {
-            /*  Sometimes S3 does not send an error explanation in the body such as if the HEAD_OBJECT request fails.
-             * Populate the error_response with aws_http_status_text to have something reasonable instead of
-             * empty error_response_body
-             */
-            result->error_response_body = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_byte_buf));
-            aws_byte_buf_init_copy_from_cursor(
-                result->error_response_body,
-                meta_request->allocator,
-                aws_byte_cursor_from_c_str(aws_http_status_text(response_status)));
         }
     }
 
