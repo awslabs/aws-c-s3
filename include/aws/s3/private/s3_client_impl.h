@@ -474,6 +474,9 @@ AWS_S3_API
 extern const uint32_t g_num_conns_per_vip_meta_request_look_up[];
 
 AWS_S3_API
+extern const size_t g_expect_timeout_offset_ms;
+
+AWS_S3_API
 void aws_s3_client_update_upload_part_timeout(
     struct aws_s3_client *client,
     struct aws_s3_request *finished_upload_part_request,
