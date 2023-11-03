@@ -1336,7 +1336,7 @@ void aws_s3_meta_request_send_request_finish_default(
                 /* Log at info level instead of error as it's somewhat expected. */
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Meta request failed from error %d (%s). (request=%p). Try to setup a retry.",
+                    "id=%p Request failed from error %d (%s). (request=%p). Try to setup a retry.",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
@@ -1344,7 +1344,7 @@ void aws_s3_meta_request_send_request_finish_default(
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Meta request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
+                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
                     "retry.",
                     (void *)meta_request,
                     error_code,
