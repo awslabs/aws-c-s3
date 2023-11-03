@@ -171,19 +171,25 @@ struct aws_s3_upload_part_timeout_stats {
     bool stop_timeout;
 
     /* Total number of upload request succeed */
-    size_t num_upload_requests_succeed;
+    uint64_t num_upload_requests_succeed;
 
     /* Stats for the request time of first 10 succeed requests */
-    uint64_t request_time_sum_ns;
-    uint64_t number_request_time;
+    struct {
+        uint64_t sum_ns;
+        uint64_t num_samples;
+    } initial_request_time;
 
     /* Track the timeout rate. */
-    size_t num_rate_track_completed;
-    size_t num_rate_track_timed_out;
+    struct {
+        uint64_t num_completed;
+        uint64_t num_failed;
+    } timeout_rate_tracking;
 
     /* Stats for the response to first byte time of tracked succeed requests */
-    uint64_t response_to_first_byte_time_ns_sum;
-    uint64_t response_to_first_byte_time_ns_number;
+    struct {
+        uint64_t sum_ns;
+        uint64_t num_samples;
+    } response_to_first_byte_time;
 };
 
 /* Represents the state of the S3 client. */

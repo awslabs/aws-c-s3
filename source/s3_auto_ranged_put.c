@@ -452,6 +452,7 @@ static void s_s3_auto_ranged_put_send_request_finish(
     int error_code) {
     struct aws_s3_request *request = connection->request;
     if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+        /* TODO: the single part upload may also be improved from a timeout as multipart. */
         aws_s3_client_update_upload_part_timeout(request->meta_request->client, request, error_code);
     }
     aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);

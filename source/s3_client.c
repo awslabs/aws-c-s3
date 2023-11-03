@@ -2065,20 +2065,20 @@ static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
  * This serves as an optimization to set a timeout that will retry on those upload parts response way too slow.
  *
  * The current algorithm:
- * 1. Start without timeout. After 10 requests completed, we know the average of how long the
- *      request takes. We decide if it's worth to set a timeout or not. (If the average of request takes more than 5
- *      secs or not)
- * 2. If it is worth to retry, start a timeout default to 1 sec.
- * 3. Once a request finishes without timeout, use the average response_to_first_byte_time + 500ms as our expected
- *      timeout. (TODO: The real expected timeout should be a P99 of all the requests.)
- *  3.1 Adjust the current timeout against the expected timeout, via 0.99 * <current timeout> + 0.01 * <expected
- *      timeout> to get closer to the expected timeout.
- * 4. Once request finishes with timeout. We check the timeout rate.
- *  4.1 If timeout rate is larger than 0.1%, we increase the timeout by 100ms (Check the timeout when the
- *      request was made, if the updated timeout is larger than the expected, skip update).
- *  4.2 If timeout rate is larger than 1%, we increase the timeout by 1 secs (If needed). And clear the rate
- *      to get the exact rate with new timeout.
- *  4.3 Once the timeout is larger than 5 secs, we stop the process.
+ * 1. Start without a timeout value. After 10 requests completed, we know the average of how long the
+ *      request takes. We decide if it's worth to set a timeout value or not. (If the average of request takes more than
+ *      5 secs or not) TODO: if the client have different part size, this doesn't make sense
+ * 2. If it is worth to retry, start with a default timeout value, 1 sec.
+ * 3. If a request finishes successfully, use the average response_to_first_byte_time + 500ms as our expected
+ *      timeout value. (TODO: The real expected timeout value should be a P99 of all the requests.)
+ *  3.1 Adjust the current timeout value against the expected timeout value, via 0.99 * <current timeout> + 0.01 *
+ *      <expected timeout> to get closer to the expected timeout value.
+ * 4. If request had timed out. We check the timeout rate.
+ *  4.1 If timeout rate is larger than 0.1%, we increase the timeout value by 100ms (Check the timeout value when the
+ *      request was made, if the updated timeout value is larger than the expected, skip update).
+ *  4.2 If timeout rate is larger than 1%, we increase the timeout value by 1 secs (If needed). And clear the rate
+ *      to get the exact rate with new timeout value.
+ *  4.3 Once the timeout value is larger than 5 secs, we stop the process.
  *
  * Invoked from `s_s3_auto_ranged_put_send_request_finish`.
  */
@@ -2103,16 +2103,18 @@ void aws_s3_client_update_upload_part_timeout(
     switch (finished_error_code) {
         case AWS_ERROR_SUCCESS:
             /* We only interested in request succeed */
-            ++stats->num_upload_requests_succeed;
+            stats->num_upload_requests_succeed = aws_add_u64_saturating(stats->num_upload_requests_succeed, 1);
             if (stats->num_upload_requests_succeed <= 10) {
                 /* Gether the data */
                 uint64_t request_time_ns =
                     metrics->time_metrics.receive_end_timestamp_ns - metrics->time_metrics.send_start_timestamp_ns;
-                stats->request_time_sum_ns += request_time_ns;
-                ++stats->number_request_time;
+                stats->initial_request_time.sum_ns =
+                    aws_add_u64_saturating(stats->initial_request_time.sum_ns, request_time_ns);
+                ++stats->initial_request_time.num_samples;
                 if (stats->num_upload_requests_succeed == 10) {
                     /* Decide we need a timeout or not */
-                    uint64_t average_request_time_ns = stats->request_time_sum_ns / stats->number_request_time;
+                    uint64_t average_request_time_ns =
+                        stats->initial_request_time.sum_ns / stats->initial_request_time.num_samples;
                     if (average_request_time_ns >= s_upload_timeout_threshold_ns) {
                         /* We don't need a timeout, as retry will be slower than just wait for the server to response */
                         stats->stop_timeout = true;
@@ -2124,53 +2126,51 @@ void aws_s3_client_update_upload_part_timeout(
                 goto unlock;
             }
             /* Starts to update timeout on case of succeed */
-            ++stats->num_rate_track_completed;
+            stats->timeout_rate_tracking.num_completed =
+                aws_add_u64_saturating(stats->timeout_rate_tracking.num_completed, 1);
             /* Response to first byte is time taken for the first byte data received from the request finished
              * sending */
             uint64_t response_to_first_byte_time_ns =
                 metrics->time_metrics.receive_start_timestamp_ns - metrics->time_metrics.send_end_timestamp_ns;
-            stats->response_to_first_byte_time_ns_sum += response_to_first_byte_time_ns;
-            ++stats->response_to_first_byte_time_ns_number;
+            stats->response_to_first_byte_time.sum_ns =
+                aws_add_u64_saturating(stats->response_to_first_byte_time.sum_ns, response_to_first_byte_time_ns);
+            stats->response_to_first_byte_time.num_samples =
+                aws_add_u64_saturating(stats->response_to_first_byte_time.num_samples, 1);
 
             uint64_t average_response_to_first_byte_time_ns =
-                stats->response_to_first_byte_time_ns_sum / stats->response_to_first_byte_time_ns_number;
+                stats->response_to_first_byte_time.sum_ns / stats->response_to_first_byte_time.num_samples;
             uint64_t expected_timeout_ns = average_response_to_first_byte_time_ns +
                                            aws_timestamp_convert(500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
 
             updated_timeout_ns = (uint64_t)(0.99 * (double)current_timeout_ns + 0.01 * (double)expected_timeout_ns);
             break;
+
         case AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT:
             if (stats->num_upload_requests_succeed < 10) {
                 goto unlock;
             }
 
             /* Starts to update timeout on case of timed out */
-            ++stats->num_rate_track_completed;
-            ++stats->num_rate_track_timed_out;
+            stats->timeout_rate_tracking.num_completed =
+                aws_add_u64_saturating(stats->timeout_rate_tracking.num_completed, 1);
+            stats->timeout_rate_tracking.num_failed =
+                aws_add_u64_saturating(stats->timeout_rate_tracking.num_failed, 1);
 
-            size_t timeout_threshold = stats->num_rate_track_completed / 100;
-            if (stats->num_rate_track_completed % 100 > 0) {
-                /* Use the ceiling of 1% of made request as threshold */
-                ++timeout_threshold;
-            }
-            size_t warning_threshold = stats->num_rate_track_completed / 1000;
-            if (stats->num_rate_track_completed % 1000 > 0) {
-                /* Use the ceiling of 0.1% of made request as warning threshold */
-                ++warning_threshold;
-            }
+            uint64_t timeout_threshold = ceil((double)stats->timeout_rate_tracking.num_completed / 100);
+            uint64_t warning_threshold = ceil((double)stats->timeout_rate_tracking.num_completed / 1000);
 
-            if (stats->num_rate_track_timed_out > timeout_threshold) {
+            if (stats->timeout_rate_tracking.num_failed > timeout_threshold) {
                 /**
                  * Restore the rate track, as we are larger than 1%, it goes off the record.
                  */
-                stats->num_rate_track_completed = 0;
-                stats->num_rate_track_timed_out = 0;
+                stats->timeout_rate_tracking.num_completed = 0;
+                stats->timeout_rate_tracking.num_failed = 0;
                 if (finished_upload_part_request->upload_timeout_ms + 1000 > current_timeout_ms) {
                     /* Update the timeout by adding 1 secs only when it's worth to do so */
                     updated_timeout_ns = aws_add_u64_saturating(
                         current_timeout_ns, aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
                 }
-            } else if (stats->num_rate_track_timed_out > warning_threshold) {
+            } else if (stats->timeout_rate_tracking.num_failed > warning_threshold) {
                 if (finished_upload_part_request->upload_timeout_ms + 100 > current_timeout_ms) {
                     /* Only update the timeout by adding 100 ms if the request was made with a longer time out. */
                     updated_timeout_ns = aws_add_u64_saturating(
@@ -2178,7 +2178,7 @@ void aws_s3_client_update_upload_part_timeout(
                         aws_timestamp_convert(100, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
                 }
             }
-
+            break;
         default:
             break;
     }
