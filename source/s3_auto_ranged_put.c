@@ -924,7 +924,6 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         /* Read the body */
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-        aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
 
         part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
         aws_future_bool_register_callback(
