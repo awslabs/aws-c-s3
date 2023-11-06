@@ -1374,6 +1374,9 @@ static bool try_allocate_request_buffers(struct aws_s3_request *request) {
     }
 
     if (request->part_size_response_body && request->send_data.response_pool_ptr == NULL) {
+        AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p Allocated %zu for response body", (void *)request, meta_request->part_size);
         request->send_data.response_pool_ptr = aws_s3_buffer_pool_acquire(request->buffer_pool, meta_request->part_size);
         if (request->send_data.response_pool_ptr == NULL) {
             return false;
