@@ -543,7 +543,7 @@ static bool s_s3_auto_ranged_put_update(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
                     0,
-                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY);
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
