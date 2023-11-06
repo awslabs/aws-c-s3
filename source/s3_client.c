@@ -2159,8 +2159,8 @@ void aws_s3_client_update_upload_part_timeout(
             stats->timeout_rate_tracking.num_failed =
                 aws_add_u64_saturating(stats->timeout_rate_tracking.num_failed, 1);
 
-            uint64_t timeout_threshold = ceil((double)stats->timeout_rate_tracking.num_completed / 100);
-            uint64_t warning_threshold = ceil((double)stats->timeout_rate_tracking.num_completed / 1000);
+            uint64_t timeout_threshold = (uint64_t)ceil((double)stats->timeout_rate_tracking.num_completed / 100);
+            uint64_t warning_threshold = (uint64_t)ceil((double)stats->timeout_rate_tracking.num_completed / 1000);
 
             if (stats->timeout_rate_tracking.num_failed > timeout_threshold) {
                 /**
