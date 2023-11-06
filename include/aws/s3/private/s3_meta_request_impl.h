@@ -128,6 +128,7 @@ struct aws_s3_meta_request_vtable {
  */
 struct aws_s3_meta_request {
     struct aws_allocator *allocator;
+    struct aws_s3_buffer_pool *buffer_pool;
 
     struct aws_ref_count ref_count;
 
