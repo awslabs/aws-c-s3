@@ -1708,8 +1708,6 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
 
-    AWS_LOGF_ERROR(0, "Fooo %zu %zu %d", buffer->capacity, buffer->len, aws_byte_buf_is_valid(buffer));
-
     /* If async-stream, simply call read_to_fill() */
     if (meta_request->request_body_async_stream != NULL) {
         return aws_async_input_stream_read_to_fill(meta_request->request_body_async_stream, buffer);
