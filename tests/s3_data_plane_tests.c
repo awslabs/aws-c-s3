@@ -411,6 +411,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     aws_s3_request_release(request);
     aws_http_message_release(request_message);
     aws_s3_meta_request_release(meta_request);
+    aws_s3_client_release(client);
 
     aws_s3_tester_clean_up(&tester);
 
@@ -480,7 +481,6 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
 
     struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new(&tester);
-    meta_request->client = aws_s3_client_acquire(mock_client);
     ASSERT_TRUE(meta_request != NULL);
 
     struct aws_event_loop_group *event_loop_group = aws_event_loop_group_new_default(allocator, 0, NULL);
