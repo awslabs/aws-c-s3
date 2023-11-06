@@ -1115,7 +1115,8 @@ static int s_s3_meta_request_incoming_body(
         aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
     }
 
-    if (aws_byte_buf_append_dynamic(&request->send_data.response_body, data)) {
+    if ((request->part_size_response_body && aws_byte_buf_append(&request->send_data.response_body, data)) ||
+        aws_byte_buf_append_dynamic(&request->send_data.response_body, data)) {
 
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,

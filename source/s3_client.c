@@ -5,6 +5,7 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
+#include "aws/s3/private/s3_buffer_pool.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
 #include "aws/s3/private/s3_default_meta_request.h"
@@ -257,6 +258,7 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
+    client->buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(4));
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
@@ -588,6 +590,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
+    aws_s3_buffer_pool_destroy(client->buffer_pool);
     aws_mem_release(client->allocator, client);
     client = NULL;
 
@@ -1359,6 +1362,30 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 }
 
+static bool try_allocate_request_buffers(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    if (request->part_size_request_body && request->request_pool_ptr == NULL) {
+        request->request_pool_ptr = aws_s3_buffer_pool_acquire(request->buffer_pool, meta_request->part_size);
+        if (request->request_pool_ptr == NULL) {
+            return false;
+        }
+        aws_byte_buf_from_array(request->request_pool_ptr, meta_request->part_size);
+    }
+
+    if (request->part_size_response_body && request->send_data.response_pool_ptr == NULL) {
+        request->send_data.response_pool_ptr = aws_s3_buffer_pool_acquire(request->buffer_pool, meta_request->part_size);
+        if (request->send_data.response_pool_ptr == NULL) {
+            return false;
+        }
+        aws_byte_buf_from_array(request->send_data.response_pool_ptr, meta_request->part_size);
+    }
+
+    /** TODO: default */
+
+    return true;
+}
+
 static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -1423,9 +1450,16 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             }
 
             struct aws_s3_request *request = NULL;
+            bool work_remaining = false;
 
-            /* Try to grab the next request from the meta request. */
-            bool work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
+            if (client->threaded_data.request_waiting_for_memory) {
+                request = client->threaded_data.request_waiting_for_memory;
+                work_remaining = true;
+                client->threaded_data.request_waiting_for_memory = NULL;
+            } else {
+                /* Try to grab the next request from the meta request. */
+                work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
+            }
 
             if (work_remaining) {
                 /* If there is work remaining, but we didn't get a request back, take the meta request out of the
@@ -1436,15 +1470,20 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     aws_linked_list_push_back(
                         &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
                 } else {
-                    request->tracked_by_client = true;
+                    if (try_allocate_request_buffers(request)) {
+                        request->tracked_by_client = true;
 
-                    ++client->threaded_data.num_requests_being_prepared;
+                        ++client->threaded_data.num_requests_being_prepared;
 
-                    num_requests_in_flight =
-                        (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+                        num_requests_in_flight =
+                            (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
 
-                    aws_s3_meta_request_prepare_request(
-                        meta_request, request, s_s3_client_prepare_callback_queue_request, client);
+                        aws_s3_meta_request_prepare_request(
+                            meta_request, request, s_s3_client_prepare_callback_queue_request, client);
+                    } else {
+                        client->threaded_data.request_waiting_for_memory = request;
+                        break;
+                    }
                 }
             } else {
                 s_s3_client_remove_meta_request_threaded(client, meta_request);

@@ -171,6 +171,8 @@ struct aws_s3_client_vtable {
 struct aws_s3_client {
     struct aws_allocator *allocator;
 
+    struct aws_s3_buffer_pool *buffer_pool;
+
     struct aws_s3_client_vtable *vtable;
 
     struct aws_ref_count ref_count;
@@ -347,6 +349,8 @@ struct aws_s3_client {
 
         /* Number of requests currently being prepared. */
         uint32_t num_requests_being_prepared;
+
+        struct aws_s3_request *request_waiting_for_memory;
     } threaded_data;
 };
 
