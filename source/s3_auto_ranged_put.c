@@ -924,7 +924,10 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         /* Read the body */
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-
+        if (request->request_body.capacity == 0) {
+            aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+        }
+        
         part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
         aws_future_bool_register_callback(
             part_prep->asyncstep_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
@@ -951,17 +954,20 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Failed reading request body, error %d (%s)",
+            "id=%p: Failed reading request body, error %d (%s) req cap %zu",
             (void *)meta_request,
             error_code,
-            aws_error_str(error_code));
+            aws_error_str(error_code),
+            request->request_body.capacity);
         goto on_done;
     }
     /* Reading succeeded. */
     bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
 
+    uint64_t offset = 0;
+    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
     /* If Content-Length is defined, check that we read the expected amount */
-    if (has_content_length && (request->request_body.len < request->request_body.capacity)) {
+    if (has_content_length && (request->request_body.len < request_body_size)) {
         error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,

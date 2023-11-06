@@ -1370,7 +1370,8 @@ static bool try_allocate_request_buffers(struct aws_s3_request *request) {
         if (request->request_pool_ptr == NULL) {
             return false;
         }
-        aws_byte_buf_from_array(request->request_pool_ptr, meta_request->part_size);
+
+        request->request_body = aws_byte_buf_from_empty_array(request->request_pool_ptr, meta_request->part_size);
     }
 
     if (request->part_size_response_body && request->send_data.response_pool_ptr == NULL) {
@@ -1378,7 +1379,7 @@ static bool try_allocate_request_buffers(struct aws_s3_request *request) {
         if (request->send_data.response_pool_ptr == NULL) {
             return false;
         }
-        aws_byte_buf_from_array(request->send_data.response_pool_ptr, meta_request->part_size);
+        request->send_data.response_body = aws_byte_buf_from_empty_array(request->send_data.response_pool_ptr, meta_request->part_size);
     }
 
     /** TODO: default */
