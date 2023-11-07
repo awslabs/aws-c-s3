@@ -45,7 +45,7 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environm
     struct aws_s3_platform_info_loader *loader);
 
 /*
- * Retrieves a list of EC2 instance types with a recommended configuration.
+ * Retrieves a list of EC2 instance types with recommended configuration.
  * Returns aws_array_list<aws_byte_cursor>. The caller is responsible for cleaning up the array list.
  */
 AWS_S3_API
