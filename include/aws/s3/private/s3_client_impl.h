@@ -170,8 +170,8 @@ struct aws_s3_client_vtable {
 struct aws_s3_upload_part_timeout_stats {
     bool stop_timeout;
 
-    /* Total number of upload request succeed */
-    uint64_t num_upload_requests_succeed;
+    /* Total number of successful upload requests */
+    uint64_t num_successful_upload_requests;
 
     /* Stats for the request time of first 10 succeed requests */
     struct {

@@ -2060,11 +2060,23 @@ const size_t g_expect_timeout_offset_ms =
     700; /* 0.7 Secs. From experienments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
 
 /**
- * S3 upload part request has a very low rate (around 0.1%) result in a very high time to first byte latency (5
- * seconds).
- * This function used to decide what's the good timeout for upload part based on completed upload part requests made
- * from the client.
- * This serves as an optimization to set a timeout that will retry on those upload parts response way too slow.
+ * The upload timeout optimization: explained.
+ *
+ * Sometimes, S3 is extremely slow responding to an upload.
+ * In these cases, it's much faster to cancel and resend the upload,
+ * vs waiting 5sec for the slow response.
+ *
+ * Typically, S3 responds to an upload in 0.2sec after the request is fully received.
+ * But occasionally (about 0.1%) it takes 5sec to respond.
+ * In a large 30GiB file upload, you can expect about 4 parts to suffer from
+ * a slow response. If one of these parts is near the end of the file,
+ * then we end up sitting around doing nothing for up to 5sec, waiting
+ * for this final slow upload to complete.
+ *
+ * We use the response_first_byte_timeout HTTP option to cancel uploads
+ * suffering from a slow response. But how should we set it? A fast 100Gbps
+ * machine definitely wants it! But a slow computer does not. A slow computer
+ * would be better off waiting 5sec for the response, vs re-uploading the whole request.
  *
  * The current algorithm:
  * 1. Start without a timeout value. After 10 requests completed, we know the average of how long the
@@ -2101,19 +2113,21 @@ void aws_s3_client_update_upload_part_timeout(
     uint64_t current_timeout_ns =
         aws_timestamp_convert(current_timeout_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
     uint64_t updated_timeout_ns = 0;
+    uint64_t expect_timeout_offset_ns =
+        aws_timestamp_convert(g_expect_timeout_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
 
     switch (finished_error_code) {
         case AWS_ERROR_SUCCESS:
             /* We only interested in request succeed */
-            stats->num_upload_requests_succeed = aws_add_u64_saturating(stats->num_upload_requests_succeed, 1);
-            if (stats->num_upload_requests_succeed <= 10) {
+            stats->num_successful_upload_requests = aws_add_u64_saturating(stats->num_successful_upload_requests, 1);
+            if (stats->num_successful_upload_requests <= 10) {
                 /* Gether the data */
                 uint64_t request_time_ns =
                     metrics->time_metrics.receive_end_timestamp_ns - metrics->time_metrics.send_start_timestamp_ns;
                 stats->initial_request_time.sum_ns =
                     aws_add_u64_saturating(stats->initial_request_time.sum_ns, request_time_ns);
                 ++stats->initial_request_time.num_samples;
-                if (stats->num_upload_requests_succeed == 10) {
+                if (stats->num_successful_upload_requests == 10) {
                     /* Decide we need a timeout or not */
                     uint64_t average_request_time_ns =
                         stats->initial_request_time.sum_ns / stats->initial_request_time.num_samples;
@@ -2121,7 +2135,7 @@ void aws_s3_client_update_upload_part_timeout(
                         /* We don't need a timeout, as retry will be slower than just wait for the server to response */
                         stats->stop_timeout = true;
                     } else {
-                        /* Start the timeout by 1 secs */
+                        /* Start the timeout at 1 secs */
                         aws_atomic_store_int(&client->upload_timeout_ms, 1000);
                     }
                 }
@@ -2141,15 +2155,13 @@ void aws_s3_client_update_upload_part_timeout(
 
             uint64_t average_response_to_first_byte_time_ns =
                 stats->response_to_first_byte_time.sum_ns / stats->response_to_first_byte_time.num_samples;
-            uint64_t expected_timeout_ns =
-                average_response_to_first_byte_time_ns +
-                aws_timestamp_convert(g_expect_timeout_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+            uint64_t expected_timeout_ns = average_response_to_first_byte_time_ns + expect_timeout_offset_ns;
             double timeout_ns_double = (double)current_timeout_ns * 0.99 + (double)expected_timeout_ns * 0.01;
             updated_timeout_ns = (uint64_t)timeout_ns_double;
             break;
 
         case AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT:
-            if (stats->num_upload_requests_succeed < 10) {
+            if (stats->num_successful_upload_requests < 10) {
                 goto unlock;
             }
 
