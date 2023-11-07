@@ -189,6 +189,7 @@ add_test_case(test_add_user_agent_header)
 
 add_test_case(test_get_existing_platform_info)
 add_test_case(test_get_nonexistent_platform_info)
+add_test_case(test_get_platforms_with_recommended_config)
 add_net_test_case(load_platform_info_from_global_state_sanity_test)
 
 add_net_test_case(sha1_nist_test_case_1)

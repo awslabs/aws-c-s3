@@ -569,6 +569,25 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environm
     return &loader->lock_data.current_env_platform_info;
 }
 
+struct aws_array_list aws_s3_get_recommended_platforms_info(struct aws_s3_platform_info_loader *loader) {
+    struct aws_array_list array_list;
+    aws_mutex_lock(&loader->lock_data.lock);
+    aws_array_list_init_dynamic(&array_list, loader->allocator, 5, sizeof(struct aws_byte_cursor));
+    /* Iterate over the map and add instance types to the array list which have
+     * platform_info->has_recommended_configuration == true */
+    for (struct aws_hash_iter iter = aws_hash_iter_begin(&loader->lock_data.compute_platform_info_table);
+         !aws_hash_iter_done(&iter);
+         aws_hash_iter_next(&iter)) {
+        struct aws_s3_platform_info *platform_info = iter.element.value;
+
+        if (platform_info->has_recommended_configuration) {
+            aws_array_list_push_back(&array_list, &platform_info->instance_type);
+        }
+    }
+    aws_mutex_unlock(&loader->lock_data.lock);
+    return array_list;
+}
+
 const struct aws_s3_platform_info *aws_s3_get_platform_info_for_instance_type(
     struct aws_s3_platform_info_loader *loader,
     struct aws_byte_cursor instance_type_name) {

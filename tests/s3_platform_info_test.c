@@ -97,3 +97,17 @@ static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocat
 }
 
 AWS_TEST_CASE(load_platform_info_from_global_state_sanity_test, s_load_platform_info_from_global_state_sanity_test)
+
+static int s_test_get_platforms_with_recommended_config(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    aws_s3_library_init(allocator);
+
+    struct aws_array_list recommended_platform_list = aws_s3_get_platforms_with_recommended_config();
+    ASSERT_TRUE(aws_array_list_length(&recommended_platform_list) > 0);
+    aws_array_list_clean_up(&recommended_platform_list);
+    aws_s3_library_clean_up();
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_get_platforms_with_recommended_config, s_test_get_platforms_with_recommended_config)

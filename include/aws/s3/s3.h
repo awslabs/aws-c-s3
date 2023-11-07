@@ -113,6 +113,13 @@ void aws_s3_library_clean_up(void);
 AWS_S3_API
 const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void);
 
+/*
+ * Retrieves a list of ec2 instance types that have recommended configuration
+ * Returns aws_array_list<aws_byte_cursor>. It is the callers responsibility to clean up the array list.
+ */
+AWS_S3_API
+struct aws_array_list aws_s3_get_platforms_with_recommended_config(void);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
