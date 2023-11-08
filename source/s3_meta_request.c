@@ -14,6 +14,7 @@
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
 #include <aws/auth/signing_result.h>
+#include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -846,6 +847,12 @@ finish:
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
+static bool s_s3_request_is_upload_part(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && meta_request->vtable->get_request_type &&
+           meta_request->vtable->get_request_type(request) == AWS_S3_REQUEST_TYPE_UPLOAD_PART;
+}
+
 void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(connection);
@@ -868,6 +875,10 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         options.on_metrics = s_s3_meta_request_stream_metrics;
     }
     options.on_complete = s_s3_meta_request_stream_complete;
+    if (s_s3_request_is_upload_part(request)) {
+        options.response_first_byte_timeout_ms = aws_atomic_load_int(&meta_request->client->upload_timeout_ms);
+        request->upload_timeout_ms = (size_t)options.response_first_byte_timeout_ms;
+    }
 
     struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
 
@@ -1321,16 +1332,26 @@ void aws_s3_meta_request_send_request_finish_default(
                 response_status);
 
         } else {
-
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Meta request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
-                "retry.",
-                (void *)meta_request,
-                error_code,
-                aws_error_str(error_code),
-                (void *)request,
-                response_status);
+            if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT) {
+                /* Log at info level instead of error as it's somewhat expected. */
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Request failed from error %d (%s). (request=%p). Try to setup a retry.",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code),
+                    (void *)request);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
+                    "retry.",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code),
+                    (void *)request,
+                    response_status);
+            }
 
             /* Otherwise, set this up for a retry if the meta request is active. */
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_RETRY;

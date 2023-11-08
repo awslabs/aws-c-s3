@@ -293,6 +293,8 @@ endif()
 add_test_case(parallel_read_stream_from_file_sanity_test)
 add_test_case(parallel_read_stream_from_large_file_test)
 
+add_test_case(client_update_upload_part_timeout)
+
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
 
