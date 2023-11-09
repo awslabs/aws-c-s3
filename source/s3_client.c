@@ -613,9 +613,9 @@ static void s_s3_client_start_destroy(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
 
-        if (client->synced_data.trim_buffer_pool_task_scheduled) {
-            aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
-        }
+        //if (client->synced_data.trim_buffer_pool_task_scheduled) {
+        //    aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+        //}
         
         client->synced_data.active = false;
 
