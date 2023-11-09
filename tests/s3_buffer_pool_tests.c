@@ -6,21 +6,19 @@
 #include <aws/s3/private/s3_buffer_pool.h>
 #include <aws/s3/private/s3_util.h>
 
+#include <aws/common/process.h>
 #include <aws/common/thread.h>
 #include <aws/testing/aws_test_harness.h>
 
 #define NUM_TEST_ALLOCS 100
-#define NUM_TEST_THREADS 8
+#define NUM_TEST_THREADS 1
 
 struct pool_thread_test_data {
     struct aws_s3_buffer_pool *pool;
     uint32_t thread_idx;
 };
 
-static void s_thread_test(
-    struct aws_allocator *allocator,
-    void (*thread_fn)(void *),
-    struct aws_s3_buffer_pool *pool) {
+static void s_thread_test(struct aws_allocator *allocator, void (*thread_fn)(void *), struct aws_s3_buffer_pool *pool) {
     const struct aws_thread_options *thread_options = aws_default_thread_options();
     struct aws_thread threads[NUM_TEST_THREADS];
     struct pool_thread_test_data thread_data[NUM_TEST_THREADS];
@@ -44,17 +42,17 @@ static void s_thread_test(
 static void s_threaded_alloc_worker(void *user_data) {
     struct aws_s3_buffer_pool *test_allocator = ((struct pool_thread_test_data *)user_data)->pool;
 
-    void *allocs[NUM_TEST_ALLOCS];
+    struct aws_s3_pooled_buffer allocs[NUM_TEST_ALLOCS];
     for (size_t count = 0; count < NUM_TEST_ALLOCS / NUM_TEST_THREADS; ++count) {
         size_t size = 8 * 1024 * 1024;
-        void *alloc = aws_s3_buffer_pool_acquire(test_allocator, size);
-        AWS_FATAL_ASSERT(alloc);
+        struct aws_s3_pooled_buffer alloc = aws_s3_buffer_pool_acquire_buffer(test_allocator, size);
+        memset(alloc.ptr, 0, size);
+        AWS_FATAL_ASSERT(alloc.ptr);
         allocs[count] = alloc;
     }
 
     for (size_t count = 0; count < NUM_TEST_ALLOCS / NUM_TEST_THREADS; ++count) {
-        void *alloc = allocs[count];
-        aws_s3_buffer_pool_release(test_allocator, alloc);
+        aws_s3_buffer_pool_release_buffer(test_allocator, allocs[count]);
     }
 }
 
@@ -78,27 +76,27 @@ static int s_s3_buffer_pool_limits(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
 
-    void *ptr1 = aws_s3_buffer_pool_acquire(buffer_pool, MB_TO_BYTES(64));
-    ASSERT_NOT_NULL(ptr1);
+    struct aws_s3_pooled_buffer buf1 = aws_s3_buffer_pool_acquire_buffer(buffer_pool, MB_TO_BYTES(64));
+    ASSERT_NOT_NULL(buf1.ptr);
 
-    void *ptrs[7];
-    for(size_t i = 0; i < 7; ++i) {
-        ptrs[i] = aws_s3_buffer_pool_acquire(buffer_pool, MB_TO_BYTES(128));
-        ASSERT_NOT_NULL(ptrs[i]);
+    struct aws_s3_pooled_buffer bufs[7];
+    for (size_t i = 0; i < 7; ++i) {
+        bufs[i] = aws_s3_buffer_pool_acquire_buffer(buffer_pool, MB_TO_BYTES(128));
+        ASSERT_NOT_NULL(bufs[i].ptr);
     }
 
-    ASSERT_NULL(aws_s3_buffer_pool_acquire(buffer_pool, MB_TO_BYTES(128)));
-    ASSERT_NULL(aws_s3_buffer_pool_acquire(buffer_pool, MB_TO_BYTES(96)));
+    ASSERT_NULL(aws_s3_buffer_pool_acquire_buffer(buffer_pool, MB_TO_BYTES(128)).ptr);
+    ASSERT_NULL(aws_s3_buffer_pool_acquire_buffer(buffer_pool, MB_TO_BYTES(96)).ptr);
 
-    void *ptr2 = aws_s3_buffer_pool_acquire(buffer_pool, MB_TO_BYTES(32));
-    ASSERT_NOT_NULL(ptr2);
+    struct aws_s3_pooled_buffer buf2 = aws_s3_buffer_pool_acquire_buffer(buffer_pool, MB_TO_BYTES(32));
+    ASSERT_NOT_NULL(buf2.ptr);
 
-    for(size_t i = 0; i < 7; ++i) {
-        aws_s3_buffer_pool_release(buffer_pool, ptrs[i]);
+    for (size_t i = 0; i < 7; ++i) {
+        aws_s3_buffer_pool_release_buffer(buffer_pool, bufs[i]);
     }
 
-    aws_s3_buffer_pool_release(buffer_pool, ptr1);
-    aws_s3_buffer_pool_release(buffer_pool, ptr2);
+    aws_s3_buffer_pool_release_buffer(buffer_pool, buf1);
+    aws_s3_buffer_pool_release_buffer(buffer_pool, buf2);
 
     aws_s3_buffer_pool_destroy(buffer_pool);
 

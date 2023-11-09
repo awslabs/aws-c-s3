@@ -81,6 +81,24 @@ static size_t s_dns_host_address_ttl_seconds = 5 * 60;
  * 30 seconds mirrors the value currently used by the Java SDK. */
 static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 
+/* Default size of the queue for requesting that could not acquire mem, and are
+ * waiting to be rescheduled. */
+static const size_t s_default_request_waiting_for_mem_queue_size = 10;
+
+/* How many times to retry acquiring buffer during request prepare before
+ * falling back and acquiring it during scheduling. */
+static const uint32_t s_num_buffer_acquire_retries_before_blocking = 5;
+
+/* Default size of buffer pool blocks. */
+static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
+
+/* Amount of mem reserved for use outside of buffer pool.
+ * This is an optimistic upper bound on mem used as we dont track it. */
+static const size_t s_buffer_pool_reserved_mem = MB_TO_BYTES(128);
+
+/* Amount of time spent idling before trimming buffer. */
+static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -133,6 +151,18 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
 
 void aws_s3_set_dns_ttl(size_t ttl) {
     s_dns_host_address_ttl_seconds = ttl;
+}
+
+static int s_s3_request_waiting_for_mem_priority_queue_pred(const void *a, const void *b) {
+    const struct aws_s3_request *const *request_a = a;
+    AWS_PRECONDITION(request_a);
+    AWS_PRECONDITION(*request_a);
+
+    const struct aws_s3_request *const *request_b = b;
+    AWS_PRECONDITION(request_b);
+    AWS_PRECONDITION(*request_b);
+
+    return (*request_a)->num_times_tried_buffer_acquire > (*request_b)->num_times_tried_buffer_acquire;
 }
 
 /* Returns the max number of connections allowed.
@@ -258,13 +288,52 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
-    client->buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(256), GB_TO_BYTES(8));
+
+    size_t max_mem_limit = 0;
+    switch (client_config->memory_limiter_mode) {
+        case AWS_S3_MEMORY_LIMITER_DISABLED:
+            max_mem_limit = 0;
+            break;
+        case AWS_S3_MEMORY_LIMITER_ENABLED:
+            max_mem_limit = client_config->max_memory_limit;
+            break;
+        case AWS_S3_MEMORY_LIMITER_ENABLED_DEFAULT:
+            if (sizeof(size_t) == 4) {
+                if (client_config->throughput_target_gbps > 25.0) {
+                    max_mem_limit = GB_TO_BYTES(2);
+                } else {
+                    max_mem_limit = GB_TO_BYTES(1);
+                }
+            } else {
+                if (client_config->throughput_target_gbps > 75.0) {
+                    max_mem_limit = GB_TO_BYTES(8);
+                } else if (client_config->throughput_target_gbps > 25.0) {
+                    max_mem_limit = GB_TO_BYTES(4);
+                } else {
+                    max_mem_limit = GB_TO_BYTES(2);
+                }
+            }
+    }
+
+    client->buffer_pool =
+        aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size - s_buffer_pool_reserved_mem, max_mem_limit);
+
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
     if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
-        goto lock_init_fail;
+        goto on_lock_init_fail;
+    }
+
+    if (aws_priority_queue_init_dynamic(
+            &client->synced_data.requests_waiting_for_mem,
+            allocator,
+            s_default_request_waiting_for_mem_queue_size,
+            sizeof(struct aws_s3_request *),
+            s_s3_request_waiting_for_mem_priority_queue_pred)) {
+        /* Priority queue */
+        goto on_request_queue_init_fail;
     }
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
@@ -489,8 +558,9 @@ on_error:
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
+on_request_queue_init_fail:
     aws_mutex_clean_up(&client->synced_data.lock);
-lock_init_fail:
+on_lock_init_fail:
     aws_mem_release(client->allocator, client);
     return NULL;
 }
@@ -1133,6 +1203,53 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
     client->synced_data.process_work_task_scheduled = true;
 }
 
+/* Task function for trying to find a request that can be processed. */
+static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    AWS_PRECONDITION(task);
+    (void)task;
+    (void)task_status;
+
+    /* Client keeps a reference to the event loop group; a 'canceled' status should not happen.*/
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+
+    struct aws_s3_client *client = arg;
+    AWS_PRECONDITION(client);
+
+    uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+
+    if (num_reqs_in_flight == 0) {
+        aws_s3_buffer_pool_trim(client->buffer_pool);
+    }
+}
+
+static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *client) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+
+    if (client->synced_data.trim_buffer_pool_task_scheduled) {
+        return;
+    }
+
+    if (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+        return;
+    }
+
+    aws_task_init(
+        &client->synced_data.trim_buffer_pool_task,
+        s_s3_client_trim_buffer_pool_task,
+        client,
+        "s3_client_buffer_pool_trim_task");
+
+    uint64_t trim_time = 0;
+    aws_event_loop_current_clock_time(client->process_work_event_loop, &trim_time);
+    trim_time +=
+        aws_timestamp_convert(s_buffer_pool_trim_time_offset_in_s, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+
+    aws_event_loop_schedule_task_future(
+        client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task, trim_time);
+
+    client->synced_data.trim_buffer_pool_task_scheduled = true;
+}
+
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
@@ -1196,7 +1313,17 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
 
+    s_s3_client_schedule_buffer_pool_trim_synced(client);
+
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
+
+    while (aws_priority_queue_size(&client->synced_data.requests_waiting_for_mem) > 0) {
+        struct aws_s3_request *request = NULL;
+        aws_priority_queue_pop(&client->synced_data.requests_waiting_for_mem, (void **)&request);
+        AWS_FATAL_ASSERT(request != NULL);
+
+        aws_priority_queue_push(&client->synced_data.requests_waiting_for_mem, &request);
+    }
 
     uint32_t num_requests_queued =
         aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
@@ -1362,31 +1489,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 }
 
-static bool try_allocate_request_buffers(struct aws_s3_request *request) {
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-
-    if (request->part_size_request_body && request->request_pool_ptr == NULL) {
-        request->request_pool_ptr = aws_s3_buffer_pool_acquire(request->buffer_pool, meta_request->part_size);
-        if (request->request_pool_ptr == NULL) {
-            return false;
-        }
-
-        request->request_body = aws_byte_buf_from_empty_array(request->request_pool_ptr, meta_request->part_size);
-    }
-
-    if (request->part_size_response_body && request->send_data.response_pool_ptr == NULL) {
-        request->send_data.response_pool_ptr = aws_s3_buffer_pool_acquire(request->buffer_pool, meta_request->part_size);
-        if (request->send_data.response_pool_ptr == NULL) {
-            return false;
-        }
-        request->send_data.response_body = aws_byte_buf_from_empty_array(request->send_data.response_pool_ptr, meta_request->part_size);
-    }
-
-    /** TODO: default */
-
-    return true;
-}
-
 static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -1411,6 +1513,11 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
+    struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+    bool has_mem_limit = pool_usage.max_size != 0;
+    AWS_ASSERT(!has_mem_limit || pool_usage.max_size >= pool_usage.approx_used);
+    size_t approx_mem_remaining = has_mem_limit ? pool_usage.max_size - pool_usage.approx_used : 0;
+
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /* While:
@@ -1426,6 +1533,43 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                    max_requests_prepare &&
                num_requests_in_flight < max_requests_in_flight &&
                !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+
+            if (aws_priority_queue_size(&client->threaded_data.requests_waiting_for_mem) > 0) {
+                struct aws_s3_request *request = NULL;
+                aws_priority_queue_top(&client->threaded_data.requests_waiting_for_mem, (void **)&request);
+                AWS_ASSERT(request->part_size != 0); /* non part sized reqs should not fail due to lack of mem */
+
+                if (request->num_times_tried_buffer_acquire > s_num_buffer_acquire_retries_before_blocking) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "request id=%p Falling back to force allocating buffer for request",
+                        (void *)request);
+
+                    request->pooled_buffer =
+                        aws_s3_buffer_pool_acquire_buffer(request->buffer_pool, request->part_size);
+                    if (request->pooled_buffer.ptr == NULL) {
+                        break; /* stop scheduling until we can allocate this req */
+                    }
+
+                    if (request->part_size_request_body) {
+                        request->request_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
+                    } else {
+                        request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
+                    }
+                }
+
+                if (aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining)) {
+                    break;
+                }
+
+                ++client->threaded_data.num_requests_being_prepared;
+
+                num_requests_in_flight = (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+
+                aws_s3_meta_request_prepare_request(
+                    request->meta_request, request, s_s3_client_prepare_callback_queue_request, client);
+                continue;
+            }
 
             struct aws_linked_list_node *meta_request_node =
                 aws_linked_list_begin(&client->threaded_data.meta_requests);
@@ -1451,16 +1595,9 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             }
 
             struct aws_s3_request *request = NULL;
-            bool work_remaining = false;
 
-            if (client->threaded_data.request_waiting_for_memory) {
-                request = client->threaded_data.request_waiting_for_memory;
-                work_remaining = true;
-                client->threaded_data.request_waiting_for_memory = NULL;
-            } else {
-                /* Try to grab the next request from the meta request. */
-                work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
-            }
+            /* Try to grab the next request from the meta request. */
+            bool work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
 
             if (work_remaining) {
                 /* If there is work remaining, but we didn't get a request back, take the meta request out of the
@@ -1471,20 +1608,23 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     aws_linked_list_push_back(
                         &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
                 } else {
-                    if (try_allocate_request_buffers(request)) {
-                        request->tracked_by_client = true;
+                    request->tracked_by_client = true;
 
-                        ++client->threaded_data.num_requests_being_prepared;
-
-                        num_requests_in_flight =
-                            (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
-
-                        aws_s3_meta_request_prepare_request(
-                            meta_request, request, s_s3_client_prepare_callback_queue_request, client);
-                    } else {
-                        client->threaded_data.request_waiting_for_memory = request;
+                    /* Note: logic relies on the fact the either response or
+                     * request will be part sized, but never both. */
+                    if ((request->part_size_request_body || request->part_size_response_body) &&
+                        aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining)) {
+                        AWS_ASSERT(request->part_size != 0); /* part sized reqs should have part size set */
                         break;
                     }
+
+                    ++client->threaded_data.num_requests_being_prepared;
+
+                    num_requests_in_flight =
+                        (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+
+                    aws_s3_meta_request_prepare_request(
+                        meta_request, request, s_s3_client_prepare_callback_queue_request, client);
                 }
             } else {
                 s_s3_client_remove_meta_request_threaded(client, meta_request);
@@ -1525,7 +1665,7 @@ static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    if (error_code != AWS_ERROR_SUCCESS) {
+    if (error_code != AWS_ERROR_SUCCESS && error_code != AWS_ERROR_S3_INSUFFICIENT_MEMORY) {
         s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
         request = aws_s3_request_release(request);
     }
@@ -1536,6 +1676,9 @@ static void s_s3_client_prepare_callback_queue_request(
 
         if (error_code == AWS_ERROR_SUCCESS) {
             aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
+        } else if (error_code == AWS_ERROR_S3_INSUFFICIENT_MEMORY) {
+            ++request->num_times_tried_buffer_acquire;
+            aws_priority_queue_push(&client->synced_data.requests_waiting_for_mem, &request);
         } else {
             ++client->synced_data.num_failed_prepare_requests;
         }

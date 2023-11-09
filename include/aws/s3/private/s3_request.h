@@ -12,8 +12,8 @@
 #include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
-#include <aws/s3/private/s3_checksums.h>
 #include <aws/s3/private/s3_buffer_pool.h>
+#include <aws/s3/private/s3_checksums.h>
 
 struct aws_http_message;
 struct aws_signable;
@@ -116,7 +116,7 @@ struct aws_s3_request {
      * retried.*/
     struct aws_byte_buf request_body;
 
-    uint8_t *request_pool_ptr;
+    struct aws_s3_pooled_buffer pooled_buffer;
 
     /* Beginning range of this part. */
     /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
@@ -131,6 +131,10 @@ struct aws_s3_request {
      * caller.
      */
     uint32_t part_number;
+
+    size_t part_size;
+
+    uint32_t num_times_tried_buffer_acquire;
 
     /* Number of times aws_s3_meta_request_prepare has been called for a request. During the first call to the virtual
      * prepare function, this will be 0.*/
@@ -175,8 +179,6 @@ struct aws_s3_request {
 
         /* Recorded response body of the request. */
         struct aws_byte_buf response_body;
-
-        uint8_t *response_pool_ptr;
 
         /* Returned response status of this request. */
         int response_status;

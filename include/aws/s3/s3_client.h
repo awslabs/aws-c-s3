@@ -229,6 +229,12 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
+enum aws_s3_memory_limiter_mode {
+    AWS_S3_MEMORY_LIMITER_DISABLED = 0,
+    AWS_S3_MEMORY_LIMITER_ENABLED_DEFAULT,
+    AWS_S3_MEMORY_LIMITER_ENABLED
+};
+
 /**
  * Info about a single part, for you to review before the upload completes.
  */
@@ -343,6 +349,10 @@ struct aws_s3_client_config {
 
     /* Throughput target in Gbps that we are trying to reach. */
     double throughput_target_gbps;
+
+    enum aws_s3_memory_limiter_mode memory_limiter_mode;
+
+    size_t max_memory_limit;
 
     /* Retry strategy to use. If NULL, a default retry strategy will be used. */
     struct aws_retry_strategy *retry_strategy;

@@ -101,8 +101,8 @@ static int s_meta_request_get_response_headers_checksum_callback(
             if (header_sum.len == encoded_len - 1) {
                 /* encoded_len includes the nullptr length. -1 is the expected length. */
                 aws_byte_buf_init_copy_from_cursor(
-                    &meta_request->meta_request_level_response_header_checksum, aws_default_allocator(), header_sum);
-                meta_request->meta_request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+                    &meta_request->meta_request_level_response_header_checksum, meta_request->allocator, header_sum);
+                meta_request->meta_request_level_running_response_sum = aws_checksum_new(meta_request->allocator, i);
             }
             break;
         }
@@ -150,10 +150,10 @@ static void s_meta_request_get_response_finish_checksum_callback(
         /* what error should I raise for these? */
         aws_base64_compute_encoded_len(
             meta_request->meta_request_level_running_response_sum->digest_size, &encoded_checksum_len);
-        aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
+        aws_byte_buf_init(&encoded_response_body_sum, meta_request->allocator, encoded_checksum_len);
         aws_byte_buf_init(
             &response_body_sum,
-            aws_default_allocator(),
+            meta_request->allocator,
             meta_request->meta_request_level_running_response_sum->digest_size);
         aws_checksum_finalize(meta_request->meta_request_level_running_response_sum, &response_body_sum, 0);
         struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
@@ -951,8 +951,8 @@ static void s_get_part_response_headers_checksum_helper(
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
             if (header_sum.len == encoded_len - 1) {
                 aws_byte_buf_init_copy_from_cursor(
-                    &connection->request->request_level_response_header_checksum, aws_default_allocator(), header_sum);
-                connection->request->request_level_running_response_sum = aws_checksum_new(aws_default_allocator(), i);
+                    &connection->request->request_level_response_header_checksum, meta_request->allocator, header_sum);
+                connection->request->request_level_running_response_sum = aws_checksum_new(meta_request->allocator, i);
             }
             break;
         }
@@ -979,9 +979,9 @@ static void s_get_response_part_finish_checksum_helper(struct aws_s3_connection 
         size_t encoded_checksum_len = 0;
         request->did_validate = true;
         aws_base64_compute_encoded_len(request->request_level_running_response_sum->digest_size, &encoded_checksum_len);
-        aws_byte_buf_init(&encoded_response_body_sum, aws_default_allocator(), encoded_checksum_len);
+        aws_byte_buf_init(&encoded_response_body_sum, request->allocator, encoded_checksum_len);
         aws_byte_buf_init(
-            &response_body_sum, aws_default_allocator(), request->request_level_running_response_sum->digest_size);
+            &response_body_sum, request->allocator, request->request_level_running_response_sum->digest_size);
         aws_checksum_finalize(request->request_level_running_response_sum, &response_body_sum, 0);
         struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
         aws_base64_encode(&response_body_sum_cursor, &encoded_response_body_sum);
@@ -1108,9 +1108,8 @@ static int s_s3_meta_request_incoming_body(
     if (request->send_data.response_body.capacity == 0) {
         size_t buffer_size = s_dynamic_body_initial_buf_size;
 
-        if (request->part_size_response_body) {
-            buffer_size = meta_request->part_size;
-        }
+        AWS_ASSERT(
+            !request->part_size_response_body); /* part size buffer should have been allocated before getting here. */
 
         aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
     }

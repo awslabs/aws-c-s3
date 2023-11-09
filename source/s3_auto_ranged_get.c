@@ -180,6 +180,7 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
                         request->discovers_object_size = true;
+                        request->part_size = meta_request->part_size;
 
                         auto_ranged_get->synced_data.head_object_sent = true;
                     }
@@ -194,6 +195,7 @@ static bool s_s3_auto_ranged_get_update(
 
                     request->part_range_start = 0;
                     request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
+                    request->part_size = meta_request->part_size;
                     request->discovers_object_size = true;
 
                     ++auto_ranged_get->synced_data.num_parts_requested;
@@ -266,6 +268,8 @@ static bool s_s3_auto_ranged_get_update(
                     request->part_number,
                     &request->part_range_start,
                     &request->part_range_end);
+
+                request->part_size = meta_request->part_size;
 
                 ++auto_ranged_get->synced_data.num_parts_requested;
                 goto has_work_remaining;
@@ -368,13 +372,21 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
                 aws_http_message_set_request_method(message, g_head_method);
             }
             break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART: {
+            request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->buffer_pool, meta_request->part_size);
+            if (request->pooled_buffer.ptr != NULL) {
+                request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
+            } else {
+                aws_raise_error(AWS_ERROR_S3_INSUFFICIENT_MEMORY);
+                goto finish;
+            }
+
             message = aws_s3_ranged_get_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 request->part_range_start,
                 request->part_range_end);
-            break;
+        } break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
             message = aws_s3_message_util_copy_http_message_no_body_all_headers(
                 meta_request->allocator, meta_request->initial_request_message);

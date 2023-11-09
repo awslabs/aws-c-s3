@@ -41,6 +41,7 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH, "Request body length must match Content-Length header."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED, "RequestTimeTooSkewed error received from S3."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_FILE_MODIFIED, "The file was modified during upload."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INSUFFICIENT_MEMORY, "Request cannot be processed due to insufficient memory"),
 };
 /* clang-format on */
 

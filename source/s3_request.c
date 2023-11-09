@@ -100,7 +100,6 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     request->send_data.response_headers = NULL;
 
     aws_byte_buf_clean_up(&request->send_data.response_body);
-    aws_s3_buffer_pool_release(request->buffer_pool, request->send_data.response_pool_ptr);
 
     AWS_ZERO_STRUCT(request->send_data);
 }
@@ -128,7 +127,7 @@ static void s_s3_request_destroy(void *user_data) {
 
     aws_s3_request_clean_up_send_data(request);
     aws_byte_buf_clean_up(&request->request_body);
-    aws_s3_buffer_pool_release(request->buffer_pool, request->request_pool_ptr);
+    aws_s3_buffer_pool_release_buffer(request->buffer_pool, request->pooled_buffer);
     aws_s3_meta_request_release(request->meta_request);
 
     aws_mem_release(request->allocator, request);
