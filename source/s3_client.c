@@ -336,6 +336,17 @@ struct aws_s3_client *aws_s3_client_new(
         goto on_request_queue_init_fail;
     }
 
+    if (aws_priority_queue_init_dynamic(
+            &client->threaded_data.requests_waiting_for_mem,
+            allocator,
+            s_default_request_waiting_for_mem_queue_size,
+            sizeof(struct aws_s3_request *),
+            s_s3_request_waiting_for_mem_priority_queue_pred)) {
+        /* Priority queue */
+        aws_priority_queue_clean_up(&client->synced_data.requests_waiting_for_mem);
+        goto on_request_queue_init_fail;
+    }
+
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
     aws_linked_list_init(&client->synced_data.prepared_requests);
 
@@ -593,6 +604,10 @@ static void s_s3_client_start_destroy(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
 
+        if (client->synced_data.trim_buffer_pool_task_scheduled) {
+            aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+        }
+        
         client->synced_data.active = false;
 
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
@@ -659,6 +674,9 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
+
+    aws_priority_queue_clean_up(&client->synced_data.requests_waiting_for_mem);
+    aws_priority_queue_clean_up(&client->threaded_data.requests_waiting_for_mem);
 
     aws_s3_buffer_pool_destroy(client->buffer_pool);
     aws_mem_release(client->allocator, client);
@@ -1229,7 +1247,8 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
         return;
     }
 
-    if (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+    uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+    if (num_reqs_in_flight > 0) {
         return;
     }
 
@@ -1313,7 +1332,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
 
-    s_s3_client_schedule_buffer_pool_trim_synced(client);
+    if (client->synced_data.active) {
+        s_s3_client_schedule_buffer_pool_trim_synced(client);
+    }
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
 
@@ -1322,7 +1343,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         aws_priority_queue_pop(&client->synced_data.requests_waiting_for_mem, (void **)&request);
         AWS_FATAL_ASSERT(request != NULL);
 
-        aws_priority_queue_push(&client->synced_data.requests_waiting_for_mem, &request);
+        aws_priority_queue_push(&client->threaded_data.requests_waiting_for_mem, &request);
     }
 
     uint32_t num_requests_queued =

@@ -145,7 +145,7 @@ static struct aws_s3_pooled_buffer s_primary_acquire(struct aws_s3_buffer_pool *
         }
     }
 
-    if (alloc_ptr == NULL && (buffer_pool->max_mem_usage ||
+    if (alloc_ptr == NULL && (buffer_pool->max_mem_usage == 0 ||
                               buffer_pool->current_mem_usage + buffer_pool->block_size <= buffer_pool->max_mem_usage)) {
         struct s3_buffer_pool_block block;
         block.alloc_count = 1;
