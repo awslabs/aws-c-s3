@@ -372,24 +372,13 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
                 aws_http_message_set_request_method(message, g_head_method);
             }
             break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART: {
-            if (request->pooled_buffer.ptr == NULL) {
-                request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->buffer_pool, meta_request->part_size);
-                if (request->pooled_buffer.ptr != NULL) {
-                    request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
-                } else {
-                    aws_raise_error(AWS_ERROR_S3_INSUFFICIENT_MEMORY);
-                    goto finish;
-                }
-            }
-
-
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
             message = aws_s3_ranged_get_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 request->part_range_start,
                 request->part_range_end);
-        } break;
+            break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
             message = aws_s3_message_util_copy_http_message_no_body_all_headers(
                 meta_request->allocator, meta_request->initial_request_message);
@@ -424,13 +413,24 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
     aws_s3_request_setup_send_data(request, message);
     aws_http_message_release(message);
 
+    if (request->part_size_response_body && request->pooled_buffer.ptr == NULL) {
+        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->buffer_pool, meta_request->part_size);
+        if (request->pooled_buffer.ptr != NULL) {
+            request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
+        } else {
+            aws_raise_error(AWS_ERROR_S3_INSUFFICIENT_MEMORY);
+            goto finish;
+        }
+    }
+
     /* Success! */
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: Created request %p for part %d",
+        "id=%p: Created request %p for part %d part sized %d",
         (void *)meta_request,
         (void *)request,
-        request->part_number);
+        request->part_number,
+        request->part_size_response_body);
 
     success = true;
 

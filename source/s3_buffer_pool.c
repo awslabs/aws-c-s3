@@ -165,8 +165,6 @@ static struct aws_s3_pooled_buffer s_primary_acquire(struct aws_s3_buffer_pool *
 struct aws_s3_pooled_buffer aws_s3_buffer_pool_acquire_buffer(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
     AWS_PRECONDITION(buffer_pool);
 
-    AWS_LOGF_DEBUG(0, "buffer pool acquire %zu %zu", size, buffer_pool->block_size);
-
     if (size < buffer_pool->block_size) {
         return s_primary_acquire(buffer_pool, size);
     }

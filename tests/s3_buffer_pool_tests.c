@@ -60,7 +60,7 @@ static int s_s3_buffer_pool_threaded_allocs_and_frees(struct aws_allocator *allo
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(4));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(2));
 
     s_thread_test(allocator, s_threaded_alloc_worker, buffer_pool);
 
