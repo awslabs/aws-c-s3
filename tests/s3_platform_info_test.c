@@ -105,6 +105,11 @@ static int s_test_get_platforms_with_recommended_config(struct aws_allocator *al
 
     struct aws_array_list recommended_platform_list = aws_s3_get_platforms_with_recommended_config();
     ASSERT_TRUE(aws_array_list_length(&recommended_platform_list) > 0);
+    for (size_t i = 0; i < aws_array_list_length(&recommended_platform_list); ++i) {
+        struct aws_byte_cursor *cursor;
+        aws_array_list_get_at_ptr(&recommended_platform_list, (void **)&cursor, i);
+        ASSERT_TRUE(cursor->len > 0);
+    }
     aws_array_list_clean_up(&recommended_platform_list);
     aws_s3_library_clean_up();
     return AWS_OP_SUCCESS;

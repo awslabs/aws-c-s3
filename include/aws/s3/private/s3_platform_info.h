@@ -49,7 +49,7 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environm
  * Returns aws_array_list<aws_byte_cursor>. The caller is responsible for cleaning up the array list.
  */
 AWS_S3_API
-struct aws_array_list aws_s3_get_recommended_platforms_info(struct aws_s3_platform_info_loader *loader);
+struct aws_array_list aws_s3_get_recommended_platforms(struct aws_s3_platform_info_loader *loader);
 
 /**
  * Returns true if the current process is running on an Amazon EC2 instance powered by Nitro.

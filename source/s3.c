@@ -99,7 +99,7 @@ const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void) {
 }
 
 struct aws_array_list aws_s3_get_platforms_with_recommended_config(void) {
-    return aws_s3_get_recommended_platforms_info(s_loader);
+    return aws_s3_get_recommended_platforms(s_loader);
 }
 
 void aws_s3_library_clean_up(void) {

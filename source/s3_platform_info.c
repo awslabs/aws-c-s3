@@ -569,7 +569,7 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environm
     return &loader->lock_data.current_env_platform_info;
 }
 
-struct aws_array_list aws_s3_get_recommended_platforms_info(struct aws_s3_platform_info_loader *loader) {
+struct aws_array_list aws_s3_get_recommended_platforms(struct aws_s3_platform_info_loader *loader) {
     struct aws_array_list array_list;
     aws_mutex_lock(&loader->lock_data.lock);
     aws_array_list_init_dynamic(&array_list, loader->allocator, 5, sizeof(struct aws_byte_cursor));
