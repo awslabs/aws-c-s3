@@ -325,7 +325,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     client->buffer_pool =
-        aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size - s_buffer_pool_reserved_mem, max_mem_limit);
+        aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size, max_mem_limit - s_buffer_pool_reserved_mem);
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -1588,7 +1588,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     }
                 }
 
-                if (aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining)) {
+                if (has_mem_limit &&
+                    aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining)) {
                     break;
                 }
 
@@ -1598,6 +1599,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
                 aws_s3_meta_request_prepare_request(
                     request->meta_request, request, s_s3_client_prepare_callback_queue_request, client);
+                aws_priority_queue_pop(&client->threaded_data.requests_waiting_for_mem, (void **)&request);
                 continue;
             }
 
@@ -1642,8 +1644,9 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
                     /* Note: logic relies on the fact the either response or
                      * request will be part sized, but never both. */
-                    if ((request->part_size_request_body || request->part_size_response_body) &&
-                        aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining)) {
+                    if (has_mem_limit && (
+                        (request->part_size_request_body || request->part_size_response_body) &&
+                        aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining))) {
                         AWS_ASSERT(request->part_size != 0); /* part sized reqs should have part size set */
                         break;
                     }
