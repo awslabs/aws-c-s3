@@ -818,6 +818,8 @@ struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_test
     AWS_PRECONDITION(tester);
 
     struct aws_http_message *message = aws_http_message_new_request(tester->allocator);
+    aws_http_message_set_request_method(message, aws_http_method_get);
+    aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("/dummy_test"));
 
     struct aws_http_header host_header = {
         .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host"),
