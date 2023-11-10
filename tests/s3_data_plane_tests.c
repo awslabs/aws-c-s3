@@ -3906,11 +3906,12 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
 
-    aws_s3_tester_unlock_synced_data(&tester);
     /* Check the size of the metrics should be the same as the number of requests, which should be 1 */
     ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
     struct aws_s3_request_metrics *metrics = NULL;
     aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
+
+    aws_s3_tester_unlock_synced_data(&tester);
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
 
