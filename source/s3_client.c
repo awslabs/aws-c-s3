@@ -612,10 +612,6 @@ static void s_s3_client_start_destroy(void *user_data) {
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
-
-        //if (client->synced_data.trim_buffer_pool_task_scheduled) {
-        //    aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
-        //}
         
         client->synced_data.active = false;
 
@@ -646,6 +642,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
+
+    if (client->synced_data.trim_buffer_pool_task_scheduled) {
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    }
 
     aws_string_destroy(client->region);
     client->region = NULL;
@@ -960,7 +960,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             goto unlock;
         }
 
-        if (was_created) {
+        if (was_created)
             struct aws_s3_endpoint_options endpoint_options = {
                 .host_name = endpoint_host_name,
                 .client_bootstrap = client->client_bootstrap,

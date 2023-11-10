@@ -106,7 +106,7 @@ void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
-        if (block->block_ptr == 0) {
+        if (block->alloc_count == 0) {
             size_t swap_loc = aws_array_list_length(&buffer_pool->blocks) - 1 - swap_count;
             if (swap_loc == i) {
                 break;
