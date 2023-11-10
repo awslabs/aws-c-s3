@@ -960,7 +960,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             goto unlock;
         }
 
-        if (was_created)
+        if (was_created) {
             struct aws_s3_endpoint_options endpoint_options = {
                 .host_name = endpoint_host_name,
                 .client_bootstrap = client->client_bootstrap,
