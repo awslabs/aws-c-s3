@@ -214,10 +214,13 @@ void aws_s3_buffer_pool_release_buffer(
 }
 
 struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3_buffer_pool *buffer_pool) {
-    return (struct aws_s3_buffer_pool_usage_stats){
+    aws_mutex_lock(&buffer_pool->mutex);
+    struct aws_s3_buffer_pool_usage_stats ret = (struct aws_s3_buffer_pool_usage_stats){
         .max_size = buffer_pool->max_mem_usage,
         .approx_used = buffer_pool->current_mem_usage,
     };
+    aws_mutex_unlock(&buffer_pool->mutex);
+    return ret;
 }
 
 struct aws_byte_buf aws_byte_buf_from_pooled_buffer(struct aws_s3_pooled_buffer pooled_buffer) {
