@@ -195,15 +195,19 @@ void aws_s3_buffer_pool_release_buffer(
 
     aws_mutex_lock(&buffer_pool->mutex);
     if (pooled_buffer.size < buffer_pool->block_size) {
+        bool found = false;
         for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
             struct s3_buffer_pool_block *block;
             aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
             if (block->block_ptr <= pooled_buffer.ptr && block->block_ptr + block->block_size > pooled_buffer.ptr) {
                 block->alloc_count -= 1;
+                found = true;
                 break;
             }
         }
+
+        AWS_FATAL_ASSERT(found);
     } else {
         aws_mem_release(buffer_pool->base_allocator, pooled_buffer.ptr);
     }

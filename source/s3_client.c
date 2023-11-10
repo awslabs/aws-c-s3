@@ -1567,12 +1567,11 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             if (aws_priority_queue_size(&client->threaded_data.requests_waiting_for_mem) > 0) {
                 struct aws_s3_request *request = NULL;
                 aws_priority_queue_top(&client->threaded_data.requests_waiting_for_mem, (void **)&request);
-                AWS_ASSERT(request->part_size != 0); /* non part sized reqs should not fail due to lack of mem */
 
                 if (request->num_times_tried_buffer_acquire > s_num_buffer_acquire_retries_before_blocking) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_CLIENT,
-                        "request id=%p Falling back to force allocating buffer for request",
+                        "id=%p Falling back to force allocating buffer for request",
                         (void *)request);
 
                     request->pooled_buffer =
@@ -1647,7 +1646,6 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     if (has_mem_limit && (
                         (request->part_size_request_body || request->part_size_response_body) &&
                         aws_sub_size_checked(approx_mem_remaining, request->meta_request->part_size, &approx_mem_remaining))) {
-                        AWS_ASSERT(request->part_size != 0); /* part sized reqs should have part size set */
                         break;
                     }
 
@@ -1710,6 +1708,11 @@ static void s_s3_client_prepare_callback_queue_request(
         if (error_code == AWS_ERROR_SUCCESS) {
             aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
         } else if (error_code == AWS_ERROR_S3_INSUFFICIENT_MEMORY) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Failed to allocate mem for request. part size %zu",
+                (void *)request, 
+                request->meta_request->part_size);
             ++request->num_times_tried_buffer_acquire;
             aws_priority_queue_push(&client->synced_data.requests_waiting_for_mem, &request);
         } else {
