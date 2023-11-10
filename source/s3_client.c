@@ -1576,7 +1576,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                         (void *)request);
 
                     request->pooled_buffer =
-                        aws_s3_buffer_pool_acquire_buffer(request->buffer_pool, request->part_size);
+                        aws_s3_buffer_pool_acquire_buffer(client->buffer_pool, request->meta_request->part_size);
                     if (request->pooled_buffer.ptr == NULL) {
                         break; /* stop scheduling until we can allocate this req */
                     }
@@ -1589,7 +1589,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 }
 
                 if (has_mem_limit &&
-                    aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining)) {
+                    aws_sub_size_checked(approx_mem_remaining, request->meta_request->part_size, &approx_mem_remaining)) {
                     break;
                 }
 
@@ -1646,7 +1646,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                      * request will be part sized, but never both. */
                     if (has_mem_limit && (
                         (request->part_size_request_body || request->part_size_response_body) &&
-                        aws_sub_size_checked(approx_mem_remaining, request->part_size, &approx_mem_remaining))) {
+                        aws_sub_size_checked(approx_mem_remaining, request->meta_request->part_size, &approx_mem_remaining))) {
                         AWS_ASSERT(request->part_size != 0); /* part sized reqs should have part size set */
                         break;
                     }

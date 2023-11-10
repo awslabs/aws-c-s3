@@ -26,7 +26,6 @@ struct aws_s3_request *aws_s3_request_new(
     aws_ref_count_init(&request->ref_count, request, (aws_simple_completion_callback *)s_s3_request_destroy);
 
     request->allocator = meta_request->allocator;
-    request->buffer_pool = meta_request->client->buffer_pool;
     request->meta_request = aws_s3_meta_request_acquire(meta_request);
 
     request->request_tag = request_tag;
@@ -127,7 +126,7 @@ static void s_s3_request_destroy(void *user_data) {
 
     aws_s3_request_clean_up_send_data(request);
     aws_byte_buf_clean_up(&request->request_body);
-    aws_s3_buffer_pool_release_buffer(request->buffer_pool, request->pooled_buffer);
+    aws_s3_buffer_pool_release_buffer(request->meta_request->client->buffer_pool, request->pooled_buffer);
     aws_s3_meta_request_release(request->meta_request);
 
     aws_mem_release(request->allocator, request);

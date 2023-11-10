@@ -107,8 +107,6 @@ struct aws_s3_request {
 
     struct aws_allocator *allocator;
 
-    struct aws_s3_buffer_pool *buffer_pool;
-
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
 
@@ -131,8 +129,6 @@ struct aws_s3_request {
      * caller.
      */
     uint32_t part_number;
-
-    size_t part_size;
 
     uint32_t num_times_tried_buffer_acquire;
 

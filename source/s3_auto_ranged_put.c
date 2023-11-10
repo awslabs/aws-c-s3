@@ -546,7 +546,6 @@ static bool s_s3_auto_ranged_put_update(
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY);
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
-                request->part_size = meta_request->part_size;
 
                 /* If request was previously uploaded, we prepare it to ensure checksums still match,
                  * but ultimately it gets marked no-op and we don't send it */
@@ -926,7 +925,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
         if (request->request_body.capacity == 0) {
-            request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->buffer_pool, request_body_size);
+            request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request_body_size);
             if (request->pooled_buffer.ptr != NULL) {
                 request->request_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
             } else {

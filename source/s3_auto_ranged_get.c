@@ -180,7 +180,6 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
                         request->discovers_object_size = true;
-                        request->part_size = meta_request->part_size;
 
                         auto_ranged_get->synced_data.head_object_sent = true;
                     }
@@ -195,7 +194,6 @@ static bool s_s3_auto_ranged_get_update(
 
                     request->part_range_start = 0;
                     request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
-                    request->part_size = meta_request->part_size;
                     request->discovers_object_size = true;
 
                     ++auto_ranged_get->synced_data.num_parts_requested;
@@ -268,8 +266,6 @@ static bool s_s3_auto_ranged_get_update(
                     request->part_number,
                     &request->part_range_start,
                     &request->part_range_end);
-
-                request->part_size = meta_request->part_size;
 
                 ++auto_ranged_get->synced_data.num_parts_requested;
                 goto has_work_remaining;
@@ -414,7 +410,7 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
     aws_http_message_release(message);
 
     if (request->part_size_response_body && request->pooled_buffer.ptr == NULL) {
-        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->buffer_pool, meta_request->part_size);
+        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, meta_request->part_size);
         if (request->pooled_buffer.ptr != NULL) {
             request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
         } else {
