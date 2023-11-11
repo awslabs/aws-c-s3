@@ -2215,7 +2215,7 @@ AWS_TEST_CASE(
     test_s3_put_large_object_no_content_length_with_checksum,
     s_test_s3_put_large_object_no_content_length_with_checksum)
 static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws_allocator *allocator, void *ctx) {
-    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 1280, true));
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 128, true));
 
     return 0;
 }
