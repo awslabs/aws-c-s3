@@ -308,7 +308,7 @@ struct aws_s3_client *aws_s3_client_new(
         case AWS_S3_MEMORY_LIMITER_ENABLED_DEFAULT:
 #if defined(ON_32_BIT_PLATFORM)
             if (client_config->throughput_target_gbps > 25.0) {
-                max_mem_limit = GB_TO_BYTES(2);
+                max_mem_limit = GB_TO_BYTES(1);
             } else {
                 max_mem_limit = GB_TO_BYTES(1);
             }
