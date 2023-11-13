@@ -289,9 +289,6 @@ static void s_destroy_loader(void *arg) {
     aws_hash_table_clean_up(&loader->lock_data.compute_platform_info_table);
     aws_mutex_clean_up(&loader->lock_data.lock);
 
-    /* clean up the memory we allocated in init() */
-    aws_mem_release(loader->allocator, loader->lock_data.current_env_platform_info.cpu_group_info_array);
-
     if (loader->lock_data.detected_instance_type) {
         aws_string_destroy(loader->lock_data.detected_instance_type);
     }
@@ -310,21 +307,12 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
     aws_mutex_init(&loader->lock_data.lock);
     aws_ref_count_init(&loader->ref_count, loader, s_destroy_loader);
 
-    /* we won't know an instance type, possibly ever, but it will be set if available before returning to the user. */
-    loader->lock_data.current_env_platform_info.has_recommended_configuration = false;
-    loader->lock_data.current_env_platform_info.cpu_group_info_array_length =
-        aws_system_environment_get_cpu_group_count(loader->current_env);
-    loader->lock_data.current_env_platform_info.cpu_group_info_array = aws_mem_calloc(
-        allocator,
-        loader->lock_data.current_env_platform_info.cpu_group_info_array_length,
-        sizeof(struct aws_s3_cpu_group_info));
-
-    for (size_t i = 0; i < loader->lock_data.current_env_platform_info.cpu_group_info_array_length; ++i) {
-        struct aws_s3_cpu_group_info *group_info = &loader->lock_data.current_env_platform_info.cpu_group_info_array[i];
-        group_info->cpu_group = (uint16_t)i;
-        group_info->cpus_in_group = aws_get_cpu_count_for_group((uint16_t)i);
-        /* when we have the ability to detect NIC affinity add that here. */
-    }
+    /* TODO: Implement runtime CPU information retrieval from the system. Currently, Valgrind detects a memory leak
+     * associated with the g_numa_node_of_cpu_ptr function (see: https://github.com/numactl/numactl/issues/3). This
+     * issue was addressed in version v2.0.13 of libnuma (see: https://github.com/numactl/numactl/pull/43). However,
+     * Amazon Linux 2 defaults to libnuma version v2.0.9, which lacks this fix. We need to suppress this
+     * warning as a false positive in older versions of libnuma. In the future, however, we will probably eliminate the
+     * use of numactl altogether. */
 
     AWS_FATAL_ASSERT(
         !aws_hash_table_init(
