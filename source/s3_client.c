@@ -38,14 +38,6 @@
 #include <inttypes.h>
 #include <math.h>
 
-#if SIZE_MAX == UINT32_MAX
-#    define ON_32_BIT_PLATFORM
-#elif SIZE_MAX == UINT64_MAX
-#    define ON_64_BIT_PLATFORM
-#else
-#    error "Target not supported"
-#endif
-
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif                              /* _MSC_VER */
@@ -298,30 +290,24 @@ struct aws_s3_client *aws_s3_client_new(
     client->allocator = allocator;
 
     size_t max_mem_limit = 0;
-    switch (client_config->memory_limiter_mode) {
-        case AWS_S3_MEMORY_LIMITER_DISABLED:
-            max_mem_limit = 0;
-            break;
-        case AWS_S3_MEMORY_LIMITER_ENABLED:
-            max_mem_limit = client_config->max_memory_limit;
-            break;
-        case AWS_S3_MEMORY_LIMITER_ENABLED_DEFAULT:
-#if defined(ON_32_BIT_PLATFORM)
-            if (client_config->throughput_target_gbps > 25.0) {
-                max_mem_limit = GB_TO_BYTES(1);
-            } else {
-                max_mem_limit = GB_TO_BYTES(1);
-            }
+    if (client_config->max_memory_limit == 0) {
+#if SIZE_BITS == 32
+        if (client_config->throughput_target_gbps > 25.0) {
+            max_mem_limit = GB_TO_BYTES(1);
+        } else {
+            max_mem_limit = GB_TO_BYTES(2);
+        }
 #else
-            if (client_config->throughput_target_gbps > 75.0) {
-                max_mem_limit = GB_TO_BYTES(8);
-            } else if (client_config->throughput_target_gbps > 25.0) {
-                max_mem_limit = GB_TO_BYTES(4);
-            } else {
-                max_mem_limit = GB_TO_BYTES(2);
-            }
+        if (client_config->throughput_target_gbps > 75.0) {
+            max_mem_limit = GB_TO_BYTES(8);
+        } else if (client_config->throughput_target_gbps > 25.0) {
+            max_mem_limit = GB_TO_BYTES(4);
+        } else {
+            max_mem_limit = GB_TO_BYTES(2);
+        }
 #endif
-            break;
+    } else {
+        max_mem_limit = client_config->max_memory_limit;
     }
 
     client->buffer_pool =
