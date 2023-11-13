@@ -1231,13 +1231,13 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
 }
 
 /* Task function for trying to find a request that can be processed. */
-static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+/*static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     AWS_PRECONDITION(task);
     (void)task;
     (void)task_status;
 
     /* Client keeps a reference to the event loop group; a 'canceled' status should not happen.*/
-    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+    /*AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
     struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);
@@ -1247,9 +1247,9 @@ static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, 
     if (num_reqs_in_flight == 0) {
         aws_s3_buffer_pool_trim(client->buffer_pool);
     }
-}
+}*/
 
-static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *client) {
+/*static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *client) {
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     if (client->synced_data.trim_buffer_pool_task_scheduled) {
@@ -1276,7 +1276,7 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
         client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task, trim_time);
 
     client->synced_data.trim_buffer_pool_task_scheduled = true;
-}
+}*/
 
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
