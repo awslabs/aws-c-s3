@@ -186,6 +186,8 @@ struct aws_s3_pooled_buffer aws_s3_buffer_pool_acquire_buffer(struct aws_s3_buff
     aws_mutex_unlock(&buffer_pool->mutex);
 
     if (alloc_ptr != NULL) {
+        AWS_LOGF_DEBUG(0, "(MemLim) acquired mem %p with size %zu current alloc usage %zu", 
+        (void *)alloc_ptr, size, buffer_pool->current_alloc_usage);
         buffer_pool->current_alloc_usage += size;
     }
 
@@ -217,6 +219,9 @@ void aws_s3_buffer_pool_release_buffer(
     } else {
         aws_mem_release(buffer_pool->base_allocator, pooled_buffer.ptr);
     }
+
+    AWS_LOGF_DEBUG(0, "(MemLim) releasing mem %p with size %zu current alloc usage %zu", 
+        (void *)pooled_buffer.ptr, pooled_buffer.size, buffer_pool->current_alloc_usage);
 
     buffer_pool->current_alloc_usage -= pooled_buffer.size;
 
