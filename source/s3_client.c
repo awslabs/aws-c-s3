@@ -1548,7 +1548,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
     bool has_mem_limit = pool_usage.max_size != 0;
     AWS_LOGF_ERROR(AWS_LS_S3_CLIENT,
-        "(MemLim) has mem limit %zu approx usage %zu max mem %zu", has_mem_limit,
+        "(MemLim) has mem limit %d approx usage %zu max mem %zu", has_mem_limit,
             pool_usage.approx_used, pool_usage.max_size);
     AWS_ASSERT(!has_mem_limit || pool_usage.max_size >= pool_usage.approx_used);
     size_t approx_mem_remaining = has_mem_limit ? pool_usage.max_size - pool_usage.approx_used : 0;
