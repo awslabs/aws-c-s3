@@ -1236,8 +1236,8 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
     (void)task;
     (void)task_status;
 
-    /* Client keeps a reference to the event loop group; a 'canceled' status should not happen.*/
-    /*AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
+    // Client keeps a reference to the event loop group; a 'canceled' status should not happen.
+    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
     struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);
