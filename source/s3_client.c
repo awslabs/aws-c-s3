@@ -1341,9 +1341,11 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
 
+/*
     if (client->synced_data.active) {
         s_s3_client_schedule_buffer_pool_trim_synced(client);
     }
+*/
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
 
@@ -1571,7 +1573,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 if (request->num_times_tried_buffer_acquire > s_num_buffer_acquire_retries_before_blocking) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_CLIENT,
-                        "id=%p Falling back to force allocating buffer for request",
+                        "id=%p (MemLim) Falling back to force allocating buffer for request",
                         (void *)request);
 
                     request->pooled_buffer =
@@ -1592,6 +1594,10 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     break;
                 }
 
+                AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "id=%p (MemLim) Rescheduling request prep that failed due to mem acquisition",
+                        (void *)request);
                 ++client->threaded_data.num_requests_being_prepared;
 
                 num_requests_in_flight = (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
