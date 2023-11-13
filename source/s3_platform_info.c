@@ -308,9 +308,11 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
     aws_ref_count_init(&loader->ref_count, loader, s_destroy_loader);
 
     /* TODO: Implement runtime CPU information retrieval from the system. Currently, Valgrind detects a memory leak
-     * associated with the g_numa_node_of_cpu_ptr function. This issue requires further investigation to either resolve
-     * or suppress it before reintegrating this code segment. However, we will probably eliminate the use of numactl
-     * altogether. */
+     * associated with the g_numa_node_of_cpu_ptr function (see: https://github.com/numactl/numactl/issues/3). This
+     * issue was addressed in version v2.0.13 of libnuma (see: https://github.com/numactl/numactl/pull/43). However,
+     * Amazon Linux 2 defaults to libnuma version v2.0.9, which lacks this fix. We need to suppress this
+     * warning as a false positive in older versions of libnuma. In the future, however, we will probably eliminate the
+     * use of numactl altogether. */
 
     AWS_FATAL_ASSERT(
         !aws_hash_table_init(
