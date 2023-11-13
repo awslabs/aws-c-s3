@@ -105,7 +105,7 @@ static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
 static const size_t s_buffer_pool_reserved_mem = MB_TO_BYTES(128);
 
 /* Amount of time spent idling before trimming buffer. */
-static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
+//static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
