@@ -42,6 +42,7 @@ struct aws_s3_buffer_pool {
     size_t block_size;
     size_t max_mem_usage;
     size_t current_mem_usage;
+    size_t current_alloc_usage;
 
     struct aws_array_list blocks;
 };
@@ -65,6 +66,7 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
     buffer_pool->base_allocator = allocator;
     buffer_pool->block_size = block_size;
     buffer_pool->current_mem_usage = 0;
+    buffer_pool->current_alloc_usage = 0;
     buffer_pool->max_mem_usage = max_mem_usage;
     if (aws_mutex_init(&buffer_pool->mutex)) {
         goto on_error;
@@ -183,6 +185,10 @@ struct aws_s3_pooled_buffer aws_s3_buffer_pool_acquire_buffer(struct aws_s3_buff
     }
     aws_mutex_unlock(&buffer_pool->mutex);
 
+    if (alloc_ptr != NULL) {
+        buffer_pool->current_alloc_usage += size;
+    }
+
     return (struct aws_s3_pooled_buffer){.ptr = alloc_ptr, .size = alloc_ptr == NULL ? 0 : size};
 }
 
@@ -212,7 +218,7 @@ void aws_s3_buffer_pool_release_buffer(
         aws_mem_release(buffer_pool->base_allocator, pooled_buffer.ptr);
     }
 
-    buffer_pool->current_mem_usage -= pooled_buffer.size;
+    buffer_pool->current_alloc_usage -= pooled_buffer.size;
 
     aws_mutex_unlock(&buffer_pool->mutex);
 }
@@ -221,7 +227,7 @@ struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3
     aws_mutex_lock(&buffer_pool->mutex);
     struct aws_s3_buffer_pool_usage_stats ret = (struct aws_s3_buffer_pool_usage_stats){
         .max_size = buffer_pool->max_mem_usage,
-        .approx_used = buffer_pool->current_mem_usage,
+        .approx_used = buffer_pool->current_alloc_usage,
     };
     aws_mutex_unlock(&buffer_pool->mutex);
     return ret;
