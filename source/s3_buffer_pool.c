@@ -159,6 +159,12 @@ static struct aws_s3_pooled_buffer s_primary_acquire(struct aws_s3_buffer_pool *
         alloc_ptr = block.block_ptr;
     }
 
+    if (alloc_ptr != NULL) {
+        AWS_LOGF_DEBUG(0, "(MemLim) acquired mem %p with size %zu current alloc usage %zu", 
+        (void *)alloc_ptr, size, buffer_pool->current_alloc_usage);
+        buffer_pool->current_alloc_usage += size;
+    }
+
     aws_mutex_unlock(&buffer_pool->mutex);
 
     return (struct aws_s3_pooled_buffer){.ptr = alloc_ptr, .size = size};
@@ -183,13 +189,15 @@ struct aws_s3_pooled_buffer aws_s3_buffer_pool_acquire_buffer(struct aws_s3_buff
             alloc_ptr = aws_mem_acquire(buffer_pool->base_allocator, size);
         }
     }
-    aws_mutex_unlock(&buffer_pool->mutex);
+    
 
     if (alloc_ptr != NULL) {
         AWS_LOGF_DEBUG(0, "(MemLim) acquired mem %p with size %zu current alloc usage %zu", 
         (void *)alloc_ptr, size, buffer_pool->current_alloc_usage);
         buffer_pool->current_alloc_usage += size;
     }
+
+    aws_mutex_unlock(&buffer_pool->mutex);
 
     return (struct aws_s3_pooled_buffer){.ptr = alloc_ptr, .size = alloc_ptr == NULL ? 0 : size};
 }
