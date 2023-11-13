@@ -629,9 +629,9 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
-    if (client->synced_data.trim_buffer_pool_task_scheduled) {
-        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
-    }
+    //if (client->synced_data.trim_buffer_pool_task_scheduled) {
+    //    aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    //}
 
     aws_string_destroy(client->region);
     client->region = NULL;
