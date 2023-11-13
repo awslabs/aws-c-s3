@@ -90,6 +90,7 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
         metric->time_metrics.total_duration_ns =
             metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
         if (meta_request->telemetry_callback) {
+            AWS_LOGF_DEBUG(0, "Invoking telemetry callback");
             meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
         }
         request->send_data.metrics = aws_s3_request_metrics_release(metric);
