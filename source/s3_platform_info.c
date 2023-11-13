@@ -307,7 +307,10 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
     aws_mutex_init(&loader->lock_data.lock);
     aws_ref_count_init(&loader->ref_count, loader, s_destroy_loader);
 
-    /* TODO: fetch runtime cpu info from system */
+    /* TODO: Implement runtime CPU information retrieval from the system. Currently, Valgrind detects a memory leak
+     * associated with the g_numa_node_of_cpu_ptr function. This issue requires further investigation to either resolve
+     * or suppress it before reintegrating this code segment. However, we will probably eliminate the use of numactl
+     * altogether. */
 
     AWS_FATAL_ASSERT(
         !aws_hash_table_init(
