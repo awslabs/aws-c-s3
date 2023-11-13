@@ -1507,6 +1507,26 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 }
 
+static bool s_try_allocate_request_buffer(struct aws_s3_request *request) {
+    if (request->part_size_request_body) {
+        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->meta_request->part_size);
+        if (request->pooled_buffer.ptr != NULL) {
+            request->request_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
+        }
+
+        return request->pooled_buffer.ptr != NULL;
+    } else if (request->part_size_response_body) {
+        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->meta_request->part_size);
+        if (request->pooled_buffer.ptr != NULL) {
+            request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
+        }
+
+        return request->pooled_buffer.ptr != NULL;
+    }
+
+    return true;
+}
+
 static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -1541,6 +1561,16 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
+        if (client->threaded_data.req_waiting_for_mem != NULL) {
+            ++client->threaded_data.num_requests_being_prepared;
+
+            num_requests_in_flight =
+                (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+
+            aws_s3_meta_request_prepare_request(
+                client->threaded_data.req_waiting_for_mem->meta_request, client->threaded_data.req_waiting_for_mem, s_s3_client_prepare_callback_queue_request, client);
+        }   
+
         /* While:
          *     * Number of being-prepared + already-prepared-and-queued requests is less than the max that can be in the
          * preparation stage.
@@ -1555,6 +1585,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                num_requests_in_flight < max_requests_in_flight &&
                !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 
+            /*
             if (aws_priority_queue_size(&client->threaded_data.requests_waiting_for_mem) > 0) {
                 struct aws_s3_request *request = NULL;
                 aws_priority_queue_top(&client->threaded_data.requests_waiting_for_mem, (void **)&request);
@@ -1568,7 +1599,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     request->pooled_buffer =
                         aws_s3_buffer_pool_acquire_buffer(client->buffer_pool, request->meta_request->part_size);
                     if (request->pooled_buffer.ptr == NULL) {
-                        break; /* stop scheduling until we can allocate this req */
+                        break; // stop scheduling until we can allocate this req 
                     }
 
                     if (request->part_size_request_body) {
@@ -1596,6 +1627,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 aws_priority_queue_pop(&client->threaded_data.requests_waiting_for_mem, (void **)&request);
                 continue;
             }
+            */
 
             struct aws_linked_list_node *meta_request_node =
                 aws_linked_list_begin(&client->threaded_data.meta_requests);
@@ -1638,9 +1670,15 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
                     /* Note: logic relies on the fact the either response or
                      * request will be part sized, but never both. */
+                    /*
                     if (has_mem_limit && (
                         (request->part_size_request_body || request->part_size_response_body) &&
                         aws_sub_size_checked(approx_mem_remaining, request->meta_request->part_size, &approx_mem_remaining))) {
+                        break;
+                    }*/
+
+                    if (!s_try_allocate_request_buffer(request)) {                        
+                        client->threaded_data.req_waiting_for_mem = request;
                         break;
                     }
 
