@@ -226,7 +226,6 @@ struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
 void aws_s3_buffer_pool_release_ticket(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_ticket *ticket) {
-    AWS_PRECONDITION(ticket);
 
     if (buffer_pool == NULL || ticket == NULL || ticket->ptr == NULL) {
         if (ticket != NULL) {
