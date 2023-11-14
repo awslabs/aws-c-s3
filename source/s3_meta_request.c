@@ -1107,7 +1107,8 @@ static int s_s3_meta_request_incoming_body(
 
     if (request->send_data.response_body.capacity == 0) {
         if (request->part_size_response_body) {
-            request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
+            request->send_data.response_body = aws_s3_buffer_pool_acquire_buffer(
+                request->meta_request->client->buffer_pool, request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);

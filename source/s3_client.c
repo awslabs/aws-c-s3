@@ -1507,26 +1507,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 }
 
-static bool s_try_allocate_request_buffer(struct aws_s3_request *request) {
-    if (request->part_size_request_body) {
-        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->meta_request->part_size);
-        if (request->pooled_buffer.ptr != NULL) {
-            request->request_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
-        }
-
-        return request->pooled_buffer.ptr != NULL;
-    } else if (request->part_size_response_body) {
-        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->meta_request->part_size);
-        if (request->pooled_buffer.ptr != NULL) {
-            request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
-        }
-
-        return request->pooled_buffer.ptr != NULL;
-    }
-
-    return true;
-}
-
 static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -1551,25 +1531,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
-    struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
-    bool has_mem_limit = pool_usage.max_size != 0;
-    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT,
-        "(MemLim) has mem limit %d approx usage %zu max mem %zu", has_mem_limit,
-            pool_usage.approx_used, pool_usage.max_size);
-    AWS_ASSERT(!has_mem_limit || pool_usage.max_size >= pool_usage.approx_used);
-    size_t approx_mem_remaining = has_mem_limit ? pool_usage.max_size - pool_usage.approx_used : 0;
-
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
-
-        if (client->threaded_data.req_waiting_for_mem != NULL) {
-            ++client->threaded_data.num_requests_being_prepared;
-
-            num_requests_in_flight =
-                (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
-
-            aws_s3_meta_request_prepare_request(
-                client->threaded_data.req_waiting_for_mem->meta_request, client->threaded_data.req_waiting_for_mem, s_s3_client_prepare_callback_queue_request, client);
-        }   
 
         /* While:
          *     * Number of being-prepared + already-prepared-and-queued requests is less than the max that can be in the
@@ -1584,50 +1546,6 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                    max_requests_prepare &&
                num_requests_in_flight < max_requests_in_flight &&
                !aws_linked_list_empty(&client->threaded_data.meta_requests)) {
-
-            /*
-            if (aws_priority_queue_size(&client->threaded_data.requests_waiting_for_mem) > 0) {
-                struct aws_s3_request *request = NULL;
-                aws_priority_queue_top(&client->threaded_data.requests_waiting_for_mem, (void **)&request);
-
-                if (request->num_times_tried_buffer_acquire > s_num_buffer_acquire_retries_before_blocking) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "id=%p (MemLim) Falling back to force allocating buffer for request",
-                        (void *)request);
-
-                    request->pooled_buffer =
-                        aws_s3_buffer_pool_acquire_buffer(client->buffer_pool, request->meta_request->part_size);
-                    if (request->pooled_buffer.ptr == NULL) {
-                        break; // stop scheduling until we can allocate this req 
-                    }
-
-                    if (request->part_size_request_body) {
-                        request->request_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
-                    } else {
-                        request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
-                    }
-                }
-
-                if (has_mem_limit &&
-                    aws_sub_size_checked(approx_mem_remaining, request->meta_request->part_size, &approx_mem_remaining)) {
-                    break;
-                }
-
-                AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "id=%p (MemLim) Rescheduling request prep that failed due to mem acquisition",
-                        (void *)request);
-                ++client->threaded_data.num_requests_being_prepared;
-
-                num_requests_in_flight = (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
-
-                aws_s3_meta_request_prepare_request(
-                    request->meta_request, request, s_s3_client_prepare_callback_queue_request, client);
-                aws_priority_queue_pop(&client->threaded_data.requests_waiting_for_mem, (void **)&request);
-                continue;
-            }
-            */
 
             struct aws_linked_list_node *meta_request_node =
                 aws_linked_list_begin(&client->threaded_data.meta_requests);
@@ -1667,20 +1585,6 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                         &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
                 } else {
                     request->tracked_by_client = true;
-
-                    /* Note: logic relies on the fact the either response or
-                     * request will be part sized, but never both. */
-                    /*
-                    if (has_mem_limit && (
-                        (request->part_size_request_body || request->part_size_response_body) &&
-                        aws_sub_size_checked(approx_mem_remaining, request->meta_request->part_size, &approx_mem_remaining))) {
-                        break;
-                    }*/
-
-                    if (!s_try_allocate_request_buffer(request)) {                        
-                        client->threaded_data.req_waiting_for_mem = request;
-                        break;
-                    }
 
                     ++client->threaded_data.num_requests_being_prepared;
 

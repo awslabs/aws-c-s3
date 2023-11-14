@@ -18,11 +18,7 @@
 AWS_EXTERN_C_BEGIN
 
 struct aws_s3_buffer_pool;
-
-struct aws_s3_pooled_buffer {
-    size_t size;
-    uint8_t *ptr;
-};
+struct aws_s3_buffer_pool_ticket;
 
 struct aws_s3_buffer_pool_usage_stats {
     /* Max size limit. Same value as provided during creation. */
@@ -56,6 +52,10 @@ AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
  */
 AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool);
 
+AWS_S3_API struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(
+    struct aws_s3_buffer_pool *buffer_pool,
+    size_t size);
+
 /*
  * Acquire buffer of specified size.
  * Returned buffer is empty (0 ptr and size) if buffer cannot be allocated.
@@ -63,26 +63,21 @@ AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_poo
  * buffer in another struct as long as it does not try to free underlying pointer
  * (ex. aws_byte_buf_from_pooled_buffer)
  */
-AWS_S3_API struct aws_s3_pooled_buffer aws_s3_buffer_pool_acquire_buffer(
+AWS_S3_API struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
     struct aws_s3_buffer_pool *buffer_pool,
-    size_t size);
+    struct aws_s3_buffer_pool_ticket *ticket);
 
 /*
  * Release buffer back to the pool.
  */
-AWS_S3_API void aws_s3_buffer_pool_release_buffer(
+AWS_S3_API void aws_s3_buffer_pool_release_ticket(
     struct aws_s3_buffer_pool *buffer_pool,
-    struct aws_s3_pooled_buffer pooled_buffer);
+    struct aws_s3_buffer_pool_ticket *ticket);
 
 /*
  * Get pool memory usage stats.
  */
 AWS_S3_API struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3_buffer_pool *buffer_pool);
-
-/*
- * Wraps pooled buffer in a static byte_buf.
- */
-AWS_S3_API struct aws_byte_buf aws_byte_buf_from_pooled_buffer(struct aws_s3_pooled_buffer pooled_buffer);
 
 /*
  * Trims all unused mem from the pool.

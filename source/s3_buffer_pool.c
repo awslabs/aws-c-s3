@@ -33,6 +33,11 @@
  * by malloc.
  */
 
+struct aws_s3_buffer_pool_ticket {
+    size_t size;
+    uint8_t *ptr;
+};
+
 static size_t s_min_num_blocks = 5;
 
 struct aws_s3_buffer_pool {
@@ -40,9 +45,15 @@ struct aws_s3_buffer_pool {
     struct aws_mutex mutex;
 
     size_t block_size;
+
     size_t max_mem_usage;
-    size_t current_mem_usage;
-    size_t current_alloc_usage;
+
+    size_t primary_allocated;
+    size_t primary_reserved;
+    size_t primary_used;
+
+    size_t secondary_reserved;
+    size_t secondary_used;
 
     struct aws_array_list blocks;
 };
@@ -65,8 +76,6 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
 
     buffer_pool->base_allocator = allocator;
     buffer_pool->block_size = block_size;
-    buffer_pool->current_mem_usage = 0;
-    buffer_pool->current_alloc_usage = 0;
     buffer_pool->max_mem_usage = max_mem_usage;
     if (aws_mutex_init(&buffer_pool->mutex)) {
         goto on_error;
@@ -115,123 +124,137 @@ void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
             } else {
                 aws_array_list_swap(&buffer_pool->blocks, i, swap_loc);
             }
+            ++swap_count;
         }
     }
 
     for (size_t i = 0; i < swap_count; ++i) {
-        buffer_pool->current_mem_usage -= buffer_pool->block_size;
+        buffer_pool->primary_allocated -= buffer_pool->block_size;
         aws_array_list_pop_back(&buffer_pool->blocks);
     }
 }
 
-static struct aws_s3_pooled_buffer s_primary_acquire(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
-    uint8_t *alloc_ptr = NULL;
+struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
+
+    struct aws_s3_buffer_pool_ticket *ticket = NULL;
     aws_mutex_lock(&buffer_pool->mutex);
+    size_t overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + 
+                            buffer_pool->secondary_used + buffer_pool->secondary_reserved;
+
+    if ((size + overall_taken) < buffer_pool->max_mem_usage) {
+        ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool_ticket));
+        ticket->size = size;
+        if (size < buffer_pool->block_size) {
+            buffer_pool->primary_reserved += size;
+        } else {
+            buffer_pool->secondary_reserved += size;
+        }
+    }
+
+    aws_mutex_unlock(&buffer_pool->mutex);
+
+    return ticket;
+}
+
+static uint8_t *s_primary_acquire(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
+    uint8_t *alloc_ptr = NULL;
 
     for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
         if (block->alloc_count == 0) {
-            block->offset_ptr = block->block_ptr + size;
             alloc_ptr = block->block_ptr;
+            block->offset_ptr = block->block_ptr + size;
             block->alloc_count += 1;
-            break;
+            goto on_allocated;
         }
 
         if (block->offset_ptr + size < block->block_ptr + block->block_size) {
             alloc_ptr = block->offset_ptr;
             block->offset_ptr += size;
             block->alloc_count += 1;
-            break;
+            goto on_allocated;
         }
     }
 
-    if (alloc_ptr == NULL && (buffer_pool->max_mem_usage == 0 ||
-                              buffer_pool->current_mem_usage + buffer_pool->block_size <= buffer_pool->max_mem_usage)) {
-        struct s3_buffer_pool_block block;
-        block.alloc_count = 1;
-        block.block_ptr = aws_mem_acquire(buffer_pool->base_allocator, buffer_pool->block_size);
-        block.offset_ptr = block.block_ptr + size;
-        block.block_size = buffer_pool->block_size;
-        aws_array_list_push_back(&buffer_pool->blocks, &block);
-        buffer_pool->current_mem_usage += buffer_pool->block_size;
-        alloc_ptr = block.block_ptr;
-    }
+    struct s3_buffer_pool_block block;
+    block.alloc_count = 1;
+    block.block_ptr = aws_mem_acquire(buffer_pool->base_allocator, buffer_pool->block_size);
+    block.offset_ptr = block.block_ptr + size;
+    block.block_size = buffer_pool->block_size;
+    aws_array_list_push_back(&buffer_pool->blocks, &block);
+    alloc_ptr = block.block_ptr;
 
-    if (alloc_ptr != NULL) {
-        AWS_LOGF_DEBUG(0, "(MemLim) acquired mem %p with size %zu current alloc usage %zu", 
-        (void *)alloc_ptr, size, buffer_pool->current_alloc_usage);
-        buffer_pool->current_alloc_usage += size;
-    }
+    buffer_pool->primary_allocated += buffer_pool->block_size;
 
-    aws_mutex_unlock(&buffer_pool->mutex);
+on_allocated:
+    buffer_pool->primary_reserved -= size;
+    buffer_pool->primary_used += size;
 
-    return (struct aws_s3_pooled_buffer){.ptr = alloc_ptr, .size = size};
+    return alloc_ptr;
 }
 
-struct aws_s3_pooled_buffer aws_s3_buffer_pool_acquire_buffer(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
+struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
+    struct aws_s3_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool_ticket *ticket) {
     AWS_PRECONDITION(buffer_pool);
+    AWS_PRECONDITION(ticket);
 
-    if (size < buffer_pool->block_size) {
-        return s_primary_acquire(buffer_pool, size);
+    if (ticket->ptr != NULL) {
+        return aws_byte_buf_from_empty_array(ticket->ptr, ticket->size);
     }
 
     uint8_t *alloc_ptr = NULL;
-    aws_mutex_lock(&buffer_pool->mutex);
-    if (buffer_pool->max_mem_usage == 0 || buffer_pool->current_mem_usage + size <= buffer_pool->max_mem_usage) {
-        buffer_pool->current_mem_usage += size;
-        alloc_ptr = aws_mem_acquire(buffer_pool->base_allocator, size);
-    } else {
-        aws_s3_buffer_pool_trim(buffer_pool);
-        if (buffer_pool->current_mem_usage + size <= buffer_pool->max_mem_usage) {
-            buffer_pool->current_mem_usage += size;
-            alloc_ptr = aws_mem_acquire(buffer_pool->base_allocator, size);
-        }
-    }
-    
 
-    if (alloc_ptr != NULL) {
-        AWS_LOGF_DEBUG(0, "(MemLim) acquired mem %p with size %zu current alloc usage %zu", 
-        (void *)alloc_ptr, size, buffer_pool->current_alloc_usage);
-        buffer_pool->current_alloc_usage += size;
+    aws_mutex_lock(&buffer_pool->mutex);
+
+    if (ticket->size < buffer_pool->block_size) {
+        alloc_ptr = s_primary_acquire(buffer_pool, ticket->size);
+    } else {
+        alloc_ptr = aws_mem_acquire(buffer_pool->base_allocator, ticket->size);
+        buffer_pool->secondary_reserved -= ticket->size;
+        buffer_pool->secondary_used += ticket->size;
     }
 
     aws_mutex_unlock(&buffer_pool->mutex);
+    ticket->ptr = alloc_ptr;
 
-    return (struct aws_s3_pooled_buffer){.ptr = alloc_ptr, .size = alloc_ptr == NULL ? 0 : size};
+    return aws_byte_buf_from_empty_array(ticket->ptr, ticket->size);
 }
 
-void aws_s3_buffer_pool_release_buffer(
+void aws_s3_buffer_pool_release_ticket(
     struct aws_s3_buffer_pool *buffer_pool,
-    struct aws_s3_pooled_buffer pooled_buffer) {
-    if (buffer_pool == NULL || pooled_buffer.ptr == NULL || pooled_buffer.size == 0) {
+    struct aws_s3_buffer_pool_ticket *ticket) {
+    AWS_PRECONDITION(ticket);
+
+    if (buffer_pool == NULL || ticket->ptr == NULL) {
+        aws_mem_release(buffer_pool->base_allocator, ticket);
         return;
     }
 
     aws_mutex_lock(&buffer_pool->mutex);
-    if (pooled_buffer.size < buffer_pool->block_size) {
+    if (ticket->size < buffer_pool->block_size) {
         bool found = false;
         for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
             struct s3_buffer_pool_block *block;
             aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
-            if (block->block_ptr <= pooled_buffer.ptr && block->block_ptr + block->block_size > pooled_buffer.ptr) {
+            if (block->block_ptr <= ticket->ptr && block->block_ptr + block->block_size > ticket->ptr) {
                 block->alloc_count -= 1;
                 found = true;
                 break;
             }
         }
+        buffer_pool->primary_used -= ticket->size;
 
         AWS_FATAL_ASSERT(found);
     } else {
-        aws_mem_release(buffer_pool->base_allocator, pooled_buffer.ptr);
+        aws_mem_release(buffer_pool->base_allocator, ticket->ptr);
+        buffer_pool->secondary_used -= ticket->size;
     }
 
-    AWS_LOGF_DEBUG(0, "(MemLim) releasing mem %p with size %zu current alloc usage %zu", 
-        (void *)pooled_buffer.ptr, pooled_buffer.size, buffer_pool->current_alloc_usage);
-
-    buffer_pool->current_alloc_usage -= pooled_buffer.size;
+    aws_mem_release(buffer_pool->base_allocator, ticket);
 
     aws_mutex_unlock(&buffer_pool->mutex);
 }
@@ -240,12 +263,8 @@ struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3
     aws_mutex_lock(&buffer_pool->mutex);
     struct aws_s3_buffer_pool_usage_stats ret = (struct aws_s3_buffer_pool_usage_stats){
         .max_size = buffer_pool->max_mem_usage,
-        .approx_used = buffer_pool->current_alloc_usage,
+        .approx_used = buffer_pool->primary_used + buffer_pool->secondary_used,
     };
     aws_mutex_unlock(&buffer_pool->mutex);
     return ret;
-}
-
-struct aws_byte_buf aws_byte_buf_from_pooled_buffer(struct aws_s3_pooled_buffer pooled_buffer) {
-    return aws_byte_buf_from_empty_array(pooled_buffer.ptr, pooled_buffer.size);
 }

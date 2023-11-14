@@ -177,7 +177,7 @@ static bool s_s3_auto_ranged_get_update(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
                             0,
-                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                         request->discovers_object_size = true;
 
@@ -253,6 +253,13 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
+                struct aws_s3_buffer_pool_ticket *ticket 
+                    = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+                if (ticket == NULL) {
+                    goto has_work_remaining;
+                }
+
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
@@ -266,6 +273,8 @@ static bool s_s3_auto_ranged_get_update(
                     request->part_number,
                     &request->part_range_start,
                     &request->part_range_end);
+                
+                request->ticket = ticket;
 
                 ++auto_ranged_get->synced_data.num_parts_requested;
                 goto has_work_remaining;
@@ -408,16 +417,6 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
 
     aws_s3_request_setup_send_data(request, message);
     aws_http_message_release(message);
-
-    if (request->part_size_response_body && request->pooled_buffer.ptr == NULL) {
-        request->pooled_buffer = aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, meta_request->part_size);
-        if (request->pooled_buffer.ptr != NULL) {
-            request->send_data.response_body = aws_byte_buf_from_pooled_buffer(request->pooled_buffer);
-        } else {
-            aws_raise_error(AWS_ERROR_S3_INSUFFICIENT_MEMORY);
-            goto finish;
-        }
-    }
 
     /* Success! */
     AWS_LOGF_DEBUG(

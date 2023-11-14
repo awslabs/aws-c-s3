@@ -361,8 +361,6 @@ struct aws_s3_client {
 
         /* Number of requests currently being prepared. */
         uint32_t num_requests_being_prepared;
-
-        struct aws_s3_request *req_waiting_for_mem;
     } threaded_data;
 };
 

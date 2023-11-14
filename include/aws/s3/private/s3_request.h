@@ -114,7 +114,7 @@ struct aws_s3_request {
      * retried.*/
     struct aws_byte_buf request_body;
 
-    struct aws_s3_pooled_buffer pooled_buffer;
+    struct aws_s3_buffer_pool_ticket *ticket;
 
     /* Beginning range of this part. */
     /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
