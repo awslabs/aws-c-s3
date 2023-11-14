@@ -940,7 +940,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             AWS_FATAL_ASSERT(request->ticket);
             request->request_body = aws_s3_buffer_pool_acquire_buffer(
                 request->meta_request->client->buffer_pool, request->ticket);
-            request->request_body.len = request_body_size;
+            request->request_body.capacity = request_body_size;
         }
 
         part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
@@ -969,10 +969,11 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Failed reading request body, error %d (%s) req cap %zu",
+            "id=%p: Failed reading request body, error %d (%s) req len %zu req cap %zu",
             (void *)meta_request,
             error_code,
             aws_error_str(error_code),
+            request->request_body.len,
             request->request_body.capacity);
         goto on_done;
     }
