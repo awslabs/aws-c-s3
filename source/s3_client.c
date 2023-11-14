@@ -81,14 +81,6 @@ static size_t s_dns_host_address_ttl_seconds = 5 * 60;
  * 30 seconds mirrors the value currently used by the Java SDK. */
 static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 
-/* Default size of the queue for requesting that could not acquire mem, and are
- * waiting to be rescheduled. */
-static const size_t s_default_request_waiting_for_mem_queue_size = 10;
-
-/* How many times to retry acquiring buffer during request prepare before
- * falling back and acquiring it during scheduling. */
-static const uint32_t s_num_buffer_acquire_retries_before_blocking = 5;
-
 /* Default size of buffer pool blocks. */
 static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
 
