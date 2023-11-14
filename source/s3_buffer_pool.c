@@ -228,8 +228,10 @@ void aws_s3_buffer_pool_release_ticket(
     struct aws_s3_buffer_pool_ticket *ticket) {
     AWS_PRECONDITION(ticket);
 
-    if (buffer_pool == NULL || ticket->ptr == NULL) {
-        aws_mem_release(buffer_pool->base_allocator, ticket);
+    if (buffer_pool == NULL || ticket == NULL || ticket->ptr == NULL) {
+        if (ticket != NULL) {
+            aws_mem_release(buffer_pool->base_allocator, ticket);
+        }
         return;
     }
 

@@ -306,9 +306,6 @@ struct aws_s3_client {
          * List contains aws_s3_meta_request_work */
         struct aws_linked_list pending_meta_request_work;
 
-        /* aws_s3_requests waiting for memory. */
-        struct aws_priority_queue requests_waiting_for_mem;
-
         /* aws_s3_request that are prepared and ready to be put in the threaded_data request queue. */
         struct aws_linked_list prepared_requests;
 
@@ -352,9 +349,6 @@ struct aws_s3_client {
 
         /* Client list of ongoing aws_s3_meta_requests. */
         struct aws_linked_list meta_requests;
-
-        /* aws_s3_requests waiting for memory. */
-        struct aws_priority_queue requests_waiting_for_mem;
 
         /* Number of requests in the request_queue linked_list. */
         uint32_t request_queue_size;

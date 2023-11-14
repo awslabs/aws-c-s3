@@ -145,18 +145,6 @@ void aws_s3_set_dns_ttl(size_t ttl) {
     s_dns_host_address_ttl_seconds = ttl;
 }
 
-static int s_s3_request_waiting_for_mem_priority_queue_pred(const void *a, const void *b) {
-    const struct aws_s3_request *const *request_a = a;
-    AWS_PRECONDITION(request_a);
-    AWS_PRECONDITION(*request_a);
-
-    const struct aws_s3_request *const *request_b = b;
-    AWS_PRECONDITION(request_b);
-    AWS_PRECONDITION(*request_b);
-
-    return (*request_a)->num_times_tried_buffer_acquire > (*request_b)->num_times_tried_buffer_acquire;
-}
-
 /* Returns the max number of connections allowed.
  *
  * When meta request is NULL, this will return the overall allowed number of connections.
@@ -311,27 +299,6 @@ struct aws_s3_client *aws_s3_client_new(
 
     if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
         goto on_lock_init_fail;
-    }
-
-    if (aws_priority_queue_init_dynamic(
-            &client->synced_data.requests_waiting_for_mem,
-            allocator,
-            s_default_request_waiting_for_mem_queue_size,
-            sizeof(struct aws_s3_request *),
-            s_s3_request_waiting_for_mem_priority_queue_pred)) {
-        /* Priority queue */
-        goto on_request_queue_init_fail;
-    }
-
-    if (aws_priority_queue_init_dynamic(
-            &client->threaded_data.requests_waiting_for_mem,
-            allocator,
-            s_default_request_waiting_for_mem_queue_size,
-            sizeof(struct aws_s3_request *),
-            s_s3_request_waiting_for_mem_priority_queue_pred)) {
-        /* Priority queue */
-        aws_priority_queue_clean_up(&client->synced_data.requests_waiting_for_mem);
-        goto on_request_queue_init_fail;
     }
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
@@ -556,7 +523,6 @@ on_error:
 
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
-on_request_queue_init_fail:
     aws_mutex_clean_up(&client->synced_data.lock);
 on_lock_init_fail:
     aws_mem_release(client->allocator, client);
@@ -661,9 +627,6 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
-
-    aws_priority_queue_clean_up(&client->synced_data.requests_waiting_for_mem);
-    aws_priority_queue_clean_up(&client->threaded_data.requests_waiting_for_mem);
 
     aws_s3_buffer_pool_destroy(client->buffer_pool);
     aws_mem_release(client->allocator, client);
@@ -1327,14 +1290,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
 
-    while (aws_priority_queue_size(&client->synced_data.requests_waiting_for_mem) > 0) {
-        struct aws_s3_request *request = NULL;
-        aws_priority_queue_pop(&client->synced_data.requests_waiting_for_mem, (void **)&request);
-        AWS_FATAL_ASSERT(request != NULL);
-
-        aws_priority_queue_push(&client->threaded_data.requests_waiting_for_mem, &request);
-    }
-
     uint32_t num_requests_queued =
         aws_s3_client_queue_requests_threaded(client, &client->synced_data.prepared_requests, false);
 
@@ -1636,14 +1591,6 @@ static void s_s3_client_prepare_callback_queue_request(
 
         if (error_code == AWS_ERROR_SUCCESS) {
             aws_linked_list_push_back(&client->synced_data.prepared_requests, &request->node);
-        } else if (error_code == AWS_ERROR_S3_INSUFFICIENT_MEMORY) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Failed to allocate mem for request. part size %zu",
-                (void *)request, 
-                request->meta_request->part_size);
-            ++request->num_times_tried_buffer_acquire;
-            aws_priority_queue_push(&client->synced_data.requests_waiting_for_mem, &request);
         } else {
             ++client->synced_data.num_failed_prepare_requests;
         }
