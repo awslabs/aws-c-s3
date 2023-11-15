@@ -295,6 +295,7 @@ add_test_case(parallel_read_stream_from_large_file_test)
 
 add_test_case(s3_buffer_pool_threaded_allocs_and_frees)
 add_test_case(s3_buffer_pool_limits)
+add_test_case(s3_buffer_pool_reservations)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})

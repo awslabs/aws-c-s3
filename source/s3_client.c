@@ -279,9 +279,9 @@ struct aws_s3_client *aws_s3_client_new(
         }
 #else
         if (client_config->throughput_target_gbps > 75.0) {
-            max_mem_limit = GB_TO_BYTES(8);
+            max_mem_limit = GB_TO_BYTES(2);
         } else if (client_config->throughput_target_gbps > 25.0) {
-            max_mem_limit = GB_TO_BYTES(4);
+            max_mem_limit = GB_TO_BYTES(2);
         } else {
             max_mem_limit = GB_TO_BYTES(2);
         }
@@ -1477,6 +1477,11 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     };
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
+
+    struct aws_s3_buffer_pool_usage_stats stats = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+
+    AWS_LOGF_DEBUG(0, "Pool usage stats primary allocated: %zu primary used %zu primary reserved %zu", 
+        stats.primary_allocated, stats.primary_used, stats.primary_reserved);
 
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 

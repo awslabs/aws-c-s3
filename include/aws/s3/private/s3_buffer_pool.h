@@ -23,14 +23,12 @@ struct aws_s3_buffer_pool_ticket;
 struct aws_s3_buffer_pool_usage_stats {
     /* Max size limit. Same value as provided during creation. */
     size_t max_size;
-    /* Approximate amount of memory used. Should be fairly close to actual
-     * memory usage, but amount of remaining memory can vary based on
-     * allocations being performed, ex. pool has several blocks with space
-     * available to them, but allocation does not fit into any of them and new
-     * block cannot be allocated.
-     * Exercise caution when using this number and plan for allocations failing
-     * even if pool seemingly has enough memory. */
-    size_t approx_used;
+    
+    size_t primary_used;
+    size_t primary_allocated;
+    size_t primary_reserved;
+    size_t secondary_used;
+    size_t secondary_reserved;
 };
 
 /*
