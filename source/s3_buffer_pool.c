@@ -179,14 +179,6 @@ static uint8_t *s_primary_acquire(struct aws_s3_buffer_pool *buffer_pool, size_t
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
-        if (block->alloc_count == 0) {
-            AWS_LOGF_DEBUG(0, "Reused clean block");
-            alloc_ptr = block->block_ptr;
-            block->offset_ptr = block->block_ptr + size;
-            block->alloc_count += 1;
-            goto on_allocated;
-        }
-
         if (block->offset_ptr + size <= block->block_ptr + block->block_size) {
             AWS_LOGF_DEBUG(0, "Reused existing block");
             alloc_ptr = block->offset_ptr;
@@ -264,6 +256,10 @@ void aws_s3_buffer_pool_release_ticket(
 
             if (block->block_ptr <= ticket->ptr && block->block_ptr + block->block_size > ticket->ptr) {
                 block->alloc_count -= 1;
+                if (block->alloc_count == 0) {
+                    block->offset_ptr = block->block_ptr;
+                }
+
                 found = true;
                 break;
             }
