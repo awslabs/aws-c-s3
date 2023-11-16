@@ -130,7 +130,8 @@ struct aws_s3_request {
      */
     uint32_t part_number;
 
-    uint32_t num_times_tried_buffer_acquire;
+    /* The upload_timeout used. Zero, if the request is not a upload part */
+    size_t upload_timeout_ms;
 
     /* Number of times aws_s3_meta_request_prepare has been called for a request. During the first call to the virtual
      * prepare function, this will be 0.*/

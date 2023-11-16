@@ -46,18 +46,15 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 
     request->send_data.message = message;
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    if (meta_request->telemetry_callback) {
-        /* start the telemetry for the request to be sent */
-        request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
-        if (!meta_request->vtable->get_request_type) {
-            request->send_data.metrics->req_resp_info_metrics.request_type = AWS_S3_REQUEST_TYPE_DEFAULT;
-        } else {
-            request->send_data.metrics->req_resp_info_metrics.request_type =
-                meta_request->vtable->get_request_type(request);
-        }
-        /* Start the timestamp */
-        aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.start_timestamp_ns);
+    request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
+    if (!meta_request->vtable->get_request_type) {
+        request->send_data.metrics->req_resp_info_metrics.request_type = AWS_S3_REQUEST_TYPE_DEFAULT;
+    } else {
+        request->send_data.metrics->req_resp_info_metrics.request_type =
+            meta_request->vtable->get_request_type(request);
     }
+    /* Start the timestamp */
+    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.start_timestamp_ns);
 
     aws_http_message_acquire(message);
 }

@@ -23,22 +23,6 @@ static int s_test_get_existing_platform_info(struct aws_allocator *allocator, vo
     ASSERT_BIN_ARRAYS_EQUALS(
         instance_type.ptr, instance_type.len, platform_info->instance_type.ptr, platform_info->instance_type.len);
     ASSERT_UINT_EQUALS(100, (uintmax_t)platform_info->max_throughput_gbps);
-    ASSERT_UINT_EQUALS(2, (uintmax_t)platform_info->cpu_group_info_array_length);
-    ASSERT_NOT_NULL(platform_info->cpu_group_info_array);
-    ASSERT_UINT_EQUALS(0, (uintmax_t)platform_info->cpu_group_info_array[0].cpu_group);
-    ASSERT_NOT_NULL(platform_info->cpu_group_info_array[0].nic_name_array);
-    ASSERT_UINT_EQUALS(1, (uintmax_t)platform_info->cpu_group_info_array[0].nic_name_array_length);
-
-    struct aws_byte_cursor nic_name = aws_byte_cursor_from_c_str("eth0");
-    ASSERT_BIN_ARRAYS_EQUALS(
-        nic_name.ptr,
-        nic_name.len,
-        platform_info->cpu_group_info_array[0].nic_name_array[0].ptr,
-        platform_info->cpu_group_info_array[0].nic_name_array[0].len);
-
-    ASSERT_UINT_EQUALS(1, platform_info->cpu_group_info_array[1].cpu_group);
-    ASSERT_NULL(platform_info->cpu_group_info_array[1].nic_name_array);
-    ASSERT_UINT_EQUALS(0, platform_info->cpu_group_info_array[1].nic_name_array_length);
 
     aws_s3_platform_info_loader_release(loader);
     aws_s3_library_clean_up();
@@ -72,8 +56,6 @@ static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocat
 
     const struct aws_s3_platform_info *platform_info = aws_s3_get_current_platform_info();
     ASSERT_NOT_NULL(platform_info);
-    ASSERT_NOT_NULL(platform_info->cpu_group_info_array);
-    ASSERT_TRUE(platform_info->cpu_group_info_array_length > 0);
 
     if (platform_info->instance_type.len) {
         struct aws_s3_platform_info_loader *loader = aws_s3_platform_info_loader_new(allocator);
@@ -85,7 +67,6 @@ static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocat
                 platform_info->instance_type.len,
                 by_name_info->instance_type.ptr,
                 by_name_info->instance_type.len);
-            ASSERT_UINT_EQUALS(platform_info->cpu_group_info_array_length, by_name_info->cpu_group_info_array_length);
             ASSERT_TRUE(platform_info->max_throughput_gbps == by_name_info->max_throughput_gbps);
         }
 
@@ -97,3 +78,22 @@ static int s_load_platform_info_from_global_state_sanity_test(struct aws_allocat
 }
 
 AWS_TEST_CASE(load_platform_info_from_global_state_sanity_test, s_load_platform_info_from_global_state_sanity_test)
+
+static int s_test_get_platforms_with_recommended_config(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    aws_s3_library_init(allocator);
+
+    struct aws_array_list recommended_platform_list = aws_s3_get_platforms_with_recommended_config();
+    ASSERT_TRUE(aws_array_list_length(&recommended_platform_list) > 0);
+    for (size_t i = 0; i < aws_array_list_length(&recommended_platform_list); ++i) {
+        struct aws_byte_cursor cursor;
+        aws_array_list_get_at(&recommended_platform_list, &cursor, i);
+        ASSERT_TRUE(cursor.len > 0);
+    }
+    aws_array_list_clean_up(&recommended_platform_list);
+    aws_s3_library_clean_up();
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_get_platforms_with_recommended_config, s_test_get_platforms_with_recommended_config)

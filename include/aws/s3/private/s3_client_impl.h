@@ -167,6 +167,31 @@ struct aws_s3_client_vtable {
         *parallel_input_stream_new_from_file)(struct aws_allocator *allocator, struct aws_byte_cursor file_name);
 };
 
+struct aws_s3_upload_part_timeout_stats {
+    bool stop_timeout;
+
+    /* Total number of successful upload requests */
+    uint64_t num_successful_upload_requests;
+
+    /* Stats for the request time of first 10 succeed requests */
+    struct {
+        uint64_t sum_ns;
+        uint64_t num_samples;
+    } initial_request_time;
+
+    /* Track the timeout rate. */
+    struct {
+        uint64_t num_completed;
+        uint64_t num_failed;
+    } timeout_rate_tracking;
+
+    /* Stats for the response to first byte time of tracked succeed requests */
+    struct {
+        uint64_t sum_ns;
+        uint64_t num_samples;
+    } response_to_first_byte_time;
+};
+
 /* Represents the state of the S3 client. */
 struct aws_s3_client {
     struct aws_allocator *allocator;
@@ -278,6 +303,11 @@ struct aws_s3_client {
      * Ignored unless `enable_read_backpressure` is true. */
     const size_t initial_read_window;
 
+    /**
+     * Timeout in ms for upload request for request after sending to the response first byte received.
+     */
+    struct aws_atomic_var upload_timeout_ms;
+
     struct {
         /* Number of overall requests currently being processed by the client. */
         struct aws_atomic_var num_requests_in_flight;
@@ -341,6 +371,7 @@ struct aws_s3_client {
         /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
         uint32_t finish_destroy : 1;
 
+        struct aws_s3_upload_part_timeout_stats upload_part_stats;
     } synced_data;
 
     struct {
@@ -449,6 +480,15 @@ extern const uint32_t g_max_num_connections_per_vip;
 
 AWS_S3_API
 extern const uint32_t g_num_conns_per_vip_meta_request_look_up[];
+
+AWS_S3_API
+extern const size_t g_expect_timeout_offset_ms;
+
+AWS_S3_API
+void aws_s3_client_update_upload_part_timeout(
+    struct aws_s3_client *client,
+    struct aws_s3_request *finished_upload_part_request,
+    int finished_error_code);
 
 AWS_EXTERN_C_END
 

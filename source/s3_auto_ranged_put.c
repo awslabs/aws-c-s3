@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_list_parts.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
+#include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/io/stream.h>
@@ -72,6 +73,11 @@ struct aws_s3_prepare_complete_multipart_upload_job {
 };
 
 static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request *meta_request);
+
+static void s_s3_auto_ranged_put_send_request_finish(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code);
 
 static bool s_s3_auto_ranged_put_update(
     struct aws_s3_meta_request *meta_request,
@@ -307,7 +313,7 @@ static int s_s3_auto_ranged_put_request_type(const struct aws_s3_request *reques
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
-    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
+    .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
@@ -438,6 +444,18 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
 
     /* In all other cases, cap the number of pending-reads to something reasonable */
     return auto_ranged_put->synced_data.num_parts_pending_read >= s_max_parts_pending_read;
+}
+
+static void s_s3_auto_ranged_put_send_request_finish(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+    struct aws_s3_request *request = connection->request;
+    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+        /* TODO: the single part upload may also be improved from a timeout as multipart. */
+        aws_s3_client_update_upload_part_timeout(request->meta_request->client, request, error_code);
+    }
+    aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
 }
 
 static bool s_s3_auto_ranged_put_update(

@@ -189,6 +189,7 @@ add_test_case(test_add_user_agent_header)
 
 add_test_case(test_get_existing_platform_info)
 add_test_case(test_get_nonexistent_platform_info)
+add_test_case(test_get_platforms_with_recommended_config)
 add_net_test_case(load_platform_info_from_global_state_sanity_test)
 
 add_net_test_case(sha1_nist_test_case_1)
@@ -295,6 +296,8 @@ add_test_case(parallel_read_stream_from_large_file_test)
 
 add_test_case(s3_buffer_pool_threaded_allocs_and_frees)
 add_test_case(s3_buffer_pool_limits)
+
+add_test_case(client_update_upload_part_timeout)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
