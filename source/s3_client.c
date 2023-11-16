@@ -1478,11 +1478,6 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
-    struct aws_s3_buffer_pool_usage_stats stats = aws_s3_buffer_pool_get_usage(client->buffer_pool);
-
-    AWS_LOGF_DEBUG(0, "Pool usage stats primary allocated: %zu primary used %zu primary reserved %zu", 
-        stats.primary_allocated, stats.primary_used, stats.primary_reserved);
-
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /* While:
@@ -1525,6 +1520,9 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             struct aws_s3_request *request = NULL;
 
             /* Try to grab the next request from the meta request. */
+            /* TODO: should we bail out if request fails to update due to mem or
+             * continue going and hopping that following reqs can fit into mem?
+             * check if avail space is at least part size? */
             bool work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
 
             if (work_remaining) {

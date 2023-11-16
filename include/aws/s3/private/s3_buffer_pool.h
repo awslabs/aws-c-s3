@@ -12,7 +12,7 @@
  * S3 buffer pool.
  * Buffer pool used for pooling part sized buffers for Put/Get.
  * Provides additional functionally for limiting overall memory usage by setting
- * upper bound beyond which buffer acquisition will fail.
+ * upper bound beyond reservations will fail.
  */
 
 AWS_EXTERN_C_BEGIN
@@ -24,10 +24,18 @@ struct aws_s3_buffer_pool_usage_stats {
     /* Max size limit. Same value as provided during creation. */
     size_t max_size;
     
+    /* How much mem is used in primary storage. includes memory used by blocks
+     * that are waiting on all allocs to release before being put back in circulation. */
     size_t primary_used;
+    /* Overall memory allocated for blocks. */
     size_t primary_allocated;
+    /* Reserved memory. Does not account for how that memory will map into
+     * blocks and in practice can be lower than used memory. */
     size_t primary_reserved;
+
+    /* Secondary mem used. Accurate, maps directly to base allocator. */
     size_t secondary_used;
+    /* Secondary mem reserved. Accurate, maps directly to base allocator. */
     size_t secondary_reserved;
 };
 
@@ -50,23 +58,30 @@ AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
  */
 AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool);
 
+/*
+ * Best effort way to reserve some memory for later use.
+ * Reservation takes some memory out of the available pool, but does not
+ * allocate it right away.
+ * On success ticket will be returned. 
+ * On failure NULL is returned and error is raised.
+ */
 AWS_S3_API struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(
     struct aws_s3_buffer_pool *buffer_pool,
     size_t size);
 
 /*
- * Acquire buffer of specified size.
- * Returned buffer is empty (0 ptr and size) if buffer cannot be allocated.
- * Warning: Always release buffer using release api. Its fine to wrap pooled
- * buffer in another struct as long as it does not try to free underlying pointer
- * (ex. aws_byte_buf_from_pooled_buffer)
+ * Trades in the ticket for a buffer.
+ * Cannot fail and can over allocate above mem limit if reservation was not accurate.
+ * Using the same ticket twice will return the same buffer.
+ * Buffer is only valid until the ticket is released.
  */
 AWS_S3_API struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_ticket *ticket);
 
 /*
- * Release buffer back to the pool.
+ * Releases the ticket.
+ * Any buffers associated with the ticket are invalidated.
  */
 AWS_S3_API void aws_s3_buffer_pool_release_ticket(
     struct aws_s3_buffer_pool *buffer_pool,

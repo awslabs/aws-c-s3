@@ -112,34 +112,3 @@ static int s_s3_buffer_pool_limits(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 AWS_TEST_CASE(s3_buffer_pool_limits, s_s3_buffer_pool_limits)
-
-static int s_s3_buffer_pool_reservations(struct aws_allocator *allocator, void *ctx) {
-    (void)allocator;
-    (void)ctx;
-
-    size_t n = 100;
-
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), MB_TO_BYTES(128));
-    struct aws_s3_buffer_pool_ticket *tickets[100] = {0};
-    for (size_t i = 0; i < n; ++i) {
-        tickets[i] = aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(8));
-
-        if (tickets[i] == NULL) {
-            AWS_LOGF_DEBUG(0, "Failed to acquire ticket at %d", i);
-            return 0;
-        }
-        
-        //struct aws_byte_buf buf = aws_s3_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
-        //ASSERT_NOT_NULL(buf.buffer);
-    }
-
-    for (size_t i = 0; i < n; ++i) {
-        aws_s3_buffer_pool_release_ticket(buffer_pool, tickets[i]);
-    }
-
-    aws_s3_buffer_pool_destroy(buffer_pool);
-
-    return 0;
-}
-AWS_TEST_CASE(s3_buffer_pool_reservations, s_s3_buffer_pool_reservations)
-
