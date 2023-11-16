@@ -32,6 +32,8 @@ struct aws_s3_buffer_pool_usage_stats {
     /* Reserved memory. Does not account for how that memory will map into
      * blocks and in practice can be lower than used memory. */
     size_t primary_reserved;
+    /* Number of blocks allocated in primary. */
+    size_t primary_num_blocks;
 
     /* Secondary mem used. Accurate, maps directly to base allocator. */
     size_t secondary_used;

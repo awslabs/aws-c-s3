@@ -59,7 +59,7 @@ static void s_threaded_alloc_worker(void *user_data) {
     }
 }
 
-static int s_s3_buffer_pool_threaded_allocs_and_frees(struct aws_allocator *allocator, void *ctx) {
+static int s_test_s3_buffer_pool_threaded_allocs_and_frees(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
 
@@ -71,9 +71,9 @@ static int s_s3_buffer_pool_threaded_allocs_and_frees(struct aws_allocator *allo
 
     return 0;
 }
-AWS_TEST_CASE(s3_buffer_pool_threaded_allocs_and_frees, s_s3_buffer_pool_threaded_allocs_and_frees)
+AWS_TEST_CASE(test_s3_buffer_pool_threaded_allocs_and_frees, s_test_s3_buffer_pool_threaded_allocs_and_frees)
 
-static int s_s3_buffer_pool_limits(struct aws_allocator *allocator, void *ctx) {
+static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
 
@@ -111,4 +111,42 @@ static int s_s3_buffer_pool_limits(struct aws_allocator *allocator, void *ctx) {
 
     return 0;
 }
-AWS_TEST_CASE(s3_buffer_pool_limits, s_s3_buffer_pool_limits)
+AWS_TEST_CASE(test_s3_buffer_pool_limits, s_test_s3_buffer_pool_limits)
+
+static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
+
+    struct aws_s3_buffer_pool_ticket *tickets[40];
+    for (size_t i = 0; i < 40; ++i) {
+        tickets[i] = aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(8));
+        ASSERT_NOT_NULL(tickets[i]);
+        struct aws_byte_buf buf = aws_s3_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
+        ASSERT_NOT_NULL(buf.buffer);
+    }
+
+    struct aws_s3_buffer_pool_usage_stats stats_before = aws_s3_buffer_pool_get_usage(buffer_pool);
+    AWS_LOGF_DEBUG(0, "before %zu", stats_before.primary_num_blocks);
+
+    for (size_t i = 0; i < 20; ++i) {
+        aws_s3_buffer_pool_release_ticket(buffer_pool, tickets[i]);
+    }
+
+    aws_s3_buffer_pool_trim(buffer_pool);
+
+    struct aws_s3_buffer_pool_usage_stats stats_after = aws_s3_buffer_pool_get_usage(buffer_pool);
+    AWS_LOGF_DEBUG(0, "after %zu", stats_after.primary_num_blocks);
+
+    ASSERT_TRUE(stats_before.primary_num_blocks > stats_after.primary_num_blocks);
+
+    for (size_t i = 20; i < 40; ++i) {
+        aws_s3_buffer_pool_release_ticket(buffer_pool, tickets[i]);
+    }
+
+    aws_s3_buffer_pool_destroy(buffer_pool);
+
+    return 0;
+};
+AWS_TEST_CASE(test_s3_buffer_pool_trim, s_test_s3_buffer_pool_trim)

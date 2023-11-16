@@ -114,26 +114,15 @@ void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
 }
 
 void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
-    size_t swap_count = 0;
-
     for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
         if (block->alloc_count == 0) {
-            size_t swap_loc = aws_array_list_length(&buffer_pool->blocks) - 1 - swap_count;
-            if (swap_loc == i) {
-                break;
-            } else {
-                aws_array_list_swap(&buffer_pool->blocks, i, swap_loc);
-            }
-            ++swap_count;
+            aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
+            aws_array_list_erase(&buffer_pool->blocks, i);
+            --i;
         }
-    }
-
-    for (size_t i = 0; i < swap_count; ++i) {
-        buffer_pool->primary_allocated -= buffer_pool->block_size;
-        aws_array_list_pop_back(&buffer_pool->blocks);
     }
 }
 
@@ -274,6 +263,7 @@ struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3
         .primary_allocated = buffer_pool->primary_allocated,
         .primary_used = buffer_pool->primary_used,
         .primary_reserved = buffer_pool->primary_reserved,
+        .primary_num_blocks = aws_array_list_length(&buffer_pool->blocks),
         .secondary_used = buffer_pool->secondary_used,
         .secondary_reserved = buffer_pool->secondary_reserved,
     };

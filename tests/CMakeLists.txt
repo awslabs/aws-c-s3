@@ -294,8 +294,9 @@ endif()
 add_test_case(parallel_read_stream_from_file_sanity_test)
 add_test_case(parallel_read_stream_from_large_file_test)
 
-add_test_case(s3_buffer_pool_threaded_allocs_and_frees)
-add_test_case(s3_buffer_pool_limits)
+add_test_case(test_s3_buffer_pool_threaded_allocs_and_frees)
+add_test_case(test_s3_buffer_pool_limits)
+add_test_case(test_s3_buffer_pool_trim)
 
 add_test_case(client_update_upload_part_timeout)
 
