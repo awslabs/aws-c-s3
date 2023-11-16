@@ -188,7 +188,10 @@ struct aws_s3_request {
     uint32_t record_response_headers : 1;
 
     /* When true, the response body buffer will be allocated in the size of a part. */
-    uint32_t part_size_response_body : 1;
+    uint32_t has_part_size_response_body : 1;
+
+    /* When true, the request body buffer will be allocated in the size of a part. */
+    uint32_t has_part_size_request_body : 1;
 
     /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
     uint32_t tracked_by_client : 1;
@@ -212,8 +215,6 @@ struct aws_s3_request {
 
     /* When true, this request has already been uploaded. we still prepare the request to check the durability. */
     uint32_t was_previously_uploaded : 1;
-
-    uint32_t part_size_request_body : 1;
 };
 
 AWS_EXTERN_C_BEGIN

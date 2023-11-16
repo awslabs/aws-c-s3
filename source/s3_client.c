@@ -84,10 +84,6 @@ static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 /* Default size of buffer pool blocks. */
 static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
 
-/* Amount of mem reserved for use outside of buffer pool.
- * This is an optimistic upper bound on mem used as we dont track it. */
-static const size_t s_buffer_pool_reserved_mem = MB_TO_BYTES(128);
-
 /* Amount of time spent idling before trimming buffer. */
 //static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
@@ -269,29 +265,29 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->allocator = allocator;
 
-    size_t max_mem_limit = 0;
-    if (client_config->max_memory_limit == 0) {
+    size_t mem_limit = 0;
+    if (client_config->memory_limit_in_bytes == 0) {
 #if SIZE_BITS == 32
         if (client_config->throughput_target_gbps > 25.0) {
-            max_mem_limit = GB_TO_BYTES(1);
+            mem_limit = GB_TO_BYTES(1);
         } else {
-            max_mem_limit = GB_TO_BYTES(2);
+            mem_limit = GB_TO_BYTES(2);
         }
 #else
         if (client_config->throughput_target_gbps > 75.0) {
-            max_mem_limit = GB_TO_BYTES(2);
+            mem_limit = GB_TO_BYTES(8);
         } else if (client_config->throughput_target_gbps > 25.0) {
-            max_mem_limit = GB_TO_BYTES(2);
+            mem_limit = GB_TO_BYTES(4);
         } else {
-            max_mem_limit = GB_TO_BYTES(2);
+            mem_limit = GB_TO_BYTES(2);
         }
 #endif
     } else {
-        max_mem_limit = client_config->max_memory_limit;
+        mem_limit = client_config->memory_limit_in_bytes;
     }
 
     client->buffer_pool =
-        aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size, max_mem_limit - s_buffer_pool_reserved_mem);
+        aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size, mem_limit);
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -2155,7 +2151,7 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
 
 static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
 const size_t g_expect_timeout_offset_ms =
-    700; /* 0.7 Secs. From experienments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
+    700; /* 0.7 Secs. From experiments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
 
 /**
  * The upload timeout optimization: explained.

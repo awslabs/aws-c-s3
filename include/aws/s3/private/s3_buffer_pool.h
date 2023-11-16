@@ -45,14 +45,14 @@ struct aws_s3_buffer_pool_usage_stats {
  * Create new buffer pool.
  * block_size - specifies size of the blocks in the primary storage. any acquires
  * bigger than block size are allocated off secondary storage.
- * max_mem_usage - limit on how much mem buffer pool can use. once limit is hit,
+ * mem_limit - limit on how much mem buffer pool can use. once limit is hit,
  * buffer pool will start return empty buffers.
  * Returns buffer pool pointer on success and NULL on failure.
  */
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
     struct aws_allocator *allocator,
     size_t block_size,
-    size_t max_mem_usage);
+    size_t mem_limit);
 
 /*
  * Destroys buffer pool.

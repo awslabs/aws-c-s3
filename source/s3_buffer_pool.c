@@ -7,6 +7,7 @@
 
 #include <aws/common/array_list.h>
 #include <aws/common/mutex.h>
+#include <aws/s3/private/s3_util.h>
 
 /*
  * S3 Buffer Pool.
@@ -38,15 +39,25 @@ struct aws_s3_buffer_pool_ticket {
     uint8_t *ptr;
 };
 
+/* Default size for blocks array. Note: this is just for meta info, blocks
+ * themselves are not preallocated s*/
 static size_t s_min_num_blocks = 5;
+
+/* Amount of mem reserved for use outside of buffer pool.
+ * This is an optimistic upper bound on mem used as we dont track it. 
+ * Covers both usage outside of pool, i.e. all allocations done as part of s3
+ * client as well as any allocations overruns due to memory waste in the pool. */
+static const size_t s_buffer_pool_reserved_mem = MB_TO_BYTES(128);
 
 struct aws_s3_buffer_pool {
     struct aws_allocator *base_allocator;
     struct aws_mutex mutex;
 
     size_t block_size;
+    /* size at which allocations should go to secondary */
+    size_t primary_size_cutoff;
 
-    size_t max_mem_usage;
+    size_t mem_limit;
 
     size_t primary_allocated;
     size_t primary_reserved;
@@ -72,14 +83,32 @@ struct s3_buffer_pool_block {
 struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
     struct aws_allocator *allocator,
     size_t block_size,
-    size_t max_mem_usage) {
+    size_t mem_limit) {
+
+    if (mem_limit < GB_TO_BYTES(1)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to initialize buffer pool. Min supported value for Memory Limit is 1GB.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    if (block_size != 0 || (block_size < 1024 * 1024 || block_size % 1024 != 0)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, 
+            "Failed to initialize buffer pool. Block size must be either 0 or more than 1 mb and size must be 1 KB aligned.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     struct aws_s3_buffer_pool *buffer_pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
 
     AWS_FATAL_ASSERT(buffer_pool != NULL);
 
     buffer_pool->base_allocator = allocator;
     buffer_pool->block_size = block_size;
-    buffer_pool->max_mem_usage = max_mem_usage;
+    /* Somewhat arbitrary number. 
+     * Tries to balance between how many allocations use buffer and buffer space
+     * being wasted. */
+    buffer_pool->primary_size_cutoff = block_size / 4;
+    buffer_pool->mem_limit = mem_limit - s_buffer_pool_reserved_mem;
     if (aws_mutex_init(&buffer_pool->mutex)) {
         goto on_error;
     }
@@ -113,7 +142,7 @@ void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
     aws_mem_release(base, buffer_pool);
 }
 
-void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
+void s_buffer_pool_trim_synced(struct aws_s3_buffer_pool *buffer_pool) {
     for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
@@ -126,6 +155,12 @@ void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
     }
 }
 
+void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
+    aws_mutex_lock(&buffer_pool->mutex);
+    s_buffer_pool_trim_synced(buffer_pool);
+    aws_mutex_unlock(&buffer_pool->mutex);
+}
+
 struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
 
     struct aws_s3_buffer_pool_ticket *ticket = NULL;
@@ -134,10 +169,21 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
     size_t overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + 
                             buffer_pool->secondary_used + buffer_pool->secondary_reserved;
 
-    if ((size + overall_taken) < buffer_pool->max_mem_usage) {
+    /*
+     * 
+     */
+    if (size > buffer_pool->primary_size_cutoff && 
+        (size + overall_taken) > buffer_pool->mem_limit &&
+        (buffer_pool->primary_allocated > (buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->block_size))) {
+        s_buffer_pool_trim_synced(buffer_pool);
+        overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + 
+                            buffer_pool->secondary_used + buffer_pool->secondary_reserved;
+    }
+
+    if ((size + overall_taken) <= buffer_pool->mem_limit) {
         ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool_ticket));
         ticket->size = size;
-        if (size < buffer_pool->block_size) {
+        if (size <= buffer_pool->primary_size_cutoff) {
             buffer_pool->primary_reserved += size;
         } else {
             buffer_pool->secondary_reserved += size;
@@ -198,7 +244,7 @@ struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
 
     aws_mutex_lock(&buffer_pool->mutex);
 
-    if (ticket->size < buffer_pool->block_size) {
+    if (ticket->size <= buffer_pool->primary_size_cutoff) {
         alloc_ptr = s_primary_acquire(buffer_pool, ticket->size);
     } else {
         alloc_ptr = aws_mem_acquire(buffer_pool->base_allocator, ticket->size);
@@ -225,7 +271,7 @@ void aws_s3_buffer_pool_release_ticket(
     }
 
     aws_mutex_lock(&buffer_pool->mutex);
-    if (ticket->size < buffer_pool->block_size) {
+    if (ticket->size <= buffer_pool->primary_size_cutoff) {
         bool found = false;
         for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
             struct s3_buffer_pool_block *block;
@@ -259,7 +305,7 @@ struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3
     aws_mutex_lock(&buffer_pool->mutex);
 
     struct aws_s3_buffer_pool_usage_stats ret = (struct aws_s3_buffer_pool_usage_stats){
-        .max_size = buffer_pool->max_mem_usage,
+        .max_size = buffer_pool->mem_limit,
         .primary_allocated = buffer_pool->primary_allocated,
         .primary_used = buffer_pool->primary_used,
         .primary_reserved = buffer_pool->primary_reserved,
@@ -267,6 +313,7 @@ struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3
         .secondary_used = buffer_pool->secondary_used,
         .secondary_reserved = buffer_pool->secondary_reserved,
     };
+
     aws_mutex_unlock(&buffer_pool->mutex);
     return ret;
 }

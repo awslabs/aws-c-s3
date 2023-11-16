@@ -1084,6 +1084,15 @@ static int s_s3_meta_request_incoming_headers(
     return AWS_OP_SUCCESS;
 }
 
+/*
+ * Small helper to either do a static or dynamic append.
+ * TODO: something like this would be useful in common.
+ */
+static int s_response_body_append(bool is_dynamic, struct aws_byte_buf *buf, const struct aws_byte_cursor *data) {
+    return is_dynamic ? aws_byte_buf_append_dynamic(buf, data) :
+        aws_byte_buf_append(buf, data);
+}
+
 static int s_s3_meta_request_incoming_body(
     struct aws_http_stream *stream,
     const struct aws_byte_cursor *data,
@@ -1117,7 +1126,7 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->part_size_response_body) {
+        if (request->has_part_size_response_body) {
             request->send_data.response_body = aws_s3_buffer_pool_acquire_buffer(
                 request->meta_request->client->buffer_pool, request->ticket);
         } else {
@@ -1126,9 +1135,9 @@ static int s_s3_meta_request_incoming_body(
         }
     }
 
-    if ((request->part_size_response_body && aws_byte_buf_append(&request->send_data.response_body, data)) ||
-        (!request->part_size_response_body && aws_byte_buf_append_dynamic(&request->send_data.response_body, data))) {
-
+    /* Note: not having part sized response body means the buffer is dynamic and
+     * can grow. */
+    if (s_response_body_append(!request->has_part_size_response_body, &request->send_data.response_body, data)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Request %p could not append to response body due to error %d (%s)",

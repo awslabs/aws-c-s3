@@ -434,7 +434,7 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
         (void *)meta_request,
         (void *)request,
         request->part_number,
-        request->part_size_response_body);
+        request->has_part_size_response_body);
 
     success = true;
 
