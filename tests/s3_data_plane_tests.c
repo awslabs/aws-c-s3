@@ -3908,7 +3908,9 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     aws_s3_tester_unlock_synced_data(&tester);
 
-    /* Check the size of the metrics should be the same as the number of requests, which should be 1 */
+    /* Check the size of the metrics should be the same as the number of
+    requests, which should be 1 */
+    AWS_LOGF_DEBUG(0, "Checking for telemetry");
     ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
     struct aws_s3_request_metrics *metrics = NULL;
     aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);

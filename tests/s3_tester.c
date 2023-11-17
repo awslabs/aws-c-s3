@@ -157,6 +157,8 @@ static void s_s3_test_meta_request_finish(
     void *user_data) {
     (void)meta_request;
 
+    AWS_LOGF_DEBUG(0, "received finish callback");
+
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     struct aws_s3_tester *tester = meta_request_test_results->tester;
 
