@@ -191,6 +191,7 @@ static void s_s3_test_meta_request_telemetry(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request_metrics *metrics,
     void *user_data) {
+    AWS_LOGF_DEBUG(0, "Received telemetry callback");
     (void)meta_request;
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     struct aws_s3_tester *tester = meta_request_test_results->tester;
@@ -228,6 +229,8 @@ static void s_s3_test_meta_request_telemetry(
 
     aws_s3_tester_lock_synced_data(tester);
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
+    AWS_LOGF_DEBUG(0, "Added metrics to the list %zu", 
+        aws_array_list_length(&meta_request_test_results->synced_data.metrics));
     aws_s3_request_metrics_acquire(metrics);
     aws_s3_tester_unlock_synced_data(tester);
 }
