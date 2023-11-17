@@ -117,6 +117,8 @@ struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request) {
 static void s_s3_request_destroy(void *user_data) {
     struct aws_s3_request *request = user_data;
 
+    AWS_LOGF_DEBUG(0, "killing req %p", (void *)request);
+
     if (request == NULL) {
         return;
     }

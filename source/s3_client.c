@@ -1954,7 +1954,7 @@ reset_connection:
     }
 
     if (connection->request != NULL) {
-
+        AWS_LOGF_DEBUG(0, "releasing connection hold on req %p", (void *)connection->request);
         connection->request = aws_s3_request_release(connection->request);
     }
 
