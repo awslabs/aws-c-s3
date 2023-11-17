@@ -84,8 +84,8 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     struct aws_byte_buf buf1 = aws_s3_buffer_pool_acquire_buffer(buffer_pool, ticket1);
     ASSERT_NOT_NULL(buf1.buffer);
 
-    struct aws_s3_buffer_pool_ticket *tickets[7];
-    for (size_t i = 0; i < 7; ++i) {
+    struct aws_s3_buffer_pool_ticket *tickets[6];
+    for (size_t i = 0; i < 6; ++i) {
         tickets[i] = aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(128));
         ASSERT_NOT_NULL(tickets[i]);
         struct aws_byte_buf buf = aws_s3_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
@@ -100,7 +100,7 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     struct aws_byte_buf buf2 = aws_s3_buffer_pool_acquire_buffer(buffer_pool, ticket2);
     ASSERT_NOT_NULL(buf2.buffer);
 
-    for (size_t i = 0; i < 7; ++i) {
+    for (size_t i = 0; i < 6; ++i) {
         aws_s3_buffer_pool_release_ticket(buffer_pool, tickets[i]);
     }
 
