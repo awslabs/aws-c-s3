@@ -3914,9 +3914,15 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
+    /*
+     * TODO: telemetry is sent from request destructor, http threads hold on to
+     * req for a little bit after on_req_finished callback and its possible that
+     * telemetry callback will be invoked after meta reqs on_finished callback. 
+     * Moving the telemetry check to after meta req shutdown callback. Need to
+     * figure out whether current behavior can be improved.
+     */
     /* Check the size of the metrics should be the same as the number of
     requests, which should be 1 */
-    AWS_LOGF_DEBUG(0, "Checking for telemetry");
     ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
     struct aws_s3_request_metrics *metrics = NULL;
     aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);

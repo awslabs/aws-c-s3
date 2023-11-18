@@ -87,7 +87,6 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
         metric->time_metrics.total_duration_ns =
             metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
         if (meta_request->telemetry_callback) {
-            AWS_LOGF_DEBUG(0, "invoking telemetry callback");
             meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
         }
         request->send_data.metrics = aws_s3_request_metrics_release(metric);
@@ -117,8 +116,6 @@ struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request) {
 
 static void s_s3_request_destroy(void *user_data) {
     struct aws_s3_request *request = user_data;
-
-    AWS_LOGF_DEBUG(0, "killing req %p", (void *)request);
 
     if (request == NULL) {
         return;

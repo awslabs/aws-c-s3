@@ -84,6 +84,9 @@ static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 /* Default size of buffer pool blocks. */
 static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
 
+/* Default multiplier between max part size and memory limit */
+static const size_t s_default_max_part_size_to_mem_lim_multiplier = 4;
+
 /* Amount of time spent idling before trimming buffer. */
 //static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
@@ -226,6 +229,10 @@ void aws_s3_client_unlock_synced_data(struct aws_s3_client *client) {
     aws_mutex_unlock(&client->synced_data.lock);
 }
 
+static size_t s_default_max_part_size_based_on_mem_limit(size_t mem_lim) {
+    return mem_lim / s_default_max_part_size_to_mem_lim_multiplier;
+}
+
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
@@ -250,6 +257,15 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 
+    if (client_config->max_part_size != 0 && client_config->memory_limit_in_bytes != 0 &&
+        client_config->max_part_size > (client_config->memory_limit_in_bytes / s_default_max_part_size_to_mem_lim_multiplier)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; memory limit should be at least 4 times higher than max part size.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
 #ifdef BYO_CRYPTO
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
         AWS_LOGF_ERROR(
@@ -269,9 +285,9 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->memory_limit_in_bytes == 0) {
 #if SIZE_BITS == 32
         if (client_config->throughput_target_gbps > 25.0) {
-            mem_limit = GB_TO_BYTES(1);
-        } else {
             mem_limit = GB_TO_BYTES(2);
+        } else {
+            mem_limit = GB_TO_BYTES(1);
         }
 #else
         if (client_config->throughput_target_gbps > 75.0) {
@@ -336,6 +352,11 @@ struct aws_s3_client *aws_s3_client_new(
     } else {
         *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
     }
+
+    if (client_config->max_part_size > s_default_max_part_size_based_on_mem_limit(mem_limit)) {
+        *((uint64_t *)&client->max_part_size) = s_default_max_part_size_based_on_mem_limit(mem_limit);
+    }
+
     if (client->max_part_size > SIZE_MAX) {
         /* For the 32bit max part size to be SIZE_MAX */
         *((uint64_t *)&client->max_part_size) = SIZE_MAX;
@@ -1954,7 +1975,6 @@ reset_connection:
     }
 
     if (connection->request != NULL) {
-        AWS_LOGF_DEBUG(0, "releasing connection hold on req %p", (void *)connection->request);
         connection->request = aws_s3_request_release(connection->request);
     }
 

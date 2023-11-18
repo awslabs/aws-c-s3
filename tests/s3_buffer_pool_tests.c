@@ -128,7 +128,6 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
     }
 
     struct aws_s3_buffer_pool_usage_stats stats_before = aws_s3_buffer_pool_get_usage(buffer_pool);
-    AWS_LOGF_DEBUG(0, "before %zu", stats_before.primary_num_blocks);
 
     for (size_t i = 0; i < 20; ++i) {
         aws_s3_buffer_pool_release_ticket(buffer_pool, tickets[i]);
@@ -137,7 +136,6 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
     aws_s3_buffer_pool_trim(buffer_pool);
 
     struct aws_s3_buffer_pool_usage_stats stats_after = aws_s3_buffer_pool_get_usage(buffer_pool);
-    AWS_LOGF_DEBUG(0, "after %zu", stats_after.primary_num_blocks);
 
     ASSERT_TRUE(stats_before.primary_num_blocks > stats_after.primary_num_blocks);
 

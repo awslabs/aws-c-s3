@@ -41,7 +41,7 @@ struct aws_s3_buffer_pool_ticket {
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
  * themselves are not preallocated s*/
-static size_t s_min_num_blocks = 5;
+static size_t s_block_list_initial_capacity = 5;
 
 /* Amount of mem reserved for use outside of buffer pool.
  * This is an optimistic upper bound on mem used as we dont track it. 
@@ -109,17 +109,13 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
      * being wasted. */
     buffer_pool->primary_size_cutoff = block_size / 4;
     buffer_pool->mem_limit = mem_limit - s_buffer_pool_reserved_mem;
-    if (aws_mutex_init(&buffer_pool->mutex)) {
-        goto on_error;
-    }
+    int mutex_error = aws_mutex_init(&buffer_pool->mutex);
+    AWS_ASSERT(mutex_error == AWS_OP_SUCCESS);
 
-    aws_array_list_init_dynamic(&buffer_pool->blocks, allocator, s_min_num_blocks, sizeof(struct s3_buffer_pool_block));
+    aws_array_list_init_dynamic(&buffer_pool->blocks, allocator,
+        s_block_list_initial_capacity, sizeof(struct s3_buffer_pool_block));
 
     return buffer_pool;
-
-on_error:
-    aws_mem_release(allocator, buffer_pool);
-    return NULL;
 }
 
 void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
@@ -163,6 +159,12 @@ void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
 
 struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
 
+    if (size == 0) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Could not reserve from buffer pool. 0 is not a valid size.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     struct aws_s3_buffer_pool_ticket *ticket = NULL;
     aws_mutex_lock(&buffer_pool->mutex);
 
@@ -170,7 +172,9 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
                             buffer_pool->secondary_used + buffer_pool->secondary_reserved;
 
     /*
-     * 
+     * If we are allocating from secondary and there is a lot of unused space in
+     * primary, trim the primary. 
+     * TODO: something smarter, like partial trim?
      */
     if (size > buffer_pool->primary_size_cutoff && 
         (size + overall_taken) > buffer_pool->mem_limit &&
@@ -263,9 +267,17 @@ void aws_s3_buffer_pool_release_ticket(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_ticket *ticket) {
 
-    if (buffer_pool == NULL || ticket == NULL || ticket->ptr == NULL) {
-        if (ticket != NULL) {
-            aws_mem_release(buffer_pool->base_allocator, ticket);
+    if (buffer_pool == NULL || ticket == NULL) {
+        return;
+    }
+
+    if (ticket->ptr == NULL) {
+        aws_mem_release(buffer_pool->base_allocator, ticket);
+        /* Ticket was never used, make sure to clean up reserved count. */
+        if (ticket->size <= buffer_pool->primary_size_cutoff) {
+            buffer_pool->primary_reserved -= ticket->size;
+        } else {
+            buffer_pool->secondary_reserved -= ticket->size;
         }
         return;
     }
