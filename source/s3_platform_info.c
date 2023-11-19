@@ -76,11 +76,13 @@ static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
 /***** Begin p4d.24xlarge and p4de.24xlarge ****/
 static struct aws_byte_cursor s_p4d_socket1_array[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth1")};
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth1"),
+};
 
 static struct aws_byte_cursor s_p4d_socket2_array[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth2"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth3")};
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth3"),
+};
 
 static struct aws_s3_cpu_group_info s_p4d_cpu_group_info_array[] = {
     {

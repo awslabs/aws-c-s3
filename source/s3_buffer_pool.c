@@ -295,6 +295,7 @@ void aws_s3_buffer_pool_release_ticket(
         return;
     }
 
+    aws_mutex_lock(&buffer_pool->mutex);
     if (ticket->ptr == NULL) {
         /* Ticket was never used, make sure to clean up reserved count. */
         if (ticket->size <= buffer_pool->primary_size_cutoff) {
@@ -306,7 +307,6 @@ void aws_s3_buffer_pool_release_ticket(
         return;
     }
 
-    aws_mutex_lock(&buffer_pool->mutex);
     if (ticket->size <= buffer_pool->primary_size_cutoff) {
         bool found = false;
         for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
