@@ -196,8 +196,8 @@ static bool s_s3_auto_ranged_get_update(
                     request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
                     request->discovers_object_size = true;
 
-                    struct aws_s3_buffer_pool_ticket *ticket 
-                        = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                    struct aws_s3_buffer_pool_ticket *ticket =
+                        aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                     if (ticket == NULL) {
                         goto has_work_remaining;
@@ -262,8 +262,8 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
-                struct aws_s3_buffer_pool_ticket *ticket 
-                    = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                struct aws_s3_buffer_pool_ticket *ticket =
+                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                 if (ticket == NULL) {
                     goto has_work_remaining;
@@ -275,6 +275,8 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.num_parts_requested + 1,
                     AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
+                request->ticket = ticket;
+
                 aws_s3_get_part_range(
                     auto_ranged_get->synced_data.object_range_start,
                     auto_ranged_get->synced_data.object_range_end,
@@ -282,8 +284,6 @@ static bool s_s3_auto_ranged_get_update(
                     request->part_number,
                     &request->part_range_start,
                     &request->part_range_end);
-                
-                request->ticket = ticket;
 
                 ++auto_ranged_get->synced_data.num_parts_requested;
                 goto has_work_remaining;

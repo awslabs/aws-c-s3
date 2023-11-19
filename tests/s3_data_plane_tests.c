@@ -3917,7 +3917,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     /*
      * TODO: telemetry is sent from request destructor, http threads hold on to
      * req for a little bit after on_req_finished callback and its possible that
-     * telemetry callback will be invoked after meta reqs on_finished callback. 
+     * telemetry callback will be invoked after meta reqs on_finished callback.
      * Moving the telemetry check to after meta req shutdown callback. Need to
      * figure out whether current behavior can be improved.
      */

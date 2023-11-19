@@ -148,3 +148,55 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
     return 0;
 };
 AWS_TEST_CASE(test_s3_buffer_pool_trim, s_test_s3_buffer_pool_trim)
+
+static int s_test_s3_buffer_reserve_zero_size(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
+
+    ASSERT_NULL(aws_s3_buffer_pool_reserve(buffer_pool, 0));
+    ASSERT_TRUE(aws_last_error() == AWS_ERROR_INVALID_ARGUMENT);
+
+    aws_s3_buffer_pool_destroy(buffer_pool);
+
+    return 0;
+}
+AWS_TEST_CASE(test_s3_buffer_reserve_zero_size, s_test_s3_buffer_reserve_zero_size)
+
+static int s_test_s3_buffer_pool_reservation_hold(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
+
+    struct aws_s3_buffer_pool_ticket *tickets[112];
+    for (size_t i = 0; i < 112; ++i) {
+        tickets[i] = aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(8));
+        ASSERT_NOT_NULL(tickets[i]);
+        struct aws_byte_buf buf = aws_s3_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
+        ASSERT_NOT_NULL(buf.buffer);
+    }
+
+    ASSERT_NULL(aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(8)));
+
+    ASSERT_TRUE(aws_s3_buffer_pool_has_reservation_hold(buffer_pool));
+
+    for (size_t i = 0; i < 112; ++i) {
+        aws_s3_buffer_pool_release_ticket(buffer_pool, tickets[i]);
+    }
+
+    ASSERT_NULL(aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(8)));
+
+    aws_s3_buffer_pool_remove_reservation_hold(buffer_pool);
+
+    struct aws_s3_buffer_pool_ticket *ticket = aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(8));
+    ASSERT_NOT_NULL(ticket);
+
+    aws_s3_buffer_pool_release_ticket(buffer_pool, ticket);
+
+    aws_s3_buffer_pool_destroy(buffer_pool);
+
+    return 0;
+};
+AWS_TEST_CASE(test_s3_buffer_pool_reservation_hold, s_test_s3_buffer_pool_reservation_hold)

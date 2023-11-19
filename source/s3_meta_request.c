@@ -1089,8 +1089,7 @@ static int s_s3_meta_request_incoming_headers(
  * TODO: something like this would be useful in common.
  */
 static int s_response_body_append(bool is_dynamic, struct aws_byte_buf *buf, const struct aws_byte_cursor *data) {
-    return is_dynamic ? aws_byte_buf_append_dynamic(buf, data) :
-        aws_byte_buf_append(buf, data);
+    return is_dynamic ? aws_byte_buf_append_dynamic(buf, data) : aws_byte_buf_append(buf, data);
 }
 
 static int s_s3_meta_request_incoming_body(
@@ -1127,8 +1126,8 @@ static int s_s3_meta_request_incoming_body(
 
     if (request->send_data.response_body.capacity == 0) {
         if (request->has_part_size_response_body) {
-            request->send_data.response_body = aws_s3_buffer_pool_acquire_buffer(
-                request->meta_request->client->buffer_pool, request->ticket);
+            request->send_data.response_body =
+                aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);

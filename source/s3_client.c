@@ -88,7 +88,7 @@ static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
 static const size_t s_default_max_part_size_to_mem_lim_multiplier = 4;
 
 /* Amount of time spent idling before trimming buffer. */
-//static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
+// static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -258,10 +258,12 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     if (client_config->max_part_size != 0 && client_config->memory_limit_in_bytes != 0 &&
-        client_config->max_part_size > (client_config->memory_limit_in_bytes / s_default_max_part_size_to_mem_lim_multiplier)) {
+        client_config->max_part_size >
+            (client_config->memory_limit_in_bytes / s_default_max_part_size_to_mem_lim_multiplier)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
-            "Cannot create client from client_config; memory limit should be at least 4 times higher than max part size.");
+            "Cannot create client from client_config; memory limit should be at least 4 times higher than max part "
+            "size.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -302,8 +304,7 @@ struct aws_s3_client *aws_s3_client_new(
         mem_limit = client_config->memory_limit_in_bytes;
     }
 
-    client->buffer_pool =
-        aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size, mem_limit);
+    client->buffer_pool = aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size, mem_limit);
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -573,7 +574,7 @@ static void s_s3_client_start_destroy(void *user_data) {
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
-        
+
         client->synced_data.active = false;
 
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
@@ -604,9 +605,9 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
-    //if (client->synced_data.trim_buffer_pool_task_scheduled) {
-    //    aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
-    //}
+    // if (client->synced_data.trim_buffer_pool_task_scheduled) {
+    //     aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    // }
 
     aws_string_destroy(client->region);
     client->region = NULL;
@@ -1299,11 +1300,11 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
 
-/*
-    if (client->synced_data.active) {
-        s_s3_client_schedule_buffer_pool_trim_synced(client);
-    }
-*/
+    /*
+        if (client->synced_data.active) {
+            s_s3_client_schedule_buffer_pool_trim_synced(client);
+        }
+    */
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
 
@@ -1495,6 +1496,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
+    aws_s3_buffer_pool_remove_reservation_hold(client->buffer_pool);
+
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /* While:
@@ -1600,7 +1603,7 @@ static void s_s3_client_prepare_callback_queue_request(
     struct aws_s3_client *client = user_data;
     AWS_PRECONDITION(client);
 
-    if (error_code != AWS_ERROR_SUCCESS && error_code != AWS_ERROR_S3_INSUFFICIENT_MEMORY) {
+    if (error_code != AWS_ERROR_SUCCESS) {
         s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
         request = aws_s3_request_release(request);
     }

@@ -556,8 +556,8 @@ static bool s_s3_auto_ranged_put_update(
 
             if (should_create_next_part_request) {
 
-                struct aws_s3_buffer_pool_ticket *ticket 
-                    = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                struct aws_s3_buffer_pool_ticket *ticket =
+                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                 if (ticket) {
                     /* Allocate a request for another part. */
@@ -570,7 +570,7 @@ static bool s_s3_auto_ranged_put_update(
                     request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
                     /* If request was previously uploaded, we prepare it to ensure checksums still match,
-                    * but ultimately it gets marked no-op and we don't send it */
+                     * but ultimately it gets marked no-op and we don't send it */
                     request->was_previously_uploaded = request_previously_uploaded;
 
                     request->ticket = ticket;
@@ -588,7 +588,7 @@ static bool s_s3_auto_ranged_put_update(
                 } else {
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
-                        "id=%p: Failed to allocate due to lack of memory",
+                        "id=%p: Failed to allocate due to exceeding memory limit",
                         (void *)meta_request);
                 }
 
@@ -956,8 +956,8 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
         if (request->request_body.capacity == 0) {
             AWS_FATAL_ASSERT(request->ticket);
-            request->request_body = aws_s3_buffer_pool_acquire_buffer(
-                request->meta_request->client->buffer_pool, request->ticket);
+            request->request_body =
+                aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
             request->request_body.capacity = request_body_size;
         }
 

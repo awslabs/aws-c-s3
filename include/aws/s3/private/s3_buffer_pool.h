@@ -23,7 +23,7 @@ struct aws_s3_buffer_pool_ticket;
 struct aws_s3_buffer_pool_usage_stats {
     /* Max size limit. Same value as provided during creation. */
     size_t max_size;
-    
+
     /* How much mem is used in primary storage. includes memory used by blocks
      * that are waiting on all allocs to release before being put back in circulation. */
     size_t primary_used;
@@ -64,12 +64,24 @@ AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_poo
  * Best effort way to reserve some memory for later use.
  * Reservation takes some memory out of the available pool, but does not
  * allocate it right away.
- * On success ticket will be returned. 
- * On failure NULL is returned and error is raised.
+ * On success ticket will be returned.
+ * On failure NULL is returned, error is raised and reservation hold is placed
+ * on the buffer. Any further reservations while hold is active will fail.
+ * Remove reservation hold to unblock reservations.
  */
 AWS_S3_API struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(
     struct aws_s3_buffer_pool *buffer_pool,
     size_t size);
+
+/*
+ * Whether pool has a reservation hold.
+ */
+AWS_S3_API bool aws_s3_buffer_pool_has_reservation_hold(struct aws_s3_buffer_pool *buffer_pool);
+
+/*
+ * Remove reservation hold on pool.
+ */
+AWS_S3_API void aws_s3_buffer_pool_remove_reservation_hold(struct aws_s3_buffer_pool *buffer_pool);
 
 /*
  * Trades in the ticket for a buffer.
