@@ -295,18 +295,21 @@ void aws_s3_buffer_pool_release_ticket(
         return;
     }
 
-    aws_mutex_lock(&buffer_pool->mutex);
+
     if (ticket->ptr == NULL) {
         /* Ticket was never used, make sure to clean up reserved count. */
+        aws_mutex_lock(&buffer_pool->mutex);
         if (ticket->size <= buffer_pool->primary_size_cutoff) {
             buffer_pool->primary_reserved -= ticket->size;
         } else {
             buffer_pool->secondary_reserved -= ticket->size;
         }
+        aws_mutex_unlock(&buffer_pool->mutex);
         aws_mem_release(buffer_pool->base_allocator, ticket);
         return;
     }
 
+    aws_mutex_lock(&buffer_pool->mutex);
     if (ticket->size <= buffer_pool->primary_size_cutoff) {
         bool found = false;
         for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
