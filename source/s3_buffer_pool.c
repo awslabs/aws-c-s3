@@ -296,13 +296,13 @@ void aws_s3_buffer_pool_release_ticket(
     }
 
     if (ticket->ptr == NULL) {
-        aws_mem_release(buffer_pool->base_allocator, ticket);
         /* Ticket was never used, make sure to clean up reserved count. */
         if (ticket->size <= buffer_pool->primary_size_cutoff) {
             buffer_pool->primary_reserved -= ticket->size;
         } else {
             buffer_pool->secondary_reserved -= ticket->size;
         }
+        aws_mem_release(buffer_pool->base_allocator, ticket);
         return;
     }
 
