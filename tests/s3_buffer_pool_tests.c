@@ -95,6 +95,7 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     ASSERT_NULL(aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(128)));
     ASSERT_NULL(aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(96)));
 
+    aws_s3_buffer_pool_remove_reservation_hold(buffer_pool);
     struct aws_s3_buffer_pool_ticket *ticket2 = aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(32));
     ASSERT_NOT_NULL(ticket2);
     struct aws_byte_buf buf2 = aws_s3_buffer_pool_acquire_buffer(buffer_pool, ticket2);
