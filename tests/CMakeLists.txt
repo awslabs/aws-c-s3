@@ -299,6 +299,7 @@ add_test_case(test_s3_buffer_pool_limits)
 add_test_case(test_s3_buffer_pool_trim)
 add_test_case(test_s3_buffer_reserve_zero_size)
 add_test_case(test_s3_buffer_pool_reservation_hold)
+add_test_case(test_s3_put_object_buffer_pool_trim)
 
 add_test_case(client_update_upload_part_timeout)
 

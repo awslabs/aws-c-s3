@@ -1853,6 +1853,53 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_put_object_buffer_pool_trim, s_test_s3_put_object_buffer_pool_trim)
+static int s_test_s3_put_object_buffer_pool_trim(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 8 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 32,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    struct aws_s3_buffer_pool_usage_stats usage_before = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+    
+    ASSERT_TRUE(0 != usage_before.primary_num_blocks);
+
+    aws_thread_current_sleep(aws_timestamp_convert(6, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+
+    struct aws_s3_buffer_pool_usage_stats usage_after = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+    
+    ASSERT_INT_EQUALS(0, usage_after.primary_num_blocks);
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(
     test_s3_put_object_less_than_part_size_with_content_encoding,
     s_test_s3_put_object_less_than_part_size_with_content_encoding)
