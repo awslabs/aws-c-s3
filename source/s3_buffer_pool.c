@@ -107,10 +107,10 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
         return NULL;
     }
 
-    if (!(chunk_size == 0 || (chunk_size > 1024 * 1024 && chunk_size % 1024 == 0))) {
+    if (!(chunk_size == 0 || (chunk_size > (1024) && chunk_size % 1024 == 0))) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
-            "Failed to initialize buffer pool. Chunk size must be either 0 or more than 1 mb and size must be 1 KB "
+            "Failed to initialize buffer pool. Chunk size must be either 0 or more than 1 kb and size must be 1 KB "
             "aligned.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
