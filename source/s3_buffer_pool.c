@@ -82,12 +82,12 @@ struct s3_buffer_pool_block {
 
 static inline uint16_t s_set_bit_n(uint16_t num, size_t position, size_t n) {
     uint16_t mask = ((uint16_t)0x00FF) >> (8 - n);
-    return num | (mask << position) ;
+    return num | (mask << position);
 }
 
 static inline uint16_t s_clear_bit_n(uint16_t num, size_t position, size_t n) {
     uint16_t mask = ((uint16_t)0x00FF) >> (8 - n);
-    return num & ~ (mask << position);
+    return num & ~(mask << position);
 }
 
 static inline bool s_check_bit_n(uint16_t num, size_t position, size_t n) {

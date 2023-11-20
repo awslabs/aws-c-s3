@@ -303,7 +303,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     size_t part_size;
     if (client_config->part_size != 0) {
-       part_size = (size_t)client_config->part_size;
+        part_size = (size_t)client_config->part_size;
     } else {
         part_size = s_default_part_size;
     }
