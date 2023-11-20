@@ -295,7 +295,6 @@ void aws_s3_buffer_pool_release_ticket(
         return;
     }
 
-
     if (ticket->ptr == NULL) {
         /* Ticket was never used, make sure to clean up reserved count. */
         aws_mutex_lock(&buffer_pool->mutex);

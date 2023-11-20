@@ -88,7 +88,7 @@ static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
 static const size_t s_default_max_part_size_to_mem_lim_multiplier = 4;
 
 /* Amount of time spent idling before trimming buffer. */
-// static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
+static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -605,9 +605,9 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
-    // if (client->synced_data.trim_buffer_pool_task_scheduled) {
-    //     aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
-    // }
+    if (client->synced_data.trim_buffer_pool_task_scheduled) {
+         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    }
 
     aws_string_destroy(client->region);
     client->region = NULL;
@@ -1190,25 +1190,26 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
 }
 
 /* Task function for trying to find a request that can be processed. */
-/*static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     AWS_PRECONDITION(task);
     (void)task;
     (void)task_status;
 
-    // Client keeps a reference to the event loop group; a 'canceled' status should not happen.
-    AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
-
     struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);
+
+    aws_s3_client_lock_synced_data(client);
+    client->synced_data.trim_buffer_pool_task_scheduled = false;
+    aws_s3_client_unlock_synced_data(client);
 
     uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     if (num_reqs_in_flight == 0) {
         aws_s3_buffer_pool_trim(client->buffer_pool);
     }
-}*/
+}
 
-/*static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *client) {
+static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *client) {
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
     if (client->synced_data.trim_buffer_pool_task_scheduled) {
@@ -1235,7 +1236,7 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
         client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task, trim_time);
 
     client->synced_data.trim_buffer_pool_task_scheduled = true;
-}*/
+}
 
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
@@ -1300,11 +1301,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
 
-    /*
-        if (client->synced_data.active) {
-            s_s3_client_schedule_buffer_pool_trim_synced(client);
-        }
-    */
+    if (client->synced_data.active) {
+        s_s3_client_schedule_buffer_pool_trim_synced(client);
+    }
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
 
