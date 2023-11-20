@@ -256,15 +256,13 @@ static uint8_t *s_primary_acquire_synced(struct aws_s3_buffer_pool *buffer_pool,
             if (!s_check_bit_n(block->alloc_bit_mask, chunk_i, chunks_needed)) {
                 alloc_ptr = block->block_ptr + chunk_i * buffer_pool->chunk_size;
                 block->alloc_bit_mask = s_set_bit_n(block->alloc_bit_mask, chunk_i, chunks_needed);
-                AWS_LOGF_DEBUG(0, "foo reuse %#010x", block->alloc_bit_mask);
                 goto on_allocated;
             }
         }
     }
 
     struct s3_buffer_pool_block block;
-    block.alloc_bit_mask = s_set_bit_n(block.alloc_bit_mask, 0, chunks_needed);
-    AWS_LOGF_DEBUG(0, "foo new %#010x", block.alloc_bit_mask);
+    block.alloc_bit_mask = s_set_bit_n(0, 0, chunks_needed);
     block.block_ptr = aws_mem_acquire(buffer_pool->base_allocator, buffer_pool->block_size);
     block.block_size = buffer_pool->block_size;
     aws_array_list_push_back(&buffer_pool->blocks, &block);
@@ -345,7 +343,6 @@ void aws_s3_buffer_pool_release_ticket(
                 size_t alloc_i = (ticket->ptr - block->block_ptr) / buffer_pool->chunk_size;
 
                 block->alloc_bit_mask = s_clear_bit_n(block->alloc_bit_mask, alloc_i, chunks_used);
-                AWS_LOGF_DEBUG(0, "foo clear %#010x", block->alloc_bit_mask);
                 buffer_pool->primary_used -= ticket->size;
 
                 found = true;
