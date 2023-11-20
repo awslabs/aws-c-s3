@@ -82,7 +82,7 @@ static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 
 /* Default size of buffer pool blocks. */
-static const size_t s_buffer_pool_default_block_size = MB_TO_BYTES(128);
+static const size_t s_buffer_pool_default_chunk_size = MB_TO_BYTES(8);
 
 /* Default multiplier between max part size and memory limit */
 static const size_t s_default_max_part_size_to_mem_lim_multiplier = 4;
@@ -304,7 +304,7 @@ struct aws_s3_client *aws_s3_client_new(
         mem_limit = client_config->memory_limit_in_bytes;
     }
 
-    client->buffer_pool = aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_block_size, mem_limit);
+    client->buffer_pool = aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_chunk_size, mem_limit);
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -606,7 +606,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
     if (client->synced_data.trim_buffer_pool_task_scheduled) {
-         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
     }
 
     aws_string_destroy(client->region);

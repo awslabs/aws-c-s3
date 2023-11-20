@@ -63,7 +63,7 @@ static int s_test_s3_buffer_pool_threaded_allocs_and_frees(struct aws_allocator 
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(2));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(2));
 
     s_thread_test(allocator, s_threaded_alloc_worker, buffer_pool);
 
@@ -77,7 +77,7 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
 
     struct aws_s3_buffer_pool_ticket *ticket1 = aws_s3_buffer_pool_reserve(buffer_pool, MB_TO_BYTES(64));
     ASSERT_NOT_NULL(ticket1);
@@ -118,7 +118,7 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
 
     struct aws_s3_buffer_pool_ticket *tickets[40];
     for (size_t i = 0; i < 40; ++i) {
@@ -138,6 +138,8 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
 
     struct aws_s3_buffer_pool_usage_stats stats_after = aws_s3_buffer_pool_get_usage(buffer_pool);
 
+    AWS_LOGF_DEBUG(0, "foo %zu", stats_after.primary_num_blocks);
+
     ASSERT_TRUE(stats_before.primary_num_blocks > stats_after.primary_num_blocks);
 
     for (size_t i = 20; i < 40; ++i) {
@@ -154,7 +156,7 @@ static int s_test_s3_buffer_reserve_zero_size(struct aws_allocator *allocator, v
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
 
     ASSERT_NULL(aws_s3_buffer_pool_reserve(buffer_pool, 0));
     ASSERT_TRUE(aws_last_error() == AWS_ERROR_INVALID_ARGUMENT);
@@ -169,7 +171,7 @@ static int s_test_s3_buffer_pool_reservation_hold(struct aws_allocator *allocato
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(128), GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
 
     struct aws_s3_buffer_pool_ticket *tickets[112];
     for (size_t i = 0; i < 112; ++i) {
