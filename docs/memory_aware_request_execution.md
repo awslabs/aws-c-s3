@@ -39,19 +39,14 @@ Several observations about the client usage of buffers:
 The buffer pooling takes advantage of some of those allocation patterns and
 works as follows. 
 The memory is split into primary and secondary areas. Secondary area is used for
-requests with part size bigger than a predefined value (currently 128mb)
+requests with part size bigger than a predefined value (currently 4 times part size)
 allocations from it got directly to allocator and are effectively old way of
 doing things. 
 
-Primary memory area is split into blocks of fixed size (currently 128mb). Blocks
-are allocated on demand. Buffers are 'acquired' from those block, either by
-finding an empty spot in existing block or creating a new block. Allocations
-from blocks are simplified to not have to worry about gaps in block, by
-allocating only from the back of the block - i.e. each allocation moves the
-available space pointer in the block forward and increments the number of
-allocations in that block. Once available space pointer reaches end of block, no
-more allocations are done from that block until all the previous allocations are
-released (i.e. block is put back into use, when allocation count reaches 0).
+Primary memory area is split into blocks of fixed size (part size if defined or
+8mb if not times 16). Blocks are allocated on demand. Each block is logically
+subdivided into part sized chunks. Pool allocates and releases in chunk sizes
+only, and supports acquiring several chunks (up to 4) at once. 
 
 Blocks are kept around while there are ongoing requests and are released async,
 when there is low pressure on memory.

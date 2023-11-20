@@ -138,8 +138,6 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
 
     struct aws_s3_buffer_pool_usage_stats stats_after = aws_s3_buffer_pool_get_usage(buffer_pool);
 
-    AWS_LOGF_DEBUG(0, "foo %zu", stats_after.primary_num_blocks);
-
     ASSERT_TRUE(stats_before.primary_num_blocks > stats_after.primary_num_blocks);
 
     for (size_t i = 20; i < 40; ++i) {

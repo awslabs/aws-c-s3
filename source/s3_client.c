@@ -81,9 +81,6 @@ static size_t s_dns_host_address_ttl_seconds = 5 * 60;
  * 30 seconds mirrors the value currently used by the Java SDK. */
 static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 
-/* Default size of buffer pool blocks. */
-static const size_t s_buffer_pool_default_chunk_size = MB_TO_BYTES(8);
-
 /* Default multiplier between max part size and memory limit */
 static const size_t s_default_max_part_size_to_mem_lim_multiplier = 4;
 
@@ -304,7 +301,14 @@ struct aws_s3_client *aws_s3_client_new(
         mem_limit = client_config->memory_limit_in_bytes;
     }
 
-    client->buffer_pool = aws_s3_buffer_pool_new(allocator, s_buffer_pool_default_chunk_size, mem_limit);
+    size_t part_size;
+    if (client_config->part_size != 0) {
+       part_size = (size_t)client_config->part_size;
+    } else {
+        part_size = s_default_part_size;
+    }
+
+    client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -342,11 +346,7 @@ struct aws_s3_client *aws_s3_client_new(
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
-    if (client_config->part_size != 0) {
-        *((size_t *)&client->part_size) = (size_t)client_config->part_size;
-    } else {
-        *((size_t *)&client->part_size) = s_default_part_size;
-    }
+    *((size_t *)&client->part_size) = part_size;
 
     if (client_config->max_part_size != 0) {
         *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
