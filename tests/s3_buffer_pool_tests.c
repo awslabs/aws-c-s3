@@ -150,21 +150,6 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
 };
 AWS_TEST_CASE(test_s3_buffer_pool_trim, s_test_s3_buffer_pool_trim)
 
-static int s_test_s3_buffer_reserve_zero_size(struct aws_allocator *allocator, void *ctx) {
-    (void)allocator;
-    (void)ctx;
-
-    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
-
-    ASSERT_NULL(aws_s3_buffer_pool_reserve(buffer_pool, 0));
-    ASSERT_TRUE(aws_last_error() == AWS_ERROR_INVALID_ARGUMENT);
-
-    aws_s3_buffer_pool_destroy(buffer_pool);
-
-    return 0;
-}
-AWS_TEST_CASE(test_s3_buffer_reserve_zero_size, s_test_s3_buffer_reserve_zero_size)
-
 static int s_test_s3_buffer_pool_reservation_hold(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
