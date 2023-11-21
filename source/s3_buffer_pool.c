@@ -138,13 +138,24 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
         return NULL;
     }
 
+    size_t adjusted_mem_lim = mem_limit - s_buffer_pool_reserved_mem;
+
+    if (chunk_size * s_chunks_per_block > adjusted_mem_lim) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to initialize buffer pool. Chunk size is too large for the memory limit. "
+            "Consider adjusting memory limit or part size.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
     struct aws_s3_buffer_pool *buffer_pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
 
     AWS_FATAL_ASSERT(buffer_pool != NULL);
 
     buffer_pool->base_allocator = allocator;
     buffer_pool->chunk_size = chunk_size;
-    buffer_pool->block_size = chunk_size * s_chunks_per_block;
+    buffer_pool->block_size = adjusted_mem_lim;
     /* Somewhat arbitrary number.
      * Tries to balance between how many allocations use buffer and buffer space
      * being wasted. */
@@ -207,11 +218,8 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
         return NULL;
     }
 
-    if (size == 0) {
-        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Could not reserve from buffer pool. 0 is not a valid size.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
-    }
+    AWS_FATAL_ASSERT(size != 0);
+    AWS_FATAL_ASSERT(size <= buffer_pool->mem_limit);
 
     struct aws_s3_buffer_pool_ticket *ticket = NULL;
     aws_mutex_lock(&buffer_pool->mutex);
@@ -396,7 +404,7 @@ struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3
     aws_mutex_lock(&buffer_pool->mutex);
 
     struct aws_s3_buffer_pool_usage_stats ret = (struct aws_s3_buffer_pool_usage_stats){
-        .max_size = buffer_pool->mem_limit,
+        .mem_limit = buffer_pool->mem_limit,
         .primary_allocated = buffer_pool->primary_allocated,
         .primary_used = buffer_pool->primary_used,
         .primary_reserved = buffer_pool->primary_reserved,

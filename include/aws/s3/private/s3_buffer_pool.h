@@ -34,8 +34,9 @@ struct aws_s3_buffer_pool;
 struct aws_s3_buffer_pool_ticket;
 
 struct aws_s3_buffer_pool_usage_stats {
-    /* Max size limit. Same value as provided during creation. */
-    size_t max_size;
+    /* Effective Max memory limit. Memory limit value provided during construction minus
+     * buffer reserved for overhead of the pool */
+    size_t mem_limit;
 
     /* How much mem is used in primary storage. includes memory used by blocks
      * that are waiting on all allocs to release before being put back in circulation. */

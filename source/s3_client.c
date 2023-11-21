@@ -81,9 +81,6 @@ static size_t s_dns_host_address_ttl_seconds = 5 * 60;
  * 30 seconds mirrors the value currently used by the Java SDK. */
 static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 
-/* Default multiplier between max part size and memory limit */
-static const size_t s_default_max_part_size_to_mem_lim_multiplier = 4;
-
 /* Amount of time spent idling before trimming buffer. */
 static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
@@ -226,10 +223,6 @@ void aws_s3_client_unlock_synced_data(struct aws_s3_client *client) {
     aws_mutex_unlock(&client->synced_data.lock);
 }
 
-static size_t s_default_max_part_size_based_on_mem_limit(size_t mem_lim) {
-    return mem_lim / s_default_max_part_size_to_mem_lim_multiplier;
-}
-
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
@@ -250,17 +243,6 @@ struct aws_s3_client *aws_s3_client_new(
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; throughput_target_gbps cannot less than or equal to 0.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
-    }
-
-    if (client_config->max_part_size != 0 && client_config->memory_limit_in_bytes != 0 &&
-        client_config->max_part_size >
-            s_default_max_part_size_based_on_mem_limit(client_config->memory_limit_in_bytes)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "Cannot create client from client_config; memory limit should be at least 4 times higher than max part "
-            "size.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -310,12 +292,27 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
 
+    if (client->buffer_pool == NULL) {
+        goto on_early_fail;
+    }
+
+    struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+
+    if (client_config->max_part_size > pool_usage.mem_limit) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; configured max part size should not exceed memory limit."
+            "size.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto on_early_fail;
+    }
+
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
     if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
-        goto on_lock_init_fail;
+        goto on_early_fail;
     }
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
@@ -354,8 +351,8 @@ struct aws_s3_client *aws_s3_client_new(
         *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
     }
 
-    if (client_config->max_part_size > s_default_max_part_size_based_on_mem_limit(mem_limit)) {
-        *((uint64_t *)&client->max_part_size) = s_default_max_part_size_based_on_mem_limit(mem_limit);
+    if (client_config->max_part_size > pool_usage.mem_limit) {
+        *((uint64_t *)&client->max_part_size) = pool_usage.mem_limit;
     }
 
     if (client->max_part_size > SIZE_MAX) {
@@ -542,7 +539,7 @@ on_error:
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
-on_lock_init_fail:
+on_early_fail:
     aws_mem_release(client->allocator, client);
     return NULL;
 }
