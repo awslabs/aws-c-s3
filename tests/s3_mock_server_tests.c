@@ -85,6 +85,10 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
     ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, request_type);
 
+    const struct aws_string *operation_name = NULL;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_operation_name(metrics, &operation_name));
+    ASSERT_STR_EQUALS("CreateMultipartUpload", aws_string_c_str(operation_name));
+
     /* Second metrics should be the Upload Part */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 1);
     struct aws_byte_cursor header_value;
@@ -98,18 +102,24 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
     ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_UPLOAD_PART, request_type);
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_operation_name(metrics, &operation_name));
+    ASSERT_STR_EQUALS("UploadPart", aws_string_c_str(operation_name));
 
     /* Third metrics still be Upload Part */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 2);
     request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
     ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_UPLOAD_PART, request_type);
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_operation_name(metrics, &operation_name));
+    ASSERT_STR_EQUALS("UploadPart", aws_string_c_str(operation_name));
 
     /* Fourth should be complete MPU */
     aws_array_list_get_at(metrics_list, (void **)&metrics, 3);
     request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
     ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD, request_type);
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_operation_name(metrics, &operation_name));
+    ASSERT_STR_EQUALS("CompleteMultipartUpload", aws_string_c_str(operation_name));
     /* All the rest should be similar */
 
     return AWS_OP_SUCCESS;
@@ -321,6 +331,7 @@ TEST_CASE(async_access_denied_from_complete_multipart_mock_server) {
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR, out_results.finished_error_code);
     ASSERT_UINT_EQUALS(AWS_S3_RESPONSE_STATUS_SUCCESS, out_results.finished_response_status);
     ASSERT_TRUE(out_results.error_response_body.len != 0);
+    ASSERT_STR_EQUALS("CompleteMultipartUpload", aws_string_c_str(out_results.error_response_operation_name));
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -363,6 +374,7 @@ TEST_CASE(get_object_modified_mock_server) {
 
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_OBJECT_MODIFIED, out_results.finished_error_code);
     ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED, out_results.finished_response_status);
+    ASSERT_STR_EQUALS("GetObject", aws_string_c_str(out_results.error_response_operation_name));
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);

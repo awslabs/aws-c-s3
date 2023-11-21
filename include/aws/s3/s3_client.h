@@ -86,6 +86,9 @@ enum aws_s3_meta_request_type {
 
 /**
  * The type of S3 request made. Used by metrics.
+ * aws_s3_request_type_operation_name() returns the S3 operation name
+ * for types that map (e.g. AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> "HeadObject"),
+ * or empty string for types that don't map (e.g. AWS_S3_REQUEST_TYPE_DEFAULT -> "").
  */
 enum aws_s3_request_type {
     /* Same as the original HTTP request passed to aws_s3_meta_request_options */
@@ -100,6 +103,7 @@ enum aws_s3_request_type {
     AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
     AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
     AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
+    AWS_S3_REQUEST_TYPE_COPY_OBJECT,
 
     AWS_S3_REQUEST_TYPE_MAX,
 };
@@ -481,6 +485,15 @@ struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 
+    /**
+     * Optional.
+     * The S3 operation name (e.g. "CreateBucket").
+     * You should only set this when type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
+     * it is automatically populated for other meta-request types.
+     * This name is used to fill out details in metrics and error reports.
+     */
+    struct aws_byte_cursor operation_name;
+
     /* Signing options to be used for each request created for this meta request.  If NULL, options in the client will
      * be used. If not NULL, these options will override the client options. */
     const struct aws_signing_config_aws *signing_config;
@@ -602,11 +615,22 @@ struct aws_s3_meta_request_options {
  */
 struct aws_s3_meta_request_result {
 
-    /* HTTP Headers for the failed request that triggered finish of the meta request.  NULL if no request failed. */
+    /* If meta request failed due to an HTTP error response from S3, these are the headers.
+     * NULL if meta request failed for another reason. */
     struct aws_http_headers *error_response_headers;
 
-    /* Response body for the failed request that triggered finishing of the meta request.  NULL if no request failed.*/
+    /* If meta request failed due to an HTTP error response from S3, this the body.
+     * NULL if meta request failed for another reason, or if the response had no body (such as a HEAD response). */
     struct aws_byte_buf *error_response_body;
+
+    /* If meta request failed due to an HTTP error response from S3,
+     * this is the name of the S3 operation it was responding to.
+     * For example, if a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT fails, this could be
+     * "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", or others.
+     * For AWS_S3_META_REQUEST_TYPE_DEFAULT, this is the same value passed to
+     * aws_s3_meta_request_options.operation_name.
+     * NULL if the meta request failed for another reason, or the operation name is not known. */
+    struct aws_string *error_response_operation_name;
 
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
@@ -824,6 +848,17 @@ void aws_s3_init_default_signing_config(
     struct aws_credentials_provider *credentials_provider);
 
 /**
+ * Return operation name for aws_s3_request_type,
+ * or empty string if the type doesn't map to an actual operation.
+ * For example:
+ * AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> "HeadObject"
+ * AWS_S3_REQUEST_TYPE_DEFAULT -> ""
+ * AWS_S3_REQUEST_TYPE_MAX -> ""
+ */
+AWS_S3_API
+const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type);
+
+/**
  * Add a reference, keeping this object alive.
  * The reference must be released when you are done with it, or it's memory will never be cleaned up.
  * Always returns the same pointer that was passed in.
@@ -973,6 +1008,17 @@ int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *me
  * raised if data not available */
 AWS_S3_API
 int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_metrics *metrics, uint32_t *out_stream_id);
+
+/**
+ * Get the S3 operation name of the request (e.g. "HeadObject").
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_operation_name will be set to a string.
+ * Be warned this string's lifetime is tied to the metrics object.
+ */
+AWS_S3_API
+int aws_s3_request_metrics_get_operation_name(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_operation_name);
 
 /* Get the request type from request metrics. */
 AWS_S3_API

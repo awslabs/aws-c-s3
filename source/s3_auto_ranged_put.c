@@ -294,7 +294,7 @@ static int s_try_init_resume_state_from_persisted_data(
     return AWS_OP_SUCCESS;
 }
 
-static int s_s3_auto_ranged_put_request_type(const struct aws_s3_request *request) {
+static enum aws_s3_request_type s_s3_auto_ranged_put_request_type(const struct aws_s3_request *request) {
     switch (request->request_tag) {
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS:
             return AWS_S3_REQUEST_TYPE_LIST_PARTS;

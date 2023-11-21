@@ -118,8 +118,16 @@ struct aws_s3_meta_request_vtable {
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
-    /* Get the type of the aws_s3_request */
-    int (*get_request_type)(const struct aws_s3_request *request);
+    /* Get the type of the aws_s3_request.
+     * Not implemented for DEFAULT type, which doesn't know its aws_s3_request_type enum value */
+    enum aws_s3_request_type (*get_request_type)(const struct aws_s3_request *request);
+
+    /* Get the S3 operation name for the meta-request.
+     * This is only implemented for DEFAULT type, which doesn't know its
+     * aws_s3_request_type enum value, but might know its operation name.
+     * Returns empty string if the name isn't known.
+     * Note that this C-string's lifetime is tied to the meta-request. */
+    const char *(*get_operation_name)(const struct aws_s3_meta_request *meta_request);
 };
 
 /**

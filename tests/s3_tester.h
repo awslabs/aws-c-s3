@@ -222,6 +222,7 @@ struct aws_s3_meta_request_test_results {
 
     struct aws_http_headers *error_response_headers;
     struct aws_byte_buf error_response_body;
+    struct aws_string *error_response_operation_name;
     size_t part_size;
 
     int headers_response_status;

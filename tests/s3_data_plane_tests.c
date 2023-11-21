@@ -4043,6 +4043,11 @@ static int s_test_s3_error_missing_file(struct aws_allocator *allocator, void *c
 
     ASSERT_TRUE(meta_request_test_results.error_response_headers != NULL);
 
+    ASSERT_NOT_NULL(meta_request_test_results.error_response_operation_name);
+    ASSERT_TRUE(
+        aws_string_eq_c_str(meta_request_test_results.error_response_operation_name, "GetObject") ||
+        aws_string_eq_c_str(meta_request_test_results.error_response_operation_name, "HeadObject"));
+
     meta_request = aws_s3_meta_request_release(meta_request);
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
@@ -5416,6 +5421,10 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
 
     ASSERT_TRUE(results.finished_response_status == AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE);
+    ASSERT_NOT_NULL(results.error_response_operation_name);
+    ASSERT_TRUE(
+        aws_string_eq_c_str(results.error_response_operation_name, "GetObject") ||
+        aws_string_eq_c_str(results.error_response_operation_name, "HeadObject"));
 
     aws_s3_meta_request_test_results_clean_up(&results);
 
@@ -6859,6 +6868,10 @@ static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, vo
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
     ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_404_NOT_FOUND, test_results.finished_response_status);
+    ASSERT_NOT_NULL(test_results.error_response_operation_name);
+    ASSERT_TRUE(
+        aws_string_eq_c_str(test_results.error_response_operation_name, "GetObject") ||
+        aws_string_eq_c_str(test_results.error_response_operation_name, "HeadObject"));
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);

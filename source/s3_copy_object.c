@@ -37,14 +37,13 @@ static void s_s3_copy_object_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static int s_s3_copy_object_request_type(const struct aws_s3_request *request) {
+static enum aws_s3_request_type s_s3_copy_object_request_type(const struct aws_s3_request *request) {
     switch (request->request_tag) {
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE:
             /* It's a HEAD request of GetObject call */
             return AWS_S3_REQUEST_TYPE_HEAD_OBJECT;
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS:
-            /* A single copy object request, same as default */
-            return AWS_S3_REQUEST_TYPE_DEFAULT;
+            return AWS_S3_REQUEST_TYPE_COPY_OBJECT;
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
             return AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD;
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY:

@@ -15,6 +15,8 @@ struct aws_s3_meta_request_default {
 
     size_t content_length;
 
+    struct aws_string *operation_name;
+
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
         int cached_response_status;

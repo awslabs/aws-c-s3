@@ -1811,6 +1811,11 @@ void aws_s3_meta_request_result_setup(
             aws_byte_buf_init_copy(
                 result->error_response_body, meta_request->allocator, &failed_request->send_data.response_body);
         }
+
+        const char *operation_name = aws_s3_request_get_operation_name(failed_request);
+        if (operation_name[0] != '\0') {
+            result->error_response_operation_name = aws_string_new_from_c_str(meta_request->allocator, operation_name);
+        }
     }
 
     result->response_status = response_status;
@@ -1829,6 +1834,8 @@ void aws_s3_meta_request_result_clean_up(
         aws_byte_buf_clean_up(result->error_response_body);
         aws_mem_release(meta_request->allocator, result->error_response_body);
     }
+
+    aws_string_destroy(result->error_response_operation_name);
 
     AWS_ZERO_STRUCT(*result);
 }
