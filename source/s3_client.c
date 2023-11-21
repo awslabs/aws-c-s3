@@ -5,6 +5,7 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
+#include "aws/s3/private/s3_buffer_pool.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
 #include "aws/s3/private/s3_default_meta_request.h"
@@ -79,6 +80,9 @@ static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 /* Default time until a connection is declared dead, while handling a request but seeing no activity.
  * 30 seconds mirrors the value currently used by the Java SDK. */
 static const uint32_t s_default_throughput_failure_interval_seconds = 30;
+
+/* Amount of time spent idling before trimming buffer. */
+static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -257,12 +261,58 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
     client->allocator = allocator;
+
+    size_t mem_limit = 0;
+    if (client_config->memory_limit_in_bytes == 0) {
+#if SIZE_BITS == 32
+        if (client_config->throughput_target_gbps > 25.0) {
+            mem_limit = GB_TO_BYTES(2);
+        } else {
+            mem_limit = GB_TO_BYTES(1);
+        }
+#else
+        if (client_config->throughput_target_gbps > 75.0) {
+            mem_limit = GB_TO_BYTES(8);
+        } else if (client_config->throughput_target_gbps > 25.0) {
+            mem_limit = GB_TO_BYTES(4);
+        } else {
+            mem_limit = GB_TO_BYTES(2);
+        }
+#endif
+    } else {
+        mem_limit = client_config->memory_limit_in_bytes;
+    }
+
+    size_t part_size;
+    if (client_config->part_size != 0) {
+        part_size = (size_t)client_config->part_size;
+    } else {
+        part_size = s_default_part_size;
+    }
+
+    client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
+
+    if (client->buffer_pool == NULL) {
+        goto on_early_fail;
+    }
+
+    struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+
+    if (client_config->max_part_size > pool_usage.mem_limit) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; configured max part size should not exceed memory limit."
+            "size.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto on_early_fail;
+    }
+
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
     if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
-        goto lock_init_fail;
+        goto on_early_fail;
     }
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
@@ -293,17 +343,18 @@ struct aws_s3_client *aws_s3_client_new(
     /* Make a copy of the region string. */
     client->region = aws_string_new_from_array(allocator, client_config->region.ptr, client_config->region.len);
 
-    if (client_config->part_size != 0) {
-        *((size_t *)&client->part_size) = (size_t)client_config->part_size;
-    } else {
-        *((size_t *)&client->part_size) = s_default_part_size;
-    }
+    *((size_t *)&client->part_size) = part_size;
 
     if (client_config->max_part_size != 0) {
         *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
     } else {
         *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
     }
+
+    if (client_config->max_part_size > pool_usage.mem_limit) {
+        *((uint64_t *)&client->max_part_size) = pool_usage.mem_limit;
+    }
+
     if (client->max_part_size > SIZE_MAX) {
         /* For the 32bit max part size to be SIZE_MAX */
         *((uint64_t *)&client->max_part_size) = SIZE_MAX;
@@ -488,7 +539,7 @@ on_error:
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
-lock_init_fail:
+on_early_fail:
     aws_mem_release(client->allocator, client);
     return NULL;
 }
@@ -551,6 +602,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
+    if (client->threaded_data.trim_buffer_pool_task_scheduled) {
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    }
+
     aws_string_destroy(client->region);
     client->region = NULL;
 
@@ -588,6 +643,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
+    aws_s3_buffer_pool_destroy(client->buffer_pool);
     aws_mem_release(client->allocator, client);
     client = NULL;
 
@@ -1130,6 +1186,57 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
     client->synced_data.process_work_task_scheduled = true;
 }
 
+/* Task function for trying to find a request that can be processed. */
+static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    AWS_PRECONDITION(task);
+    (void)task;
+    (void)task_status;
+
+    if (task_status != AWS_TASK_STATUS_RUN_READY) {
+        return;
+    }
+
+    struct aws_s3_client *client = arg;
+    AWS_PRECONDITION(client);
+
+    client->threaded_data.trim_buffer_pool_task_scheduled = false;
+
+    uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+
+    if (num_reqs_in_flight == 0) {
+        aws_s3_buffer_pool_trim(client->buffer_pool);
+    }
+}
+
+static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *client) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+
+    if (client->threaded_data.trim_buffer_pool_task_scheduled) {
+        return;
+    }
+
+    uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+    if (num_reqs_in_flight > 0) {
+        return;
+    }
+
+    aws_task_init(
+        &client->synced_data.trim_buffer_pool_task,
+        s_s3_client_trim_buffer_pool_task,
+        client,
+        "s3_client_buffer_pool_trim_task");
+
+    uint64_t trim_time = 0;
+    aws_event_loop_current_clock_time(client->process_work_event_loop, &trim_time);
+    trim_time +=
+        aws_timestamp_convert(s_buffer_pool_trim_time_offset_in_s, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+
+    aws_event_loop_schedule_task_future(
+        client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task, trim_time);
+
+    client->threaded_data.trim_buffer_pool_task_scheduled = true;
+}
+
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
@@ -1192,6 +1299,10 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* Once we exit this mutex, someone can reschedule this task. */
     client->synced_data.process_work_task_scheduled = false;
     client->synced_data.process_work_task_in_progress = true;
+
+    if (client->synced_data.active) {
+        s_s3_client_schedule_buffer_pool_trim_synced(client);
+    }
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
 
@@ -1383,6 +1494,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
+    aws_s3_buffer_pool_remove_reservation_hold(client->buffer_pool);
+
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /* While:
@@ -1425,6 +1538,9 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             struct aws_s3_request *request = NULL;
 
             /* Try to grab the next request from the meta request. */
+            /* TODO: should we bail out if request fails to update due to mem or
+             * continue going and hopping that following reqs can fit into mem?
+             * check if avail space is at least part size? */
             bool work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
 
             if (work_remaining) {
@@ -1860,7 +1976,6 @@ reset_connection:
     }
 
     if (connection->request != NULL) {
-
         connection->request = aws_s3_request_release(connection->request);
     }
 
@@ -2057,7 +2172,7 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
 
 static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
 const size_t g_expect_timeout_offset_ms =
-    700; /* 0.7 Secs. From experienments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
+    700; /* 0.7 Secs. From experiments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
 
 /**
  * The upload timeout optimization: explained.

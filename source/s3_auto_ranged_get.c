@@ -177,13 +177,21 @@ static bool s_s3_auto_ranged_get_update(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
                             0,
-                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                         request->discovers_object_size = true;
 
                         auto_ranged_get->synced_data.head_object_sent = true;
                     }
                 } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
+
+                    struct aws_s3_buffer_pool_ticket *ticket =
+                        aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+                    if (ticket == NULL) {
+                        goto has_work_remaining;
+                    }
+
                     /* If we aren't using a head object, then discover the size of the object while trying to get the
                      * first part. */
                     request = aws_s3_request_new(
@@ -192,6 +200,7 @@ static bool s_s3_auto_ranged_get_update(
                         1,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
+                    request->ticket = ticket;
                     request->part_range_start = 0;
                     request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
                     request->discovers_object_size = true;
@@ -253,11 +262,20 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
+                struct aws_s3_buffer_pool_ticket *ticket =
+                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+                if (ticket == NULL) {
+                    goto has_work_remaining;
+                }
+
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                     auto_ranged_get->synced_data.num_parts_requested + 1,
                     AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+
+                request->ticket = ticket;
 
                 aws_s3_get_part_range(
                     auto_ranged_get->synced_data.object_range_start,
@@ -412,10 +430,11 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
     /* Success! */
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: Created request %p for part %d",
+        "id=%p: Created request %p for part %d part sized %d",
         (void *)meta_request,
         (void *)request,
-        request->part_number);
+        request->part_number,
+        request->has_part_size_response_body);
 
     success = true;
 

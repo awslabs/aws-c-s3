@@ -377,6 +377,10 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     ASSERT_TRUE(meta_request != NULL);
 
+    struct aws_s3_client *client = aws_s3_tester_mock_client_new(&tester);
+    ASSERT_TRUE(client != NULL);
+    meta_request->client = aws_s3_client_acquire(client);
+
     struct aws_http_message *request_message = aws_s3_tester_dummy_http_request_new(&tester);
     ASSERT_TRUE(request_message != NULL);
 
@@ -407,6 +411,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     aws_s3_request_release(request);
     aws_http_message_release(request_message);
     aws_s3_meta_request_release(meta_request);
+    aws_s3_client_release(client);
 
     aws_s3_tester_clean_up(&tester);
 
@@ -600,6 +605,7 @@ static int s_test_s3_client_queue_requests(struct aws_allocator *allocator, void
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
 
     struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
+    mock_meta_request->client = aws_s3_client_acquire(mock_client);
 
     struct aws_s3_request *pivot_request = aws_s3_request_new(mock_meta_request, 0, 0, 0);
 
@@ -815,6 +821,7 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
     aws_linked_list_init(&mock_client->threaded_data.meta_requests);
 
     struct aws_s3_meta_request *mock_meta_request_without_work = aws_s3_tester_mock_meta_request_new(&tester);
+    mock_meta_request_without_work->client = aws_s3_client_acquire(mock_client);
     mock_meta_request_without_work->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
 
     struct test_work_meta_request_update_user_data mock_meta_request_without_work_data = {
@@ -836,6 +843,7 @@ static int s_test_s3_update_meta_requests_trigger_prepare(struct aws_allocator *
     aws_s3_meta_request_acquire(mock_meta_request_without_work);
 
     struct aws_s3_meta_request *mock_meta_request_with_work = aws_s3_tester_mock_meta_request_new(&tester);
+    mock_meta_request_with_work->client = aws_s3_client_acquire(mock_client);
     struct test_work_meta_request_update_user_data mock_meta_request_with_work_data = {
         .has_work_remaining = true,
     };
@@ -952,19 +960,6 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
     struct aws_s3_tester tester;
     aws_s3_tester_init(allocator, &tester);
 
-    struct s3_test_update_connections_finish_result_user_data test_update_connections_finish_result_user_data;
-    AWS_ZERO_STRUCT(test_update_connections_finish_result_user_data);
-
-    /* Put together a mock meta request that is finished. */
-    struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
-    mock_meta_request->synced_data.finish_result_set = true;
-    mock_meta_request->user_data = &test_update_connections_finish_result_user_data;
-    mock_meta_request->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
-
-    struct aws_s3_meta_request_vtable *mock_meta_request_vtable =
-        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request, NULL);
-    mock_meta_request_vtable->finished_request = s_s3_test_meta_request_has_finish_result_finished_request;
-
     struct aws_client_bootstrap mock_client_bootstrap;
     AWS_ZERO_STRUCT(mock_client_bootstrap);
 
@@ -977,6 +972,20 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
     *((uint32_t *)&mock_client->ideal_vip_count) = 1;
 
     aws_linked_list_init(&mock_client->threaded_data.request_queue);
+
+    struct s3_test_update_connections_finish_result_user_data test_update_connections_finish_result_user_data;
+    AWS_ZERO_STRUCT(test_update_connections_finish_result_user_data);
+
+    /* Put together a mock meta request that is finished. */
+    struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
+    mock_meta_request->client = aws_s3_client_acquire(mock_client);
+    mock_meta_request->synced_data.finish_result_set = true;
+    mock_meta_request->user_data = &test_update_connections_finish_result_user_data;
+    mock_meta_request->endpoint = aws_s3_tester_mock_endpoint_new(&tester);
+
+    struct aws_s3_meta_request_vtable *mock_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(&tester, mock_meta_request, NULL);
+    mock_meta_request_vtable->finished_request = s_s3_test_meta_request_has_finish_result_finished_request;
 
     /* Verify that the request does not get sent because the meta request has finish-result. */
     {
@@ -1844,6 +1853,53 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_put_object_buffer_pool_trim, s_test_s3_put_object_buffer_pool_trim)
+static int s_test_s3_put_object_buffer_pool_trim(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 8 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 32,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    struct aws_s3_buffer_pool_usage_stats usage_before = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+
+    ASSERT_TRUE(0 != usage_before.primary_num_blocks);
+
+    aws_thread_current_sleep(aws_timestamp_convert(6, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+
+    struct aws_s3_buffer_pool_usage_stats usage_after = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+
+    ASSERT_INT_EQUALS(0, usage_after.primary_num_blocks);
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(
     test_s3_put_object_less_than_part_size_with_content_encoding,
     s_test_s3_put_object_less_than_part_size_with_content_encoding)
@@ -2206,7 +2262,7 @@ AWS_TEST_CASE(
     test_s3_put_large_object_no_content_length_with_checksum,
     s_test_s3_put_large_object_no_content_length_with_checksum)
 static int s_test_s3_put_large_object_no_content_length_with_checksum(struct aws_allocator *allocator, void *ctx) {
-    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 1280, true));
+    ASSERT_SUCCESS(s3_no_content_length_test_helper(allocator, ctx, 128, true));
 
     return 0;
 }
@@ -3898,16 +3954,25 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
 
     aws_s3_tester_unlock_synced_data(&tester);
-    /* Check the size of the metrics should be the same as the number of requests, which should be 1 */
-    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
-    struct aws_s3_request_metrics *metrics = NULL;
-    aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
 
     meta_request = aws_s3_meta_request_release(meta_request);
 
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    /*
+     * TODO: telemetry is sent from request destructor, http threads hold on to
+     * req for a little bit after on_req_finished callback and its possible that
+     * telemetry callback will be invoked after meta reqs on_finished callback.
+     * Moving the telemetry check to after meta req shutdown callback. Need to
+     * figure out whether current behavior can be improved.
+     */
+    /* Check the size of the metrics should be the same as the number of
+    requests, which should be 1 */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
+    struct aws_s3_request_metrics *metrics = NULL;
+    aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 

@@ -31,7 +31,8 @@ struct aws_s3_request *aws_s3_request_new(
     request->request_tag = request_tag;
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
-    request->part_size_response_body = (flags & AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY) != 0;
+    request->has_part_size_response_body = (flags & AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY) != 0;
+    request->has_part_size_request_body = (flags & AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY) != 0;
     request->always_send = (flags & AWS_S3_REQUEST_FLAG_ALWAYS_SEND) != 0;
 
     return request;
@@ -122,6 +123,7 @@ static void s_s3_request_destroy(void *user_data) {
 
     aws_s3_request_clean_up_send_data(request);
     aws_byte_buf_clean_up(&request->request_body);
+    aws_s3_buffer_pool_release_ticket(request->meta_request->client->buffer_pool, request->ticket);
     aws_s3_meta_request_release(request->meta_request);
 
     aws_mem_release(request->allocator, request);

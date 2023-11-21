@@ -556,29 +556,36 @@ static bool s_s3_auto_ranged_put_update(
 
             if (should_create_next_part_request) {
 
-                /* Allocate a request for another part. */
-                request = aws_s3_request_new(
-                    meta_request,
-                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
-                    0,
-                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                struct aws_s3_buffer_pool_ticket *ticket =
+                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
-                request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
+                if (ticket != NULL) {
+                    /* Allocate a request for another part. */
+                    request = aws_s3_request_new(
+                        meta_request,
+                        AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
+                        0,
+                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY);
 
-                /* If request was previously uploaded, we prepare it to ensure checksums still match,
-                 * but ultimately it gets marked no-op and we don't send it */
-                request->was_previously_uploaded = request_previously_uploaded;
+                    request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
-                ++auto_ranged_put->threaded_update_data.next_part_number;
-                ++auto_ranged_put->synced_data.num_parts_started;
-                ++auto_ranged_put->synced_data.num_parts_pending_read;
+                    /* If request was previously uploaded, we prepare it to ensure checksums still match,
+                     * but ultimately it gets marked no-op and we don't send it */
+                    request->was_previously_uploaded = request_previously_uploaded;
 
-                AWS_LOGF_DEBUG(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Returning request %p for part %d",
-                    (void *)meta_request,
-                    (void *)request,
-                    request->part_number);
+                    request->ticket = ticket;
+
+                    ++auto_ranged_put->threaded_update_data.next_part_number;
+                    ++auto_ranged_put->synced_data.num_parts_started;
+                    ++auto_ranged_put->synced_data.num_parts_pending_read;
+
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Returning request %p for part %d",
+                        (void *)meta_request,
+                        (void *)request,
+                        request->part_number);
+                }
 
                 goto has_work_remaining;
             }
@@ -942,7 +949,12 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         /* Read the body */
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-        aws_byte_buf_init(&request->request_body, meta_request->allocator, request_body_size);
+        if (request->request_body.capacity == 0) {
+            AWS_FATAL_ASSERT(request->ticket);
+            request->request_body =
+                aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
+            request->request_body.capacity = request_body_size;
+        }
 
         part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
         aws_future_bool_register_callback(
@@ -970,17 +982,21 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Failed reading request body, error %d (%s)",
+            "id=%p: Failed reading request body, error %d (%s) req len %zu req cap %zu",
             (void *)meta_request,
             error_code,
-            aws_error_str(error_code));
+            aws_error_str(error_code),
+            request->request_body.len,
+            request->request_body.capacity);
         goto on_done;
     }
     /* Reading succeeded. */
     bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
 
+    uint64_t offset = 0;
+    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
     /* If Content-Length is defined, check that we read the expected amount */
-    if (has_content_length && (request->request_body.len < request->request_body.capacity)) {
+    if (has_content_length && (request->request_body.len < request_body_size)) {
         error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,

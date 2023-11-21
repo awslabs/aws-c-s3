@@ -196,6 +196,8 @@ struct aws_s3_upload_part_timeout_stats {
 struct aws_s3_client {
     struct aws_allocator *allocator;
 
+    struct aws_s3_buffer_pool *buffer_pool;
+
     struct aws_s3_client_vtable *vtable;
 
     struct aws_ref_count ref_count;
@@ -340,6 +342,9 @@ struct aws_s3_client {
         /* Task for processing requests from meta requests on connections. */
         struct aws_task process_work_task;
 
+        /* Task for trimming buffer bool. */
+        struct aws_task trim_buffer_pool_task;
+
         /* Number of endpoints currently allocated. Used during clean up to know how many endpoints are still in
          * memory.*/
         uint32_t num_endpoints_allocated;
@@ -378,6 +383,9 @@ struct aws_s3_client {
 
         /* Number of requests currently being prepared. */
         uint32_t num_requests_being_prepared;
+
+        /* Whether or not work processing is currently scheduled. */
+        uint32_t trim_buffer_pool_task_scheduled : 1;
     } threaded_data;
 };
 

@@ -12,6 +12,7 @@
 #include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
+#include <aws/s3/private/s3_buffer_pool.h>
 #include <aws/s3/private/s3_checksums.h>
 
 struct aws_http_message;
@@ -22,6 +23,7 @@ enum aws_s3_request_flags {
     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS = 0x00000001,
     AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY = 0x00000002,
     AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000004,
+    AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY = 0x00000008,
 };
 
 /**
@@ -112,6 +114,8 @@ struct aws_s3_request {
      * retried.*/
     struct aws_byte_buf request_body;
 
+    struct aws_s3_buffer_pool_ticket *ticket;
+
     /* Beginning range of this part. */
     /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
     uint64_t part_range_start;
@@ -184,7 +188,10 @@ struct aws_s3_request {
     uint32_t record_response_headers : 1;
 
     /* When true, the response body buffer will be allocated in the size of a part. */
-    uint32_t part_size_response_body : 1;
+    uint32_t has_part_size_response_body : 1;
+
+    /* When true, the request body buffer will be allocated in the size of a part. */
+    uint32_t has_part_size_request_body : 1;
 
     /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
     uint32_t tracked_by_client : 1;
