@@ -43,15 +43,20 @@ struct aws_s3_buffer_pool_usage_stats {
 
 /*
  * Create new buffer pool.
- * block_size - specifies size of the blocks in the primary storage. any acquires
- * bigger than block size are allocated off secondary storage.
+ * Buffer pool controls overall amount of memory that can be used on buffers and
+ * it is split into primary and secondary storage. 
+ * Primary storage allocates big blocks consisting of several chunks and reuses
+ * those blocks for successive buffer acquires.
+ * Secondary storage delegates buffer acquires directly to system allocators.
+ * chunk_size - specifies the size of memory that will most commonly be acquired
+ * from the pool (typically part size). 
  * mem_limit - limit on how much mem buffer pool can use. once limit is hit,
- * buffer pool will start return empty buffers.
+ * buffers can no longer be reserved from (reservation hold is placed on the pool).
  * Returns buffer pool pointer on success and NULL on failure.
  */
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
     struct aws_allocator *allocator,
-    size_t block_size,
+    size_t chunk_size,
     size_t mem_limit);
 
 /*

@@ -17,21 +17,21 @@
  * of big allocations, performance impact is not that bad, but something we need
  * to look into on the next iteration.
  *
- * Basic approach is to keep a pool of blocks (block size provided by caller,
- * ex. 128 MB as a typical size). This is referred to as primary storage.
- * At high level, each block has offset ptr and allocation basically just means
- * bumping the offset ptr up and increasing blocks alloc count.
- * Deallocation decreases the block alloc count and if alloc count ever reaches
- * 0, the offset ptr is reset back to the start of the block.
- * For acquires less than a block size, the current approach is to go through
- * all blocks and see if any of them can fit the size and if not a new block is
- * created.
- * For acquires over block size, pool falls back to acquiring/releasing through
- * base allocator.
- * If memory limit is set, then acquires will return empty buffers when memory
- * limit is hit. For primary, that means acquires will fail when new block is
- * needed, but there is no mem for it. For secondary storage, it tracks mem used
- * by malloc.
+ * Basic approach is to divide acquires into primary and secondary. 
+ * User provides chunk size during construction. Acquires below 4 * chunks_size
+ * are done from primary and the rest are from secondary.
+ * 
+ * Primary storage consists of blocks that are each s_chunks_per_block *
+ * chunk_size in size. blocks are created on demand as needed. 
+ * Acquire operation from primary basically works by determining how many chunks
+ * are needed and then finding available space in existing blocks or creating a
+ * new block. Acquire will always take over the whole chunk, so some space is
+ * likely wasted. 
+ * Ex. say chunk_size is 8mb and s_chunks_per_block is 16, which makes block size 128mb.
+ * acquires up to 32mb will be done from primary. So 1 block can hold 4 buffers
+ * of 32mb (4 chunks) or 16 buffers of 8mb (1 chunk). If requested buffer size
+ * is 12mb, 2 chunks are used for acquire and 4mb will be wasted.
+ * Secondary storage delegates directly to system allocator.
  */
 
 struct aws_s3_buffer_pool_ticket {
@@ -80,17 +80,38 @@ struct s3_buffer_pool_block {
     uint16_t alloc_bit_mask;
 };
 
-static inline uint16_t s_set_bit_n(uint16_t num, size_t position, size_t n) {
+/*
+ * Sets n bits at position starting with LSB.
+ * Note: n must be at most 8, but in practice will always be at most 4.
+ * position + n should at most be 16 
+ */
+static inline uint16_t s_set_bits(uint16_t num, size_t position, size_t n) {
+    AWS_PRECONDITION(n <= 8);
+    AWS_PRECONDITION(position + n <= 16);
     uint16_t mask = ((uint16_t)0x00FF) >> (8 - n);
     return num | (mask << position);
 }
 
-static inline uint16_t s_clear_bit_n(uint16_t num, size_t position, size_t n) {
+/*
+ * Clears n bits at position starting with LSB.
+ * Note: n must be at most 8, but in practice will always be at most 4.
+ * position + n should at most be 16 
+ */
+static inline uint16_t s_clear_bits(uint16_t num, size_t position, size_t n) {
+    AWS_PRECONDITION(n <= 8);
+    AWS_PRECONDITION(position + n <= 16);
     uint16_t mask = ((uint16_t)0x00FF) >> (8 - n);
     return num & ~(mask << position);
 }
 
-static inline bool s_check_bit_n(uint16_t num, size_t position, size_t n) {
+/*
+ * Checks whether n bits are set at position starting with LSB.
+ * Note: n must be at most 8, but in practice will always be at most 4.
+ * position + n should at most be 16 
+ */
+static inline bool s_check_bits(uint16_t num, size_t position, size_t n) {
+    AWS_PRECONDITION(n <= 8);
+    AWS_PRECONDITION(position + n <= 16);
     uint16_t mask = ((uint16_t)0x00FF) >> (8 - n);
     return (num >> position) & mask;
 }
@@ -253,16 +274,16 @@ static uint8_t *s_primary_acquire_synced(struct aws_s3_buffer_pool *buffer_pool,
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
         for (size_t chunk_i = 0; chunk_i < s_chunks_per_block - chunks_needed + 1; ++chunk_i) {
-            if (!s_check_bit_n(block->alloc_bit_mask, chunk_i, chunks_needed)) {
+            if (!s_check_bits(block->alloc_bit_mask, chunk_i, chunks_needed)) {
                 alloc_ptr = block->block_ptr + chunk_i * buffer_pool->chunk_size;
-                block->alloc_bit_mask = s_set_bit_n(block->alloc_bit_mask, chunk_i, chunks_needed);
+                block->alloc_bit_mask = s_set_bits(block->alloc_bit_mask, chunk_i, chunks_needed);
                 goto on_allocated;
             }
         }
     }
 
     struct s3_buffer_pool_block block;
-    block.alloc_bit_mask = s_set_bit_n(0, 0, chunks_needed);
+    block.alloc_bit_mask = s_set_bits(0, 0, chunks_needed);
     block.block_ptr = aws_mem_acquire(buffer_pool->base_allocator, buffer_pool->block_size);
     block.block_size = buffer_pool->block_size;
     aws_array_list_push_back(&buffer_pool->blocks, &block);
@@ -342,7 +363,7 @@ void aws_s3_buffer_pool_release_ticket(
             if (block->block_ptr <= ticket->ptr && block->block_ptr + block->block_size > ticket->ptr) {
                 size_t alloc_i = (ticket->ptr - block->block_ptr) / buffer_pool->chunk_size;
 
-                block->alloc_bit_mask = s_clear_bit_n(block->alloc_bit_mask, alloc_i, chunks_used);
+                block->alloc_bit_mask = s_clear_bits(block->alloc_bit_mask, alloc_i, chunks_used);
                 buffer_pool->primary_used -= ticket->size;
 
                 found = true;
