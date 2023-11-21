@@ -10,9 +10,22 @@
 
 /*
  * S3 buffer pool.
- * Buffer pool used for pooling part sized buffers for Put/Get.
- * Provides additional functionally for limiting overall memory usage by setting
- * upper bound beyond reservations will fail.
+ * Buffer pool used for pooling part sized buffers for Put/Get operations.
+ * Provides additional functionally for limiting overall memory used.
+ * High-level buffer pool usage flow: 
+ * - Create buffer with overall memory limit and common buffer size, aka chunk
+ *   size (typically part size configured on client)
+ * - For each request:
+ *   -- call reserve to acquire ticket for future buffer acquisition. this will
+ *   mark memory reserved, but would not allocate it. if reserve call hits
+ *   memory limit, it fails and reservation hold is put on the whole buffer
+ *   pool. (aws_s3_buffer_pool_remove_reservation_hold can be used to remove
+ *   reservation hold).
+ *   -- once request needs memory, it can exchange ticket for a buffer using
+ *   aws_s3_buffer_pool_acquire_buffer. this operation never fails, even if it
+ *   ends up going over memory limit.
+ *   -- buffer lifetime is tied to the ticket. so once request is done with the
+ *   buffer, ticket is released and buffer returns back to the pool.
  */
 
 AWS_EXTERN_C_BEGIN
@@ -43,13 +56,8 @@ struct aws_s3_buffer_pool_usage_stats {
 
 /*
  * Create new buffer pool.
- * Buffer pool controls overall amount of memory that can be used on buffers and
- * it is split into primary and secondary storage. 
- * Primary storage allocates big blocks consisting of several chunks and reuses
- * those blocks for successive buffer acquires.
- * Secondary storage delegates buffer acquires directly to system allocators.
  * chunk_size - specifies the size of memory that will most commonly be acquired
- * from the pool (typically part size). 
+ * from the pool (typically part size).
  * mem_limit - limit on how much mem buffer pool can use. once limit is hit,
  * buffers can no longer be reserved from (reservation hold is placed on the pool).
  * Returns buffer pool pointer on success and NULL on failure.
@@ -66,7 +74,8 @@ AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
 AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool);
 
 /*
- * Best effort way to reserve some memory for later use.
+ * Reserves memory from the pool for later use.
+ * Best effort and can potentially reserve memory slightly over the limit.
  * Reservation takes some memory out of the available pool, but does not
  * allocate it right away.
  * On success ticket will be returned.

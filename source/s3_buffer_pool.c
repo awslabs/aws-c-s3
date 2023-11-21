@@ -17,16 +17,16 @@
  * of big allocations, performance impact is not that bad, but something we need
  * to look into on the next iteration.
  *
- * Basic approach is to divide acquires into primary and secondary. 
+ * Basic approach is to divide acquires into primary and secondary.
  * User provides chunk size during construction. Acquires below 4 * chunks_size
  * are done from primary and the rest are from secondary.
- * 
+ *
  * Primary storage consists of blocks that are each s_chunks_per_block *
- * chunk_size in size. blocks are created on demand as needed. 
+ * chunk_size in size. blocks are created on demand as needed.
  * Acquire operation from primary basically works by determining how many chunks
  * are needed and then finding available space in existing blocks or creating a
  * new block. Acquire will always take over the whole chunk, so some space is
- * likely wasted. 
+ * likely wasted.
  * Ex. say chunk_size is 8mb and s_chunks_per_block is 16, which makes block size 128mb.
  * acquires up to 32mb will be done from primary. So 1 block can hold 4 buffers
  * of 32mb (4 chunks) or 16 buffers of 8mb (1 chunk). If requested buffer size
@@ -41,7 +41,7 @@ struct aws_s3_buffer_pool_ticket {
 };
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
- * themselves are not preallocated s*/
+ * themselves are not preallocated. */
 static size_t s_block_list_initial_capacity = 5;
 
 /* Amount of mem reserved for use outside of buffer pool.
@@ -84,7 +84,7 @@ struct s3_buffer_pool_block {
 /*
  * Sets n bits at position starting with LSB.
  * Note: n must be at most 8, but in practice will always be at most 4.
- * position + n should at most be 16 
+ * position + n should at most be 16
  */
 static inline uint16_t s_set_bits(uint16_t num, size_t position, size_t n) {
     AWS_PRECONDITION(n <= 8);
@@ -96,7 +96,7 @@ static inline uint16_t s_set_bits(uint16_t num, size_t position, size_t n) {
 /*
  * Clears n bits at position starting with LSB.
  * Note: n must be at most 8, but in practice will always be at most 4.
- * position + n should at most be 16 
+ * position + n should at most be 16
  */
 static inline uint16_t s_clear_bits(uint16_t num, size_t position, size_t n) {
     AWS_PRECONDITION(n <= 8);
@@ -108,7 +108,7 @@ static inline uint16_t s_clear_bits(uint16_t num, size_t position, size_t n) {
 /*
  * Checks whether n bits are set at position starting with LSB.
  * Note: n must be at most 8, but in practice will always be at most 4.
- * position + n should at most be 16 
+ * position + n should at most be 16
  */
 static inline bool s_check_bits(uint16_t num, size_t position, size_t n) {
     AWS_PRECONDITION(n <= 8);
@@ -248,8 +248,10 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
 
     if (ticket == NULL) {
         AWS_LOGF_TRACE(
-            AWS_LS_S3_CLIENT, "Memory limit reached while trying to allocate buffer of size %zu. "
-                "Putting new buffer reservations on hold...", size);
+            AWS_LS_S3_CLIENT,
+            "Memory limit reached while trying to allocate buffer of size %zu. "
+            "Putting new buffer reservations on hold...",
+            size);
         aws_raise_error(AWS_ERROR_S3_EXCEEDS_MEMORY_LIMIT);
     }
     return ticket;
@@ -266,8 +268,7 @@ void aws_s3_buffer_pool_remove_reservation_hold(struct aws_s3_buffer_pool *buffe
     buffer_pool->has_reservation_hold = false;
 }
 
-static uint8_t *s_primary_acquire_synced(struct aws_s3_buffer_pool *buffer_pool, 
-    size_t size, size_t *out_chunks_used) {
+static uint8_t *s_primary_acquire_synced(struct aws_s3_buffer_pool *buffer_pool, size_t size, size_t *out_chunks_used) {
     uint8_t *alloc_ptr = NULL;
 
     size_t chunks_needed = size / buffer_pool->chunk_size;
