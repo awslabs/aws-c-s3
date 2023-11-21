@@ -256,7 +256,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     if (client_config->max_part_size != 0 && client_config->memory_limit_in_bytes != 0 &&
         client_config->max_part_size >
-            (client_config->memory_limit_in_bytes / s_default_max_part_size_to_mem_lim_multiplier)) {
+            s_default_max_part_size_based_on_mem_limit(client_config->memory_limit_in_bytes)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; memory limit should be at least 4 times higher than max part "
@@ -605,7 +605,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client finishing destruction.", (void *)client);
 
-    if (client->synced_data.trim_buffer_pool_task_scheduled) {
+    if (client->threaded_data.trim_buffer_pool_task_scheduled) {
         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
     }
 
@@ -1195,12 +1195,14 @@ static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, 
     (void)task;
     (void)task_status;
 
+    if (task_status != AWS_TASK_STATUS_RUN_READY) {
+        return;
+    }
+
     struct aws_s3_client *client = arg;
     AWS_PRECONDITION(client);
 
-    aws_s3_client_lock_synced_data(client);
-    client->synced_data.trim_buffer_pool_task_scheduled = false;
-    aws_s3_client_unlock_synced_data(client);
+    client->threaded_data.trim_buffer_pool_task_scheduled = false;
 
     uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
@@ -1212,7 +1214,7 @@ static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, 
 static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *client) {
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
 
-    if (client->synced_data.trim_buffer_pool_task_scheduled) {
+    if (client->threaded_data.trim_buffer_pool_task_scheduled) {
         return;
     }
 
@@ -1235,7 +1237,7 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
     aws_event_loop_schedule_task_future(
         client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task, trim_time);
 
-    client->synced_data.trim_buffer_pool_task_scheduled = true;
+    client->threaded_data.trim_buffer_pool_task_scheduled = true;
 }
 
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {

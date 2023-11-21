@@ -37,6 +37,7 @@
 struct aws_s3_buffer_pool_ticket {
     size_t size;
     uint8_t *ptr;
+    size_t chunks_used;
 };
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
@@ -179,14 +180,16 @@ void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
 }
 
 void s_buffer_pool_trim_synced(struct aws_s3_buffer_pool *buffer_pool) {
-    for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
+    for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks);) {
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
         if (block->alloc_bit_mask == 0) {
             aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
             aws_array_list_erase(&buffer_pool->blocks, i);
-            --i;
+            /* do not increment since we just released element */
+        } else {
+            ++i;
         }
     }
 }
@@ -245,7 +248,8 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
 
     if (ticket == NULL) {
         AWS_LOGF_TRACE(
-            AWS_LS_S3_CLIENT, "Failed to reserve buffer of size %zu. Consider increasing memory limit", size);
+            AWS_LS_S3_CLIENT, "Memory limit reached while trying to allocate buffer of size %zu. "
+                "Putting new buffer reservations on hold...", size);
         aws_raise_error(AWS_ERROR_S3_EXCEEDS_MEMORY_LIMIT);
     }
     return ticket;
@@ -253,6 +257,7 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
 
 bool aws_s3_buffer_pool_has_reservation_hold(struct aws_s3_buffer_pool *buffer_pool) {
     AWS_PRECONDITION(buffer_pool);
+    AWS_LOGF_TRACE(AWS_LS_S3_CLIENT, "Releasing buffer reservation hold.");
     return buffer_pool->has_reservation_hold;
 }
 
@@ -261,14 +266,17 @@ void aws_s3_buffer_pool_remove_reservation_hold(struct aws_s3_buffer_pool *buffe
     buffer_pool->has_reservation_hold = false;
 }
 
-static uint8_t *s_primary_acquire_synced(struct aws_s3_buffer_pool *buffer_pool, size_t size) {
+static uint8_t *s_primary_acquire_synced(struct aws_s3_buffer_pool *buffer_pool, 
+    size_t size, size_t *out_chunks_used) {
     uint8_t *alloc_ptr = NULL;
 
     size_t chunks_needed = size / buffer_pool->chunk_size;
     if (size % buffer_pool->chunk_size != 0) {
         ++chunks_needed; /* round up */
     }
+    *out_chunks_used = chunks_needed;
 
+    /* Look for space in existing blocks */
     for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
@@ -282,6 +290,7 @@ static uint8_t *s_primary_acquire_synced(struct aws_s3_buffer_pool *buffer_pool,
         }
     }
 
+    /* No space available. Allocate new block. */
     struct s3_buffer_pool_block block;
     block.alloc_bit_mask = s_set_bits(0, 0, chunks_needed);
     block.block_ptr = aws_mem_acquire(buffer_pool->base_allocator, buffer_pool->block_size);
@@ -313,7 +322,7 @@ struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
     aws_mutex_lock(&buffer_pool->mutex);
 
     if (ticket->size <= buffer_pool->primary_size_cutoff) {
-        alloc_ptr = s_primary_acquire_synced(buffer_pool, ticket->size);
+        alloc_ptr = s_primary_acquire_synced(buffer_pool, ticket->size, &ticket->chunks_used);
     } else {
         alloc_ptr = aws_mem_acquire(buffer_pool->base_allocator, ticket->size);
         buffer_pool->secondary_reserved -= ticket->size;

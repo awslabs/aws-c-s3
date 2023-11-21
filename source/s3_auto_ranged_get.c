@@ -184,17 +184,6 @@ static bool s_s3_auto_ranged_get_update(
                         auto_ranged_get->synced_data.head_object_sent = true;
                     }
                 } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
-                    /* If we aren't using a head object, then discover the size of the object while trying to get the
-                     * first part. */
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-                        1,
-                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
-
-                    request->part_range_start = 0;
-                    request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
-                    request->discovers_object_size = true;
 
                     struct aws_s3_buffer_pool_ticket *ticket =
                         aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
@@ -203,7 +192,18 @@ static bool s_s3_auto_ranged_get_update(
                         goto has_work_remaining;
                     }
 
+                    /* If we aren't using a head object, then discover the size of the object while trying to get the
+                     * first part. */
+                    request = aws_s3_request_new(
+                        meta_request,
+                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
+                        1,
+                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+
                     request->ticket = ticket;
+                    request->part_range_start = 0;
+                    request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
+                    request->discovers_object_size = true;
 
                     ++auto_ranged_get->synced_data.num_parts_requested;
                 }

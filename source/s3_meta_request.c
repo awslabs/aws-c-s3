@@ -1126,6 +1126,7 @@ static int s_s3_meta_request_incoming_body(
 
     if (request->send_data.response_body.capacity == 0) {
         if (request->has_part_size_response_body) {
+            AWS_FATAL_ASSERT(request->ticket);
             request->send_data.response_body =
                 aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
         } else {

@@ -358,9 +358,6 @@ struct aws_s3_client {
         /* Whether or not work processing is currently scheduled. */
         uint32_t process_work_task_scheduled : 1;
 
-        /* Whether or not work processing is currently scheduled. */
-        uint32_t trim_buffer_pool_task_scheduled : 1;
-
         /* Whether or not work process is currently in progress. */
         uint32_t process_work_task_in_progress : 1;
 
@@ -386,6 +383,9 @@ struct aws_s3_client {
 
         /* Number of requests currently being prepared. */
         uint32_t num_requests_being_prepared;
+
+        /* Whether or not work processing is currently scheduled. */
+        uint32_t trim_buffer_pool_task_scheduled : 1;
     } threaded_data;
 };
 

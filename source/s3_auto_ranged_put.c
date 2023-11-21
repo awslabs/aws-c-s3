@@ -559,7 +559,7 @@ static bool s_s3_auto_ranged_put_update(
                 struct aws_s3_buffer_pool_ticket *ticket =
                     aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
-                if (ticket) {
+                if (ticket != NULL) {
                     /* Allocate a request for another part. */
                     request = aws_s3_request_new(
                         meta_request,
@@ -585,11 +585,6 @@ static bool s_s3_auto_ranged_put_update(
                         (void *)meta_request,
                         (void *)request,
                         request->part_number);
-                } else {
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: Failed to allocate due to exceeding memory limit",
-                        (void *)meta_request);
                 }
 
                 goto has_work_remaining;
