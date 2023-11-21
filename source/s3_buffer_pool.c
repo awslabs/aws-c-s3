@@ -155,12 +155,12 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
 
     buffer_pool->base_allocator = allocator;
     buffer_pool->chunk_size = chunk_size;
-    buffer_pool->block_size = adjusted_mem_lim;
+    buffer_pool->block_size = s_chunks_per_block * chunk_size;
     /* Somewhat arbitrary number.
      * Tries to balance between how many allocations use buffer and buffer space
      * being wasted. */
     buffer_pool->primary_size_cutoff = chunk_size * 4;
-    buffer_pool->mem_limit = mem_limit - s_buffer_pool_reserved_mem;
+    buffer_pool->mem_limit = adjusted_mem_lim;
     int mutex_error = aws_mutex_init(&buffer_pool->mutex);
     AWS_FATAL_ASSERT(mutex_error == AWS_OP_SUCCESS);
 
