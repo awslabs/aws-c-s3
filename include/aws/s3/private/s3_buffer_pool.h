@@ -12,7 +12,7 @@
  * S3 buffer pool.
  * Buffer pool used for pooling part sized buffers for Put/Get operations.
  * Provides additional functionally for limiting overall memory used.
- * High-level buffer pool usage flow: 
+ * High-level buffer pool usage flow:
  * - Create buffer with overall memory limit and common buffer size, aka chunk
  *   size (typically part size configured on client)
  * - For each request:
