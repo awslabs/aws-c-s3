@@ -32,18 +32,7 @@ struct aws_s3_meta_request_default {
     } synced_data;
 };
 
-/* Creates a new default meta request. This will send the request as is and pass back the response.
- *
- * Sometimes, a default meta-request is used for other aws_s3_meta_request_types.
- * For example, if the request is simple (e.g. single part upload or download),
- * or if there's a header that's too complex to deal with.
- * In these cases, request_type and operation_name_override should be set.
- *
- * But if the user literally asked for a AWS_S3_META_REQUEST_TYPE_DEFAULT,
- * the request_type should be AWS_S3_META_REQUEST_TYPE_DEFAULT and
- * operation_name_override should be NULL (options->operation_name will be used
- * if it is set).
- */
+/* Creates a new default meta request. This will send the request as is and pass back the response. */
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,

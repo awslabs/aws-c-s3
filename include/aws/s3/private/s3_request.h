@@ -230,11 +230,7 @@ struct aws_s3_request {
 
 AWS_EXTERN_C_BEGIN
 
-/* Create a new s3 request structure with the given options.
- * @param operation_name    Official S3 operation name (e.g. "CreateMultipartUpload").
- *                          Pass an empty string if unknown.
- *                          The string's memory must outlive the request (static string, or live on meta_request)
- */
+/* Create a new s3 request structure with the given options. */
 AWS_S3_API
 struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
