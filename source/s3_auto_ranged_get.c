@@ -184,8 +184,8 @@ static bool s_s3_auto_ranged_get_update(
                     request = aws_s3_request_new(
                         meta_request,
                         AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-                        AWS_S3_REQUEST_TYPE_UPLOAD_PART,
-                        "UploadPart",
+                        AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                        "GetObject",
                         1 /*part_number*/,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
