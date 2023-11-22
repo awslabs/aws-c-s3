@@ -1047,7 +1047,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     client->allocator,
                     client,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    "GetObject",
                     content_length,
                     false /*should_compute_content_md5*/,
                     options);
@@ -1100,7 +1099,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         client->allocator,
                         client,
                         AWS_S3_REQUEST_TYPE_PUT_OBJECT,
-                        "PutObject",
                         content_length,
                         client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                             !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
@@ -1150,8 +1148,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return aws_s3_meta_request_default_new(
                 client->allocator,
                 client,
-                AWS_S3_REQUEST_TYPE_DEFAULT,
-                NULL /*operation_name_override*/,
+                AWS_S3_REQUEST_TYPE_UNKNOWN,
                 content_length,
                 false /*should_compute_content_md5*/,
                 options);

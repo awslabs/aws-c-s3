@@ -22,6 +22,30 @@
 #include <inttypes.h>
 #include <stdio.h>
 
+AWS_TEST_CASE(test_s3_request_type_operation_name, s_test_s3_request_type_operation_name)
+static int s_test_s3_request_type_operation_name(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    /* sanity check */
+    ASSERT_STR_EQUALS("HeadObject", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_HEAD_OBJECT));
+
+    /* check that all valid enums give back valid strings */
+    for (enum aws_s3_request_type type = AWS_S3_REQUEST_TYPE_UNKNOWN + 1; type < AWS_S3_REQUEST_TYPE_MAX; ++type) {
+        const char *operation_name = aws_s3_request_type_operation_name(type);
+        ASSERT_NOT_NULL(operation_name);
+        ASSERT_TRUE(strlen(operation_name) > 1);
+    }
+
+    /* check that invalid enums give back empty strings */
+    ASSERT_NOT_NULL(aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_UNKNOWN));
+    ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_UNKNOWN));
+    ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_MAX));
+    ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(-1));
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_replace_quote_entities, s_test_s3_replace_quote_entities)
 static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

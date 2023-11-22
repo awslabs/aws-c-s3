@@ -15,7 +15,7 @@ struct aws_s3_meta_request_default {
 
     size_t content_length;
 
-    /* Actual type for the single request (AWS_S3_REQUEST_TYPE_DEFAULT if unknown) */
+    /* Actual type for the single request (may be AWS_S3_REQUEST_TYPE_UNKNOWN) */
     enum aws_s3_request_type request_type;
 
     /* S3 operation name for the single request (NULL if unknown) */
@@ -48,7 +48,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     enum aws_s3_request_type request_type,
-    const char *operation_name_override,
     uint64_t content_length,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options);

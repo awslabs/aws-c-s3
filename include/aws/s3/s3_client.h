@@ -85,25 +85,39 @@ enum aws_s3_meta_request_type {
 };
 
 /**
- * The type of S3 request made. Used by metrics.
+ * The type of a single S3 HTTP request. Used by metrics.
+ * A meta-request can make multiple S3 HTTP requests under the hood.
+ *
+ * For example, AWS_S3_META_REQUEST_TYPE_PUT_OBJECT for a large file will
+ * do multipart upload, resulting in 3+ HTTP requests:
+ * AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, one or more AWS_S3_REQUEST_TYPE_UPLOAD_PART,
+ * and finally AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD.
+ *
+ * aws_s3_request_type_operation_name() returns the S3 operation name
+ * for types that map (e.g. AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> "HeadObject"),
+ * or empty string for types that don't map (e.g. AWS_S3_REQUEST_TYPE_UNKNOWN -> "").
  */
 enum aws_s3_request_type {
-    /* Same as the original HTTP request passed to aws_s3_meta_request_options */
-    AWS_S3_REQUEST_TYPE_DEFAULT,
+    /* The actual type of the single S3 HTTP request is unknown */
+    AWS_S3_REQUEST_TYPE_UNKNOWN,
 
     /* S3 APIs */
     AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
     AWS_S3_REQUEST_TYPE_GET_OBJECT,
     AWS_S3_REQUEST_TYPE_LIST_PARTS,
-    AWS_S3_REQUEST_TYPE_PUT_OBJECT,
     AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
     AWS_S3_REQUEST_TYPE_UPLOAD_PART,
     AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
     AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
     AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
     AWS_S3_REQUEST_TYPE_COPY_OBJECT,
+    AWS_S3_REQUEST_TYPE_PUT_OBJECT,
 
+    /* Max enum value */
     AWS_S3_REQUEST_TYPE_MAX,
+
+    /** @deprecated Use AWS_S3_REQUEST_TYPE_UNKNOWN if the actual S3 HTTP request type is unknown */
+    AWS_S3_REQUEST_TYPE_DEFAULT = AWS_S3_REQUEST_TYPE_UNKNOWN,
 };
 
 /**
@@ -844,6 +858,17 @@ void aws_s3_init_default_signing_config(
     struct aws_signing_config_aws *signing_config,
     const struct aws_byte_cursor region,
     struct aws_credentials_provider *credentials_provider);
+
+/**
+ * Return operation name for aws_s3_request_type,
+ * or empty string if the type doesn't map to an actual operation.
+ * For example:
+ * AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> "HeadObject"
+ * AWS_S3_REQUEST_TYPE_UNKNOWN -> ""
+ * AWS_S3_REQUEST_TYPE_MAX -> ""
+ */
+AWS_S3_API
+const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type);
 
 /**
  * Add a reference, keeping this object alive.

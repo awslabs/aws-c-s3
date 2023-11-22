@@ -160,7 +160,7 @@ struct aws_s3_request {
     /* TODO: this should be a union type to make it clear that this could be one of two enums for puts, and gets. */
     int request_tag;
 
-    /* Actual S3 type for the single request (AWS_S3_REQUEST_TYPE_DEFAULT if unknown) */
+    /* Actual S3 type for the single request (may be AWS_S3_REQUEST_TYPE_UNKNOWN) */
     enum aws_s3_request_type request_type;
 
     /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") (NULL if unknown) */
