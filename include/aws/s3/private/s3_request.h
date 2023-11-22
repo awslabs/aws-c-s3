@@ -75,6 +75,8 @@ struct aws_s3_request_metrics {
         struct aws_string *host_address;
         /* The the request ID header value. */
         struct aws_string *request_id;
+        /* S3 operation name for the request (NULL if unknown) */
+        struct aws_string *operation_name;
         /* The type of request made */
         enum aws_s3_request_type request_type;
     } req_resp_info_metrics;
@@ -155,8 +157,17 @@ struct aws_s3_request {
      * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests. (For example, they can
      * be more contextual, like "first part" instead of just "part".) */
 
-    /* TODO: this should be a union type to make it clear that this could be one of two enums for puts, and gets. */
+    /* TODO: Eliminate the concept of "request tag" and just use request_type.
+     * It's confusing having 2 concepts that are so similar.
+     * There's only 1 case where 2 tags used the same type,
+     * we can use some other bool/flag to differentiate this 1 case. */
     int request_tag;
+
+    /* Actual S3 type for the single request (may be AWS_S3_REQUEST_TYPE_UNKNOWN) */
+    enum aws_s3_request_type request_type;
+
+    /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") (NULL if unknown) */
+    struct aws_string *operation_name;
 
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to
      * be retried, then the members of this structure will be cleaned up and re-populated on the next send.
@@ -224,6 +235,7 @@ AWS_S3_API
 struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
+    enum aws_s3_request_type request_type,
     uint32_t part_number,
     uint32_t flags);
 
@@ -245,7 +257,8 @@ struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request);
 AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *message);
+    const struct aws_s3_request *request,
+    const struct aws_http_message *message);
 
 AWS_EXTERN_C_END
 

@@ -28,8 +28,6 @@ static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static int s_s3_auto_ranged_get_request_type(const struct aws_s3_request *request);
-
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -39,20 +37,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .finished_request = s_s3_auto_ranged_get_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
     .finish = aws_s3_meta_request_finish_default,
-    .get_request_type = s_s3_auto_ranged_get_request_type,
 };
-
-static int s_s3_auto_ranged_get_request_type(const struct aws_s3_request *request) {
-    switch (request->request_tag) {
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
-            return AWS_S3_REQUEST_TYPE_HEAD_OBJECT;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
-            return AWS_S3_REQUEST_TYPE_GET_OBJECT;
-    }
-    AWS_ASSERT(false);
-    return AWS_S3_REQUEST_TYPE_MAX;
-}
 
 static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
@@ -176,7 +161,8 @@ static bool s_s3_auto_ranged_get_update(
                         request = aws_s3_request_new(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
-                            0,
+                            AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+                            0 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                         request->discovers_object_size = true;
@@ -197,7 +183,8 @@ static bool s_s3_auto_ranged_get_update(
                     request = aws_s3_request_new(
                         meta_request,
                         AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-                        1,
+                        AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                        1 /*part_number*/,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
                     request->ticket = ticket;
@@ -223,7 +210,8 @@ static bool s_s3_auto_ranged_get_update(
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE,
-                    0,
+                    AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                    0 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                 auto_ranged_get->synced_data.get_without_range_sent = true;
@@ -272,7 +260,8 @@ static bool s_s3_auto_ranged_get_update(
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-                    auto_ranged_get->synced_data.num_parts_requested + 1,
+                    AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                    auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
                 request->ticket = ticket;

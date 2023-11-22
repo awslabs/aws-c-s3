@@ -171,6 +171,11 @@ static void s_s3_test_meta_request_finish(
             &meta_request_test_results->error_response_body, tester->allocator, result->error_response_body);
     }
 
+    if (result->error_response_operation_name != NULL) {
+        meta_request_test_results->error_response_operation_name =
+            aws_string_new_from_string(tester->allocator, result->error_response_operation_name);
+    }
+
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
 
@@ -496,6 +501,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
 
     aws_http_headers_release(test_meta_request->error_response_headers);
     aws_byte_buf_clean_up(&test_meta_request->error_response_body);
+    aws_string_destroy(test_meta_request->error_response_operation_name);
     aws_http_headers_release(test_meta_request->response_headers);
     while (aws_array_list_length(&test_meta_request->synced_data.metrics) > 0) {
         struct aws_s3_request_metrics *metrics = NULL;
@@ -1396,6 +1402,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     struct aws_s3_meta_request_options meta_request_options = {
         .type = options->meta_request_type,
+        .operation_name = options->default_type_options.operation_name,
         .message = options->message,
         .checksum_config = &checksum_config,
         .resume_token = options->put_options.resume_token,
@@ -1830,6 +1837,7 @@ int aws_s3_tester_validate_get_object_results(
 
     ASSERT_TRUE(meta_request_test_results->error_response_headers == NULL);
     ASSERT_TRUE(meta_request_test_results->error_response_body.len == 0);
+    ASSERT_NULL(meta_request_test_results->error_response_operation_name);
 
     struct aws_byte_cursor sse_byte_cursor;
 
@@ -1967,6 +1975,7 @@ int aws_s3_tester_validate_put_object_results(
 
     ASSERT_TRUE(meta_request_test_results->error_response_headers == NULL);
     ASSERT_TRUE(meta_request_test_results->error_response_body.len == 0);
+    ASSERT_NULL(meta_request_test_results->error_response_operation_name);
 
     struct aws_byte_cursor etag_byte_cursor;
     AWS_ZERO_STRUCT(etag_byte_cursor);

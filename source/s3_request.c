@@ -16,8 +16,10 @@ static void s_s3_request_destroy(void *user_data);
 struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
+    enum aws_s3_request_type request_type,
     uint32_t part_number,
     uint32_t flags) {
+
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->allocator);
 
@@ -29,6 +31,13 @@ struct aws_s3_request *aws_s3_request_new(
     request->meta_request = aws_s3_meta_request_acquire(meta_request);
 
     request->request_tag = request_tag;
+    request->request_type = request_type;
+
+    const char *operation_name = aws_s3_request_type_operation_name(request_type);
+    if (operation_name[0] != '\0') {
+        request->operation_name = aws_string_new_from_c_str(request->allocator, operation_name);
+    }
+
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
     request->has_part_size_response_body = (flags & AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY) != 0;
@@ -45,14 +54,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     aws_s3_request_clean_up_send_data(request);
 
     request->send_data.message = message;
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, message);
-    if (!meta_request->vtable->get_request_type) {
-        request->send_data.metrics->req_resp_info_metrics.request_type = AWS_S3_REQUEST_TYPE_DEFAULT;
-    } else {
-        request->send_data.metrics->req_resp_info_metrics.request_type =
-            meta_request->vtable->get_request_type(request);
-    }
+    request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, request, message);
     /* Start the timestamp */
     aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.start_timestamp_ns);
 
@@ -124,6 +126,7 @@ static void s_s3_request_destroy(void *user_data) {
     aws_s3_request_clean_up_send_data(request);
     aws_byte_buf_clean_up(&request->request_body);
     aws_s3_buffer_pool_release_ticket(request->meta_request->client->buffer_pool, request->ticket);
+    aws_string_destroy(request->operation_name);
     aws_s3_meta_request_release(request->meta_request);
 
     aws_mem_release(request->allocator, request);
@@ -138,6 +141,7 @@ static void s_s3_request_metrics_destroy(void *arg) {
     aws_string_destroy(metrics->req_resp_info_metrics.request_path_query);
     aws_string_destroy(metrics->req_resp_info_metrics.host_address);
     aws_string_destroy(metrics->req_resp_info_metrics.request_id);
+    aws_string_destroy(metrics->req_resp_info_metrics.operation_name);
     aws_string_destroy(metrics->crt_info_metrics.ip_address);
 
     aws_mem_release(metrics->allocator, metrics);
@@ -145,7 +149,9 @@ static void s_s3_request_metrics_destroy(void *arg) {
 
 struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *message) {
+    const struct aws_s3_request *request,
+    const struct aws_http_message *message) {
+
     struct aws_s3_request_metrics *metrics = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_request_metrics));
     metrics->allocator = allocator;
     struct aws_byte_cursor out_path;
@@ -165,6 +171,12 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     AWS_ASSERT(!err);
     metrics->req_resp_info_metrics.host_address = aws_string_new_from_cursor(allocator, &host_header_value);
     AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
+
+    metrics->req_resp_info_metrics.request_type = request->request_type;
+
+    if (request->operation_name != NULL) {
+        metrics->req_resp_info_metrics.operation_name = aws_string_new_from_string(allocator, request->operation_name);
+    }
 
     metrics->time_metrics.start_timestamp_ns = -1;
     metrics->time_metrics.end_timestamp_ns = -1;
@@ -381,6 +393,18 @@ int aws_s3_request_metrics_get_request_stream_id(const struct aws_s3_request_met
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
     *stream_id = metrics->crt_info_metrics.stream_id;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_operation_name(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_operation_name) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_operation_name);
+    if (metrics->req_resp_info_metrics.operation_name == NULL) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_operation_name = metrics->req_resp_info_metrics.operation_name;
     return AWS_OP_SUCCESS;
 }
 

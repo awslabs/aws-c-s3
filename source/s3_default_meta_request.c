@@ -51,9 +51,11 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
+    enum aws_s3_request_type request_type,
     uint64_t content_length,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options) {
+
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
@@ -103,8 +105,25 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     }
 
     meta_request_default->content_length = (size_t)content_length;
+    meta_request_default->request_type = request_type;
 
-    AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new Default Meta Request.", (void *)meta_request_default);
+    /* Try to get operation name.
+     * When internal aws-c-s3 code creates a default meta-request,
+     * a valid request_type is always passed in, and we can get its operation name.
+     * When external users create a default meta-request, they may have provided
+     * operation name in the options. */
+    const char *operation_name = aws_s3_request_type_operation_name(request_type);
+    if (operation_name[0] != '\0') {
+        meta_request_default->operation_name = aws_string_new_from_c_str(allocator, operation_name);
+    } else if (options->operation_name.len != 0) {
+        meta_request_default->operation_name = aws_string_new_from_cursor(allocator, &options->operation_name);
+    }
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Created new Default Meta Request. operation=%s",
+        (void *)meta_request_default,
+        meta_request_default->operation_name ? aws_string_c_str(meta_request_default->operation_name) : "?");
 
     return &meta_request_default->base;
 }
@@ -114,6 +133,7 @@ static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_r
     AWS_PRECONDITION(meta_request->impl);
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
+    aws_string_destroy(meta_request_default->operation_name);
     aws_mem_release(meta_request->allocator, meta_request_default);
 }
 
@@ -143,7 +163,19 @@ static bool s_s3_meta_request_default_update(
                     goto has_work_remaining;
                 }
 
-                request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                request = aws_s3_request_new(
+                    meta_request,
+                    0 /*request_tag*/,
+                    meta_request_default->request_type,
+                    1 /*part_number*/,
+                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+
+                /* Default meta-request might know operation name, despite not knowing valid request_type.
+                 * If so, pass the name along. */
+                if (request->operation_name == NULL && meta_request_default->operation_name != NULL) {
+                    request->operation_name =
+                        aws_string_new_from_string(meta_request->allocator, meta_request_default->operation_name);
+                }
 
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,

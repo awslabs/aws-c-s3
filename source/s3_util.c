@@ -64,6 +64,33 @@ const struct aws_byte_cursor g_user_agent_header_product_name =
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
 
+const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type) {
+    switch (type) {
+        case AWS_S3_REQUEST_TYPE_HEAD_OBJECT:
+            return "HeadObject";
+        case AWS_S3_REQUEST_TYPE_GET_OBJECT:
+            return "GetObject";
+        case AWS_S3_REQUEST_TYPE_LIST_PARTS:
+            return "ListParts";
+        case AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD:
+            return "CreateMultipartUpload";
+        case AWS_S3_REQUEST_TYPE_UPLOAD_PART:
+            return "UploadPart";
+        case AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD:
+            return "AbortMultipartUpload";
+        case AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD:
+            return "CompleteMultipartUpload";
+        case AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY:
+            return "UploadPartCopy";
+        case AWS_S3_REQUEST_TYPE_COPY_OBJECT:
+            return "CopyObject";
+        case AWS_S3_REQUEST_TYPE_PUT_OBJECT:
+            return "PutObject";
+        default:
+            return "";
+    }
+}
+
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
     AWS_PRECONDITION(dest);

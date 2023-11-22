@@ -37,27 +37,6 @@ static void s_s3_copy_object_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static int s_s3_copy_object_request_type(const struct aws_s3_request *request) {
-    switch (request->request_tag) {
-        case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE:
-            /* It's a HEAD request of GetObject call */
-            return AWS_S3_REQUEST_TYPE_HEAD_OBJECT;
-        case AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS:
-            /* A single copy object request, same as default */
-            return AWS_S3_REQUEST_TYPE_DEFAULT;
-        case AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD:
-            return AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD;
-        case AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY:
-            return AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY;
-        case AWS_S3_COPY_OBJECT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD:
-            return AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD;
-        case AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD:
-            return AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD;
-    }
-    AWS_ASSERT(false);
-    return AWS_S3_REQUEST_TYPE_MAX;
-}
-
 static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .update = s_s3_copy_object_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -67,7 +46,6 @@ static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .finished_request = s_s3_copy_object_request_finished,
     .destroy = s_s3_meta_request_copy_object_destroy,
     .finish = aws_s3_meta_request_finish_default,
-    .get_request_type = s_s3_copy_object_request_type,
 };
 
 /* Allocate a new copy object meta request */
@@ -158,7 +136,8 @@ static bool s_s3_copy_object_update(
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE,
-                0,
+                AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+                0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             copy_object->synced_data.head_object_sent = true;
@@ -177,7 +156,8 @@ static bool s_s3_copy_object_update(
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS,
-                    1,
+                    AWS_S3_REQUEST_TYPE_COPY_OBJECT,
+                    1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                 AWS_LOGF_DEBUG(
@@ -204,7 +184,8 @@ static bool s_s3_copy_object_update(
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
-                0,
+                AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
+                0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             copy_object->synced_data.create_multipart_upload_sent = true;
@@ -234,10 +215,9 @@ static bool s_s3_copy_object_update(
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY,
-                0,
+                AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
+                copy_object->threaded_update_data.next_part_number,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
-
-            request->part_number = copy_object->threaded_update_data.next_part_number;
 
             ++copy_object->threaded_update_data.next_part_number;
             ++copy_object->synced_data.num_parts_sent;
@@ -263,7 +243,8 @@ static bool s_s3_copy_object_update(
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
-                0,
+                AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
+                0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
             copy_object->synced_data.complete_multipart_upload_sent = true;
@@ -316,7 +297,8 @@ static bool s_s3_copy_object_update(
             request = aws_s3_request_new(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
-                0,
+                AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
+                0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
 
             copy_object->synced_data.abort_multipart_upload_sent = true;
