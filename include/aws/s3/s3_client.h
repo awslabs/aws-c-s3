@@ -500,7 +500,7 @@ struct aws_s3_meta_request_options {
     /**
      * Optional.
      * The S3 operation name (e.g. "CreateBucket").
-     * You should only set this when type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
+     * This will only be used when type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
      * it is automatically populated for other meta-request types.
      * This name is used to fill out details in metrics and error reports.
      */
