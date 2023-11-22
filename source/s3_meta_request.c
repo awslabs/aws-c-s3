@@ -1055,7 +1055,7 @@ static int s_s3_meta_request_incoming_headers(
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
 
     if (successful_response && meta_request->checksum_config.validate_response_checksum &&
-        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
+        request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
         s_get_part_response_headers_checksum_helper(connection, meta_request, headers, headers_count);
     }
 
