@@ -59,7 +59,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
-    AWS_PRECONDITION(operation_name_override == NULL || operation_name_override[0] != '\0'); /* NULL or non-empty */
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->message);
 
@@ -163,7 +162,8 @@ static bool s_s3_meta_request_default_update(
                     meta_request,
                     0 /*request_tag*/,
                     AWS_S3_REQUEST_TYPE_DEFAULT,
-                    meta_request_default->operation_name ? aws_string_c_str(meta_request_default->operation_name) : "",
+                    meta_request_default->operation_name ? aws_string_c_str(meta_request_default->operation_name)
+                                                         : NULL,
                     1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 

@@ -23,7 +23,7 @@ struct aws_s3_request *aws_s3_request_new(
 
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->allocator);
-    AWS_PRECONDITION(operation_name);
+    AWS_PRECONDITION(operation_name == NULL || operation_name[0] != '\0'); /* should be NULL or non-empty */
 
     struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
 
@@ -170,7 +170,7 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
 
     metrics->req_resp_info_metrics.request_type = request->request_type;
 
-    if (request->operation_name[0] != '\0') {
+    if (request->operation_name != NULL) {
         metrics->req_resp_info_metrics.operation_name = aws_string_new_from_c_str(allocator, request->operation_name);
     }
 

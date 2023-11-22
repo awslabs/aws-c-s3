@@ -163,7 +163,7 @@ struct aws_s3_request {
     /* Actual S3 type for the single request (AWS_S3_REQUEST_TYPE_DEFAULT if unknown) */
     enum aws_s3_request_type request_type;
 
-    /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") (empty string if unknown) */
+    /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") (NULL if unknown) */
     const char *operation_name;
 
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to

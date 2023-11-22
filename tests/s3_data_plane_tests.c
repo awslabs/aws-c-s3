@@ -624,15 +624,15 @@ static int s_test_s3_client_queue_requests(struct aws_allocator *allocator, void
     struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     mock_meta_request->client = aws_s3_client_acquire(mock_client);
 
-    struct aws_s3_request *pivot_request = aws_s3_request_new(mock_meta_request, 0, 0, "", 0, 0);
+    struct aws_s3_request *pivot_request = aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0);
 
     struct aws_linked_list pivot_request_list;
     aws_linked_list_init(&pivot_request_list);
 
     struct aws_s3_request *requests[] = {
-        aws_s3_request_new(mock_meta_request, 0, 0, "", 0, 0),
-        aws_s3_request_new(mock_meta_request, 0, 0, "", 0, 0),
-        aws_s3_request_new(mock_meta_request, 0, 0, "", 0, 0),
+        aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0),
+        aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0),
+        aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0),
     };
 
     const uint32_t num_requests = AWS_ARRAY_SIZE(requests);
@@ -745,7 +745,7 @@ static bool s_s3_test_work_meta_request_update(
 
     if (out_request) {
         if (user_data->has_work_remaining) {
-            *out_request = aws_s3_request_new(meta_request, 0, 0, "", 0, 0);
+            *out_request = aws_s3_request_new(meta_request, 0, 0, NULL, 0, 0);
         }
     }
 
@@ -1006,7 +1006,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
 
     /* Verify that the request does not get sent because the meta request has finish-result. */
     {
-        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, "", 0, 0);
+        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
         ++mock_client->threaded_data.request_queue_size;
 
@@ -1028,7 +1028,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
     /* Verify that a request with the 'always send' flag still gets sent when the meta request has a finish-result. */
     {
         struct aws_s3_request *request =
-            aws_s3_request_new(mock_meta_request, 0, 0, "", 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
+            aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
         ++mock_client->threaded_data.request_queue_size;
 
