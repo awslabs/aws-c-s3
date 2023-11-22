@@ -36,8 +36,6 @@ static void s_s3_meta_request_default_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static const char *s_s3_meta_request_default_operation_name(const struct aws_s3_meta_request *meta_request);
-
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .update = s_s3_meta_request_default_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -47,7 +45,6 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .finished_request = s_s3_meta_request_default_request_finished,
     .destroy = s_s3_meta_request_default_destroy,
     .finish = aws_s3_meta_request_finish_default,
-    .get_operation_name = s_s3_meta_request_default_operation_name,
 };
 
 /* Allocate a new default meta request. */
@@ -423,10 +420,4 @@ static void s_s3_meta_request_default_request_finished(
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
-}
-
-static const char *s_s3_meta_request_default_operation_name(const struct aws_s3_meta_request *meta_request) {
-    struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
-    const struct aws_string *operation_name = meta_request_default->operation_name;
-    return operation_name ? aws_string_c_str(operation_name) : "";
 }

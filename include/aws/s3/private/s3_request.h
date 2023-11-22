@@ -256,15 +256,6 @@ struct aws_s3_request *aws_s3_request_acquire(struct aws_s3_request *request);
 AWS_S3_API
 struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request);
 
-/* Return type enum, if it is known. Otherwise AWS_S3_REQUEST_TYPE_MAX is returned. */
-AWS_S3_API
-enum aws_s3_request_type aws_s3_request_get_type(const struct aws_s3_request *request);
-
-/* Return S3 operation name, if it is known. Otherwise an empty string is returned.
- * Note that this C-string's lifetime is tied to the aws_s3_request. */
-AWS_S3_API
-const char *aws_s3_request_get_operation_name(const struct aws_s3_request *request);
-
 AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     struct aws_allocator *allocator,
