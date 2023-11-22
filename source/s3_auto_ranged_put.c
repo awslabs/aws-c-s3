@@ -463,7 +463,6 @@ static bool s_s3_auto_ranged_put_update(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
                     AWS_S3_REQUEST_TYPE_LIST_PARTS,
-                    "ListParts",
                     0 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -479,7 +478,6 @@ static bool s_s3_auto_ranged_put_update(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS,
                     AWS_S3_REQUEST_TYPE_LIST_PARTS,
-                    "ListParts",
                     0 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
                 auto_ranged_put->synced_data.list_parts_state.continues = false;
@@ -497,7 +495,6 @@ static bool s_s3_auto_ranged_put_update(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
                     AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
-                    "CreateMultipartUpload",
                     0 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -553,7 +550,6 @@ static bool s_s3_auto_ranged_put_update(
                         meta_request,
                         AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
                         AWS_S3_REQUEST_TYPE_UPLOAD_PART,
-                        "UploadPart",
                         0 /*part_number*/,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY);
 
@@ -601,7 +597,6 @@ static bool s_s3_auto_ranged_put_update(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
                     AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
-                    "CompleteMultipartUpload",
                     0 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -668,7 +663,6 @@ static bool s_s3_auto_ranged_put_update(
                     meta_request,
                     AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
                     AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
-                    "AbortMultipartUpload",
                     0 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
 

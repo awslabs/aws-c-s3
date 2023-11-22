@@ -1808,7 +1808,7 @@ void aws_s3_meta_request_result_setup(
 
         if (failed_request->operation_name != NULL) {
             result->error_response_operation_name =
-                aws_string_new_from_c_str(meta_request->allocator, failed_request->operation_name);
+                aws_string_new_from_string(meta_request->allocator, failed_request->operation_name);
         }
     }
 

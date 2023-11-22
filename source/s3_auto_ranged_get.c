@@ -162,7 +162,6 @@ static bool s_s3_auto_ranged_get_update(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
                             AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
-                            "HeadObject",
                             0 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -185,7 +184,6 @@ static bool s_s3_auto_ranged_get_update(
                         meta_request,
                         AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                         AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                        "GetObject",
                         1 /*part_number*/,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
@@ -213,7 +211,6 @@ static bool s_s3_auto_ranged_get_update(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    "GetObject",
                     0 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -264,7 +261,6 @@ static bool s_s3_auto_ranged_get_update(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    "GetObject",
                     auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 

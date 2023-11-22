@@ -157,14 +157,17 @@ struct aws_s3_request {
      * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests. (For example, they can
      * be more contextual, like "first part" instead of just "part".) */
 
-    /* TODO: this should be a union type to make it clear that this could be one of two enums for puts, and gets. */
+    /* TODO: Eliminate the concept of "request tag" and just use request_type.
+     * It's confusing having 2 concepts that are so similar.
+     * There's only 1 case where 2 tags used the same type,
+     * we can use some other bool/flag to differentiate this 1 case. */
     int request_tag;
 
     /* Actual S3 type for the single request (may be AWS_S3_REQUEST_TYPE_UNKNOWN) */
     enum aws_s3_request_type request_type;
 
     /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") (NULL if unknown) */
-    const char *operation_name;
+    struct aws_string *operation_name;
 
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to
      * be retried, then the members of this structure will be cleaned up and re-populated on the next send.
@@ -237,7 +240,6 @@ struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
     enum aws_s3_request_type request_type,
-    const char *operation_name,
     uint32_t part_number,
     uint32_t flags);
 

@@ -167,10 +167,15 @@ static bool s_s3_meta_request_default_update(
                     meta_request,
                     0 /*request_tag*/,
                     meta_request_default->request_type,
-                    meta_request_default->operation_name ? aws_string_c_str(meta_request_default->operation_name)
-                                                         : NULL,
                     1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+
+                /* Default meta-request might know operation name, despite not knowing valid request_type.
+                 * If so, pass the name along. */
+                if (request->operation_name == NULL && meta_request_default->operation_name != NULL) {
+                    request->operation_name =
+                        aws_string_new_from_string(meta_request->allocator, meta_request_default->operation_name);
+                }
 
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,

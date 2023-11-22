@@ -137,7 +137,6 @@ static bool s_s3_copy_object_update(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE,
                 AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
-                "HeadObject",
                 0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -158,7 +157,6 @@ static bool s_s3_copy_object_update(
                     meta_request,
                     AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS,
                     AWS_S3_REQUEST_TYPE_COPY_OBJECT,
-                    "CopyObject",
                     1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -187,7 +185,6 @@ static bool s_s3_copy_object_update(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD,
                 AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
-                "CreateMultipartUpload",
                 0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -219,7 +216,6 @@ static bool s_s3_copy_object_update(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY,
                 AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
-                "UploadPartCopy",
                 copy_object->threaded_update_data.next_part_number,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -248,7 +244,6 @@ static bool s_s3_copy_object_update(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD,
                 AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD,
-                "CompleteMultipartUpload",
                 0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
@@ -303,7 +298,6 @@ static bool s_s3_copy_object_update(
                 meta_request,
                 AWS_S3_COPY_OBJECT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD,
                 AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
-                "AbortMultipartUpload",
                 0 /*part_number*/,
                 AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
 

@@ -368,8 +368,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     (void)ctx;
 
     const int request_tag = 1234;
-    const enum aws_s3_request_type request_type = (enum aws_s3_request_type)9876;
-    const char *operation_name = "BlibbityBlob";
+    const enum aws_s3_request_type request_type = AWS_S3_REQUEST_TYPE_LIST_PARTS;
     const uint32_t part_number = 5678;
 
     struct aws_s3_tester tester;
@@ -387,12 +386,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     ASSERT_TRUE(request_message != NULL);
 
     struct aws_s3_request *request = aws_s3_request_new(
-        meta_request,
-        request_tag,
-        request_type,
-        operation_name,
-        part_number,
-        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+        meta_request, request_tag, request_type, part_number, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
     ASSERT_TRUE(request != NULL);
 
@@ -400,7 +394,7 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
     ASSERT_TRUE(request->part_number == part_number);
     ASSERT_TRUE(request->request_tag == request_tag);
     ASSERT_TRUE(request->request_type == request_type);
-    ASSERT_STR_EQUALS(operation_name, request->operation_name);
+    ASSERT_STR_EQUALS("ListParts", aws_string_c_str(request->operation_name));
     ASSERT_TRUE(request->record_response_headers == true);
 
     aws_s3_request_setup_send_data(request, request_message);
@@ -503,7 +497,7 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     {
         for (uint32_t part_number = part_range0_start; part_number <= part_range0_end; ++part_number) {
             struct aws_s3_request *request = aws_s3_request_new(
-                meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, "GetObject", part_number, 0 /*flags*/);
+                meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_number, 0 /*flags*/);
 
             aws_s3_get_part_range(
                 0ULL,
@@ -540,7 +534,7 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
 
         for (uint32_t part_number = part_range1_start + 1; part_number <= part_range1_end; ++part_number) {
             struct aws_s3_request *request = aws_s3_request_new(
-                meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, "GetObject", part_number, 0 /*flags*/);
+                meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_number, 0 /*flags*/);
 
             aws_s3_get_part_range(
                 0ULL,
@@ -569,12 +563,7 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
     /* Stream the last part of the body, which should flush the priority queue. */
     {
         struct aws_s3_request *request = aws_s3_request_new(
-            meta_request,
-            0 /*request_tag*/,
-            AWS_S3_REQUEST_TYPE_GET_OBJECT,
-            "GetObject",
-            part_range1_start,
-            0 /*flags*/);
+            meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_range1_start, 0 /*flags*/);
 
         aws_s3_get_part_range(
             0ULL,
@@ -624,15 +613,15 @@ static int s_test_s3_client_queue_requests(struct aws_allocator *allocator, void
     struct aws_s3_meta_request *mock_meta_request = aws_s3_tester_mock_meta_request_new(&tester);
     mock_meta_request->client = aws_s3_client_acquire(mock_client);
 
-    struct aws_s3_request *pivot_request = aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0);
+    struct aws_s3_request *pivot_request = aws_s3_request_new(mock_meta_request, 0, 0, 0, 0);
 
     struct aws_linked_list pivot_request_list;
     aws_linked_list_init(&pivot_request_list);
 
     struct aws_s3_request *requests[] = {
-        aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0),
-        aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0),
-        aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0),
+        aws_s3_request_new(mock_meta_request, 0, 0, 0, 0),
+        aws_s3_request_new(mock_meta_request, 0, 0, 0, 0),
+        aws_s3_request_new(mock_meta_request, 0, 0, 0, 0),
     };
 
     const uint32_t num_requests = AWS_ARRAY_SIZE(requests);
@@ -745,7 +734,7 @@ static bool s_s3_test_work_meta_request_update(
 
     if (out_request) {
         if (user_data->has_work_remaining) {
-            *out_request = aws_s3_request_new(meta_request, 0, 0, NULL, 0, 0);
+            *out_request = aws_s3_request_new(meta_request, 0, 0, 0, 0);
         }
     }
 
@@ -1006,7 +995,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
 
     /* Verify that the request does not get sent because the meta request has finish-result. */
     {
-        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, 0);
+        struct aws_s3_request *request = aws_s3_request_new(mock_meta_request, 0, 0, 0, 0);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
         ++mock_client->threaded_data.request_queue_size;
 
@@ -1028,7 +1017,7 @@ static int s_test_s3_client_update_connections_finish_result(struct aws_allocato
     /* Verify that a request with the 'always send' flag still gets sent when the meta request has a finish-result. */
     {
         struct aws_s3_request *request =
-            aws_s3_request_new(mock_meta_request, 0, 0, NULL, 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
+            aws_s3_request_new(mock_meta_request, 0, 0, 0, AWS_S3_REQUEST_FLAG_ALWAYS_SEND);
         aws_linked_list_push_back(&mock_client->threaded_data.request_queue, &request->node);
         ++mock_client->threaded_data.request_queue_size;
 
