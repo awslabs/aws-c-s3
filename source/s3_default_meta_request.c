@@ -121,6 +121,7 @@ static void s_s3_meta_request_default_destroy(struct aws_s3_meta_request *meta_r
     AWS_PRECONDITION(meta_request->impl);
 
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
+    aws_string_destroy(meta_request_default->operation_name);
     aws_mem_release(meta_request->allocator, meta_request_default);
 }
 

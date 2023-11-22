@@ -169,6 +169,7 @@ struct aws_s3_tester_meta_request_options {
     /* Default Meta Request specific options. */
     struct {
         enum aws_s3_tester_default_type_mode mode;
+        struct aws_byte_cursor operation_name;
     } default_type_options;
 
     /* Get Object Meta Request specific options.*/

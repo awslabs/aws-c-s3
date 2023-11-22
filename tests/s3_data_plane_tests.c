@@ -4582,6 +4582,42 @@ static int s_test_s3_default_fail_body_callback(struct aws_allocator *allocator,
     return 0;
 }
 
+/* Test that if a DEFAULt meta-request sets the operation_name, and gets an error response,
+ * then aws_s3_meta_request_result.error_response_operation_name is set. */
+AWS_TEST_CASE(test_s3_default_fail_operation_name, s_test_s3_default_fail_operation_name)
+static int s_test_s3_default_fail_operation_name(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_byte_cursor invalid_path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("___INVALID_PATH___");
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+            },
+        .get_options =
+            {
+                .object_path = invalid_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, &meta_request_test_results));
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
+    ASSERT_STR_EQUALS("GetObject", aws_string_c_str(meta_request_test_results.error_response_operation_name));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_fail_object_invalid_request, s_test_s3_put_fail_object_invalid_request)
 static int s_test_s3_put_fail_object_invalid_request(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

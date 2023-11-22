@@ -1402,6 +1402,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     struct aws_s3_meta_request_options meta_request_options = {
         .type = options->meta_request_type,
+        .operation_name = options->default_type_options.operation_name,
         .message = options->message,
         .checksum_config = &checksum_config,
         .resume_token = options->put_options.resume_token,
