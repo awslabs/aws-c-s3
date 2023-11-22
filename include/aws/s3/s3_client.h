@@ -86,9 +86,6 @@ enum aws_s3_meta_request_type {
 
 /**
  * The type of S3 request made. Used by metrics.
- * aws_s3_request_type_operation_name() returns the S3 operation name
- * for types that map (e.g. AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> "HeadObject"),
- * or empty string for types that don't map (e.g. AWS_S3_REQUEST_TYPE_DEFAULT -> "").
  */
 enum aws_s3_request_type {
     /* Same as the original HTTP request passed to aws_s3_meta_request_options */
@@ -98,6 +95,7 @@ enum aws_s3_request_type {
     AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
     AWS_S3_REQUEST_TYPE_GET_OBJECT,
     AWS_S3_REQUEST_TYPE_LIST_PARTS,
+    AWS_S3_REQUEST_TYPE_PUT_OBJECT,
     AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD,
     AWS_S3_REQUEST_TYPE_UPLOAD_PART,
     AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD,
@@ -625,8 +623,8 @@ struct aws_s3_meta_request_result {
 
     /* If meta request failed due to an HTTP error response from S3,
      * this is the name of the S3 operation it was responding to.
-     * For example, if a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT fails, this could be
-     * "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", or others.
+     * For example, if a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT fails this could be
+     * "PutObject, "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", or others.
      * For AWS_S3_META_REQUEST_TYPE_DEFAULT, this is the same value passed to
      * aws_s3_meta_request_options.operation_name.
      * NULL if the meta request failed for another reason, or the operation name is not known. */
@@ -848,17 +846,6 @@ void aws_s3_init_default_signing_config(
     struct aws_credentials_provider *credentials_provider);
 
 /**
- * Return operation name for aws_s3_request_type,
- * or empty string if the type doesn't map to an actual operation.
- * For example:
- * AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> "HeadObject"
- * AWS_S3_REQUEST_TYPE_DEFAULT -> ""
- * AWS_S3_REQUEST_TYPE_MAX -> ""
- */
-AWS_S3_API
-const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type);
-
-/**
  * Add a reference, keeping this object alive.
  * The reference must be released when you are done with it, or it's memory will never be cleaned up.
  * Always returns the same pointer that was passed in.
@@ -1020,7 +1007,8 @@ int aws_s3_request_metrics_get_operation_name(
     const struct aws_s3_request_metrics *metrics,
     const struct aws_string **out_operation_name);
 
-/* Get the request type from request metrics. */
+/* Get the request type from request metrics.
+ * If you just need a string, aws_s3_request_metrics_get_operation_name() is more reliable. */
 AWS_S3_API
 void aws_s3_request_metrics_get_request_type(
     const struct aws_s3_request_metrics *metrics,

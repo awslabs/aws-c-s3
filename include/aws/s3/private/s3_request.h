@@ -160,6 +160,12 @@ struct aws_s3_request {
     /* TODO: this should be a union type to make it clear that this could be one of two enums for puts, and gets. */
     int request_tag;
 
+    /* Actual S3 type for the single request (AWS_S3_REQUEST_TYPE_DEFAULT if unknown) */
+    enum aws_s3_request_type request_type;
+
+    /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") (empty string if unknown) */
+    const char *operation_name;
+
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to
      * be retried, then the members of this structure will be cleaned up and re-populated on the next send.
      */
@@ -221,11 +227,17 @@ struct aws_s3_request {
 
 AWS_EXTERN_C_BEGIN
 
-/* Create a new s3 request structure with the given options. */
+/* Create a new s3 request structure with the given options.
+ * @param operation_name    Official S3 operation name (e.g. "CreateMultipartUpload").
+ *                          Pass an empty string if unknown.
+ *                          The string's memory must outlive the request (static string, or live on meta_request)
+ */
 AWS_S3_API
 struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
+    enum aws_s3_request_type request_type,
+    const char *operation_name,
     uint32_t part_number,
     uint32_t flags);
 

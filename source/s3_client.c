@@ -1043,7 +1043,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
              * TODO: Still need tests to verify that the request of a part is
              * splittable or not */
             if (aws_http_headers_has(initial_message_headers, aws_byte_cursor_from_c_str("partNumber"))) {
-                return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
+                return aws_s3_meta_request_default_new(
+                    client->allocator,
+                    client,
+                    AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                    "GetObject",
+                    content_length,
+                    false /*should_compute_content_md5*/,
+                    options);
             }
 
             return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
@@ -1092,6 +1099,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     return aws_s3_meta_request_default_new(
                         client->allocator,
                         client,
+                        AWS_S3_REQUEST_TYPE_PUT_OBJECT,
+                        "PutObject",
                         content_length,
                         client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                             !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
@@ -1138,7 +1147,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
         }
         case AWS_S3_META_REQUEST_TYPE_DEFAULT:
-            return aws_s3_meta_request_default_new(client->allocator, client, content_length, false, options);
+            return aws_s3_meta_request_default_new(
+                client->allocator,
+                client,
+                AWS_S3_REQUEST_TYPE_DEFAULT,
+                NULL /*operation_name_override*/,
+                content_length,
+                false /*should_compute_content_md5*/,
+                options);
         default:
             AWS_FATAL_ASSERT(false);
     }

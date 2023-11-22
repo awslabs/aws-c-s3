@@ -847,12 +847,6 @@ finish:
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
-static bool s_s3_request_is_upload_part(struct aws_s3_request *request) {
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    return meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && meta_request->vtable->get_request_type &&
-           meta_request->vtable->get_request_type(request) == AWS_S3_REQUEST_TYPE_UPLOAD_PART;
-}
-
 void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(connection);
@@ -875,7 +869,7 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         options.on_metrics = s_s3_meta_request_stream_metrics;
     }
     options.on_complete = s_s3_meta_request_stream_complete;
-    if (s_s3_request_is_upload_part(request)) {
+    if (request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART) {
         options.response_first_byte_timeout_ms = aws_atomic_load_int(&meta_request->client->upload_timeout_ms);
         request->upload_timeout_ms = (size_t)options.response_first_byte_timeout_ms;
     }
@@ -1812,9 +1806,9 @@ void aws_s3_meta_request_result_setup(
                 result->error_response_body, meta_request->allocator, &failed_request->send_data.response_body);
         }
 
-        const char *operation_name = aws_s3_request_get_operation_name(failed_request);
-        if (operation_name[0] != '\0') {
-            result->error_response_operation_name = aws_string_new_from_c_str(meta_request->allocator, operation_name);
+        if (failed_request->operation_name[0] != '\0') {
+            result->error_response_operation_name =
+                aws_string_new_from_c_str(meta_request->allocator, failed_request->operation_name);
         }
     }
 

@@ -16,10 +16,14 @@ static void s_s3_request_destroy(void *user_data);
 struct aws_s3_request *aws_s3_request_new(
     struct aws_s3_meta_request *meta_request,
     int request_tag,
+    enum aws_s3_request_type request_type,
+    const char *operation_name,
     uint32_t part_number,
     uint32_t flags) {
+
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->allocator);
+    AWS_PRECONDITION(operation_name);
 
     struct aws_s3_request *request = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_request));
 
@@ -29,6 +33,8 @@ struct aws_s3_request *aws_s3_request_new(
     request->meta_request = aws_s3_meta_request_acquire(meta_request);
 
     request->request_tag = request_tag;
+    request->request_type = request_type;
+    request->operation_name = operation_name;
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
     request->has_part_size_response_body = (flags & AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY) != 0;
@@ -121,59 +127,6 @@ static void s_s3_request_destroy(void *user_data) {
 
     aws_mem_release(request->allocator, request);
 }
-enum aws_s3_request_type aws_s3_request_get_type(const struct aws_s3_request *request) {
-    if (!request->meta_request->vtable->get_request_type) {
-        return AWS_S3_REQUEST_TYPE_DEFAULT;
-    } else {
-        return request->meta_request->vtable->get_request_type(request);
-    }
-}
-
-const char *aws_s3_request_get_operation_name(const struct aws_s3_request *request) {
-    /* Try to get name from type */
-    enum aws_s3_request_type request_type = aws_s3_request_get_type(request);
-    const char *operation_name = aws_s3_request_type_operation_name(request_type);
-    if (operation_name[0] != '\0') {
-        return operation_name;
-    }
-
-    /* Try to get name from meta-request */
-    const struct aws_s3_meta_request *meta_request = request->meta_request;
-    if (meta_request->vtable->get_operation_name != NULL) {
-        operation_name = meta_request->vtable->get_operation_name(meta_request);
-        if (operation_name[0] != '\0') {
-            return operation_name;
-        }
-    }
-
-    /* Name unknown */
-    return "";
-}
-
-const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type) {
-    switch (type) {
-        case AWS_S3_REQUEST_TYPE_HEAD_OBJECT:
-            return "HeadObject";
-        case AWS_S3_REQUEST_TYPE_GET_OBJECT:
-            return "GetObject";
-        case AWS_S3_REQUEST_TYPE_LIST_PARTS:
-            return "ListParts";
-        case AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD:
-            return "CreateMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_UPLOAD_PART:
-            return "UploadPart";
-        case AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD:
-            return "AbortMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD:
-            return "CompleteMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY:
-            return "UploadPartCopy";
-        case AWS_S3_REQUEST_TYPE_COPY_OBJECT:
-            return "CopyObject";
-        default:
-            return "";
-    }
-}
 
 static void s_s3_request_metrics_destroy(void *arg) {
     struct aws_s3_request_metrics *metrics = arg;
@@ -215,11 +168,10 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->req_resp_info_metrics.host_address = aws_string_new_from_cursor(allocator, &host_header_value);
     AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
 
-    metrics->req_resp_info_metrics.request_type = aws_s3_request_get_type(request);
+    metrics->req_resp_info_metrics.request_type = request->request_type;
 
-    const char *operation_name = aws_s3_request_get_operation_name(request);
-    if (operation_name[0] != '\0') {
-        metrics->req_resp_info_metrics.operation_name = aws_string_new_from_c_str(allocator, operation_name);
+    if (request->operation_name[0] != '\0') {
+        metrics->req_resp_info_metrics.operation_name = aws_string_new_from_c_str(allocator, request->operation_name);
     }
 
     metrics->time_metrics.start_timestamp_ns = -1;

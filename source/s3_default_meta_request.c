@@ -54,11 +54,15 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
 struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
+    enum aws_s3_request_type request_type,
+    const char *operation_name_override,
     uint64_t content_length,
     bool should_compute_content_md5,
     const struct aws_s3_meta_request_options *options) {
+
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
+    AWS_PRECONDITION(operation_name_override == NULL || operation_name_override[0] != '\0'); /* NULL or non-empty */
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->message);
 
@@ -106,6 +110,13 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     }
 
     meta_request_default->content_length = (size_t)content_length;
+    meta_request_default->request_type = request_type;
+
+    if (operation_name_override != NULL) {
+        meta_request_default->operation_name = aws_string_new_from_c_str(allocator, operation_name_override);
+    } else if (options->operation_name.len != 0) {
+        meta_request_default->operation_name = aws_string_new_from_cursor(allocator, &options->operation_name);
+    }
 
     if (options->operation_name.len != 0) {
         meta_request_default->operation_name = aws_string_new_from_cursor(allocator, &options->operation_name);
@@ -151,7 +162,13 @@ static bool s_s3_meta_request_default_update(
                     goto has_work_remaining;
                 }
 
-                request = aws_s3_request_new(meta_request, 0, 1, AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                request = aws_s3_request_new(
+                    meta_request,
+                    0 /*request_tag*/,
+                    AWS_S3_REQUEST_TYPE_DEFAULT,
+                    meta_request_default->operation_name ? aws_string_c_str(meta_request_default->operation_name) : "",
+                    1 /*part_number*/,
+                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,

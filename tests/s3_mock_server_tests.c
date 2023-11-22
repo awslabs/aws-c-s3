@@ -755,6 +755,7 @@ TEST_CASE(resume_list_parts_failed_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_INVALID_RESPONSE_STATUS, out_results.finished_error_code);
     ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_404_NOT_FOUND, out_results.finished_response_status);
+    ASSERT_STR_EQUALS("ListParts", aws_string_c_str(out_results.error_response_operation_name));
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_meta_request_resume_token_release(token);
