@@ -560,7 +560,6 @@ static int s_s3express_get_creds(
         session->inactive = false;
         AWS_ASSERT(session->s3express_credentials != NULL);
         if (s_s3express_session_is_valid(session, now_seconds)) {
-            /* Return the credentials, also kickoff the refreshing. */
             s3express_credentials = session->s3express_credentials;
             /* Make sure the creds are valid until the callback invokes */
             aws_credentials_acquire(s3express_credentials);

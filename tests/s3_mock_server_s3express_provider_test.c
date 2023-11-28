@@ -635,8 +635,11 @@ TEST_CASE(s3express_provider_long_run_real_server) {
         /* Sleep for 0.5 sec */
         aws_thread_current_sleep(aws_timestamp_convert(500, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
     }
-    /* We should only have 2 different creds  */
-    ASSERT_UINT_EQUALS(2, s_s3express_tester.number_of_credentials);
+    /**
+     * We should have more than 2 different creds.
+     * Server can return a credentials that expires less than 5 mins.
+     **/
+    ASSERT_TRUE(s_s3express_tester.number_of_credentials >= 2);
 
     aws_s3express_credentials_provider_release(provider);
     s_aws_wait_for_provider_shutdown_callback();

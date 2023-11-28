@@ -364,8 +364,10 @@ TEST_CASE(s3express_client_put_long_running_test_real_server) {
         }
     }
 
-    /* Only two create session was invoked */
-    ASSERT_UINT_EQUALS(2, aws_atomic_load_int(&s_tester.provider_requests_made));
+    /* More than two create session was invoked */
+    /* Server can return a credentials that expires around 2-3 mins sometime. */
+    size_t session_made = aws_atomic_load_int(&s_tester.provider_requests_made);
+    ASSERT_TRUE(session_made >= 2);
 
     aws_s3_client_release(client);
     s_s3express_client_tester_cleanup();
