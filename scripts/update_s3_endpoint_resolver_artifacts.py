@@ -3,6 +3,7 @@
 # It uses the latest files to generate 'source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c' and
 # 'source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c'
 
+import argparse
 import json
 import boto3
 import requests
@@ -99,10 +100,26 @@ def download_from_git(url, token=None):
 
 
 if __name__ == '__main__':
+    argument_parser = argparse.ArgumentParser(description="Endpoint Ruleset Updater")
+    argument_parser.add_argument("--ruleset", metavar="<Path to ruleset>",
+                                required=False, help="Path to endpoint ruleset json file")
+    argument_parser.add_argument("--partitions", metavar="<Path to partitions>",
+                                required=False, help="Path to partitions json file")
+    parsed_args = argument_parser.parse_args()
+
     git_secret = get_secret_from_secrets_manager("s3/endpoint/resolver/artifacts/git", "us-east-1")
 
-    rule_set = download_from_git(git_secret['ruleset-url'], git_secret['ruleset-token'])
-    partition = download_from_git('https://raw.githubusercontent.com/aws/aws-sdk-cpp/main/tools/code-generation/partitions/partitions.json')
+    if (parsed_args.ruleset):
+        with open(parsed_args.ruleset) as f:
+           rule_set = json.load(f)    
+    else:
+        rule_set = download_from_git(git_secret['ruleset-url'], git_secret['ruleset-token'])
+
+    if (parsed_args.partitions):    
+        with open(parsed_args.partitions) as f:
+           partition = json.load(f) 
+    else:
+        partition = download_from_git('https://raw.githubusercontent.com/aws/aws-sdk-cpp/main/tools/code-generation/partitions/partitions.json')
 
     generate_c_file_from_json(
         rule_set,

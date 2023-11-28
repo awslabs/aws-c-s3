@@ -62,6 +62,16 @@ struct aws_s3_request_metrics {
         /* The time duration for the request from start receiving to finish receiving (receive_end_timestamp_ns -
          * receive_start_timestamp_ns). When receive_end_timestamp_ns is 0, means data not available. */
         int64_t receiving_duration_ns;
+
+        /* The time stamp when the request started to be signed. -1 means data not
+         * available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t sign_start_timestamp_ns;
+        /* The time stamp when the response finished to be signed. -1 means data not
+         * available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t sign_end_timestamp_ns;
+        /* The time duration for the request from start signing to finish signing (sign_end_timestamp_ns -
+         * sign_start_timestamp_ns). When sign_end_timestamp_ns is 0, means data not available. */
+        int64_t signing_duration_ns;
     } time_metrics;
 
     struct {

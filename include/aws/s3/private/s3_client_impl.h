@@ -234,6 +234,11 @@ struct aws_s3_client {
     /* Cached signing config. Can be NULL if no signing config was specified. */
     struct aws_cached_signing_config_aws *cached_signing_config;
 
+    /* The auth provider for S3 Express. */
+    aws_s3express_provider_factory_fn *s3express_provider_factory;
+    void *factory_user_data;
+    struct aws_s3express_credentials_provider *s3express_provider;
+
     /* Throughput target in Gbps that we are trying to reach. */
     const double throughput_target_gbps;
 
@@ -364,6 +369,9 @@ struct aws_s3_client {
         /* Whether or not the body streaming ELG is allocated. If the body streaming ELG is NULL, but this is true, the
          * shutdown callback has not yet been called.*/
         uint32_t body_streaming_elg_allocated : 1;
+
+        /* Whether or not a S3 Express provider is active with the client.*/
+        uint32_t s3express_provider_active : 1;
 
         /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
         uint32_t finish_destroy : 1;

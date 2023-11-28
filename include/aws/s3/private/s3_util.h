@@ -33,6 +33,7 @@ struct aws_allocator;
 struct aws_http_stream;
 struct aws_http_headers;
 struct aws_http_message;
+struct aws_s3_client;
 
 enum aws_s3_response_status {
     AWS_S3_RESPONSE_STATUS_SUCCESS = 200,
@@ -144,6 +145,9 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_s3_service_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_s3express_service_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_range_header_name;
 
 extern const struct aws_byte_cursor g_if_match_header_name;
@@ -168,8 +172,15 @@ extern const struct aws_byte_cursor g_delete_method;
 AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
 
+/**
+ * Cache and initial the signing config based on the client.
+ *
+ * @param client
+ * @param signing_config
+ * @return struct aws_cached_signing_config_aws*
+ */
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
-    struct aws_allocator *allocator,
+    struct aws_s3_client *client,
     const struct aws_signing_config_aws *signing_config);
 
 void aws_cached_signing_config_destroy(struct aws_cached_signing_config_aws *cached_signing_config);

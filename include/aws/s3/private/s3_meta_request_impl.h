@@ -175,6 +175,7 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_finish_fn *finish_user_callback_after_checksum;
 
     enum aws_s3_meta_request_type type;
+    struct aws_string *s3express_session_host;
 
     struct {
         struct aws_mutex lock;
