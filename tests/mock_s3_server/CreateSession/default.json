@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "headers": {"x-amz-request-id": "12345"},
+  "body": [
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<CreateSessionResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+    "<Credentials>",
+      "<SessionToken>sessionToken</SessionToken>",
+      "<SecretAccessKey>secretKey</SecretAccessKey>",
+      "<AccessKeyId>accessKeyId</AccessKeyId>",
+      "<Expiration>2023-06-26T17:33:30Z</Expiration>",
+    "</Credentials>",
+  "</CreateSessionResult>"
+  ]
+}

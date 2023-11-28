@@ -7,6 +7,7 @@
  */
 
 #include <aws/auth/signing_config.h>
+#include <aws/common/ref_count.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 
@@ -19,6 +20,7 @@ struct aws_http_message;
 struct aws_http_headers;
 struct aws_tls_connection_options;
 struct aws_input_stream;
+struct aws_hash_table;
 
 struct aws_s3_client;
 struct aws_s3_request;
@@ -29,6 +31,8 @@ struct aws_uri;
 struct aws_string;
 
 struct aws_s3_request_metrics;
+struct aws_s3express_credentials_provider;
+struct aws_credentials_properties_s3express;
 
 /**
  * A Meta Request represents a group of generated requests that are being done on behalf of the
@@ -301,6 +305,34 @@ typedef int(aws_s3_meta_request_upload_review_fn)(
     const struct aws_s3_upload_review *review,
     void *user_data);
 
+/**
+ * The factory function for S3 client to create a S3 Express credentials provider.
+ * The S3 client will be the only owner of the S3 Express credentials provider.
+ *
+ * During S3 client destruction, S3 client will start the destruction of the provider, and wait the
+ * on_provider_shutdown_callback to be invoked before the S3 client finish destruction.
+ *
+ * Note to implement the factory properly:
+ * - Make sure `on_provider_shutdown_callback` will be invoked after the provider finish shutdown, otherwise,
+ * leak will happen.
+ * - The provider must not acquire a reference to the client; otherwise, a circular reference will cause a deadlock.
+ * - The `client` provided CANNOT be used within the factory function call or the destructor.
+ *
+ * @param allocator    memory allocator to create the provider.
+ * @param client    The S3 client uses and owns the provider.
+ * @param on_provider_shutdown_callback    The callback to be invoked when the provider finishes shutdown.
+ * @param shutdown_user_data    The user data to invoke shutdown callback with
+ * @param user_data    The user data with the factory
+ *
+ * @return The aws_s3express_credentials_provider.
+ */
+typedef struct aws_s3express_credentials_provider *(aws_s3express_provider_factory_fn)(
+    struct aws_allocator *allocator,
+    struct aws_s3_client *client,
+    aws_simple_completion_callback on_provider_shutdown_callback,
+    void *shutdown_user_data,
+    void *factory_user_data);
+
 /* Keepalive properties are TCP only.
  * If interval or timeout are zero, then default values are used.
  */
@@ -321,7 +353,7 @@ struct aws_s3_client_config {
      * throughput_target_gbps. (Recommended) */
     uint32_t max_active_connections_override;
 
-    /* Region that the S3 bucket lives in. */
+    /* Region that the client default to. */
     struct aws_byte_cursor region;
 
     /* Client bootstrap used for common staples such as event loop group, host resolver, etc.. s*/
@@ -340,7 +372,21 @@ struct aws_s3_client_config {
      * is ENABLED, this is required. Otherwise, this is optional. */
     struct aws_tls_connection_options *tls_connection_options;
 
-    /* Signing options to be used for each request. Specify NULL to not sign requests. */
+    /**
+     * Required.
+     * Configure the signing for the requests made from the client.
+     * - Credentials or credentials provider is required. Other configs are all optional, and will be default to what
+     *      needs to sign the request for S3, only overrides when Non-zero/Not-empty is set.
+     * - To skip signing, you can config it with anonymous credentials.
+     * - S3 Client will derive the right config for signing process based on this.
+     *
+     * Notes:
+     * - For AWS_SIGNING_ALGORITHM_V4_S3EXPRESS, S3 client will use the credentials in the config to derive the
+     * S3 Express credentials that are used in the signing process.
+     * - For other auth algorithm, client may make modifications to signing config before passing it on to signer.
+     *
+     * TODO: deprecate this structure from auth, introduce a new S3 specific one.
+     */
     struct aws_signing_config_aws *signing_config;
 
     /* Size of parts the files will be downloaded or uploaded in. */
@@ -436,6 +482,22 @@ struct aws_s3_client_config {
      * Ignored unless `enable_read_backpressure` is true.
      */
     size_t initial_read_window;
+
+    /**
+     * To enable S3 Express support or not.
+     */
+    bool enable_s3express;
+
+    /**
+     * Optional.
+     * Only used when `enable_s3express` is set.
+     *
+     * If set, client will invoke the factory to get the provider to use, when needed.
+     *
+     * If not set, client will create a default S3 Express provider under the hood.
+     */
+    aws_s3express_provider_factory_fn *s3express_provider_override_factory;
+    void *factory_user_data;
 };
 
 struct aws_s3_checksum_config {
@@ -506,8 +568,22 @@ struct aws_s3_meta_request_options {
      */
     struct aws_byte_cursor operation_name;
 
-    /* Signing options to be used for each request created for this meta request.  If NULL, options in the client will
-     * be used. If not NULL, these options will override the client options. */
+    /**
+     * Configure the signing for each request created for this meta request. If NULL, options in the client will be
+     *  used.
+     * - The credentials will be obtained based on the precedence of:
+     *      1. `credentials` from `signing_config` in `aws_s3_meta_request_options`
+     *      2. `credentials_provider` from `signing_config` in `aws_s3_meta_request_options`
+     *      3. `credentials` from `signing_config` cached in the client
+     *      4. `credentials_provider` cached in the client
+     * - To skip signing, you can config it with anonymous credentials.
+     * - S3 Client will derive the right config for signing process based on this.
+     *
+     * Notes:
+     * - For AWS_SIGNING_ALGORITHM_V4_S3EXPRESS, S3 client will use the credentials in the config to derive the
+     * S3 Express credentials that are used in the signing process.
+     * - For other auth algorithm, client may make modifications to signing config before passing it on to signer.
+     **/
     const struct aws_signing_config_aws *signing_config;
 
     /* Initial HTTP message that defines what operation we are doing.

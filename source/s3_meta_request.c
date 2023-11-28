@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_parallel_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
+#include "aws/s3/s3express_credentials_provider.h"
 #include <aws/auth/signable.h>
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
@@ -241,8 +242,9 @@ int aws_s3_meta_request_init_base(
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     checksum_config_init(&meta_request->checksum_config, options->checksum_config);
+
     if (options->signing_config) {
-        meta_request->cached_signing_config = aws_cached_signing_config_new(allocator, options->signing_config);
+        meta_request->cached_signing_config = aws_cached_signing_config_new(client, options->signing_config);
     }
 
     /* Client is currently optional to allow spinning up a meta_request without a client in a test. */
@@ -456,6 +458,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_release(struct aws_s3_meta_reque
 static void s_s3_meta_request_destroy(void *user_data) {
     struct aws_s3_meta_request *meta_request = user_data;
     AWS_PRECONDITION(meta_request);
+    void *log_id = meta_request;
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Cleaning up meta request", (void *)meta_request);
 
@@ -467,6 +470,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_s3_meta_request_shutdown_fn *shutdown_callback = meta_request->shutdown_callback;
 
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
+    aws_string_destroy(meta_request->s3express_session_host);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
@@ -485,18 +489,17 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
     if (meta_request->vtable != NULL) {
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", (void *)meta_request);
+        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", log_id);
         meta_request->vtable->destroy(meta_request);
     }
     meta_request = NULL;
 
     if (shutdown_callback != NULL) {
-        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Calling meta request shutdown callback.", (void *)meta_request);
+        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Calling meta request shutdown callback.", log_id);
         shutdown_callback(meta_request_user_data);
     }
 
-    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Meta request clean up finished.", (void *)meta_request);
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Meta request clean up finished.", log_id);
 }
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
@@ -720,7 +723,145 @@ static void s_s3_meta_request_sign_request(
     AWS_PRECONDITION(meta_request->vtable);
     AWS_PRECONDITION(meta_request->vtable->sign_request);
 
+    if (request->send_data.metrics) {
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.sign_start_timestamp_ns);
+    }
+
     meta_request->vtable->sign_request(meta_request, request, on_signing_complete, user_data);
+}
+
+struct aws_get_s3express_credentials_user_data {
+    /* Keep our own reference to allocator, because the meta request can be gone after the callback invoked. */
+    struct aws_allocator *allocator;
+
+    struct aws_s3_meta_request *meta_request;
+    struct aws_s3_request *request;
+    aws_signing_complete_fn *on_signing_complete;
+
+    const struct aws_credentials *original_credentials;
+
+    struct aws_signing_config_aws base_signing_config;
+    struct aws_credentials_properties_s3express properties;
+    void *user_data;
+};
+
+static void s_aws_get_s3express_credentials_user_data_destroy(struct aws_get_s3express_credentials_user_data *context) {
+    aws_s3_meta_request_release(context->meta_request);
+    aws_credentials_release(context->original_credentials);
+    aws_mem_release(context->allocator, context);
+}
+
+static void s_get_s3express_credentials_callback(struct aws_credentials *credentials, int error_code, void *user_data) {
+    struct aws_get_s3express_credentials_user_data *context = user_data;
+    struct aws_signing_config_aws signing_config = context->base_signing_config;
+
+    if (error_code) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Failed to get S3 Express credentials %p. due to error code %d (%s)",
+            (void *)context->meta_request,
+            (void *)context->request,
+            error_code,
+            aws_error_str(error_code));
+        context->on_signing_complete(NULL, error_code, context->user_data);
+        goto done;
+    }
+    s_s3_meta_request_init_signing_date_time(context->meta_request, &signing_config.date);
+    /* Override the credentials */
+    signing_config.credentials = credentials;
+    signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS;
+    if (aws_sign_request_aws(
+            context->allocator,
+            context->request->send_data.signable,
+            (struct aws_signing_config_base *)&signing_config,
+            context->on_signing_complete,
+            context->user_data)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Could not sign request %p. due to error code %d (%s)",
+            (void *)context->meta_request,
+            (void *)context->request,
+            aws_last_error_or_unknown(),
+            aws_error_str(aws_last_error_or_unknown()));
+        context->on_signing_complete(NULL, aws_last_error_or_unknown(), context->user_data);
+    }
+done:
+    s_aws_get_s3express_credentials_user_data_destroy(context);
+}
+
+static void s_get_original_credentials_callback(struct aws_credentials *credentials, int error_code, void *user_data) {
+    struct aws_get_s3express_credentials_user_data *context = user_data;
+    struct aws_s3_meta_request *meta_request = context->meta_request;
+    if (error_code) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Failed to get S3 Express credentials %p. due to error code %d (%s)",
+            (void *)context->meta_request,
+            (void *)context->request,
+            error_code,
+            aws_error_str(error_code));
+        context->on_signing_complete(NULL, error_code, context->user_data);
+        s_aws_get_s3express_credentials_user_data_destroy(context);
+        return;
+    }
+    context->original_credentials = credentials;
+    aws_credentials_acquire(context->original_credentials);
+
+    /**
+     * Derive the credentials for S3 Express.
+     */
+    struct aws_s3_client *client = meta_request->client;
+    if (aws_s3express_credentials_provider_get_credentials(
+            client->s3express_provider,
+            context->original_credentials,
+            &context->properties,
+            s_get_s3express_credentials_callback,
+            context)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Could not get S3 Express credentials %p",
+            (void *)meta_request,
+            (void *)context->request);
+        context->on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
+        s_aws_get_s3express_credentials_user_data_destroy(context);
+    }
+}
+
+static int s_meta_request_resolve_signing_config(
+    struct aws_signing_config_aws *out_signing_config,
+    struct aws_s3_request *request,
+    struct aws_s3_meta_request *meta_request) {
+    struct aws_s3_client *client = meta_request->client;
+    if (meta_request->cached_signing_config != NULL) {
+        *out_signing_config = meta_request->cached_signing_config->config;
+
+        if (out_signing_config->credentials == NULL && out_signing_config->credentials_provider == NULL) {
+            /* When no credentials available from meta request level override, we use the credentials from client */
+            out_signing_config->credentials = client->cached_signing_config->config.credentials;
+            out_signing_config->credentials_provider = client->cached_signing_config->config.credentials_provider;
+        }
+    } else if (client->cached_signing_config != NULL) {
+        *out_signing_config = client->cached_signing_config->config;
+    } else {
+        /* Not possible to have no cached signing config from both client and request */
+        AWS_FATAL_ASSERT(false);
+    }
+
+    /* If the checksum is configured to be added to the trailer, the payload will be aws-chunked encoded. The payload
+     * will need to be streaming signed/unsigned. */
+    if (meta_request->checksum_config.location == AWS_SCL_TRAILER &&
+        aws_byte_cursor_eq(&out_signing_config->signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
+        out_signing_config->signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
+    }
+    /* However the initial request for a multipart upload does not have a trailing checksum and is not chunked so it
+     * must have an unsigned_payload signed_body value*/
+    if (request->part_number == 0 &&
+        aws_byte_cursor_eq(
+            &out_signing_config->signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
+        out_signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
+    }
+    return AWS_OP_SUCCESS;
 }
 
 /* Handles signing a message for the caller. */
@@ -738,11 +879,7 @@ void aws_s3_meta_request_sign_request_default(
 
     struct aws_signing_config_aws signing_config;
 
-    if (meta_request->cached_signing_config != NULL) {
-        signing_config = meta_request->cached_signing_config->config;
-    } else if (client->cached_signing_config != NULL) {
-        signing_config = client->cached_signing_config->config;
-    } else {
+    if (s_meta_request_resolve_signing_config(&signing_config, request, meta_request)) {
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
             "id=%p: No signing config present. Not signing request %p.",
@@ -752,8 +889,6 @@ void aws_s3_meta_request_sign_request_default(
         on_signing_complete(NULL, AWS_ERROR_SUCCESS, user_data);
         return;
     }
-
-    s_s3_meta_request_init_signing_date_time(meta_request, &signing_config.date);
 
     request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
 
@@ -776,32 +911,71 @@ void aws_s3_meta_request_sign_request_default(
         return;
     }
 
-    /* If the checksum is configured to be added to the trailer, the payload will be aws-chunked encoded. The payload
-     * will need to be streaming signed/unsigned. */
-    if (meta_request->checksum_config.location == AWS_SCL_TRAILER &&
-        aws_byte_cursor_eq(&signing_config.signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
-        signing_config.signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
-    }
-    /* However the initial request for a multipart upload does not have a trailing checksum and is not chunked so it
-     * must have an unsigned_payload signed_body value*/
-    if (request->part_number == 0 &&
-        aws_byte_cursor_eq(
-            &signing_config.signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
-        signing_config.signed_body_value = g_aws_signed_body_value_unsigned_payload;
-    }
+    if (signing_config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS) {
+        /* Fetch credentials from S3 Express provider. */
+        struct aws_get_s3express_credentials_user_data *context =
+            aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_get_s3express_credentials_user_data));
 
-    if (aws_sign_request_aws(
-            meta_request->allocator,
-            request->send_data.signable,
-            (struct aws_signing_config_base *)&signing_config,
-            on_signing_complete,
-            user_data)) {
+        context->allocator = meta_request->allocator;
+        context->base_signing_config = signing_config;
+        context->meta_request = aws_s3_meta_request_acquire(meta_request);
+        context->on_signing_complete = on_signing_complete;
+        context->request = request;
+        context->user_data = user_data;
+        context->properties.host = aws_byte_cursor_from_string(meta_request->s3express_session_host);
+        context->properties.region = signing_config.region;
 
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "id=%p: Could not sign request %p", (void *)meta_request, (void *)request);
+        if (signing_config.credentials) {
+            context->original_credentials = signing_config.credentials;
+            aws_credentials_acquire(context->original_credentials);
+            /**
+             * Derive the credentials for S3 Express.
+             */
+            if (aws_s3express_credentials_provider_get_credentials(
+                    client->s3express_provider,
+                    context->original_credentials,
+                    &context->properties,
+                    s_get_s3express_credentials_callback,
+                    context)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Could not get S3 Express credentials %p",
+                    (void *)meta_request,
+                    (void *)request);
+                on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
+                s_aws_get_s3express_credentials_user_data_destroy(context);
+                return;
+            }
+        } else if (signing_config.credentials_provider) {
+            /* Get the credentials from provider first. */
+            if (aws_credentials_provider_get_credentials(
+                    signing_config.credentials_provider, s_get_original_credentials_callback, context)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Could not get S3 Express credentials %p",
+                    (void *)meta_request,
+                    (void *)request);
+                on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
+                s_aws_get_s3express_credentials_user_data_destroy(context);
+                return;
+            }
+        }
+    } else {
+        /* Regular signing. */
+        s_s3_meta_request_init_signing_date_time(meta_request, &signing_config.date);
+        if (aws_sign_request_aws(
+                meta_request->allocator,
+                request->send_data.signable,
+                (struct aws_signing_config_base *)&signing_config,
+                on_signing_complete,
+                user_data)) {
 
-        on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
-        return;
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST, "id=%p: Could not sign request %p", (void *)meta_request, (void *)request);
+
+            on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
+            return;
+        }
     }
 }
 
@@ -830,6 +1004,14 @@ static void s_s3_meta_request_request_on_signed(
         error_code = aws_last_error_or_unknown();
 
         goto finish;
+    }
+
+    if (request->send_data.metrics) {
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.sign_end_timestamp_ns);
+        AWS_ASSERT(metric->time_metrics.sign_start_timestamp_ns != 0);
+        metric->time_metrics.signing_duration_ns =
+            metric->time_metrics.sign_end_timestamp_ns - metric->time_metrics.sign_start_timestamp_ns;
     }
 
 finish:

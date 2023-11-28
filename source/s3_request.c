@@ -187,6 +187,9 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->time_metrics.receive_start_timestamp_ns = -1;
     metrics->time_metrics.receive_end_timestamp_ns = -1;
     metrics->time_metrics.receiving_duration_ns = -1;
+    metrics->time_metrics.sign_start_timestamp_ns = -1;
+    metrics->time_metrics.sign_end_timestamp_ns = -1;
+    metrics->time_metrics.signing_duration_ns = -1;
 
     metrics->req_resp_info_metrics.response_status = -1;
 

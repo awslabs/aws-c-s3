@@ -19,6 +19,7 @@
 
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
+const struct aws_byte_cursor g_s3express_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3express");
 const struct aws_byte_cursor g_host_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host");
 const struct aws_byte_cursor g_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Range");
 const struct aws_byte_cursor g_if_match_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("If-Match");
@@ -192,55 +193,49 @@ error:
 }
 
 struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
-    struct aws_allocator *allocator,
+    struct aws_s3_client *client,
     const struct aws_signing_config_aws *signing_config) {
-    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(client);
     AWS_PRECONDITION(signing_config);
+
+    struct aws_allocator *allocator = client->allocator;
 
     struct aws_cached_signing_config_aws *cached_signing_config =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_cached_signing_config_aws));
 
     cached_signing_config->allocator = allocator;
 
-    cached_signing_config->config.config_type = signing_config->config_type;
-    cached_signing_config->config.algorithm = signing_config->algorithm;
-    cached_signing_config->config.signature_type = signing_config->signature_type;
+    cached_signing_config->config.config_type =
+        signing_config->config_type ? signing_config->config_type : AWS_SIGNING_CONFIG_AWS;
 
     AWS_ASSERT(aws_byte_cursor_is_valid(&signing_config->region));
-
     if (signing_config->region.len > 0) {
         cached_signing_config->region = aws_string_new_from_cursor(allocator, &signing_config->region);
-
-        cached_signing_config->config.region = aws_byte_cursor_from_string(cached_signing_config->region);
+    } else {
+        /* Fall back to client region. */
+        cached_signing_config->region = aws_string_new_from_string(allocator, client->region);
     }
-
-    AWS_ASSERT(aws_byte_cursor_is_valid(&signing_config->service));
+    cached_signing_config->config.region = aws_byte_cursor_from_string(cached_signing_config->region);
 
     if (signing_config->service.len > 0) {
         cached_signing_config->service = aws_string_new_from_cursor(allocator, &signing_config->service);
-
         cached_signing_config->config.service = aws_byte_cursor_from_string(cached_signing_config->service);
+    } else {
+        cached_signing_config->config.service = g_s3_service_name;
     }
 
     cached_signing_config->config.date = signing_config->date;
-
-    cached_signing_config->config.should_sign_header = signing_config->should_sign_header;
-    /* It's the user's responsibility to keep the user data around */
-    cached_signing_config->config.should_sign_header_ud = signing_config->should_sign_header_ud;
-
-    cached_signing_config->config.flags = signing_config->flags;
 
     AWS_ASSERT(aws_byte_cursor_is_valid(&signing_config->signed_body_value));
 
     if (signing_config->signed_body_value.len > 0) {
         cached_signing_config->signed_body_value =
             aws_string_new_from_cursor(allocator, &signing_config->signed_body_value);
-
         cached_signing_config->config.signed_body_value =
             aws_byte_cursor_from_string(cached_signing_config->signed_body_value);
+    } else {
+        cached_signing_config->config.signed_body_value = g_aws_signed_body_value_unsigned_payload;
     }
-
-    cached_signing_config->config.signed_body_header = signing_config->signed_body_header;
 
     if (signing_config->credentials != NULL) {
         aws_credentials_acquire(signing_config->credentials);
@@ -252,6 +247,17 @@ struct aws_cached_signing_config_aws *aws_cached_signing_config_new(
         cached_signing_config->config.credentials_provider = signing_config->credentials_provider;
     }
 
+    /* Configs default to Zero. */
+    cached_signing_config->config.algorithm = signing_config->algorithm;
+    cached_signing_config->config.signature_type = signing_config->signature_type;
+    /* TODO: you don't have a way to override this config as the other option is zero. But, you cannot really use the
+     * other value, as it is always required. */
+    cached_signing_config->config.signed_body_header = AWS_SBHT_X_AMZ_CONTENT_SHA256;
+    cached_signing_config->config.should_sign_header = signing_config->should_sign_header;
+    /* It's the user's responsibility to keep the user data around */
+    cached_signing_config->config.should_sign_header_ud = signing_config->should_sign_header_ud;
+
+    cached_signing_config->config.flags = signing_config->flags;
     cached_signing_config->config.expiration_in_seconds = signing_config->expiration_in_seconds;
 
     return cached_signing_config;

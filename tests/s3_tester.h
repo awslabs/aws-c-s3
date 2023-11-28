@@ -12,6 +12,7 @@
 #include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
+#include <aws/s3/s3express_credentials_provider.h>
 
 #include <aws/common/common.h>
 #include <aws/common/condition_variable.h>
@@ -87,6 +88,8 @@ struct aws_s3_tester {
     struct aws_client_bootstrap *client_bootstrap;
     struct aws_credentials_provider *credentials_provider;
     struct aws_signing_config_aws default_signing_config;
+    struct aws_credentials *anonymous_creds;
+    struct aws_signing_config_aws anonymous_signing_config;
 
     struct aws_condition_variable signal;
     bool bound_to_client;
@@ -159,6 +162,8 @@ struct aws_s3_tester_meta_request_options {
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;
+    /* use S3 Express signing config */
+    bool use_s3express_signing;
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
@@ -337,8 +342,8 @@ struct aws_http_message *aws_s3_test_get_object_request_new(
 struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor *host,
-    struct aws_byte_cursor content_type,
     struct aws_byte_cursor key,
+    struct aws_byte_cursor content_type,
     struct aws_input_stream *body_stream,
     uint32_t flags);
 
@@ -456,6 +461,8 @@ struct aws_string *aws_s3_tester_create_file(
     struct aws_input_stream *input_stream);
 
 int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uint64_t *out_content_length);
+
+int aws_s3_tester_check_s3express_creds_for_default_mock_response(struct aws_credentials *credentials);
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file_failure_tester(
     struct aws_allocator *allocator,

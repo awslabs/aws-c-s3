@@ -13,6 +13,8 @@
 #include "aws/s3/private/s3_parallel_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
+#include "aws/s3/private/s3express_credentials_provider_impl.h"
+#include "aws/s3/s3express_credentials_provider.h"
 
 #include <aws/auth/credentials.h>
 #include <aws/common/assert.h>
@@ -223,6 +225,39 @@ void aws_s3_client_unlock_synced_data(struct aws_s3_client *client) {
     aws_mutex_unlock(&client->synced_data.lock);
 }
 
+static void s_s3express_provider_finish_destroy(void *user_data) {
+    struct aws_s3_client *client = user_data;
+    AWS_PRECONDITION(client);
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        client->synced_data.s3express_provider_active = false;
+        /* Schedule the work task to call s_s3_client_finish_destroy function if
+         * everything cleaning up asynchronously has finished. */
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
+}
+
+struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
+    struct aws_allocator *allocator,
+    struct aws_s3_client *client,
+    aws_simple_completion_callback on_provider_shutdown_callback,
+    void *shutdown_user_data,
+    void *factory_user_data) {
+    (void)factory_user_data;
+
+    struct aws_s3express_credentials_provider_default_options options = {
+        .client = client,
+        .shutdown_complete_callback = on_provider_shutdown_callback,
+        .shutdown_user_data = shutdown_user_data,
+    };
+    struct aws_s3express_credentials_provider *s3express_provider =
+        aws_s3express_credentials_provider_new_default(allocator, &options);
+    return s3express_provider;
+}
+
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
@@ -243,6 +278,33 @@ struct aws_s3_client *aws_s3_client_new(
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; throughput_target_gbps cannot less than or equal to 0.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    if (client_config->signing_config == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cannot create client from client_config; signing_config is required.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    if (client_config->signing_config->credentials == NULL &&
+        client_config->signing_config->credentials_provider == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; Invalid signing_config provided, either credentials or "
+            "credentials provider has to be set.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    if (!client_config->enable_s3express &&
+        client_config->signing_config->algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; Client config is set use S3 Express signing, but S3 Express "
+            "support is "
+            "not configured.");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -477,8 +539,14 @@ struct aws_s3_client *aws_s3_client_new(
         *((uint32_t *)&client->ideal_vip_count) = (uint32_t)ceil(ideal_vip_count_double);
     }
 
-    if (client_config->signing_config) {
-        client->cached_signing_config = aws_cached_signing_config_new(client->allocator, client_config->signing_config);
+    client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
+    if (client_config->enable_s3express) {
+        if (client_config->s3express_provider_override_factory) {
+            client->s3express_provider_factory = client_config->s3express_provider_override_factory;
+            client->factory_user_data = client_config->factory_user_data;
+        } else {
+            client->s3express_provider_factory = s_s3express_provider_default_factory;
+        }
     }
 
     client->synced_data.active = true;
@@ -583,6 +651,7 @@ static void s_s3_client_start_destroy(void *user_data) {
 
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
+    aws_s3express_credentials_provider_release(client->s3express_provider);
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -771,6 +840,13 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_PRECONDITION(client->vtable->meta_request_factory);
     AWS_PRECONDITION(options);
 
+    bool use_s3express_signing = false;
+    if (options->signing_config != NULL) {
+        use_s3express_signing = options->signing_config->algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS;
+    } else if (client->cached_signing_config) {
+        use_s3express_signing = client->cached_signing_config->config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS;
+    }
+
     if (options->type >= AWS_S3_META_REQUEST_TYPE_MAX) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
@@ -784,6 +860,15 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Cannot create meta s3 request; message provided in options is invalid.",
+            (void *)client);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+
+    if (use_s3express_signing && client->s3express_provider_factory == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; client doesn't support S3 Express signing.",
             (void *)client);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
@@ -890,6 +975,34 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     {
         aws_s3_client_lock_synced_data(client);
 
+        if (use_s3express_signing && !client->synced_data.s3express_provider_active) {
+
+            AWS_LOGF_TRACE(AWS_LS_S3_CLIENT, "id=%p Create S3 Express provider for the client.", (void *)client);
+            /**
+             * Invoke the factory within the lock. We WARNED people uses their own factory to not use ANY client related
+             * api during the factory.
+             *
+             * We cannot just release the lock and invoke the factory, because it can lead to the other request assume
+             * the provider is active, and not waiting for the provider to be created. And lead to unexpected behavior.
+             */
+            client->s3express_provider = client->s3express_provider_factory(
+                client->allocator, client, s_s3express_provider_finish_destroy, client, client->factory_user_data);
+
+            /* Provider is related to client, we don't need to clean it up if meta request failed. But, if provider
+             * failed to be created, let's bail out earlier. */
+            if (!client->s3express_provider) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Failed to create S3 Express provider for client due to error %d (%s)",
+                    (void *)client,
+                    aws_last_error_or_unknown(),
+                    aws_error_str(aws_last_error_or_unknown()));
+                error_occurred = true;
+                goto unlock;
+            }
+            client->synced_data.s3express_provider_active = true;
+        }
+
         struct aws_string *endpoint_host_name = NULL;
 
         if (options->endpoint != NULL) {
@@ -907,6 +1020,10 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 
         struct aws_s3_endpoint *endpoint = NULL;
         struct aws_hash_element *endpoint_hash_element = NULL;
+
+        if (use_s3express_signing) {
+            meta_request->s3express_session_host = aws_string_new_from_string(client->allocator, endpoint_host_name);
+        }
 
         int was_created = 0;
         if (aws_hash_table_create(
@@ -1169,8 +1286,7 @@ static void s_s3_client_push_meta_request_synced(
     struct aws_s3_meta_request_work *meta_request_work =
         aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_meta_request_work));
 
-    aws_s3_meta_request_acquire(meta_request);
-    meta_request_work->meta_request = meta_request;
+    meta_request_work->meta_request = aws_s3_meta_request_acquire(meta_request);
     aws_linked_list_push_back(&client->synced_data.pending_meta_request_work, &meta_request_work->node);
 }
 
@@ -1450,12 +1566,12 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         /* This flag should never be set twice. If it was, that means a double-free could occur.*/
         AWS_ASSERT(!client->synced_data.finish_destroy);
 
-        bool finish_destroy = client->synced_data.active == false &&
-                              client->synced_data.start_destroy_executing == false &&
-                              client->synced_data.body_streaming_elg_allocated == false &&
-                              client->synced_data.process_work_task_scheduled == false &&
-                              client->synced_data.process_work_task_in_progress == false &&
-                              client->synced_data.num_endpoints_allocated == 0;
+        bool finish_destroy =
+            client->synced_data.active == false && client->synced_data.start_destroy_executing == false &&
+            client->synced_data.body_streaming_elg_allocated == false &&
+            client->synced_data.process_work_task_scheduled == false &&
+            client->synced_data.process_work_task_in_progress == false &&
+            client->synced_data.s3express_provider_active == false && client->synced_data.num_endpoints_allocated == 0;
 
         client->synced_data.finish_destroy = finish_destroy;
 
@@ -1464,13 +1580,14 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                 AWS_LS_S3_CLIENT,
                 "id=%p Client shutdown progress: starting_destroy_executing=%d  body_streaming_elg_allocated=%d  "
                 "process_work_task_scheduled=%d  process_work_task_in_progress=%d  num_endpoints_allocated=%d "
-                "finish_destroy=%d",
+                "s3express_provider_active=%d finish_destroy=%d",
                 (void *)client,
                 (int)client->synced_data.start_destroy_executing,
                 (int)client->synced_data.body_streaming_elg_allocated,
                 (int)client->synced_data.process_work_task_scheduled,
                 (int)client->synced_data.process_work_task_in_progress,
                 (int)client->synced_data.num_endpoints_allocated,
+                (int)client->synced_data.s3express_provider_active,
                 (int)client->synced_data.finish_destroy);
         }
 

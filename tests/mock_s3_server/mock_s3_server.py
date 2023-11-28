@@ -35,6 +35,7 @@ class S3Opts(Enum):
     AbortMultipartUpload = 4
     GetObject = 5
     ListParts = 6
+    CreateSession = 7
 
 
 @dataclass
@@ -279,7 +280,98 @@ async def send_response(wrapper, response):
 
     res = h11.Response(status_code=response.status_code,
                        headers=response.headers)
+    try:
+        await wrapper.send(res)
+    except Exception as e:
+        print(e)
+    if not response.head_request:
+        if response.chunked:
+            await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(response.data), response.data.encode())))
+        else:
+            await wrapper.send(h11.Data(data=response.data.encode()))
+    await wrapper.send(h11.EndOfMessage())
 
+    res = h11.Response(status_code=response.status_code,
+                       headers=response.headers)
+
+
+async def send_simple_response(wrapper, status_code, content_type, body):
+    wrapper.info("Sending", status_code, "response with", len(body), "bytes")
+    headers = wrapper.basic_headers()
+    headers.append(("Content-Type", content_type))
+    headers.append(("Content-Length", str(len(body))))
+    res = h11.Response(status_code=status_code, headers=headers)
+    await wrapper.send(res)
+    await wrapper.send(h11.Data(data=body))
+    await wrapper.send(h11.EndOfMessage())
+
+
+async def send_response_from_json(wrapper, response_json_path, chunked=False, generate_body=False, generate_body_size=0, head_request=False):
+    wrapper.info("sending response from json file: ", response_json_path,
+                 ".\n generate_body: ", generate_body, "generate_body_size: ", generate_body_size)
+    with open(response_json_path, 'r') as f:
+        data = json.load(f)
+    # if response has delay, then sleep before sending it
+    delay = data.get('delay', 0)
+    if delay > 0:
+        assert delay < TIMEOUT
+        await trio.sleep(delay)
+
+    status_code = data['status']
+    if generate_body:
+        # generate body with a specific size instead
+        body = "a" * generate_body_size
+    else:
+        body = "\n".join(data['body'])
+    wrapper.info("Sending", status_code,
+                 "response with", len(body), "bytes")
+
+    headers = wrapper.basic_headers()
+    for header in data['headers'].items():
+        headers.append((header[0], header[1]))
+
+    if chunked:
+        headers.append(('Transfer-Encoding', "chunked"))
+        res = h11.Response(status_code=status_code, headers=headers)
+        await wrapper.send(res)
+        await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(body), body.encode())))
+    else:
+        headers.append(("Content-Length", str(len(body))))
+        res = h11.Response(status_code=status_code, headers=headers)
+        await wrapper.send(res)
+        if head_request:
+            await wrapper.send(h11.EndOfMessage())
+            return
+        await wrapper.send(h11.Data(data=body.encode()))
+
+    await wrapper.send(h11.EndOfMessage())
+
+
+async def send_mock_s3_response(wrapper, request_type, path, generate_body=False, generate_body_size=0, head_request=False):
+    response_file = os.path.join(
+        base_dir, request_type.name, f"{path[1:]}.json")
+    if os.path.exists(response_file) == False:
+        wrapper.info(response_file, "not exist, using the default response")
+        response_file = os.path.join(
+            base_dir, request_type.name, f"default.json")
+    if "throttle" in response_file:
+        # We throttle the request half the time to make sure it succeeds after a retry
+        if wrapper.should_throttle is False:
+            wrapper.info("Skipping throttling")
+            response_file = os.path.join(
+                base_dir, request_type.name, f"default.json")
+        else:
+            wrapper.info("Throttling")
+        # Flip the flag
+        wrapper.should_throttle = not wrapper.should_throttle
+    await send_response_from_json(wrapper, response_file, generate_body=generate_body, generate_body_size=generate_body_size, head_request=head_request)
+
+
+async def maybe_send_error_response(wrapper, exc):
+    if wrapper.conn.our_state not in {h11.IDLE, h11.SEND_RESPONSE}:
+        wrapper.info("...but I can't, because our state is",
+                     wrapper.conn.our_state)
+        return
     try:
         await wrapper.send(res)
     except Exception as e:
@@ -385,6 +477,8 @@ async def handle_mock_s3_request(wrapper, request):
             # GET /Key+?max-parts=MaxParts&part-number-marker=PartNumberMarker&uploadId=UploadId HTTP/1.1 -- List Parts
             request_type = S3Opts.ListParts
             response_config = handle_list_parts(parsed_path)
+        elif parsed_path.query.find("session") != -1:
+            request_type = S3Opts.CreateSession
         else:
             request_type = S3Opts.GetObject
             response_config = handle_get_object(

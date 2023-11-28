@@ -89,7 +89,7 @@ static int s_test_s3_client_monitoring_options_override(struct aws_allocator *al
 
     struct aws_s3_client_config client_config = {.monitoring_options = &monitoring_options};
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, 0));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
@@ -1150,6 +1150,7 @@ static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
 
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_public_bucket_name, &g_test_s3_region);

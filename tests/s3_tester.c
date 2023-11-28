@@ -395,6 +395,8 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         tester->client_bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
     }
 
+    tester->anonymous_creds = aws_credentials_new_anonymous(allocator);
+    tester->anonymous_signing_config.credentials = tester->anonymous_creds;
 #ifndef BYO_CRYPTO
     /* Setup the credentials provider */
     {
@@ -402,10 +404,13 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
         AWS_ZERO_STRUCT(credentials_config);
         credentials_config.bootstrap = tester->client_bootstrap;
         tester->credentials_provider = aws_credentials_provider_new_chain_default(allocator, &credentials_config);
+        aws_s3_init_default_signing_config(
+            &tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
     }
+#else
+    { tester->default_signing_config = tester->anonymous_signing_config; }
 #endif
 
-    aws_s3_init_default_signing_config(&tester->default_signing_config, g_test_s3_region, tester->credentials_provider);
     return AWS_OP_SUCCESS;
 
 condition_variable_failed:
@@ -425,14 +430,20 @@ int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client
     ASSERT_TRUE(config->client_bootstrap == NULL);
     config->client_bootstrap = tester->client_bootstrap;
 
-    if (flags & AWS_S3_TESTER_BIND_CLIENT_REGION) {
-        ASSERT_TRUE(config->region.len == 0);
-        config->region = g_test_s3_region;
-    }
-
     if (flags & AWS_S3_TESTER_BIND_CLIENT_SIGNING) {
         ASSERT_TRUE(config->signing_config == NULL);
         config->signing_config = &tester->default_signing_config;
+    }
+    if (flags & AWS_S3_TESTER_BIND_CLIENT_REGION) {
+        ASSERT_TRUE(config->region.len == 0);
+        config->region = g_test_s3_region;
+    } else {
+        if (config->signing_config) {
+            config->signing_config->region = config->region;
+        }
+    }
+    if (!config->signing_config) {
+        config->signing_config = &tester->anonymous_signing_config;
     }
 
     ASSERT_TRUE(config->shutdown_callback == NULL);
@@ -687,6 +698,8 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     }
     aws_string_destroy(tester->bucket_name);
     aws_string_destroy(tester->public_bucket_name);
+
+    aws_credentials_release(tester->anonymous_creds);
 
     aws_array_list_clean_up(&tester->client_vtable_patches);
     aws_array_list_clean_up(&tester->meta_request_vtable_patches);
@@ -1415,6 +1428,12 @@ int aws_s3_tester_send_meta_request_with_options(
     if (options->signing_config) {
         meta_request_options.signing_config = options->signing_config;
     }
+    struct aws_signing_config_aws signing_config = {
+        .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
+        .service = g_s3express_service_name,
+    };
+    meta_request_options.signing_config =
+        options->use_s3express_signing ? &signing_config : meta_request_options.signing_config;
 
     struct aws_byte_buf input_stream_buffer;
     AWS_ZERO_STRUCT(input_stream_buffer);
@@ -2029,6 +2048,35 @@ int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uin
     ASSERT_SUCCESS(aws_http_headers_get(headers, aws_byte_cursor_from_c_str("Content-Length"), &value_cursor));
 
     ASSERT_SUCCESS(aws_byte_cursor_utf8_parse_u64(value_cursor, out_content_length));
+    return AWS_OP_SUCCESS;
+}
+
+/* The default mock response is:
+<?xml version="1.0" encoding="UTF-8"?>
+<CreateSessionResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Credentials>
+    <SessionToken>sessionToken</SessionToken>
+    <SecretAccessKey>secretKey</SecretAccessKey>
+    <AccessKeyId>accessKeyId</AccessKeyId>
+    <Expiration>2023-06-26T17:33:30Z</Expiration>
+  </Credentials>
+</CreateSessionResult>
+ */
+int aws_s3_tester_check_s3express_creds_for_default_mock_response(struct aws_credentials *credentials) {
+
+    struct aws_byte_cursor result;
+    bool match = true;
+    result = aws_credentials_get_access_key_id(credentials);
+    match &= aws_byte_cursor_eq_c_str(&result, "accessKeyId");
+    result = aws_credentials_get_secret_access_key(credentials);
+    match &= aws_byte_cursor_eq_c_str(&result, "secretKey");
+    result = aws_credentials_get_session_token(credentials);
+    match &= aws_byte_cursor_eq_c_str(&result, "sessionToken");
+
+    uint64_t expiration_secs = aws_credentials_get_expiration_timepoint_seconds(credentials);
+    ASSERT_UINT_EQUALS(1687800810, expiration_secs);
+
+    ASSERT_TRUE(match);
     return AWS_OP_SUCCESS;
 }
 
