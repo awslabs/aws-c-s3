@@ -154,8 +154,8 @@ static bool s_s3_auto_ranged_get_update(
                  * turning the Range header into a Content-Range response header.*/
                 bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0 ||
                                             meta_request->checksum_config.validate_response_checksum;
-
-                if (head_object_required) {
+                // waahm7
+                if (false && head_object_required) {
                     /* If the head object request hasn't been sent yet, then send it now. */
                     if (!auto_ranged_get->synced_data.head_object_sent) {
                         request = aws_s3_request_new(
@@ -376,11 +376,22 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
             }
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
-            message = aws_s3_ranged_get_object_message_new(
-                meta_request->allocator,
-                meta_request->initial_request_message,
-                request->part_range_start,
-                request->part_range_end);
+            // waahm7
+            if (request->discovers_object_size) {
+                message = aws_s3_message_util_copy_http_message_no_body_all_headers(
+                    meta_request->allocator, meta_request->initial_request_message);
+                if (message) {
+                    aws_s3_message_util_set_multipart_request_path(
+                        meta_request->allocator, NULL, request->part_number, false, message);
+                }
+            } else {
+                // Todo waahm7: fix this with proper adding range header here
+                message = aws_s3_ranged_get_object_message_new(
+                    meta_request->allocator,
+                    meta_request->initial_request_message,
+                    request->part_range_start,
+                    request->part_range_end);
+            }
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
             message = aws_s3_message_util_copy_http_message_no_body_all_headers(

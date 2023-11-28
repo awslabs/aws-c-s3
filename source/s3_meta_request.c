@@ -94,7 +94,9 @@ static int s_meta_request_get_response_headers_checksum_callback(
             continue;
         }
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
-        if (aws_http_headers_has(headers, *algorithm_header_name)) {
+        const struct aws_byte_cursor parts_count_header_name = aws_byte_cursor_from_c_str("x-amz-mp-parts-count");
+        if (aws_http_headers_has(headers, *algorithm_header_name) &&
+            !aws_http_headers_has(headers, parts_count_header_name)) {
             struct aws_byte_cursor header_sum;
             aws_http_headers_get(headers, *algorithm_header_name, &header_sum);
             size_t encoded_len = 0;
