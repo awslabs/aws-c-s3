@@ -56,7 +56,7 @@ static const size_t s_buffer_pool_reserved_mem = MB_TO_BYTES(128);
 static const size_t s_chunks_per_block = 16;
 
 /*
- * Max size of chunks in primary. 
+ * Max size of chunks in primary.
  * Effectively if client part size is above the following number, primary
  * storage along with buffer reuse is disabled and all buffers are allocated
  * directly using allocator.
@@ -135,7 +135,8 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
 
     if (mem_limit < GB_TO_BYTES(1)) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT, "Failed to initialize buffer pool. "
+            AWS_LS_S3_CLIENT,
+            "Failed to initialize buffer pool. "
             "Minimum supported value for Memory Limit is 1GB.");
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         return NULL;
@@ -152,12 +153,20 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
 
     size_t adjusted_mem_lim = mem_limit - s_buffer_pool_reserved_mem;
 
-    if (chunk_size > s_max_chunk_size_for_buffer_reuse ||
-        chunk_size * s_chunks_per_block > adjusted_mem_lim) {
+    /*
+     * TODO: There is several things we can consider tweaking here:
+     * - if chunk size is a weird number of bytes, force it to the closest page size?
+     * - grow chunk size max based on overall mem lim (ex. for 4gb it might be
+     *   64mb, but for 8gb it can be 128mb)
+     * - align chunk size to better fill available mem? some chunk sizes can
+     *   result in memory being wasted because overall limit does not divide
+     *   nicely into chunks
+     */
+    if (chunk_size > s_max_chunk_size_for_buffer_reuse || chunk_size * s_chunks_per_block > adjusted_mem_lim) {
         AWS_LOGF_WARN(
             AWS_LS_S3_CLIENT,
             "Part size specified on the client is too large for automatic buffer reuse. "
-            "Consider specifying a smaller part size to improve performance and memory utilization");    
+            "Consider specifying a smaller part size to improve performance and memory utilization");
         chunk_size = 0;
     }
 
