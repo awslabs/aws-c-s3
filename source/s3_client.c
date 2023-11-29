@@ -365,7 +365,7 @@ struct aws_s3_client *aws_s3_client_new(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; configured max part size should not exceed memory limit."
             "size.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         goto on_early_fail;
     }
 

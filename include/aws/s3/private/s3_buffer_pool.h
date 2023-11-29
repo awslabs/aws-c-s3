@@ -38,6 +38,9 @@ struct aws_s3_buffer_pool_usage_stats {
      * buffer reserved for overhead of the pool */
     size_t mem_limit;
 
+    /* Max size of buffer to be allocated from primary. */
+    size_t primary_cutoff;
+
     /* How much mem is used in primary storage. includes memory used by blocks
      * that are waiting on all allocs to release before being put back in circulation. */
     size_t primary_used;
