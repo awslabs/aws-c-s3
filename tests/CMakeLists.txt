@@ -256,8 +256,8 @@ add_net_test_case(test_s3_upload_review)
 add_net_test_case(test_s3_upload_review_no_content_length)
 add_net_test_case(test_s3_upload_review_rejection)
 
-add_test_case(test_s3_list_bucket_init_mem_safety)
-add_test_case(test_s3_list_bucket_init_mem_safety_optional_copies)
+add_net_test_case(test_s3_list_bucket_init_mem_safety)
+add_net_test_case(test_s3_list_bucket_init_mem_safety_optional_copies)
 add_net_test_case(test_s3_list_bucket_valid)
 
 # Tests against local mock server
@@ -320,7 +320,7 @@ add_test_case(test_s3_buffer_pool_trim)
 add_test_case(test_s3_buffer_pool_reservation_hold)
 add_net_test_case(test_s3_put_object_buffer_pool_trim)
 
-add_test_case(client_update_upload_part_timeout)
+add_net_test_case(client_update_upload_part_timeout)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
