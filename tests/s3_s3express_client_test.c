@@ -326,6 +326,7 @@ TEST_CASE(s3express_client_put_test_multiple) {
 
         meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
         ASSERT_TRUE(meta_requests[i] != NULL);
+        aws_http_message_release(message);
     }
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(&tester);
@@ -340,7 +341,7 @@ TEST_CASE(s3express_client_put_test_multiple) {
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
-        aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
+        aws_s3_tester_validate_put_object_results(&meta_request_test_results[i], 0);
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
     }
 
@@ -517,7 +518,7 @@ TEST_CASE(s3express_client_get_test) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_client_get_multiple_test) {
+TEST_CASE(s3express_client_get_test_multiple) {
     (void)ctx;
 
     struct aws_s3_meta_request *meta_requests[100];

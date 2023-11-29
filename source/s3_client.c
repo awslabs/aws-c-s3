@@ -1630,9 +1630,9 @@ static bool s_meta_request_create_more_requests(
      *
      * We cannot create more requests for this meta request.
      */
-    if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) >
+    if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) >=
             max_requests_prepare ||
-        num_requests_in_flight > max_requests_in_flight) {
+        num_requests_in_flight >= max_requests_in_flight) {
         return false;
     }
 

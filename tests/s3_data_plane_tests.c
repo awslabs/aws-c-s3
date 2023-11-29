@@ -1801,6 +1801,7 @@ static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator,
             aws_string_destroy(filepath_str[i]);
         }
     }
+#undef NUM_REQUESTS
 
     aws_string_destroy(host_name);
     host_name = NULL;
