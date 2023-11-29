@@ -497,6 +497,7 @@ static struct aws_s3express_session_creator *s_session_creator_new(
     };
 
     aws_byte_buf_init(&session_creator->response_buf, provider->allocator, 512);
+    struct aws_byte_cursor operation_name = aws_byte_cursor_from_c_str("CreateSession");
     struct aws_s3_meta_request_options options = {
         .message = request,
         .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
@@ -506,6 +507,7 @@ static struct aws_s3express_session_creator *s_session_creator_new(
         /* Override endpoint only for tests. */
         .endpoint = impl->mock_test.endpoint_override ? impl->mock_test.endpoint_override : NULL,
         .user_data = session_creator,
+        .operation_name = operation_name,
     };
     session_creator->synced_data.meta_request = aws_s3_client_make_meta_request(impl->client, &options);
     AWS_FATAL_ASSERT(session_creator->synced_data.meta_request);

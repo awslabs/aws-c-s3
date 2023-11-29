@@ -221,7 +221,7 @@ static int s_s3express_put_object_request(
     return AWS_OP_SUCCESS;
 }
 
-static int s_s3express_client_put_test_real_server_helper(struct aws_allocator *allocator, size_t content_length) {
+static int s_s3express_client_put_test_helper(struct aws_allocator *allocator, size_t content_length) {
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -256,14 +256,101 @@ static int s_s3express_client_put_test_real_server_helper(struct aws_allocator *
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_client_put_test_small_real_server) {
+TEST_CASE(s3express_client_put_test_small) {
     (void)ctx;
-    return s_s3express_client_put_test_real_server_helper(allocator, MB_TO_BYTES(1));
+    return s_s3express_client_put_test_helper(allocator, MB_TO_BYTES(1));
 }
 
-TEST_CASE(s3express_client_put_test_large_real_server) {
+TEST_CASE(s3express_client_put_test_large) {
     (void)ctx;
-    return s_s3express_client_put_test_real_server_helper(allocator, MB_TO_BYTES(100));
+    return s_s3express_client_put_test_helper(allocator, MB_TO_BYTES(100));
+}
+
+TEST_CASE(s3express_client_put_test_multiple) {
+    (void)ctx;
+
+#define NUM_REQUESTS 100
+    struct aws_s3_meta_request *meta_requests[NUM_REQUESTS];
+    struct aws_s3_meta_request_test_results meta_request_test_results[NUM_REQUESTS];
+    struct aws_input_stream *input_streams[NUM_REQUESTS];
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
+
+    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_c_str(endpoint);
+    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str("/crt-test");
+
+    struct aws_byte_cursor west2_region_cursor = aws_byte_cursor_from_c_str("us-west-2");
+    char west2_endpoint[] = "crts-west2--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com";
+    struct aws_byte_cursor west2_host_cursor = aws_byte_cursor_from_c_str(west2_endpoint);
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(5),
+        .enable_s3express = true,
+        .region = region_cursor,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
+        input_streams[i] = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
+
+        struct aws_byte_cursor request_region = region_cursor;
+        struct aws_byte_cursor request_host = host_cursor;
+        if (i % 2 == 0) {
+            request_region = west2_region_cursor;
+            request_host = west2_host_cursor;
+        }
+
+        struct aws_http_message *message = aws_s3_test_put_object_request_new(
+            allocator, &request_host, key_cursor, g_test_body_content_type, input_streams[i], 0);
+
+        struct aws_s3_meta_request_options options;
+        AWS_ZERO_STRUCT(options);
+        options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+        options.message = message;
+        struct aws_signing_config_aws s3express_signing_config = {
+            .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
+            .service = g_s3express_service_name,
+            .region = request_region,
+        };
+        options.signing_config = &s3express_signing_config;
+        aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
+
+        ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
+
+        meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
+        ASSERT_TRUE(meta_requests[i] != NULL);
+    }
+    /* Wait for the request to finish. */
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    aws_s3_tester_lock_synced_data(&tester);
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
+        meta_requests[i] = aws_s3_meta_request_release(meta_requests[i]);
+    }
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
+        aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
+    }
+
+    for (size_t i = 0; i < NUM_REQUESTS; ++i) {
+        aws_input_stream_release(input_streams[i]);
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
 }
 
 void s_meta_request_finished_overhead(
@@ -300,7 +387,7 @@ struct aws_s3express_credentials_provider *s_s3express_provider_mock_factory(
 }
 
 /* Long running test to make sure our refresh works properly */
-TEST_CASE(s3express_client_put_long_running_test_real_server) {
+TEST_CASE(s3express_client_put_long_running_test) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -375,7 +462,7 @@ TEST_CASE(s3express_client_put_long_running_test_real_server) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_client_get_test_real_server) {
+TEST_CASE(s3express_client_get_test) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -425,6 +512,76 @@ TEST_CASE(s3express_client_get_test_real_server) {
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(s3express_client_get_multiple_test) {
+    (void)ctx;
+
+    struct aws_s3_meta_request *meta_requests[100];
+    struct aws_s3_meta_request_test_results meta_request_test_results[100];
+    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_requests);
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
+
+    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_c_str(endpoint);
+    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str("/crt-download-10MB");
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(5),
+        .enable_s3express = true,
+        .region = region_cursor,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+
+        struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, key_cursor);
+
+        struct aws_s3_meta_request_options options;
+        AWS_ZERO_STRUCT(options);
+        options.type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+        options.message = message;
+        struct aws_signing_config_aws s3express_signing_config = {
+            .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
+            .service = g_s3express_service_name,
+        };
+        options.signing_config = &s3express_signing_config;
+        aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
+
+        ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
+
+        meta_requests[i] = aws_s3_client_make_meta_request(client, &options);
+        ASSERT_TRUE(meta_requests[i] != NULL);
+
+        aws_http_message_release(message);
+    }
+    /* Wait for the request to finish. */
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    aws_s3_tester_lock_synced_data(&tester);
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        meta_requests[i] = aws_s3_meta_request_release(meta_requests[i]);
+    }
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        aws_s3_tester_validate_get_object_results(&meta_request_test_results[i], 0);
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results[i]);
+    }
+
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;

@@ -547,7 +547,6 @@ TEST_CASE(s3express_provider_stress_mock_server) {
 
     /* Stress about under load, keep hitting 10 hosts */
     for (size_t i = 0; i < num_requests; i++) {
-        /* code */
         char key_buffer[128] = "";
         snprintf(key_buffer, sizeof(key_buffer), "test-%zu", (size_t)(i % 10));
         struct aws_credentials_properties_s3express property = {
@@ -562,7 +561,6 @@ TEST_CASE(s3express_provider_stress_mock_server) {
     /* Stress about over load, keep hitting different hosts */
     s_s3express_tester.credentials_callbacks_received = 0;
     for (size_t i = 0; i < num_requests; i++) {
-        /* code */
         char key_buffer[128] = "";
         snprintf(key_buffer, sizeof(key_buffer), "test-%zu", i);
         struct aws_credentials_properties_s3express property = {
@@ -583,7 +581,7 @@ TEST_CASE(s3express_provider_stress_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_provider_long_run_real_server) {
+TEST_CASE(s3express_provider_long_running) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -637,7 +635,6 @@ TEST_CASE(s3express_provider_long_run_real_server) {
     }
     /**
      * We should have more than 2 different creds.
-     * Server can return a credentials that expires less than 5 mins.
      **/
     ASSERT_TRUE(s_s3express_tester.number_of_credentials >= 2);
 
