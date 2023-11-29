@@ -506,6 +506,7 @@ static struct aws_s3express_session_creator *s_session_creator_new(
         /* Override endpoint only for tests. */
         .endpoint = impl->mock_test.endpoint_override ? impl->mock_test.endpoint_override : NULL,
         .user_data = session_creator,
+        .operation_name = aws_byte_cursor_from_c_str("CreateSession"),
     };
     session_creator->synced_data.meta_request = aws_s3_client_make_meta_request(impl->client, &options);
     AWS_FATAL_ASSERT(session_creator->synced_data.meta_request);
