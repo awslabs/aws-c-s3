@@ -1675,10 +1675,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
-        /* While:
-         *     * There are meta requests to get requests from.
-         *
-         * Then update meta requests to get new requests that can then be prepared (reading from any streams, signing,
+        /**
+         * Iterate through the meta requests to update meta requests and get new requests that can then be prepared (reading from any streams, signing,
          * etc.) for sending.
          */
         while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
