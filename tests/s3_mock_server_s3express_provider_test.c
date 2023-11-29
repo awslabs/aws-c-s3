@@ -581,7 +581,7 @@ TEST_CASE(s3express_provider_stress_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_provider_long_running) {
+TEST_CASE(s3express_provider_long_running_session_refresh) {
     (void)ctx;
 
     struct aws_s3_tester tester;

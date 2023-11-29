@@ -1711,7 +1711,8 @@ static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocat
 
 static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator, bool file_on_disk) {
 
-#define NUM_REQUESTS 5
+    enum s_numbers { NUM_REQUESTS = 5 };
+
     struct aws_s3_meta_request *meta_requests[NUM_REQUESTS];
     struct aws_s3_meta_request_test_results meta_request_test_results[NUM_REQUESTS];
     struct aws_http_message *messages[NUM_REQUESTS];
@@ -1801,7 +1802,6 @@ static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator,
             aws_string_destroy(filepath_str[i]);
         }
     }
-#undef NUM_REQUESTS
 
     aws_string_destroy(host_name);
     host_name = NULL;

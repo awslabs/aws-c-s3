@@ -256,20 +256,21 @@ static int s_s3express_client_put_test_helper(struct aws_allocator *allocator, s
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_client_put_test_small) {
+TEST_CASE(s3express_client_put_object) {
     (void)ctx;
     return s_s3express_client_put_test_helper(allocator, MB_TO_BYTES(1));
 }
 
-TEST_CASE(s3express_client_put_test_large) {
+TEST_CASE(s3express_client_put_object_multipart) {
     (void)ctx;
     return s_s3express_client_put_test_helper(allocator, MB_TO_BYTES(100));
 }
 
-TEST_CASE(s3express_client_put_test_multiple) {
+TEST_CASE(s3express_client_put_object_multipart_multiple) {
     (void)ctx;
 
-#define NUM_REQUESTS 100
+    enum s_numbers { NUM_REQUESTS = 100 };
+
     struct aws_s3_meta_request *meta_requests[NUM_REQUESTS];
     struct aws_s3_meta_request_test_results meta_request_test_results[NUM_REQUESTS];
     struct aws_input_stream *input_streams[NUM_REQUESTS];
@@ -303,6 +304,7 @@ TEST_CASE(s3express_client_put_test_multiple) {
         struct aws_byte_cursor request_region = region_cursor;
         struct aws_byte_cursor request_host = host_cursor;
         if (i % 2 == 0) {
+            /* Make half of request to east1 and rest half to west2 */
             request_region = west2_region_cursor;
             request_host = west2_host_cursor;
         }
@@ -348,7 +350,7 @@ TEST_CASE(s3express_client_put_test_multiple) {
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_input_stream_release(input_streams[i]);
     }
-#undef NUM_REQUESTS
+
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;
@@ -388,7 +390,7 @@ struct aws_s3express_credentials_provider *s_s3express_provider_mock_factory(
 }
 
 /* Long running test to make sure our refresh works properly */
-TEST_CASE(s3express_client_put_long_running_test) {
+TEST_CASE(s3express_client_put_object_long_running_session_refresh) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -463,7 +465,7 @@ TEST_CASE(s3express_client_put_long_running_test) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_client_get_test) {
+TEST_CASE(s3express_client_get_object) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -518,7 +520,7 @@ TEST_CASE(s3express_client_get_test) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_client_get_test_multiple) {
+TEST_CASE(s3express_client_get_object_multiple) {
     (void)ctx;
 
     struct aws_s3_meta_request *meta_requests[100];

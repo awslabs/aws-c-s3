@@ -1606,9 +1606,9 @@ static void s_s3_client_prepare_callback_queue_request(
     int error_code,
     void *user_data);
 
-static bool s_meta_request_create_more_requests(
-    struct aws_s3_meta_request *meta_request,
+static bool s_s3_client_should_update_meta_request(
     struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request,
     uint32_t num_requests_in_flight,
     const uint32_t max_requests_in_flight,
     const uint32_t max_requests_prepare) {
@@ -1622,17 +1622,18 @@ static bool s_meta_request_create_more_requests(
     }
 
     /**
-     * If:
-     *     * Number of being-prepared + already-prepared-and-queued requests is more than the max that can
+     * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
      * be in the preparation stage.
-     *     * Total number of requests tracked by the client is more than the max tracked ("in flight")
+     * Or total number of requests tracked by the client is more than the max tracked ("in flight")
      * requests.
      *
      * We cannot create more requests for this meta request.
      */
     if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) >=
-            max_requests_prepare ||
-        num_requests_in_flight >= max_requests_in_flight) {
+        max_requests_prepare) {
+        return false;
+    }
+    if (num_requests_in_flight >= max_requests_in_flight) {
         return false;
     }
 
@@ -1686,8 +1687,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             struct aws_s3_meta_request *meta_request =
                 AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
-            if (!s_meta_request_create_more_requests(
-                    meta_request, client, num_requests_in_flight, max_requests_in_flight, max_requests_prepare)) {
+            if (!s_s3_client_should_update_meta_request(
+                    client, meta_request, num_requests_in_flight, max_requests_in_flight, max_requests_prepare)) {
 
                 /* Move the meta request to be processed from next loop. */
                 aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
