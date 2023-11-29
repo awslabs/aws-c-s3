@@ -50,7 +50,18 @@ static size_t s_block_list_initial_capacity = 5;
  * client as well as any allocations overruns due to memory waste in the pool. */
 static const size_t s_buffer_pool_reserved_mem = MB_TO_BYTES(128);
 
+/*
+ * How many chunks make up a block in primary storage.
+ */
 static const size_t s_chunks_per_block = 16;
+
+/*
+ * Max size of chunks in primary. 
+ * Effectively if client part size is above the following number, primary
+ * storage along with buffer reuse is disabled and all buffers are allocated
+ * directly using allocator.
+ */
+static const size_t s_max_chunk_size_for_buffer_reuse = MB_TO_BYTES(64);
 
 struct aws_s3_buffer_pool {
     struct aws_allocator *base_allocator;
@@ -124,29 +135,30 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
 
     if (mem_limit < GB_TO_BYTES(1)) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT, "Failed to initialize buffer pool. Min supported value for Memory Limit is 1GB.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            AWS_LS_S3_CLIENT, "Failed to initialize buffer pool. "
+            "Minimum supported value for Memory Limit is 1GB.");
+        aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         return NULL;
     }
 
-    if (!(chunk_size == 0 || (chunk_size > (1024) && chunk_size % 1024 == 0))) {
-        AWS_LOGF_ERROR(
+    if (chunk_size < (1024) || chunk_size % (4 * 1024) != 0) {
+        AWS_LOGF_WARN(
             AWS_LS_S3_CLIENT,
-            "Failed to initialize buffer pool. Chunk size must be either 0 or more than 1 KB and size must be 1 KB "
-            "aligned.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
+            "Part size specified on the client can lead to suboptimal performance. "
+            "Consider specifying size in multiples of 4KiB. Ideal part size for most transfers is "
+            "1MiB multiple between 8MiB and 16MiB. Note: the client will automatically scale part size "
+            "if its not sufficient to transfer data within the maximum number of parts");
     }
 
     size_t adjusted_mem_lim = mem_limit - s_buffer_pool_reserved_mem;
 
-    if (chunk_size * s_chunks_per_block > adjusted_mem_lim) {
-        AWS_LOGF_ERROR(
+    if (chunk_size > s_max_chunk_size_for_buffer_reuse ||
+        chunk_size * s_chunks_per_block > adjusted_mem_lim) {
+        AWS_LOGF_WARN(
             AWS_LS_S3_CLIENT,
-            "Failed to initialize buffer pool. Chunk size is too large for the memory limit. "
-            "Consider adjusting memory limit or part size.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
+            "Part size specified on the client is too large for automatic buffer reuse. "
+            "Consider specifying a smaller part size to improve performance and memory utilization");    
+        chunk_size = 0;
     }
 
     struct aws_s3_buffer_pool *buffer_pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
@@ -405,6 +417,7 @@ struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3
 
     struct aws_s3_buffer_pool_usage_stats ret = (struct aws_s3_buffer_pool_usage_stats){
         .mem_limit = buffer_pool->mem_limit,
+        .primary_cutoff = buffer_pool->primary_size_cutoff,
         .primary_allocated = buffer_pool->primary_allocated,
         .primary_used = buffer_pool->primary_used,
         .primary_reserved = buffer_pool->primary_reserved,

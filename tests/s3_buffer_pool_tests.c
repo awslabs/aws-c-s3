@@ -73,6 +73,23 @@ static int s_test_s3_buffer_pool_threaded_allocs_and_frees(struct aws_allocator 
 }
 AWS_TEST_CASE(test_s3_buffer_pool_threaded_allocs_and_frees, s_test_s3_buffer_pool_threaded_allocs_and_frees)
 
+static int s_test_s3_buffer_pool_large_chunk_threaded_allocs_and_frees(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(65), GB_TO_BYTES(2));
+    
+    struct aws_s3_buffer_pool_usage_stats stats = aws_s3_buffer_pool_get_usage(buffer_pool);
+    ASSERT_INT_EQUALS(0, stats.primary_cutoff);
+
+    s_thread_test(allocator, s_threaded_alloc_worker, buffer_pool);
+
+    aws_s3_buffer_pool_destroy(buffer_pool);
+
+    return 0;
+}
+AWS_TEST_CASE(test_s3_buffer_pool_large_chunk_threaded_allocs_and_frees, s_test_s3_buffer_pool_large_chunk_threaded_allocs_and_frees)
+
 static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
@@ -186,3 +203,16 @@ static int s_test_s3_buffer_pool_reservation_hold(struct aws_allocator *allocato
     return 0;
 };
 AWS_TEST_CASE(test_s3_buffer_pool_reservation_hold, s_test_s3_buffer_pool_reservation_hold)
+
+static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, MB_TO_BYTES(8), MB_TO_BYTES(512));
+    ASSERT_NULL(buffer_pool);
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, aws_last_error());
+
+
+    return 0;
+};
+AWS_TEST_CASE(test_s3_buffer_pool_too_small, s_test_s3_buffer_pool_too_small)
