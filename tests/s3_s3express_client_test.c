@@ -348,7 +348,7 @@ TEST_CASE(s3express_client_put_test_multiple) {
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_input_stream_release(input_streams[i]);
     }
-
+#undef NUM_REQUESTS
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;
