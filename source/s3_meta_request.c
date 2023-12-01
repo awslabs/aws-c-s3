@@ -95,6 +95,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
             continue;
         }
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        // waahm7: TODO need information here to find out if this object was MPU or Not
         if (aws_http_headers_has(headers, *algorithm_header_name)) {
             struct aws_byte_cursor header_sum;
             aws_http_headers_get(headers, *algorithm_header_name, &header_sum);

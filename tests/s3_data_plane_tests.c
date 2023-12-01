@@ -3595,6 +3595,62 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_download_multipart_get_single_part_upload, s_test_s3_download_multipart_get_single_part_upload)
+static int s_test_s3_download_multipart_get_single_part_upload(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/download/Caltech256/001.ak47/001_0001.jpg");
+
+    // struct aws_s3_tester_meta_request_options put_options = {
+    //     .allocator = allocator,
+    //     .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+    //     .client = client,
+    //     .checksum_algorithm = AWS_SCA_CRC32,
+    //     .validate_get_response_checksum = false,
+
+    //     .put_options =
+    //         {
+    //             .object_size_mb = 20,
+    //             .object_path_override = object_path,
+    //             .ensure_multipart = true,
+    //         },
+    // };
+
+    // ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** GET FILE ***/
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .finish_callback = s_s3_test_validate_checksum,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(
     test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc,
     s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc)
@@ -5194,6 +5250,7 @@ static int s_range_requests_receive_body_callback(
     return AWS_OP_SUCCESS;
 }
 
+// waahm7
 AWS_TEST_CASE(test_s3_range_requests, s_test_s3_range_requests)
 static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
