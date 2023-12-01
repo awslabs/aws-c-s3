@@ -1386,6 +1386,18 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
+    if (request->send_data.metrics) {
+        /* Invoke the callback here. */
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
+        metric->time_metrics.total_duration_ns =
+            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
+        if (meta_request->telemetry_callback) {
+            meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
+        }
+        request->send_data.metrics = aws_s3_request_metrics_release(metric);
+    }
+
     vtable->send_request_finish(connection, stream, error_code);
 }
 
@@ -1559,6 +1571,18 @@ void aws_s3_meta_request_finished_request(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->vtable);
     AWS_PRECONDITION(meta_request->vtable->finished_request);
+
+    if (request && request->send_data.metrics) {
+        /* Invoke the callback here. */
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
+        metric->time_metrics.total_duration_ns =
+            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
+        if (meta_request->telemetry_callback) {
+            meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
+        }
+        request->send_data.metrics = aws_s3_request_metrics_release(metric);
+    }
 
     meta_request->vtable->finished_request(meta_request, request, error_code);
 }

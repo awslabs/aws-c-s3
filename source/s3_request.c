@@ -81,18 +81,8 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
 
     aws_signable_destroy(request->send_data.signable);
     request->send_data.signable = NULL;
-    if (request->send_data.metrics) {
-        /* invoke callback */
-        struct aws_s3_meta_request *meta_request = request->meta_request;
-        struct aws_s3_request_metrics *metric = request->send_data.metrics;
-        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
-        metric->time_metrics.total_duration_ns =
-            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
-        if (meta_request->telemetry_callback) {
-            meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
-        }
-        request->send_data.metrics = aws_s3_request_metrics_release(metric);
-    }
+    /* The metrics should be collected and provided before reaching here */
+    AWS_FATAL_ASSERT(request->send_data.metrics == NULL);
 
     aws_http_headers_release(request->send_data.response_headers);
     request->send_data.response_headers = NULL;
