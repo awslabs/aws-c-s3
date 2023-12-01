@@ -9,15 +9,14 @@ import sys
 import os
 import random
 
+print(boto3.__version__)
 
+REGION = 'us-east-1'
 s3 = boto3.resource('s3')
-s3_client = boto3.client('s3')
+s3_client = boto3.client('s3', region_name=REGION)
 
 
 s3_control_client = boto3.client('s3control')
-
-
-REGION = 'us-west-2'
 
 
 MB = 1024*1024
@@ -37,21 +36,21 @@ parser.add_argument(
 args = parser.parse_args()
 
 if args.bucket_name is not None:
-    BUCKET_NAME = args.bucket_name
+    BUCKET_NAME_BASE = args.bucket_name
 elif "CRT_S3_TEST_BUCKET_NAME" in os.environ:
-    BUCKET_NAME = os.environ['CRT_S3_TEST_BUCKET_NAME']
+    BUCKET_NAME_BASE = os.environ['CRT_S3_TEST_BUCKET_NAME']
 else:
     # Generate a random bucket name
-    BUCKET_NAME = 'aws-c-s3-test-bucket-' + str(random.random())[2:8]
+    BUCKET_NAME_BASE = 'aws-c-s3-test-bucket-' + str(random.random())[2:8]
 
-PUBLIC_BUCKET_NAME = BUCKET_NAME + "-public"
+PUBLIC_BUCKET_NAME = BUCKET_NAME_BASE + "-public"
 
 
 def create_bytes(size):
     return bytearray([1] * size)
 
 
-def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public_read=False):
+def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME_BASE, sse=None, public_read=False):
     if size == 0:
         s3_client.put_object(Bucket=bucket, Key=keyname)
         print(f"Object {keyname} uploaded")
@@ -81,55 +80,87 @@ def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME, sse=None, public
     print(f"Object {keyname} uploaded")
 
 
-def create_bucket_with_lifecycle():
+def create_bucket_with_lifecycle(availability_zone=None):
     try:
         # Create the bucket. This returns an error if the bucket already exists.
+
+        if availability_zone is not None:
+            bucket_config = {
+                'Location': {
+                    'Type': 'AvailabilityZone',
+                    'Name': availability_zone
+                },
+                'Bucket': {
+                    'Type': 'Directory',
+                    'DataRedundancy': 'SingleAvailabilityZone'
+                }
+            }
+            bucket_name = BUCKET_NAME_BASE+f"--{availability_zone}--x-s3"
+        else:
+            bucket_config = {'LocationConstraint': REGION}
+            bucket_name = BUCKET_NAME_BASE
+
+        print(bucket_name)
+        print(bucket_config)
+
         s3_client.create_bucket(
-            Bucket=BUCKET_NAME, CreateBucketConfiguration={'LocationConstraint': REGION})
-        s3_client.put_bucket_lifecycle_configuration(
-            Bucket=BUCKET_NAME,
-            LifecycleConfiguration={
-                'Rules': [
-                    {
-                        'ID': 'clean up non-pre-existing objects',
-                        'Expiration': {
-                            'Days': 1,
+            Bucket=bucket_name, CreateBucketConfiguration=bucket_config)
+        if availability_zone is None:
+            s3_client.put_bucket_lifecycle_configuration(
+                Bucket=bucket_name,
+                LifecycleConfiguration={
+                    'Rules': [
+                        {
+                            'ID': 'clean up non-pre-existing objects',
+                            'Expiration': {
+                                'Days': 1,
+                            },
+                            'Filter': {
+                                'Prefix': 'upload/',
+                            },
+                            'Status': 'Enabled',
+                            'NoncurrentVersionExpiration': {
+                                'NoncurrentDays': 1,
+                            },
+                            'AbortIncompleteMultipartUpload': {
+                                'DaysAfterInitiation': 1,
+                            },
                         },
-                        'Filter': {
-                            'Prefix': 'upload/',
-                        },
-                        'Status': 'Enabled',
-                        'NoncurrentVersionExpiration': {
-                            'NoncurrentDays': 1,
-                        },
-                        'AbortIncompleteMultipartUpload': {
-                            'DaysAfterInitiation': 1,
-                        },
-                    },
-                ],
-            },
-        )
-        print(f"Bucket {BUCKET_NAME} created", file=sys.stderr)
+                    ],
+                },
+            )
+        print(f"Bucket {bucket_name} created", file=sys.stderr)
+
         put_pre_existing_objects(
-            10*MB, 'pre-existing-10MB-aes256-c', sse='aes256-c')
-        put_pre_existing_objects(
-            10*MB, 'pre-existing-10MB-aes256', sse='aes256')
-        put_pre_existing_objects(
-            10*MB, 'pre-existing-10MB-kms', sse='kms')
-        put_pre_existing_objects(256*MB, 'pre-existing-256MB')
-        put_pre_existing_objects(256*MB, 'pre-existing-256MB-@')
-        put_pre_existing_objects(2*GB, 'pre-existing-2GB')
-        put_pre_existing_objects(2*GB, 'pre-existing-2GB-@')
-        put_pre_existing_objects(10*MB, 'pre-existing-10MB')
-        put_pre_existing_objects(1*MB, 'pre-existing-1MB')
-        put_pre_existing_objects(1*MB, 'pre-existing-1MB-@')
-        put_pre_existing_objects(0, 'pre-existing-empty')
+            10*MB, 'pre-existing-10MB', bucket=bucket_name)
+
+        if availability_zone is None:
+            put_pre_existing_objects(
+                10*MB, 'pre-existing-10MB-aes256-c', sse='aes256-c', bucket=bucket_name)
+            put_pre_existing_objects(
+                10*MB, 'pre-existing-10MB-aes256', sse='aes256', bucket=bucket_name)
+            put_pre_existing_objects(
+                10*MB, 'pre-existing-10MB-kms', sse='kms', bucket=bucket_name)
+            put_pre_existing_objects(
+                256*MB, 'pre-existing-256MB', bucket=bucket_name)
+            put_pre_existing_objects(
+                256*MB, 'pre-existing-256MB-@', bucket=bucket_name)
+            put_pre_existing_objects(
+                2*GB, 'pre-existing-2GB', bucket=bucket_name)
+            put_pre_existing_objects(
+                2*GB, 'pre-existing-2GB-@', bucket=bucket_name)
+            put_pre_existing_objects(
+                1*MB, 'pre-existing-1MB', bucket=bucket_name)
+            put_pre_existing_objects(
+                1*MB, 'pre-existing-1MB-@', bucket=bucket_name)
+            put_pre_existing_objects(
+                0, 'pre-existing-empty', bucket=bucket_name)
 
     except botocore.exceptions.ClientError as e:
         # The bucket already exists. That's fine.
         if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou' or e.response['Error']['Code'] == 'BucketAlreadyExists':
             print(
-                f"Bucket {BUCKET_NAME} not created, skip initializing.", file=sys.stderr)
+                f"Bucket {bucket_name} not created, skip initializing.", file=sys.stderr)
             return
         raise e
 
@@ -168,25 +199,27 @@ def cleanup(bucket_name):
 
 if args.action == 'init':
     try:
-        print(BUCKET_NAME + " " + PUBLIC_BUCKET_NAME + " initializing...")
-        create_bucket_with_lifecycle()
-        create_bucket_with_public_object()
-        if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME:
+        print(BUCKET_NAME_BASE + " " + PUBLIC_BUCKET_NAME + " initializing...")
+        # TODO we cannot use the client across region
+        create_bucket_with_lifecycle("use1-az4")
+        create_bucket_with_lifecycle("usw2-az1")
+        # create_bucket_with_lifecycle()
+        # create_bucket_with_public_object()
+        if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME_BASE:
             print(
-                f"* Please set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME} before running the tests.")
+                f"* Please set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME_BASE} before running the tests.")
     except Exception as e:
         print(e)
-        try:
-            # Try to clean up the bucket created, when initialization failed.
-            cleanup(BUCKET_NAME)
-            cleanup(PUBLIC_BUCKET_NAME)
-        except Exception as e:
-            exit(-1)
-        raise e
+        # try:
+        #     # Try to clean up the bucket created, when initialization failed.
+        #     # cleanup(BUCKET_NAME_BASE)
+        #     # cleanup(PUBLIC_BUCKET_NAME)
+        # except Exception as e2:
+        #     exit(-1)
         exit(-1)
 elif args.action == 'clean':
     if "CRT_S3_TEST_BUCKET_NAME" not in os.environ and args.bucket_name is None:
         print("Set the environment variable CRT_S3_TEST_BUCKET_NAME before clean up, or pass in bucket_name as argument.")
         exit(-1)
-    cleanup(BUCKET_NAME)
+    cleanup(BUCKET_NAME_BASE)
     cleanup(PUBLIC_BUCKET_NAME)

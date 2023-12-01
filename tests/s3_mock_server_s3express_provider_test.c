@@ -614,9 +614,8 @@ TEST_CASE(s3express_provider_long_running_session_refresh) {
     /* 300 secs to make sure we will refresh it at least once. */
     size_t num_requests = 600;
 
-    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
     struct aws_credentials_properties_s3express property = {
-        .host = aws_byte_cursor_from_c_str(endpoint),
+        .host = g_test_s3express_bucket_use1_az4_endpoint,
     };
 
     for (size_t i = 0; i < num_requests; i++) {
