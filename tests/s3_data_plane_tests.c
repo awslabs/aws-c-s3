@@ -3602,13 +3602,13 @@ static int s_test_s3_download_multipart_get_single_part_upload(struct aws_alloca
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_s3_tester_client_options client_options = {
-        .part_size = MB_TO_BYTES(5),
+        .part_size = MB_TO_BYTES(3),
     };
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/download/Caltech256/001.ak47/001_0001.jpg");
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/head-object-test/SingleUpload20mbWithCRC32.txt");
 
     // struct aws_s3_tester_meta_request_options put_options = {
     //     .allocator = allocator,

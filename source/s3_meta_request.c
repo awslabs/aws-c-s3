@@ -60,6 +60,11 @@ static int s_s3_meta_request_incoming_headers(
     size_t headers_count,
     void *user_data);
 
+static int s_s3_meta_request_headers_block_done(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    void *user_data);
+
 static void s_s3_meta_request_stream_metrics(
     struct aws_http_stream *stream,
     const struct aws_http_stream_metrics *metrics,
@@ -1046,7 +1051,7 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     options.request = request->send_data.message;
     options.user_data = connection;
     options.on_response_headers = s_s3_meta_request_incoming_headers;
-    options.on_response_header_block_done = NULL;
+    options.on_response_header_block_done = s_s3_meta_request_headers_block_done;
     options.on_response_body = s_s3_meta_request_incoming_body;
     if (request->send_data.metrics) {
         options.on_metrics = s_s3_meta_request_stream_metrics;
@@ -1193,7 +1198,6 @@ static int s_s3_meta_request_incoming_headers(
     const struct aws_http_header *headers,
     size_t headers_count,
     void *user_data) {
-
     (void)header_block;
 
     AWS_PRECONDITION(stream);
@@ -1258,6 +1262,34 @@ static int s_s3_meta_request_incoming_headers(
         }
     }
 
+    return AWS_OP_SUCCESS;
+}
+static int s_s3_meta_request_headers_block_done(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    void *user_data) {
+
+    AWS_PRECONDITION(stream);
+
+    struct aws_s3_connection *connection = user_data;
+    AWS_PRECONDITION(connection);
+
+    struct aws_s3_request *request = connection->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
+        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART &&
+        header_block == AWS_HTTP_HEADER_BLOCK_MAIN) {
+        uint64_t content_length;
+        if (aws_s3_parse_content_length_response_header(
+                request->allocator, request->send_data.response_headers, &content_length) ||
+            content_length > meta_request->part_size) {
+            return aws_raise_error(AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART);
+        }
+    }
     return AWS_OP_SUCCESS;
 }
 
@@ -1506,6 +1538,7 @@ void aws_s3_meta_request_send_request_finish_default(
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
+            error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 

@@ -176,12 +176,12 @@ static bool s_s3_auto_ranged_get_update(
                     if (ticket == NULL) {
                         goto has_work_remaining;
                     }
-
+                    /*TODO: do rangeGet if checksum validation is off */
                     /* If we aren't using a head object, then discover the size of the object while trying to get the
                      * first part. */
                     request = aws_s3_request_new(
                         meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
+                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART,
                         AWS_S3_REQUEST_TYPE_GET_OBJECT,
                         1 /*part_number*/,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
@@ -374,19 +374,19 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
             // waahm7: TODO refactor it to reduce code duplication
-            if (request->discovers_object_size && !auto_ranged_get->initial_message_has_range_header) {
-                message = aws_s3_message_util_copy_http_message_no_body_all_headers(
-                    meta_request->allocator, meta_request->initial_request_message);
-                if (message) {
-                    aws_s3_message_util_set_multipart_request_path(
-                        meta_request->allocator, NULL, request->part_number, false, message);
-                }
-            } else {
-                message = aws_s3_ranged_get_object_message_new(
-                    meta_request->allocator,
-                    meta_request->initial_request_message,
-                    request->part_range_start,
-                    request->part_range_end);
+            message = aws_s3_ranged_get_object_message_new(
+                meta_request->allocator,
+                meta_request->initial_request_message,
+                request->part_range_start,
+                request->part_range_end);
+
+            break;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART:
+            message = aws_s3_message_util_copy_http_message_no_body_all_headers(
+                meta_request->allocator, meta_request->initial_request_message);
+            if (message) {
+                aws_s3_message_util_set_multipart_request_path(
+                    meta_request->allocator, NULL, request->part_number, false, message);
             }
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
@@ -555,6 +555,7 @@ static int s_discover_object_range_and_content_length(
                 }
                 break;
             }
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART:
 
             AWS_ASSERT(request->send_data.response_headers != NULL);
 
@@ -608,6 +609,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
+    bool failed_due_to_part_too_large = true;
 
     if (request->discovers_object_size) {
 
@@ -638,9 +640,6 @@ static void s_s3_auto_ranged_get_request_finished(
             auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
         }
 
-        /* If we were able to discover the object-range/content length successfully, then any error code that was passed
-         * into this function is being handled and does not indicate an overall failure.*/
-        error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
 
         if (meta_request->headers_callback != NULL) {
@@ -649,7 +648,8 @@ static void s_s3_auto_ranged_get_request_finished(
             copy_http_headers(request->send_data.response_headers, response_headers);
 
             /* If this request is a part, then the content range isn't applicable. */
-            if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
+            if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART ||
+                request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART) {
                 /* For now, we can assume that discovery of size via the first part of the object does not apply to
                  * breaking up a ranged request. If it ever does, then we will need to repopulate this header. */
                 AWS_ASSERT(!auto_ranged_get->initial_message_has_range_header);
@@ -685,7 +685,10 @@ update_synced_data:
         /* If the object range was found, then record it. */
         if (found_object_size) {
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
-
+            if (error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART) {
+                --auto_ranged_get->synced_data.num_parts_requested;
+            }
+            error_code = AWS_ERROR_SUCCESS;
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
@@ -698,6 +701,8 @@ update_synced_data:
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
                 auto_ranged_get->synced_data.head_object_completed = true;
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
+                break;
+            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART:
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
                 ++auto_ranged_get->synced_data.num_parts_completed;
