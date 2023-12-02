@@ -18,7 +18,8 @@
         "test"
     ],
     "+cmake_args": [
-        "-DENABLE_MRAP_TESTS=ON"
+        "-DENABLE_MRAP_TESTS=ON",
+        "-DENABLE_S3EXPRESS_TESTS=ON"
     ],
     "pre_build_steps": ["mock-server-setup"]
 }

@@ -50,6 +50,7 @@ You can specify the bucket name to be created either by passing argument to the 
 * To run tests in tests/s3_mock_server_tests.c, initialize the mock S3 server first from [here](./../mock_s3_server/). And build your cmake project with `-DENABLE_MOCK_SERVER_TESTS=true`
 * Note: If you are not at the aws-common-runtime AWS team account, you must set environment variable `CRT_S3_TEST_BUCKET_NAME` to the bucket created before running the test.
 * When you see error with "Check your account level S3 settings, public access may be blocked.", Check https://docs.aws.amazon.com/AmazonS3/latest/userguide/configuring-block-public-access-account.html to set `BlockPublicAcls` to false, which enables public read of the object with `public-read` ACL in the bucket.
+* The S3express integration tests are not included in this script, and they are disabled by default.
 
 ## TODO
 

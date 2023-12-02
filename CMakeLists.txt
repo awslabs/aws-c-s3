@@ -9,6 +9,7 @@ endif()
 option(ASSERT_LOCK_HELD "Enable ASSERT_SYNCED_DATA_LOCK_HELD for checking thread issue" OFF)
 option(ENABLE_MOCK_SERVER_TESTS "Whether to run the integration tests that rely on pre-configured mock server" OFF)
 option(ENABLE_MRAP_TESTS "Whether to run the integration tests that rely on pre-configured multi-region access point" OFF)
+option(ENABLE_S3EXPRESS_TESTS "Whether to run the integration tests that rely on pre-configured directory buckets" OFF)
 option(AWS_ENABLE_S3_ENDPOINT_RESOLVER "Whether to include the s3 endpoint resolver and related config files" OFF)
 
 if (ASSERT_LOCK_HELD)
