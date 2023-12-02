@@ -533,9 +533,10 @@ static int s_discover_object_range_and_content_length(
             result = AWS_OP_SUCCESS;
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
             AWS_ASSERT(request->part_number == 1);
 
-            if (error_code != AWS_ERROR_SUCCESS) {
+            if (error_code != AWS_ERROR_SUCCESS && error_code != AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART) {
                 /* If we hit an empty file while trying to discover the object-size via part, then this request
                 failure
                  * is as designed. */
@@ -555,7 +556,6 @@ static int s_discover_object_range_and_content_length(
                 }
                 break;
             }
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
 
             AWS_ASSERT(request->send_data.response_headers != NULL);
 
