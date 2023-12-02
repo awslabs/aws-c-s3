@@ -169,6 +169,7 @@ static bool s_s3_auto_ranged_get_update(
                         auto_ranged_get->synced_data.head_object_sent = true;
                     }
                 } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
+                    request->discovers_object_size = true;
                     /* Try to download the firstPart of the object */
                     struct aws_s3_buffer_pool_ticket *ticket =
                         aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
@@ -176,19 +177,34 @@ static bool s_s3_auto_ranged_get_update(
                     if (ticket == NULL) {
                         goto has_work_remaining;
                     }
-                    /*TODO: do rangeGet if checksum validation is off */
-                    /* If we aren't using a head object, then discover the size of the object while trying to get the
-                     * first part. */
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER,
-                        AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                        1 /*part_number*/,
-                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
+                    if (meta_request->checksum_config.validate_response_checksum) {
+                        /*
+                         * Discover the size of the object while attempting to retrieve the first part. We use
+                         * getFirstPart instead of a ranged get to enable checksum validation for objects not uploaded
+                         * via MPU. If the first part exceeds part_size, we can cancel the request
+                         * upon receiving the headers, which is similar to a head request. This approach helps avoid an
+                         * extra head request for small files.
+                         */
+                        request = aws_s3_request_new(
+                            meta_request,
+                            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER,
+                            AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                            1 /*part_number*/,
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                    } else {
+                        /* If checksum validation is not requered, then discover the size of the object while doing the
+                         * first ranged get request. */
+                        request = aws_s3_request_new(
+                            meta_request,
+                            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
+                            AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                            1 /*part_number*/,
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                        request->part_range_start = 0;
+                        request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
+                    }
                     request->ticket = ticket;
-                    request->discovers_object_size = true;
-
                     ++auto_ranged_get->synced_data.num_parts_requested;
                 }
 
@@ -702,7 +718,7 @@ update_synced_data:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
-                if (error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART) {
+                if (error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART && found_object_size) {
                     --auto_ranged_get->synced_data.num_parts_requested;
                     break;
                 }
