@@ -404,6 +404,8 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
 
     request->send_data.response_headers = aws_http_headers_new(allocator);
     ASSERT_TRUE(request->send_data.response_headers != NULL);
+    ASSERT_TRUE(request->send_data.metrics != NULL);
+    request->send_data.metrics = aws_s3_request_metrics_release(request->send_data.metrics);
 
     aws_s3_request_clean_up_send_data(request);
 
