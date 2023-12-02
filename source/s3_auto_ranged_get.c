@@ -144,7 +144,7 @@ static bool s_s3_auto_ranged_get_update(
              * request to figure that out. */
             if (!auto_ranged_get->synced_data.object_range_known) {
                 if (auto_ranged_get->synced_data.head_object_sent || auto_ranged_get->synced_data.get_first_part_sent ||
-                    auto_ranged_get->synced_data.get_first_part_sent > 0) {
+                    auto_ranged_get->synced_data.num_parts_requested > 0) {
                     goto has_work_remaining;
                 }
                 /* If there exists a range header or we require validation of the response checksum, we currently
