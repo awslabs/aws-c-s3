@@ -143,32 +143,33 @@ static bool s_s3_auto_ranged_get_update(
             /* If the overall range of the object that we are trying to retrieve isn't known yet, then we need to send a
              * request to figure that out. */
             if (!auto_ranged_get->synced_data.object_range_known) {
-
-                /* If there exists a range header or we require validation of the response checksum, we currently always
-                 * do a head request first.
-                 * S3 returns the checksum of the entire object from the HEAD response
+                if (auto_ranged_get->synced_data.head_object_sent || auto_ranged_get->synced_data.get_first_part_sent ||
+                    auto_ranged_get->synced_data.get_first_part_sent > 0) {
+                    goto has_work_remaining;
+                }
+                /* If there exists a range header or we require validation of the response checksum, we currently
+                 * always do a head request first. S3 returns the checksum of the entire object from the HEAD
+                 * response
                  *
                  * For the range header value could be parsed client-side, doing so presents a number of
                  * complications. For example, the given range could be an unsatisfiable range, and might not even
-                 * specify a complete range. To keep things simple, we are currently relying on the service to handle
-                 * turning the Range header into a Content-Range response header.*/
+                 * specify a complete range. To keep things simple, we are currently relying on the service to
+                 * handle turning the Range header into a Content-Range response header.*/
                 bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0;
                 // waahm7
                 if (head_object_required) {
                     /* If the head object request hasn't been sent yet, then send it now. */
-                    if (!auto_ranged_get->synced_data.head_object_sent) {
-                        request = aws_s3_request_new(
-                            meta_request,
-                            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
-                            AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
-                            0 /*part_number*/,
-                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                    request = aws_s3_request_new(
+                        meta_request,
+                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
+                        AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+                        0 /*part_number*/,
+                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
 
-                        request->discovers_object_size = true;
+                    request->discovers_object_size = true;
 
-                        auto_ranged_get->synced_data.head_object_sent = true;
-                    }
-                } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
+                    auto_ranged_get->synced_data.head_object_sent = true;
+                } else {
                     /* Try to download the firstPart of the object */
                     struct aws_s3_buffer_pool_ticket *ticket =
                         aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
@@ -191,8 +192,9 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_TYPE_GET_OBJECT,
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                        auto_ranged_get->synced_data.get_first_part_sent = true;
                     } else {
-                        /* If checksum validation is not requered, then discover the size of the object while doing the
+                        /* If checksum validation is not required, then discover the size of the object while doing the
                          * first ranged get request. */
                         request = aws_s3_request_new(
                             meta_request,
@@ -202,10 +204,10 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
                         request->part_range_start = 0;
                         request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
+                        ++auto_ranged_get->synced_data.num_parts_requested;
                     }
                     request->discovers_object_size = true;
                     request->ticket = ticket;
-                    ++auto_ranged_get->synced_data.num_parts_requested;
                 }
 
                 goto has_work_remaining;
@@ -301,6 +303,11 @@ static bool s_s3_auto_ranged_get_update(
              * request completely exits. */
 
             if (auto_ranged_get->synced_data.head_object_sent && !auto_ranged_get->synced_data.head_object_completed) {
+                goto has_work_remaining;
+            }
+
+            if (auto_ranged_get->synced_data.get_first_part_sent &&
+                !auto_ranged_get->synced_data.get_first_part_completed) {
                 goto has_work_remaining;
             }
 
@@ -718,10 +725,11 @@ update_synced_data:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
+                auto_ranged_get->synced_data.get_first_part_completed = true;
                 if (error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART && found_object_size) {
-                    --auto_ranged_get->synced_data.num_parts_requested;
                     break;
                 }
+                ++auto_ranged_get->synced_data.num_parts_requested;
                 /* fall through */
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
                 ++auto_ranged_get->synced_data.num_parts_completed;

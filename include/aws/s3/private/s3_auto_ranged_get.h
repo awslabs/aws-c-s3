@@ -48,6 +48,8 @@ struct aws_s3_auto_ranged_get {
         uint32_t object_range_empty : 1;
         uint32_t head_object_sent : 1;
         uint32_t head_object_completed : 1;
+        uint32_t get_first_part_sent : 1;
+        uint32_t get_first_part_completed : 1;
         uint32_t get_without_range_sent : 1;
         uint32_t get_without_range_completed : 1;
         uint32_t read_window_warning_issued : 1;
