@@ -1281,7 +1281,7 @@ static int s_s3_meta_request_headers_block_done(
     AWS_PRECONDITION(meta_request);
 
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
-        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART &&
+        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER &&
         header_block == AWS_HTTP_HEADER_BLOCK_MAIN) {
         uint64_t content_length;
         if (aws_s3_parse_content_length_response_header(

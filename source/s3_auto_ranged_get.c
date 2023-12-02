@@ -181,7 +181,7 @@ static bool s_s3_auto_ranged_get_update(
                      * first part. */
                     request = aws_s3_request_new(
                         meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART,
+                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER,
                         AWS_S3_REQUEST_TYPE_GET_OBJECT,
                         1 /*part_number*/,
                         AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
@@ -381,7 +381,7 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
                 request->part_range_end);
 
             break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
             message = aws_s3_message_util_copy_http_message_no_body_all_headers(
                 meta_request->allocator, meta_request->initial_request_message);
             if (message) {
@@ -555,7 +555,7 @@ static int s_discover_object_range_and_content_length(
                 }
                 break;
             }
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
 
             AWS_ASSERT(request->send_data.response_headers != NULL);
 
@@ -648,7 +648,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
             /* If this request is a part, then the content range isn't applicable. */
             if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART ||
-                request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART) {
+                request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER) {
                 /* For now, we can assume that discovery of size via the first part of the object does not apply to
                  * breaking up a ranged request. If it ever does, then we will need to repopulate this header. */
                 AWS_ASSERT(!auto_ranged_get->initial_message_has_range_header);
@@ -701,7 +701,7 @@ update_synced_data:
                 auto_ranged_get->synced_data.head_object_completed = true;
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
                 break;
-            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART:
+            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
                 ++auto_ranged_get->synced_data.num_parts_completed;
