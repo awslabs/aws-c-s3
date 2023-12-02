@@ -609,7 +609,6 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
-    bool failed_due_to_part_too_large = true;
 
     if (request->discovers_object_size) {
 
