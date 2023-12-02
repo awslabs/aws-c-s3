@@ -169,7 +169,6 @@ static bool s_s3_auto_ranged_get_update(
                         auto_ranged_get->synced_data.head_object_sent = true;
                     }
                 } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
-                    request->discovers_object_size = true;
                     /* Try to download the firstPart of the object */
                     struct aws_s3_buffer_pool_ticket *ticket =
                         aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
@@ -204,6 +203,7 @@ static bool s_s3_auto_ranged_get_update(
                         request->part_range_start = 0;
                         request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
                     }
+                    request->discovers_object_size = true;
                     request->ticket = ticket;
                     ++auto_ranged_get->synced_data.num_parts_requested;
                 }
