@@ -609,6 +609,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
+    int request_error_code = error_code;
 
     if (request->discovers_object_size) {
 
@@ -616,7 +617,7 @@ static void s_s3_auto_ranged_get_request_finished(
         if (s_discover_object_range_and_content_length(
                 meta_request, request, error_code, &total_content_length, &object_range_start, &object_range_end)) {
 
-            error_code = aws_last_error_or_unknown();
+            request_error_code = aws_last_error_or_unknown();
 
             goto update_synced_data;
         }
@@ -627,7 +628,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
             if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value)) {
                 aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
-                error_code = AWS_ERROR_S3_MISSING_ETAG;
+                request_error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
             }
 
@@ -639,6 +640,9 @@ static void s_s3_auto_ranged_get_request_finished(
             auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
         }
 
+        /* If we were able to discover the object-range/content length successfully, then any error code that was passed
+         * into this function is being handled and does not indicate an overall failure.*/
+        request_error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
 
         if (meta_request->headers_callback != NULL) {
@@ -667,7 +671,7 @@ static void s_s3_auto_ranged_get_request_finished(
                     s_s3_auto_ranged_get_success_status(meta_request),
                     meta_request->user_data)) {
 
-                error_code = aws_last_error_or_unknown();
+                request_error_code = aws_last_error_or_unknown();
             }
             meta_request->headers_callback = NULL;
 
@@ -684,10 +688,6 @@ update_synced_data:
         /* If the object range was found, then record it. */
         if (found_object_size) {
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
-            if (error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART) {
-                --auto_ranged_get->synced_data.num_parts_requested;
-            }
-            error_code = AWS_ERROR_SUCCESS;
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
@@ -702,7 +702,11 @@ update_synced_data:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
-                break;
+                if (error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART) {
+                    --auto_ranged_get->synced_data.num_parts_requested;
+                    break;
+                }
+                /* fall through */
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
                 ++auto_ranged_get->synced_data.num_parts_completed;
 
