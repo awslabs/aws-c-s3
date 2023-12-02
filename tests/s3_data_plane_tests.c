@@ -3602,14 +3602,14 @@ static int s_test_s3_download_multipart_get_single_part_upload(struct aws_alloca
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_s3_tester_client_options client_options = {
-        .part_size = MB_TO_BYTES(3),
+        .part_size = MB_TO_BYTES(5),
     };
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    // TODO: upload this file or use one from our test bucket
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/SingleUpload20mbWithCRC32.txt");
+    // TODO: upload this file or use one from our test
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/prefix/round_trip/test_mpu_fc.txt");
 
     // struct aws_s3_tester_meta_request_options put_options = {
     //     .allocator = allocator,
