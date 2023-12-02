@@ -228,8 +228,6 @@ static int s_s3express_client_put_test_helper(struct aws_allocator *allocator, s
 
     struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
 
-    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
-    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_c_str(endpoint);
     struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str("/crt-test");
 
     struct aws_s3_client_config client_config = {
@@ -243,13 +241,23 @@ static int s_s3express_client_put_test_helper(struct aws_allocator *allocator, s
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(s_s3express_put_object_request(
-        allocator, client, content_length, &tester, host_cursor, key_cursor, region_cursor));
+        allocator,
+        client,
+        content_length,
+        &tester,
+        g_test_s3express_bucket_use1_az4_endpoint,
+        key_cursor,
+        region_cursor));
 
     struct aws_byte_cursor west2_region_cursor = aws_byte_cursor_from_c_str("us-west-2");
-    char west2_endpoint[] = "crts-west2--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com";
-    struct aws_byte_cursor west2_host_cursor = aws_byte_cursor_from_c_str(west2_endpoint);
     ASSERT_SUCCESS(s_s3express_put_object_request(
-        allocator, client, content_length, &tester, west2_host_cursor, key_cursor, west2_region_cursor));
+        allocator,
+        client,
+        content_length,
+        &tester,
+        g_test_s3express_bucket_usw2_az1_endpoint,
+        key_cursor,
+        west2_region_cursor));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -280,13 +288,9 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
     struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
 
-    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
-    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_c_str(endpoint);
     struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str("/crt-test");
 
     struct aws_byte_cursor west2_region_cursor = aws_byte_cursor_from_c_str("us-west-2");
-    char west2_endpoint[] = "crts-west2--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com";
-    struct aws_byte_cursor west2_host_cursor = aws_byte_cursor_from_c_str(west2_endpoint);
 
     struct aws_s3_client_config client_config = {
         .part_size = MB_TO_BYTES(5),
@@ -302,11 +306,11 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
         input_streams[i] = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
 
         struct aws_byte_cursor request_region = region_cursor;
-        struct aws_byte_cursor request_host = host_cursor;
+        struct aws_byte_cursor request_host = g_test_s3express_bucket_use1_az4_endpoint;
         if (i % 2 == 0) {
             /* Make half of request to east1 and rest half to west2 */
             request_region = west2_region_cursor;
-            request_host = west2_host_cursor;
+            request_host = g_test_s3express_bucket_usw2_az1_endpoint;
         }
 
         struct aws_http_message *message = aws_s3_test_put_object_request_new(
@@ -401,8 +405,6 @@ TEST_CASE(s3express_client_put_object_long_running_session_refresh) {
 
     struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
 
-    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
-    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_c_str(endpoint);
     struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str("/crt-test");
 
     struct aws_s3_client_config client_config = {
@@ -421,7 +423,12 @@ TEST_CASE(s3express_client_put_object_long_running_session_refresh) {
         struct aws_input_stream *upload_stream = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
 
         struct aws_http_message *message = aws_s3_test_put_object_request_new(
-            allocator, &host_cursor, key_cursor, g_test_body_content_type, upload_stream, 0);
+            allocator,
+            &g_test_s3express_bucket_use1_az4_endpoint,
+            key_cursor,
+            g_test_body_content_type,
+            upload_stream,
+            0);
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
         options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
@@ -473,10 +480,6 @@ TEST_CASE(s3express_client_get_object) {
 
     struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
 
-    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
-    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_c_str(endpoint);
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str("/crt-download-10MB");
-
     struct aws_s3_client_config client_config = {
         .part_size = MB_TO_BYTES(5),
         .enable_s3express = true,
@@ -487,7 +490,8 @@ TEST_CASE(s3express_client_get_object) {
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, key_cursor);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, g_test_s3express_bucket_use1_az4_endpoint, g_pre_existing_object_10MB);
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -532,10 +536,6 @@ TEST_CASE(s3express_client_get_object_multiple) {
 
     struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
 
-    char endpoint[] = "crts-east1--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com";
-    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_c_str(endpoint);
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str("/crt-download-10MB");
-
     struct aws_s3_client_config client_config = {
         .part_size = MB_TO_BYTES(5),
         .enable_s3express = true,
@@ -548,7 +548,8 @@ TEST_CASE(s3express_client_get_object_multiple) {
 
     for (size_t i = 0; i < num_meta_requests; ++i) {
 
-        struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, key_cursor);
+        struct aws_http_message *message = aws_s3_test_get_object_request_new(
+            allocator, g_test_s3express_bucket_use1_az4_endpoint, g_pre_existing_object_10MB);
 
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
