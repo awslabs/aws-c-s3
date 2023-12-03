@@ -3506,7 +3506,11 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
     /*** GET FILE ***/
+    client_options.part_size = MB_TO_BYTES(5);
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -3569,8 +3573,12 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
 
     /*** GET FILE ***/
+    client_options.part_size = MB_TO_BYTES(20);
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
