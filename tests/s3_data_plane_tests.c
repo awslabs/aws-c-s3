@@ -3595,7 +3595,6 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
     return 0;
 }
 
-// waahm7
 AWS_TEST_CASE(test_s3_download_single_part_file_with_checksum, s_test_s3_download_single_part_file_with_checksum)
 static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -3715,7 +3714,7 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
             },
     };
 
-    // ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
@@ -3737,13 +3736,14 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
             },
     };
 
-    //  ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
     /*** GET FILE with part_size > first_part_size ***/
-    // client_options.part_size = MB_TO_BYTES(7);
-    client_options.part_size = MB_TO_BYTES(20);
+    client_options.part_size = MB_TO_BYTES(7);
+    // TODO: Discuss this case where partSize > fileSize
+    // client_options.part_size = MB_TO_BYTES(20);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
@@ -3758,7 +3758,7 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
     get_options.finish_callback = s_s3_test_validate_checksum;
-    //   ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
