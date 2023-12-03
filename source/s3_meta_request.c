@@ -100,9 +100,7 @@ static int s_meta_request_get_response_headers_checksum_callback(
             continue;
         }
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
-        // waahm7: TODO need information here to find out if this object was MPU or Not
-        if (aws_http_headers_has(headers, *algorithm_header_name) &&
-            !aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
+        if (aws_http_headers_has(headers, *algorithm_header_name)) {
             struct aws_byte_cursor header_sum;
             aws_http_headers_get(headers, *algorithm_header_name, &header_sum);
             size_t encoded_len = 0;
@@ -1285,7 +1283,7 @@ static int s_s3_meta_request_headers_block_done(
         uint64_t content_length;
         if (!aws_s3_parse_content_length_response_header(
                 request->allocator, request->send_data.response_headers, &content_length) &&
-            content_length > meta_request->part_size) {
+            content_length != meta_request->part_size) {
             return aws_raise_error(AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART);
         }
     }
@@ -1536,6 +1534,7 @@ void aws_s3_meta_request_send_request_finish_default(
 
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
+        // TODO: expected error, don't log at error
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
             error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR || meta_request_finishing) {
