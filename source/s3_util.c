@@ -54,6 +54,8 @@ const struct aws_byte_cursor g_sha1_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_S
 const struct aws_byte_cursor g_sha256_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
+const struct aws_byte_cursor g_mp_parts_count_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-mp-parts-count");
 const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
 const struct aws_byte_cursor g_head_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("HEAD");
 const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DELETE");

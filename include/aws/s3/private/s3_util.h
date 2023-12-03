@@ -161,6 +161,9 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_accept_ranges_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_mp_parts_count_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_post_method;
 
 AWS_S3_API
