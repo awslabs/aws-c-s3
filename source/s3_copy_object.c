@@ -571,6 +571,7 @@ static void s_s3_copy_object_request_finished(
 
     struct aws_s3_copy_object *copy_object = meta_request->impl;
     aws_s3_meta_request_lock_synced_data(meta_request);
+    aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
     switch (request->request_tag) {
 

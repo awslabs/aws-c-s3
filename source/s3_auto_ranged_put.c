@@ -1341,6 +1341,7 @@ static void s_s3_auto_ranged_put_request_finished(
             /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
+                aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
                 bool has_more_results = false;
 
@@ -1467,6 +1468,7 @@ static void s_s3_auto_ranged_put_request_finished(
             /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
+                aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
                 AWS_ASSERT(auto_ranged_put->synced_data.needed_response_headers == NULL);
                 auto_ranged_put->synced_data.needed_response_headers = needed_response_headers;
@@ -1519,6 +1521,7 @@ static void s_s3_auto_ranged_put_request_finished(
             /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
+                aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
                 ++auto_ranged_put->synced_data.num_parts_completed;
 
@@ -1636,6 +1639,7 @@ static void s_s3_auto_ranged_put_request_finished(
             /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
+                aws_s3_request_finish_up_metrics_synced(request, meta_request);
                 auto_ranged_put->synced_data.complete_multipart_upload_completed = true;
                 auto_ranged_put->synced_data.complete_multipart_upload_error_code = error_code;
 
@@ -1652,6 +1656,7 @@ static void s_s3_auto_ranged_put_request_finished(
             /* BEGIN CRITICAL SECTION */
             {
                 aws_s3_meta_request_lock_synced_data(meta_request);
+                aws_s3_request_finish_up_metrics_synced(request, meta_request);
                 auto_ranged_put->synced_data.abort_multipart_upload_error_code = error_code;
                 auto_ranged_put->synced_data.abort_multipart_upload_completed = true;
                 aws_s3_meta_request_unlock_synced_data(meta_request);

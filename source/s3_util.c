@@ -5,7 +5,10 @@
 
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_request.h"
 #include <aws/auth/credentials.h>
+#include <aws/common/clock.h>
 #include <aws/common/string.h>
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
@@ -622,4 +625,24 @@ int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor e
         return AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED;
     }
     return AWS_ERROR_UNKNOWN;
+}
+
+void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+
+    if (request->send_data.metrics != NULL) {
+        /* Request is done, complete the metrics for the request now. */
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
+        metric->time_metrics.total_duration_ns =
+            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
+
+        if (meta_request->telemetry_callback != NULL) {
+            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
+            event.u.telemetry.metric = aws_s3_request_metrics_acquire(metric);
+            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+        }
+        request->send_data.metrics = aws_s3_request_metrics_release(metric);
+    }
 }

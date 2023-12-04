@@ -398,6 +398,8 @@ static void s_s3_meta_request_default_request_finished(
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_request_finish_up_metrics_synced(request, meta_request);
+
         meta_request_default->synced_data.cached_response_status = request->send_data.response_status;
         meta_request_default->synced_data.request_completed = true;
         meta_request_default->synced_data.request_error_code = error_code;
