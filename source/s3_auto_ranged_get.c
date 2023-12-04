@@ -396,13 +396,11 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
             }
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
-            // waahm7: TODO refactor it to reduce code duplication
             message = aws_s3_ranged_get_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 request->part_range_start,
                 request->part_range_end);
-
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
             message = aws_s3_message_util_copy_http_message_no_body_all_headers(
@@ -559,7 +557,7 @@ static int s_discover_object_range_and_content_length(
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
             AWS_ASSERT(request->part_number == 1);
 
-            if (error_code != AWS_ERROR_SUCCESS && error_code != AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART) {
+            if (error_code != AWS_ERROR_SUCCESS && error_code != AWS_ERROR_S3_PART_SIZE_MISMATCH) {
                 /* If we hit an empty file while trying to discover the object-size via part, then this request
                 failure
                  * is as designed. */
@@ -726,7 +724,7 @@ update_synced_data:
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
                 auto_ranged_get->synced_data.get_first_part_completed = true;
-                if (error_code == AWS_ERROR_S3_PART_TOO_LARGE_FOR_GET_PART && found_object_size) {
+                if (error_code == AWS_ERROR_S3_PART_SIZE_MISMATCH && found_object_size) {
                     break;
                 }
                 ++auto_ranged_get->synced_data.num_parts_requested;
