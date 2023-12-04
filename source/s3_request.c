@@ -94,14 +94,12 @@ static void s_s3_request_clean_up_send_data_message(struct aws_s3_request *reque
 
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
+    /* The metrics should be collected and provided to user before reaching here */
+    AWS_FATAL_ASSERT(request->send_data.metrics == NULL);
 
     s_s3_request_clean_up_send_data_message(request);
 
     aws_signable_destroy(request->send_data.signable);
-
-    /* The metrics should be collected and provided before reaching here */
-    AWS_FATAL_ASSERT(request->send_data.metrics == NULL);
-
     request->send_data.signable = NULL;
     aws_http_headers_release(request->send_data.response_headers);
     request->send_data.response_headers = NULL;
