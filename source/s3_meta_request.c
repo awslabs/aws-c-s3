@@ -1287,7 +1287,7 @@ static int s_s3_meta_request_headers_block_done(
             if (content_length > meta_request->part_size ||
                 (content_length < meta_request->part_size &&
                  aws_http_headers_has(request->send_data.response_headers, g_mp_parts_count_header_name))) {
-                return aws_raise_error(AWS_ERROR_S3_PART_SIZE_MISMATCH);
+                return aws_raise_error(AWS_ERROR_S3_GET_PART_SIZE_MISMATCH);
             }
         }
     }
@@ -1539,7 +1539,7 @@ void aws_s3_meta_request_send_request_finish_default(
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
         // TODO: expected error, don't log at error
-        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_PART_SIZE_MISMATCH ||
+        if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_GET_PART_SIZE_MISMATCH ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 

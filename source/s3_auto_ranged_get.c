@@ -552,7 +552,7 @@ static int s_discover_object_range_and_content_length(
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
             AWS_ASSERT(request->part_number == 1);
 
-            if (error_code != AWS_ERROR_SUCCESS && error_code != AWS_ERROR_S3_PART_SIZE_MISMATCH) {
+            if (error_code != AWS_ERROR_SUCCESS && error_code != AWS_ERROR_S3_GET_PART_SIZE_MISMATCH) {
                 /* If we hit an empty file while trying to discover the object-size via part, then this request
                 failure
                  * is as designed. */
@@ -720,7 +720,7 @@ update_synced_data:
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
                 auto_ranged_get->synced_data.get_first_part_completed = true;
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
-                if (error_code == AWS_ERROR_S3_PART_SIZE_MISMATCH && found_object_size) {
+                if (error_code == AWS_ERROR_S3_GET_PART_SIZE_MISMATCH && found_object_size) {
                     /* Try to fetch the first part again as a ranged get */
                     break;
                 }

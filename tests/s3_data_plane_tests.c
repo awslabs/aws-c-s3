@@ -3742,8 +3742,6 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
 
     /*** GET FILE with part_size > first_part_size ***/
     client_options.part_size = MB_TO_BYTES(7);
-    // TODO: Discuss this case where partSize > fileSize
-    // client_options.part_size = MB_TO_BYTES(20);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
@@ -3753,7 +3751,6 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
 
     /*** GET FILE with part_size = first_part_size ***/
     client_options.part_size = MB_TO_BYTES(5);
-    //    client_options.part_size = MB_TO_BYTES(10);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
