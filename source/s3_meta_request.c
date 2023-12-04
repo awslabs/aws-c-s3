@@ -1748,7 +1748,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 AWS_FATAL_ASSERT(event.u.telemetry.metrics != NULL);
                 meta_request->telemetry_callback(meta_request, event.u.telemetry.metrics, meta_request->user_data);
                 event.u.telemetry.metrics = aws_s3_request_metrics_release(event.u.telemetry.metrics);
-            }
+            } break;
 
             default:
                 AWS_FATAL_ASSERT(false);
