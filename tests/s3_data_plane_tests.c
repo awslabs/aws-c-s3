@@ -3762,6 +3762,19 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
+    /*** GET FILE with part_size > fileSize ***/
+    /* TODO: Enable this test once the checksum issue is resolved. Currently, when the S3 GetObject API is called with
+     * the range 0-contentLength, it returns a checksum of checksums without the -numParts portion. This leads to a
+     * checksum mismatch error, as it is incorrectly validated as a part checksum. */
+    /*
+    client_options.part_size = MB_TO_BYTES(20);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+    */
     aws_byte_buf_clean_up(&path_buf);
     aws_s3_tester_clean_up(&tester);
 
