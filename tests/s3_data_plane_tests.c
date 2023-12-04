@@ -5377,7 +5377,6 @@ static int s_range_requests_receive_body_callback(
     return AWS_OP_SUCCESS;
 }
 
-// waahm7
 AWS_TEST_CASE(test_s3_range_requests, s_test_s3_range_requests)
 static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
