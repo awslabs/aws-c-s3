@@ -640,7 +640,7 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
 
         if (meta_request->telemetry_callback != NULL) {
             struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
-            event.u.telemetry.metric = aws_s3_request_metrics_acquire(metric);
+            event.u.telemetry.metrics = aws_s3_request_metrics_acquire(metric);
             aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
         }
         request->send_data.metrics = aws_s3_request_metrics_release(metric);

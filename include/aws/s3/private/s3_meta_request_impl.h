@@ -75,7 +75,7 @@ struct aws_s3_meta_request_event {
 
         /* data for AWS_S3_META_REQUEST_EVENT_TELEMETRY */
         struct {
-            struct aws_s3_request_metrics *metric;
+            struct aws_s3_request_metrics *metrics;
         } telemetry;
     } u;
 };
