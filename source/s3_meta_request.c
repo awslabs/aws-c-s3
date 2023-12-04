@@ -1264,11 +1264,13 @@ static int s_s3_meta_request_incoming_headers(
 
     return AWS_OP_SUCCESS;
 }
+
 static int s_s3_meta_request_headers_block_done(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
     void *user_data) {
     (void)stream;
+
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
 
@@ -1279,14 +1281,15 @@ static int s_s3_meta_request_headers_block_done(
     AWS_PRECONDITION(meta_request);
 
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
-        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER &&
-        header_block == AWS_HTTP_HEADER_BLOCK_MAIN) {
+        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER) {
         uint64_t content_length;
         if (!aws_s3_parse_content_length_response_header(
                 request->allocator, request->send_data.response_headers, &content_length)) {
             if (content_length > meta_request->part_size ||
                 (content_length < meta_request->part_size &&
-                 aws_http_headers_has(request->send_data.response_headers, g_mp_parts_count_header_name))) {
+                 aws_http_headers_has(
+                     request->send_data.response_headers,
+                     g_mp_parts_count_header_name) /* Object has multiple parts if this header is present */)) {
                 return aws_raise_error(AWS_ERROR_S3_GET_PART_SIZE_MISMATCH);
             }
         }
@@ -1538,19 +1541,29 @@ void aws_s3_meta_request_send_request_finish_default(
 
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
-        // TODO: expected error, don't log at error
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_GET_PART_SIZE_MISMATCH ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
-
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
-                (void *)meta_request,
-                error_code,
-                aws_error_str(error_code),
-                (void *)request,
-                response_status);
+            if (error_code == AWS_ERROR_S3_GET_PART_SIZE_MISMATCH) {
+                /* Log at info level instead of error as it's expected and not a fatal error */
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code),
+                    (void *)request,
+                    response_status);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code),
+                    (void *)request,
+                    response_status);
+            }
 
         } else {
             if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT) {

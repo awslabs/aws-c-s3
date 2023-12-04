@@ -176,10 +176,10 @@ static bool s_s3_auto_ranged_get_update(
                     if (meta_request->checksum_config.validate_response_checksum) {
                         /*
                          * Discover the size of the object while attempting to retrieve the first part. We use
-                         * getFirstPart instead of a ranged get to enable checksum validation for objects not uploaded
-                         * via MPU. If the first part exceeds part_size, we can cancel the request
-                         * upon receiving the headers, which is similar to a head request. This approach helps avoid an
-                         * extra head request for small files.
+                         * getFirstPart instead of a ranged get to do checksum validation for objects not uploaded
+                         * via MPU. If the first part is not equal to the part_size, we cancel the request
+                         * upon receiving the headers, which is similar to a head request. This approach helps to avoid
+                         * an extra head request for small files.
                          */
                         request = aws_s3_request_new(
                             meta_request,
@@ -189,7 +189,7 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
                         auto_ranged_get->synced_data.get_first_part_sent = true;
                     } else {
-                        /* If checksum validation is not required, then discover the size of the object while doing the
+                        /* If checksum validation is not required, then discover the size of the object during the
                          * first ranged get request. */
                         request = aws_s3_request_new(
                             meta_request,
@@ -506,7 +506,6 @@ static int s_discover_object_range_and_content_length(
     AWS_ASSERT(request->discovers_object_size);
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     switch (request->request_tag) {
-        // waahm7
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
             if (error_code != AWS_ERROR_SUCCESS) {
                 /* If the head request failed, there's nothing we can do, so resurface the error code. */
@@ -672,7 +671,6 @@ static void s_s3_auto_ranged_get_request_finished(
                 /* For now, we can assume that discovery of size via the first part of the object does not apply to
                  * breaking up a ranged request. If it ever does, then we will need to repopulate this header. */
                 AWS_ASSERT(!auto_ranged_get->initial_message_has_range_header);
-                // waahm7
                 aws_http_headers_erase(response_headers, g_content_range_header_name);
             }
 
