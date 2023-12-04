@@ -558,7 +558,7 @@ static int s_discover_object_range_and_content_length(
                     meta_request->allocator, request->send_data.response_headers, &content_length)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Could not find content-range header for request %p",
+                    "id=%p Could not find content-length header for request %p",
                     (void *)meta_request,
                     (void *)request);
                 break;
@@ -571,17 +571,19 @@ static int s_discover_object_range_and_content_length(
                         NULL,
                         NULL,
                         &total_content_length)) {
-                    AWS_LOGF_INFO(
+
+                    AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
-                        "id=%p Could not find content-range header for request %p.",
+                        "id=%p Could not find content-range header for request %p",
                         (void *)meta_request,
                         (void *)request);
-                } else {
 
-                    /* When discovering the object size via first-part, the object range is the entire object. */
-                    object_range_start = 0;
-                    object_range_end = total_content_length - 1; /* range-end is inclusive */
+                    break;
                 }
+
+                /* When discovering the object size via first-part, the object range is the entire object. */
+                object_range_start = 0;
+                object_range_end = total_content_length - 1; /* range-end is inclusive */
             }
             result = AWS_OP_SUCCESS;
             break;
