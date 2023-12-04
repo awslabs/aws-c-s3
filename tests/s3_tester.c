@@ -64,6 +64,16 @@ struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERA
 /* If `$CRT_S3_TEST_BUCKET_NAME` envrionment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
  * aws-c-s3-test-bucket-public */
 struct aws_byte_cursor g_test_public_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use
+ * `$CRT_S3_TEST_BUCKET_NAME--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com`; otherwise, use
+ * aws-c-s3-test-bucket--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com */
+struct aws_byte_cursor g_test_s3express_bucket_usw2_az1_endpoint = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+    "aws-c-s3-test-bucket--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com");
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use
+ * `$CRT_S3_TEST_BUCKET_NAME--us1-az1--x-s3.s3express-use1-az4.us-east-1.amazonaws.com`; otherwise, use
+ * aws-c-s3-test-bucket--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com */
+struct aws_byte_cursor g_test_s3express_bucket_use1_az4_endpoint = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+    "aws-c-s3-test-bucket--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com");
 
 #ifdef BYO_CRYPTO
 /* Under BYO_CRYPTO, this function currently needs to be defined by the user. Defining a null implementation here so
@@ -355,6 +365,28 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
             AWS_BYTE_CURSOR_PRI(g_test_bucket_name));
         tester->public_bucket_name = aws_string_new_from_c_str(allocator, public_bucket_name_buffer);
         g_test_public_bucket_name = aws_byte_cursor_from_string(tester->public_bucket_name);
+
+        char s3express_bucket_usw2_az1_endpoint_buffer[512] = "";
+        snprintf(
+            s3express_bucket_usw2_az1_endpoint_buffer,
+            sizeof(s3express_bucket_usw2_az1_endpoint_buffer),
+            "" PRInSTR "--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com",
+            AWS_BYTE_CURSOR_PRI(g_test_bucket_name));
+        tester->s3express_bucket_usw2_az1_endpoint =
+            aws_string_new_from_c_str(allocator, s3express_bucket_usw2_az1_endpoint_buffer);
+        g_test_s3express_bucket_usw2_az1_endpoint =
+            aws_byte_cursor_from_string(tester->s3express_bucket_usw2_az1_endpoint);
+
+        char s3express_bucket_use1_az4_name_buffer[128] = "";
+        snprintf(
+            s3express_bucket_use1_az4_name_buffer,
+            sizeof(s3express_bucket_use1_az4_name_buffer),
+            "" PRInSTR "--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com",
+            AWS_BYTE_CURSOR_PRI(g_test_bucket_name));
+        tester->s3express_bucket_use1_az4_endpoint =
+            aws_string_new_from_c_str(allocator, s3express_bucket_use1_az4_name_buffer);
+        g_test_s3express_bucket_use1_az4_endpoint =
+            aws_byte_cursor_from_string(tester->s3express_bucket_use1_az4_endpoint);
     }
 
     aws_s3_library_init(allocator);
@@ -698,6 +730,8 @@ void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     }
     aws_string_destroy(tester->bucket_name);
     aws_string_destroy(tester->public_bucket_name);
+    aws_string_destroy(tester->s3express_bucket_usw2_az1_endpoint);
+    aws_string_destroy(tester->s3express_bucket_use1_az4_endpoint);
 
     aws_credentials_release(tester->anonymous_creds);
 
