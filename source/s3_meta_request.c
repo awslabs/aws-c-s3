@@ -1270,6 +1270,7 @@ static int s_s3_meta_request_headers_block_done(
     enum aws_http_header_block header_block,
     void *user_data) {
     (void)stream;
+    (void)header_block;
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
