@@ -100,6 +100,8 @@ struct aws_s3_tester {
 
     struct aws_string *bucket_name;
     struct aws_string *public_bucket_name;
+    struct aws_string *s3express_bucket_usw2_az1_endpoint;
+    struct aws_string *s3express_bucket_use1_az4_endpoint;
 
     struct {
         struct aws_mutex lock;
@@ -489,5 +491,13 @@ extern struct aws_byte_cursor g_test_bucket_name;
  * aws-c-s3-test-bucket-public
  */
 extern struct aws_byte_cursor g_test_public_bucket_name;
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use
+ * `$CRT_S3_TEST_BUCKET_NAME--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com`; otherwise, use
+ * aws-c-s3-test-bucket--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com */
+extern struct aws_byte_cursor g_test_s3express_bucket_usw2_az1_endpoint;
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use
+ * `$CRT_S3_TEST_BUCKET_NAME--us1-az1--x-s3.s3express-use1-az4.us-east-1.amazonaws.com`; otherwise, use
+ * aws-c-s3-test-bucket--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com */
+extern struct aws_byte_cursor g_test_s3express_bucket_use1_az4_endpoint;
 
 #endif /* AWS_S3_TESTER_H */
