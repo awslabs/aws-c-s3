@@ -589,6 +589,7 @@ static int s_discover_object_range_and_content_length(
             }
 
             result = AWS_OP_SUCCESS;
+            break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE:
             AWS_ASSERT(request->part_number == 1);
 

@@ -251,6 +251,7 @@ int aws_s3_parse_content_length_response_header(
     struct aws_http_headers *response_headers,
     uint64_t *out_content_length);
 
+// waahm7 todo update documentation
 /* Calculate the number of parts based on overall object-range and part_size. This takes into account aligning
  * part-ranges on part_size. (ie: if object_range_start is not evenly divisible by part_size, it is considered in the
  * middle of a contiguous part, and that first part will be smaller than part_size.) */
