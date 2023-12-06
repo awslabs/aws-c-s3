@@ -1291,14 +1291,14 @@ static int s_s3_meta_request_headers_block_done(
                 request->allocator, request->send_data.response_headers, &content_length)) {
 
             if (content_length > meta_request->part_size * 2) {
-                return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+                return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE);
             }
             // if (content_length > meta_request->part_size ||
             //     (content_length < meta_request->part_size &&
             //      aws_http_headers_has(
             //          request->send_data.response_headers,
             //          g_mp_parts_count_header_name) /* Object has multiple parts if this header is present */)) {
-            //     return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+            //     return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE);
             // }
         }
     }
@@ -1550,10 +1550,10 @@ void aws_s3_meta_request_send_request_finish_default(
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
-            error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
+            error_code == AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
-            if (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
+            if (error_code == AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE) {
                 /* Log at info level instead of error as it's expected and not a fatal error */
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,

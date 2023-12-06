@@ -168,12 +168,6 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.head_object_sent = true;
                 } else {
                     /* Get the object range from the first request */
-                    struct aws_s3_buffer_pool_ticket *ticket =
-                        aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
-
-                    if (ticket == NULL) {
-                        goto has_work_remaining;
-                    }
 
                     if (meta_request->checksum_config.validate_response_checksum) {
                         /*
@@ -183,16 +177,31 @@ static bool s_s3_auto_ranged_get_update(
                          * upon receiving the headers, which is similar to a head request. This approach helps to avoid
                          * an extra head request for small files.
                          */
+                        struct aws_s3_buffer_pool_ticket *ticket =
+                            aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size * 2);
+
+                        if (ticket == NULL) {
+                            goto has_work_remaining;
+                        }
+
                         request = aws_s3_request_new(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER,
                             AWS_S3_REQUEST_TYPE_GET_OBJECT,
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                        request->ticket = ticket;
                         auto_ranged_get->synced_data.get_first_part_sent = true;
                     } else {
                         /* If checksum validation is not required, then discover the size of the object during the
                          * first ranged get request. */
+                        struct aws_s3_buffer_pool_ticket *ticket =
+                            aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+                        if (ticket == NULL) {
+                            goto has_work_remaining;
+                        }
+
                         request = aws_s3_request_new(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE,
@@ -201,10 +210,10 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
                         request->part_range_start = 0;
                         request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
-                        ++auto_ranged_get->synced_data.num_parts_requested;
+                        request->ticket = ticket;
                     }
+                    ++auto_ranged_get->synced_data.num_parts_requested;
                     request->discovers_object_size = true;
-                    request->ticket = ticket;
                 }
 
                 goto has_work_remaining;
@@ -668,7 +677,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
-    bool first_part_size_mismatch = (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+    bool first_part_size_mismatch = (error_code == AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE);
 
     if (request->discovers_object_size) {
 
@@ -775,11 +784,11 @@ update_synced_data:
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
                 auto_ranged_get->synced_data.get_first_part_completed = true;
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
-                if (first_part_size_mismatch && found_object_size) {
+                if (first_part_size_mismatch) {
                     /* Try to fetch the first part again as a ranged get */
+                    auto_ranged_get->synced_data.num_parts_requested = 0;
                     break;
                 }
-                ++auto_ranged_get->synced_data.num_parts_requested;
                 /* fall through */
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE:
                 ++auto_ranged_get->synced_data.num_parts_completed;
