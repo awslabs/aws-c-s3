@@ -329,7 +329,7 @@ TEST_CASE(async_access_denied_from_complete_multipart_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
 
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR, out_results.finished_error_code);
-    ASSERT_UINT_EQUALS(AWS_S3_RESPONSE_STATUS_SUCCESS, out_results.finished_response_status);
+    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, out_results.finished_response_status);
     ASSERT_TRUE(out_results.error_response_body.len != 0);
     ASSERT_STR_EQUALS("CompleteMultipartUpload", aws_string_c_str(out_results.error_response_operation_name));
 

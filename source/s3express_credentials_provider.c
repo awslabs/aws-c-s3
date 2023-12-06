@@ -314,15 +314,17 @@ static void s_on_request_finished(
     struct aws_credentials *credentials = NULL;
     int error_code = meta_request_result->error_code;
 
-    if (error_code == AWS_ERROR_SUCCESS && meta_request_result->response_status != 200) {
-        error_code = AWS_AUTH_CREDENTIALS_PROVIDER_HTTP_STATUS_FAILURE;
-    }
-
     AWS_LOGF_DEBUG(
         AWS_LS_AUTH_CREDENTIALS_PROVIDER,
         "CreateSession call completed with http status %d and error code %s",
         meta_request_result->response_status,
         aws_error_debug_str(error_code));
+
+    if (error_code) {
+        /* If anything failed from the CreateSession meta request. Provide an CreateSession failure error code to the
+         * user */
+        error_code = AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED;
+    }
 
     if (error_code == AWS_ERROR_SUCCESS) {
         credentials = s_parse_s3express_xml(

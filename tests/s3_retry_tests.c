@@ -359,7 +359,7 @@ static void s_s3_meta_request_send_request_finish_fail_first(
     if (aws_s3_tester_inc_counter2(tester) == 1) {
         AWS_ASSERT(connection->request->send_data.response_status == 404);
 
-        connection->request->send_data.response_status = AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR;
+        connection->request->send_data.response_status = AWS_HTTP_STATUS_CODE_500_INTERNAL_SERVER_ERROR;
     }
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
