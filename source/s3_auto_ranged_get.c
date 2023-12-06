@@ -624,7 +624,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
-    int request_error_code = error_code;
+    bool first_part_size_mismatch = (error_code == AWS_ERROR_S3_GET_PART_SIZE_MISMATCH);
 
     if (request->discovers_object_size) {
 
@@ -632,7 +632,7 @@ static void s_s3_auto_ranged_get_request_finished(
         if (s_discover_object_range_and_content_length(
                 meta_request, request, error_code, &total_content_length, &object_range_start, &object_range_end)) {
 
-            request_error_code = aws_last_error_or_unknown();
+            error_code = aws_last_error_or_unknown();
 
             goto update_synced_data;
         }
@@ -643,7 +643,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
             if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value)) {
                 aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
-                request_error_code = AWS_ERROR_S3_MISSING_ETAG;
+                error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
             }
 
@@ -657,7 +657,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
         /* If we were able to discover the object-range/content length successfully, then any error code that was passed
          * into this function is being handled and does not indicate an overall failure.*/
-        request_error_code = AWS_ERROR_SUCCESS;
+        error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
 
         if (meta_request->headers_callback != NULL) {
@@ -685,7 +685,7 @@ static void s_s3_auto_ranged_get_request_finished(
                     s_s3_auto_ranged_get_success_status(meta_request),
                     meta_request->user_data)) {
 
-                request_error_code = aws_last_error_or_unknown();
+                error_code = aws_last_error_or_unknown();
             }
             meta_request->headers_callback = NULL;
 
@@ -718,7 +718,7 @@ update_synced_data:
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
                 auto_ranged_get->synced_data.get_first_part_completed = true;
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
-                if (error_code == AWS_ERROR_S3_GET_PART_SIZE_MISMATCH && found_object_size) {
+                if (first_part_size_mismatch && found_object_size) {
                     /* Try to fetch the first part again as a ranged get */
                     break;
                 }
@@ -774,15 +774,15 @@ update_synced_data:
                 break;
         }
 
-        if (request_error_code != AWS_ERROR_SUCCESS) {
-            if (request_error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS &&
+        if (error_code != AWS_ERROR_SUCCESS) {
+            if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS &&
                 request->send_data.response_status == AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED &&
                 !auto_ranged_get->initial_message_has_if_match_header) {
                 /* Use more clear error code as we added the if-match header under the hood. */
-                request_error_code = AWS_ERROR_S3_OBJECT_MODIFIED;
+                error_code = AWS_ERROR_S3_OBJECT_MODIFIED;
             }
-            aws_s3_meta_request_set_fail_synced(meta_request, request, request_error_code);
-            if (request_error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH) {
+            aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+            if (error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH) {
                 /* It's a mismatch of checksum, tell user that we validated the checksum and the algorithm we validated
                  */
                 meta_request->synced_data.finish_result.did_validate = true;

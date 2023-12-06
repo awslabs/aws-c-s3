@@ -1270,7 +1270,10 @@ static int s_s3_meta_request_headers_block_done(
     enum aws_http_header_block header_block,
     void *user_data) {
     (void)stream;
-    (void)header_block;
+
+    if (header_block != AWS_HTTP_HEADER_BLOCK_MAIN) {
+        return AWS_OP_SUCCESS;
+    }
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
@@ -1549,7 +1552,7 @@ void aws_s3_meta_request_send_request_finish_default(
                 /* Log at info level instead of error as it's expected and not a fatal error */
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
+                    "id=%p Cancelling the request because of error %d (%s). (request=%p, response status=%d)",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
