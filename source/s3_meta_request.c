@@ -1744,9 +1744,16 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
             } break;
 
             case AWS_S3_META_REQUEST_EVENT_TELEMETRY: {
+                struct aws_s3_request_metrics *metric = event.u.telemetry.metrics;
                 AWS_FATAL_ASSERT(meta_request->telemetry_callback != NULL);
-                AWS_FATAL_ASSERT(event.u.telemetry.metrics != NULL);
-                meta_request->telemetry_callback(meta_request, event.u.telemetry.metrics, meta_request->user_data);
+                AWS_FATAL_ASSERT(metric != NULL);
+
+                if (metric->time_metrics.end_timestamp_ns == -1) {
+                    aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
+                    metric->time_metrics.total_duration_ns =
+                        metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
+                }
+                meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
                 event.u.telemetry.metrics = aws_s3_request_metrics_release(event.u.telemetry.metrics);
             } break;
 

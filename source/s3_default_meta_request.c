@@ -401,6 +401,7 @@ static void s_s3_meta_request_default_request_finished(
         meta_request_default->synced_data.cached_response_status = request->send_data.response_status;
         meta_request_default->synced_data.request_completed = true;
         meta_request_default->synced_data.request_error_code = error_code;
+        bool record_end = true;
 
         if (error_code == AWS_ERROR_SUCCESS) {
             /* Send progress_callback for delivery on io_event_loop thread.
@@ -423,10 +424,13 @@ static void s_s3_meta_request_default_request_finished(
             }
 
             aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+            /* The body of the request is queued to be streamed, don't record the end timestamp for the request
+             * yet. */
+            record_end = false;
         } else {
             aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
         }
-        aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code);
+        aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code, record_end);
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
