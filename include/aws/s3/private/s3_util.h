@@ -255,7 +255,10 @@ int aws_s3_parse_content_length_response_header(
  * part-ranges on part_size. (ie: if object_range_start is not evenly divisible by part_size, it is considered in the
  * middle of a contiguous part, and that first part will be smaller than part_size.) */
 AWS_S3_API
-uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end);
+uint32_t aws_s3_calculate_auto_range_get_num_parts(
+    size_t part_size,
+    uint64_t object_range_start,
+    uint64_t object_range_end);
 
 /**
  * Calculates the optimal part size and num parts given the 'content_length' and 'client_part_size'.
@@ -273,9 +276,10 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
 
 /* Calculates the part range for a part given overall object range, size of each part, and the part's number. Note: part
  * numbers begin at one. This takes into account aligning part-ranges on part_size. Intended to be used in conjunction
- * with aws_s3_get_num_parts. part_number should be less than or equal to the result of aws_s3_get_num_parts. */
+ * with aws_s3_calculate_auto_range_get_num_parts. part_number should be less than or equal to the result of
+ * aws_s3_calculate_auto_range_get_num_parts. */
 AWS_S3_API
-void aws_s3_get_part_range(
+void aws_s3_calculate_auto_range_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
     size_t part_size,

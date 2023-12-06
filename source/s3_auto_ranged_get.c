@@ -90,6 +90,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
 
     auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
+    auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
@@ -276,7 +277,7 @@ static bool s_s3_auto_ranged_get_update(
 
                 request->ticket = ticket;
 
-                aws_s3_get_part_range(
+                aws_s3_calculate_auto_range_get_part_range(
                     auto_ranged_get->synced_data.object_range_start,
                     auto_ranged_get->synced_data.object_range_end,
                     meta_request->part_size,
@@ -743,8 +744,8 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
-            auto_ranged_get->synced_data.total_num_parts =
-                aws_s3_get_num_parts(meta_request->part_size, object_range_start, object_range_end);
+            auto_ranged_get->synced_data.total_num_parts = aws_s3_calculate_auto_range_get_num_parts(
+                meta_request->part_size, object_range_start, object_range_end);
         }
 
         switch (request->request_tag) {

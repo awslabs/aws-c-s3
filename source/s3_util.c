@@ -485,7 +485,10 @@ int aws_s3_parse_content_length_response_header(
     return result;
 }
 
-uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
+uint32_t aws_s3_calculate_auto_range_get_num_parts(
+    size_t part_size,
+    uint64_t object_range_start,
+    uint64_t object_range_end) {
     uint32_t num_parts = 1;
 
     uint64_t first_part_size = part_size;
@@ -511,7 +514,7 @@ uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uin
     return num_parts;
 }
 
-void aws_s3_get_part_range(
+void aws_s3_calculate_auto_range_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
     size_t part_size,
@@ -526,7 +529,7 @@ void aws_s3_get_part_range(
     const uint32_t part_index = part_number - 1;
 
     /* Part index is assumed to be in a valid range. */
-    AWS_ASSERT(part_index < aws_s3_get_num_parts(part_size, object_range_start, object_range_end));
+    AWS_ASSERT(part_index < aws_s3_calculate_auto_range_get_num_parts(part_size, object_range_start, object_range_end));
 
     uint64_t part_size_uint64 = (uint64_t)part_size;
     uint64_t first_part_size = part_size_uint64;

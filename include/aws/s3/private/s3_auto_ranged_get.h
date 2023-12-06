@@ -31,6 +31,8 @@ struct aws_s3_auto_ranged_get {
          * So if begin=0 and end=0 then 1 byte is being downloaded. */
         uint64_t object_range_end;
 
+        uint64_t first_part_size;
+
         /* The total number of parts that are being used in downloading the object range. Note that "part" here
          * currently refers to a range-get, and does not require a "part" on the service side. */
         uint32_t total_num_parts;

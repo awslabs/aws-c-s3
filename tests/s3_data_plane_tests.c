@@ -499,7 +499,7 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
             struct aws_s3_request *request = aws_s3_request_new(
                 meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_number, 0 /*flags*/);
 
-            aws_s3_get_part_range(
+            aws_s3_calculate_auto_range_get_part_range(
                 0ULL,
                 total_object_size - 1,
                 (uint64_t)request_response_body_size,
@@ -536,7 +536,7 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
             struct aws_s3_request *request = aws_s3_request_new(
                 meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_number, 0 /*flags*/);
 
-            aws_s3_get_part_range(
+            aws_s3_calculate_auto_range_get_part_range(
                 0ULL,
                 total_object_size - 1,
                 (uint64_t)request_response_body_size,
@@ -565,7 +565,7 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
         struct aws_s3_request *request = aws_s3_request_new(
             meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_range1_start, 0 /*flags*/);
 
-        aws_s3_get_part_range(
+        aws_s3_calculate_auto_range_get_part_range(
             0ULL,
             total_object_size - 1,
             (uint64_t)request_response_body_size,
