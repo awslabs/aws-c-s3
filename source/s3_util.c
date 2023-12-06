@@ -485,19 +485,12 @@ int aws_s3_parse_content_length_response_header(
     return result;
 }
 
-uint32_t aws_s3_calculate_auto_range_get_num_parts(
+uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
     size_t part_size,
+    uint64_t first_part_size,
     uint64_t object_range_start,
     uint64_t object_range_end) {
     uint32_t num_parts = 1;
-
-    uint64_t first_part_size = part_size;
-    uint64_t first_part_alignment_offset = object_range_start % part_size;
-
-    /* If the first part size isn't aligned on the assumed part boundary, make it smaller so that it is. */
-    if (first_part_alignment_offset > 0) {
-        first_part_size = part_size - first_part_alignment_offset;
-    }
 
     uint64_t second_part_start = object_range_start + first_part_size;
 
@@ -514,10 +507,11 @@ uint32_t aws_s3_calculate_auto_range_get_num_parts(
     return num_parts;
 }
 
-void aws_s3_calculate_auto_range_get_part_range(
+void aws_s3_calculate_auto_ranged_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
     size_t part_size,
+    uint64_t first_part_size,
     uint32_t part_number,
     uint64_t *out_part_range_start,
     uint64_t *out_part_range_end) {
@@ -529,16 +523,11 @@ void aws_s3_calculate_auto_range_get_part_range(
     const uint32_t part_index = part_number - 1;
 
     /* Part index is assumed to be in a valid range. */
-    AWS_ASSERT(part_index < aws_s3_calculate_auto_range_get_num_parts(part_size, object_range_start, object_range_end));
+    AWS_ASSERT(
+        part_index <
+        aws_s3_calculate_auto_ranged_get_num_parts(part_size, first_part_size, object_range_start, object_range_end));
 
     uint64_t part_size_uint64 = (uint64_t)part_size;
-    uint64_t first_part_size = part_size_uint64;
-    uint64_t first_part_alignment_offset = object_range_start % part_size_uint64;
-
-    /* Shrink the part to a smaller size if need be to align to the assumed part boundary. */
-    if (first_part_alignment_offset > 0) {
-        first_part_size = part_size_uint64 - first_part_alignment_offset;
-    }
 
     if (part_index == 0) {
         /* If this is the first part, then use the first part size. */

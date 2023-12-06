@@ -1289,13 +1289,17 @@ static int s_s3_meta_request_headers_block_done(
         uint64_t content_length;
         if (!aws_s3_parse_content_length_response_header(
                 request->allocator, request->send_data.response_headers, &content_length)) {
-            if (content_length > meta_request->part_size ||
-                (content_length < meta_request->part_size &&
-                 aws_http_headers_has(
-                     request->send_data.response_headers,
-                     g_mp_parts_count_header_name) /* Object has multiple parts if this header is present */)) {
+
+            if (content_length > meta_request->part_size * 2) {
                 return aws_raise_error(AWS_ERROR_S3_GET_PART_SIZE_MISMATCH);
             }
+            // if (content_length > meta_request->part_size ||
+            //     (content_length < meta_request->part_size &&
+            //      aws_http_headers_has(
+            //          request->send_data.response_headers,
+            //          g_mp_parts_count_header_name) /* Object has multiple parts if this header is present */)) {
+            //     return aws_raise_error(AWS_ERROR_S3_GET_PART_SIZE_MISMATCH);
+            // }
         }
     }
     return AWS_OP_SUCCESS;
