@@ -571,8 +571,6 @@ static void s_s3_copy_object_request_finished(
 
     struct aws_s3_copy_object *copy_object = meta_request->impl;
     aws_s3_meta_request_lock_synced_data(meta_request);
-    aws_s3_request_finish_up_metrics_synced(request, meta_request);
-
     switch (request->request_tag) {
 
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE: {
@@ -612,6 +610,8 @@ static void s_s3_copy_object_request_finished(
                 /* Copy all the response headers from this request. */
                 copy_http_headers(request->send_data.response_headers, final_response_headers);
 
+                /* Invoke the callback without lock */
+                aws_s3_meta_request_unlock_synced_data(meta_request);
                 /* Notify the user of the headers. */
                 if (meta_request->headers_callback(
                         meta_request,
@@ -622,6 +622,8 @@ static void s_s3_copy_object_request_finished(
                     error_code = aws_last_error_or_unknown();
                 }
                 meta_request->headers_callback = NULL;
+                /* Grab the lock again after the callback */
+                aws_s3_meta_request_lock_synced_data(meta_request);
 
                 aws_http_headers_release(final_response_headers);
             }
@@ -770,6 +772,8 @@ static void s_s3_copy_object_request_finished(
                 }
 
                 /* Notify the user of the headers. */
+                /* Invoke the callback without lock */
+                aws_s3_meta_request_unlock_synced_data(meta_request);
                 if (meta_request->headers_callback(
                         meta_request,
                         final_response_headers,
@@ -779,6 +783,8 @@ static void s_s3_copy_object_request_finished(
                     error_code = aws_last_error_or_unknown();
                 }
                 meta_request->headers_callback = NULL;
+                /* Grab the lock again after the callback */
+                aws_s3_meta_request_lock_synced_data(meta_request);
 
                 aws_http_headers_release(final_response_headers);
             }
@@ -798,5 +804,8 @@ static void s_s3_copy_object_request_finished(
             break;
         }
     }
+
+    aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code);
+
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }

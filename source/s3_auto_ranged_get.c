@@ -673,7 +673,6 @@ update_synced_data:
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
-        aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
@@ -757,6 +756,7 @@ update_synced_data:
                 meta_request->synced_data.finish_result.validation_algorithm = request->validation_algorithm;
             }
         }
+        aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code);
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }

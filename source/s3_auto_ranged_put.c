@@ -1334,96 +1334,88 @@ static void s_s3_auto_ranged_put_request_finished(
     AWS_PRECONDITION(request);
 
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    aws_s3_meta_request_lock_synced_data(meta_request);
 
     switch (request->request_tag) {
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_LIST_PARTS: {
-            /* BEGIN CRITICAL SECTION */
-            {
-                aws_s3_meta_request_lock_synced_data(meta_request);
-                aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
-                bool has_more_results = false;
+            bool has_more_results = false;
 
-                if (error_code == AWS_ERROR_SUCCESS) {
+            if (error_code == AWS_ERROR_SUCCESS) {
 
-                    struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
-                    /* Clear the token before */
-                    aws_string_destroy(auto_ranged_put->synced_data.list_parts_continuation_token);
-                    auto_ranged_put->synced_data.list_parts_continuation_token = NULL;
-                    if (aws_s3_paginated_operation_on_response(
-                            auto_ranged_put->synced_data.list_parts_operation,
-                            &body_cursor,
-                            &auto_ranged_put->synced_data.list_parts_continuation_token,
-                            &has_more_results)) {
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST, "id=%p Failed to parse list parts response.", (void *)meta_request);
-                        error_code = AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED;
-                    } else if (!has_more_results) {
-                        uint64_t bytes_previously_uploaded = 0;
-                        int parts_previously_uploaded = 0;
+                struct aws_byte_cursor body_cursor = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                /* Clear the token before */
+                aws_string_destroy(auto_ranged_put->synced_data.list_parts_continuation_token);
+                auto_ranged_put->synced_data.list_parts_continuation_token = NULL;
+                if (aws_s3_paginated_operation_on_response(
+                        auto_ranged_put->synced_data.list_parts_operation,
+                        &body_cursor,
+                        &auto_ranged_put->synced_data.list_parts_continuation_token,
+                        &has_more_results)) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST, "id=%p Failed to parse list parts response.", (void *)meta_request);
+                    error_code = AWS_ERROR_S3_LIST_PARTS_PARSE_FAILED;
+                } else if (!has_more_results) {
+                    uint64_t bytes_previously_uploaded = 0;
+                    int parts_previously_uploaded = 0;
 
-                        for (size_t part_index = 0;
-                             part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
-                             part_index++) {
-                            struct aws_s3_mpu_part_info *part = NULL;
-                            aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
-                            if (part != NULL) {
-                                /* Update the number of parts sent/completed previously */
-                                ++parts_previously_uploaded;
-                                bytes_previously_uploaded += part->size;
-                            }
-                        }
-
-                        AWS_LOGF_DEBUG(
-                            AWS_LS_S3_META_REQUEST,
-                            "id=%p: Resuming PutObject. %d out of %d parts have completed during previous request.",
-                            (void *)meta_request,
-                            parts_previously_uploaded,
-                            auto_ranged_put->total_num_parts_from_content_length);
-
-                        /* Deliver an initial progress_callback to report all previously uploaded parts. */
-                        if (meta_request->progress_callback != NULL && bytes_previously_uploaded > 0) {
-                            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
-                            event.u.progress.info.bytes_transferred = bytes_previously_uploaded;
-                            event.u.progress.info.content_length = auto_ranged_put->content_length;
-                            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+                    for (size_t part_index = 0;
+                         part_index < aws_array_list_length(&auto_ranged_put->synced_data.part_list);
+                         part_index++) {
+                        struct aws_s3_mpu_part_info *part = NULL;
+                        aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
+                        if (part != NULL) {
+                            /* Update the number of parts sent/completed previously */
+                            ++parts_previously_uploaded;
+                            bytes_previously_uploaded += part->size;
                         }
                     }
-                }
 
-                if (has_more_results) {
-                    /* If list parts has more result, make sure list parts continues */
-                    auto_ranged_put->synced_data.list_parts_state.continues = true;
-                    auto_ranged_put->synced_data.list_parts_state.completed = false;
-                } else {
-                    /* No more result, complete the list parts */
-                    auto_ranged_put->synced_data.list_parts_state.continues = false;
-                    auto_ranged_put->synced_data.list_parts_state.completed = true;
-                }
-                auto_ranged_put->synced_data.list_parts_error_code = error_code;
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Resuming PutObject. %d out of %d parts have completed during previous request.",
+                        (void *)meta_request,
+                        parts_previously_uploaded,
+                        auto_ranged_put->total_num_parts_from_content_length);
 
-                if (error_code != AWS_ERROR_SUCCESS) {
-                    if (request->send_data.response_status == AWS_HTTP_STATUS_CODE_404_NOT_FOUND &&
-                        auto_ranged_put->resume_token->num_parts_completed ==
-                            auto_ranged_put->resume_token->total_num_parts) {
-                        AWS_LOGF_DEBUG(
-                            AWS_LS_S3_META_REQUEST,
-                            "id=%p: Resuming PutObject ended early, since there is nothing to resume"
-                            "(request finished prior to being paused?)",
-                            (void *)meta_request);
-
-                        aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
-                    } else {
-                        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+                    /* Deliver an initial progress_callback to report all previously uploaded parts. */
+                    if (meta_request->progress_callback != NULL && bytes_previously_uploaded > 0) {
+                        struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                        event.u.progress.info.bytes_transferred = bytes_previously_uploaded;
+                        event.u.progress.info.content_length = auto_ranged_put->content_length;
+                        aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
                     }
                 }
-
-                aws_s3_meta_request_unlock_synced_data(meta_request);
             }
-            /* END CRITICAL SECTION */
-            break;
-        }
+
+            if (has_more_results) {
+                /* If list parts has more result, make sure list parts continues */
+                auto_ranged_put->synced_data.list_parts_state.continues = true;
+                auto_ranged_put->synced_data.list_parts_state.completed = false;
+            } else {
+                /* No more result, complete the list parts */
+                auto_ranged_put->synced_data.list_parts_state.continues = false;
+                auto_ranged_put->synced_data.list_parts_state.completed = true;
+            }
+            auto_ranged_put->synced_data.list_parts_error_code = error_code;
+
+            if (error_code != AWS_ERROR_SUCCESS) {
+                if (request->send_data.response_status == AWS_HTTP_STATUS_CODE_404_NOT_FOUND &&
+                    auto_ranged_put->resume_token->num_parts_completed ==
+                        auto_ranged_put->resume_token->total_num_parts) {
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Resuming PutObject ended early, since there is nothing to resume"
+                        "(request finished prior to being paused?)",
+                        (void *)meta_request);
+
+                    aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
+                } else {
+                    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+                }
+            }
+        } break;
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD: {
             struct aws_http_headers *needed_response_headers = NULL;
@@ -1465,26 +1457,16 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
             }
 
-            /* BEGIN CRITICAL SECTION */
-            {
-                aws_s3_meta_request_lock_synced_data(meta_request);
-                aws_s3_request_finish_up_metrics_synced(request, meta_request);
+            AWS_ASSERT(auto_ranged_put->synced_data.needed_response_headers == NULL);
+            auto_ranged_put->synced_data.needed_response_headers = needed_response_headers;
 
-                AWS_ASSERT(auto_ranged_put->synced_data.needed_response_headers == NULL);
-                auto_ranged_put->synced_data.needed_response_headers = needed_response_headers;
+            auto_ranged_put->synced_data.create_multipart_upload_completed = true;
+            auto_ranged_put->synced_data.list_parts_error_code = error_code;
 
-                auto_ranged_put->synced_data.create_multipart_upload_completed = true;
-                auto_ranged_put->synced_data.list_parts_error_code = error_code;
-
-                if (error_code != AWS_ERROR_SUCCESS) {
-                    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-                }
-
-                aws_s3_meta_request_unlock_synced_data(meta_request);
+            if (error_code != AWS_ERROR_SUCCESS) {
+                aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             }
-            /* END CRITICAL SECTION */
-            break;
-        }
+        } break;
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART: {
             size_t part_number = request->part_number;
@@ -1518,64 +1500,53 @@ static void s_s3_auto_ranged_put_request_finished(
                 }
             }
 
-            /* BEGIN CRITICAL SECTION */
-            {
-                aws_s3_meta_request_lock_synced_data(meta_request);
-                aws_s3_request_finish_up_metrics_synced(request, meta_request);
+            ++auto_ranged_put->synced_data.num_parts_completed;
 
-                ++auto_ranged_put->synced_data.num_parts_completed;
-
-                if (request_is_noop) {
-                    ++auto_ranged_put->synced_data.num_parts_noop;
-                }
-
-                if (auto_ranged_put->has_content_length) {
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: %d out of %d parts have completed.",
-                        (void *)meta_request,
-                        auto_ranged_put->synced_data.num_parts_completed,
-                        auto_ranged_put->total_num_parts_from_content_length);
-                } else {
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: %d parts have completed.",
-                        (void *)meta_request,
-                        auto_ranged_put->synced_data.num_parts_completed);
-                }
-
-                if (!request_is_noop) {
-                    if (error_code == AWS_ERROR_SUCCESS) {
-                        AWS_ASSERT(etag != NULL);
-
-                        ++auto_ranged_put->synced_data.num_parts_successful;
-
-                        /* Send progress_callback for delivery on io_event_loop thread */
-                        if (meta_request->progress_callback != NULL) {
-                            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
-                            event.u.progress.info.bytes_transferred = request->request_body.len;
-                            event.u.progress.info.content_length = auto_ranged_put->content_length;
-                            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
-                        }
-
-                        /* Store part's ETag */
-                        struct aws_s3_mpu_part_info *part = NULL;
-                        aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
-                        AWS_ASSERT(part != NULL);
-                        AWS_ASSERT(part->etag == NULL);
-                        part->etag = etag;
-                    } else {
-                        ++auto_ranged_put->synced_data.num_parts_failed;
-                        aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-                    }
-                }
-
-                aws_s3_meta_request_unlock_synced_data(meta_request);
+            if (request_is_noop) {
+                ++auto_ranged_put->synced_data.num_parts_noop;
             }
-            /* END CRITICAL SECTION */
 
-            break;
-        }
+            if (auto_ranged_put->has_content_length) {
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: %d out of %d parts have completed.",
+                    (void *)meta_request,
+                    auto_ranged_put->synced_data.num_parts_completed,
+                    auto_ranged_put->total_num_parts_from_content_length);
+            } else {
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: %d parts have completed.",
+                    (void *)meta_request,
+                    auto_ranged_put->synced_data.num_parts_completed);
+            }
+
+            if (!request_is_noop) {
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    AWS_ASSERT(etag != NULL);
+
+                    ++auto_ranged_put->synced_data.num_parts_successful;
+
+                    /* Send progress_callback for delivery on io_event_loop thread */
+                    if (meta_request->progress_callback != NULL) {
+                        struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
+                        event.u.progress.info.bytes_transferred = request->request_body.len;
+                        event.u.progress.info.content_length = auto_ranged_put->content_length;
+                        aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+                    }
+
+                    /* Store part's ETag */
+                    struct aws_s3_mpu_part_info *part = NULL;
+                    aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
+                    AWS_ASSERT(part != NULL);
+                    AWS_ASSERT(part->etag == NULL);
+                    part->etag = etag;
+                } else {
+                    ++auto_ranged_put->synced_data.num_parts_failed;
+                    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
+                }
+            }
+        } break;
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
             if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL) {
@@ -1589,11 +1560,7 @@ static void s_s3_auto_ranged_put_request_finished(
                  */
 
                 /* BEGIN CRITICAL SECTION */
-                {
-                    aws_s3_meta_request_lock_synced_data(meta_request);
-                    copy_http_headers(auto_ranged_put->synced_data.needed_response_headers, final_response_headers);
-                    aws_s3_meta_request_unlock_synced_data(meta_request);
-                }
+                { copy_http_headers(auto_ranged_put->synced_data.needed_response_headers, final_response_headers); }
                 /* END CRITICAL SECTION */
 
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
@@ -1622,6 +1589,8 @@ static void s_s3_auto_ranged_put_request_finished(
                     aws_byte_buf_clean_up(&etag_header_value_byte_buf);
                 }
 
+                /* Invoke the callback without lock */
+                aws_s3_meta_request_unlock_synced_data(meta_request);
                 /* Notify the user of the headers. */
                 if (meta_request->headers_callback(
                         meta_request,
@@ -1632,39 +1601,29 @@ static void s_s3_auto_ranged_put_request_finished(
                     error_code = aws_last_error_or_unknown();
                 }
                 meta_request->headers_callback = NULL;
+                /* Grab the lock again after the callback */
+                aws_s3_meta_request_lock_synced_data(meta_request);
 
                 aws_http_headers_release(final_response_headers);
             }
 
-            /* BEGIN CRITICAL SECTION */
-            {
-                aws_s3_meta_request_lock_synced_data(meta_request);
-                aws_s3_request_finish_up_metrics_synced(request, meta_request);
-                auto_ranged_put->synced_data.complete_multipart_upload_completed = true;
-                auto_ranged_put->synced_data.complete_multipart_upload_error_code = error_code;
+            auto_ranged_put->synced_data.complete_multipart_upload_completed = true;
+            auto_ranged_put->synced_data.complete_multipart_upload_error_code = error_code;
 
-                if (error_code != AWS_ERROR_SUCCESS) {
-                    aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
-                }
-                aws_s3_meta_request_unlock_synced_data(meta_request);
+            if (error_code != AWS_ERROR_SUCCESS) {
+                aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             }
-            /* END CRITICAL SECTION */
-
-            break;
-        }
+        } break;
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
-            /* BEGIN CRITICAL SECTION */
-            {
-                aws_s3_meta_request_lock_synced_data(meta_request);
-                aws_s3_request_finish_up_metrics_synced(request, meta_request);
-                auto_ranged_put->synced_data.abort_multipart_upload_error_code = error_code;
-                auto_ranged_put->synced_data.abort_multipart_upload_completed = true;
-                aws_s3_meta_request_unlock_synced_data(meta_request);
-            }
-            /* END CRITICAL SECTION */
-            break;
-        }
+            auto_ranged_put->synced_data.abort_multipart_upload_error_code = error_code;
+            auto_ranged_put->synced_data.abort_multipart_upload_completed = true;
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+
+        } break;
     }
+
+    aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
 static int s_s3_auto_ranged_put_pause(

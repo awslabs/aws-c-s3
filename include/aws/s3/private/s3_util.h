@@ -287,7 +287,10 @@ AWS_S3_API
 int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string);
 
 AWS_S3_API
-void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
+void aws_s3_request_finish_up_metrics_synced(
+    struct aws_s3_request *request,
+    struct aws_s3_meta_request *meta_request,
+    int error_code);
 
 AWS_EXTERN_C_END
 
