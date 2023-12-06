@@ -1617,7 +1617,6 @@ static void s_s3_auto_ranged_put_request_finished(
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD: {
             auto_ranged_put->synced_data.abort_multipart_upload_error_code = error_code;
             auto_ranged_put->synced_data.abort_multipart_upload_completed = true;
-            aws_s3_meta_request_unlock_synced_data(meta_request);
 
         } break;
     }
