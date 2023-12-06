@@ -1290,7 +1290,7 @@ static int s_s3_meta_request_headers_block_done(
         if (!aws_s3_parse_content_length_response_header(
                 request->allocator, request->send_data.response_headers, &content_length)) {
 
-            if (content_length > meta_request->part_size * 2) {
+            if (content_length > meta_request->part_size) {
                 return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE);
             }
             // if (content_length > meta_request->part_size ||

@@ -178,7 +178,7 @@ static bool s_s3_auto_ranged_get_update(
                          * an extra head request for small files.
                          */
                         struct aws_s3_buffer_pool_ticket *ticket =
-                            aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size * 2);
+                            aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                         if (ticket == NULL) {
                             goto has_work_remaining;
