@@ -610,7 +610,7 @@ TEST_CASE(s3express_client_get_object_error) {
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     struct aws_byte_cursor my_dummy_endpoint = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
-        "aws-c-s3-test-non-bucket-test--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com");
+        "non-exist-bucket-test--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com");
 
     struct aws_http_message *message =
         aws_s3_test_get_object_request_new(allocator, my_dummy_endpoint, g_pre_existing_object_10MB);
@@ -633,8 +633,8 @@ TEST_CASE(s3express_client_get_object_error) {
     ASSERT_TRUE(meta_request != NULL);
     /* Wait for the request to finish. */
     aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_UINT_EQUALS(meta_request_test_results.finished_error_code, AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED);
 
-    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
     meta_request = aws_s3_meta_request_release(meta_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
