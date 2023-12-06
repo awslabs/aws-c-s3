@@ -298,11 +298,13 @@ TEST_CASE(s3express_provider_get_credentials_cancel_mock_server) {
 
     ASSERT_SUCCESS(aws_s3express_credentials_provider_get_credentials(
         provider, tester.anonymous_creds, &property, s_get_credentials_callback, &s_s3express_tester));
+    /* Release the provider right after we fetch the credentials, which wil cancel the create session call. */
     aws_s3express_credentials_provider_release(provider);
     s_aws_wait_for_provider_shutdown_callback();
 
     s_aws_wait_for_credentials_result(1);
-    ASSERT_UINT_EQUALS(AWS_ERROR_S3_CANCELED, s_s3express_tester.error_code);
+    /* The error code will be CreateSession failed. */
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED, s_s3express_tester.error_code);
     ASSERT_SUCCESS(s_s3express_tester_cleanup());
     aws_s3_tester_clean_up(&tester);
 
