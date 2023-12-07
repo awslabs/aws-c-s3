@@ -1097,6 +1097,7 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
             error_code = AWS_ERROR_S3_INTERNAL_ERROR;
             break;
         case AWS_HTTP_STATUS_CODE_503_SERVICE_UNAVAILABLE:
+            /* S3 response 503 for throttling, slow down the sending */
             error_code = AWS_ERROR_S3_SLOW_DOWN;
             break;
         default:

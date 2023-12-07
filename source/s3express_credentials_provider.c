@@ -316,14 +316,20 @@ static void s_on_request_finished(
 
     AWS_LOGF_DEBUG(
         AWS_LS_AUTH_CREDENTIALS_PROVIDER,
-        "CreateSession call completed with http status %d and error code %s",
+        "(id=%p): CreateSession call completed with http status: %d and error code %s",
+        (void *)session_creator->provider,
         meta_request_result->response_status,
         aws_error_debug_str(error_code));
 
-    if (error_code) {
-        /* If anything failed from the CreateSession meta request. Provide an CreateSession failure error code to the
-         * user */
+    if (error_code && meta_request_result->error_response_body->len > 0) {
+        /* The Create Session failed with an error response from S3, provide a specific error code for user. */
         error_code = AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED;
+        AWS_LOGF_ERROR(
+            AWS_LS_AUTH_CREDENTIALS_PROVIDER,
+            "(id=%p): CreateSession call failed with http status: %d, and error response body is: : %.*s",
+            (void *)session_creator->provider,
+            (int)meta_request_result->error_response_body->len,
+            meta_request_result->error_response_body->buffer);
     }
 
     if (error_code == AWS_ERROR_SUCCESS) {
@@ -333,7 +339,9 @@ static void s_on_request_finished(
         if (!credentials) {
             error_code = AWS_AUTH_PROVIDER_PARSER_UNEXPECTED_RESPONSE;
             AWS_LOGF_ERROR(
-                AWS_LS_AUTH_CREDENTIALS_PROVIDER, "failed to read credentials from document, treating as an error.");
+                AWS_LS_AUTH_CREDENTIALS_PROVIDER,
+                "(id=%p): failed to read credentials from document, treating as an error.",
+                (void *)session_creator->provider);
         }
     }
     { /* BEGIN CRITICAL SECTION */

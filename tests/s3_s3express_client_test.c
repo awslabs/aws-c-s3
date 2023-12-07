@@ -591,7 +591,7 @@ TEST_CASE(s3express_client_get_object_multiple) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(s3express_client_get_object_error) {
+TEST_CASE(s3express_client_get_object_create_session_error) {
     (void)ctx;
 
     struct aws_s3_tester tester;
