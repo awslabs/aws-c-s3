@@ -321,7 +321,7 @@ static void s_on_request_finished(
         meta_request_result->response_status,
         aws_error_debug_str(error_code));
 
-    if (error_code && meta_request_result->error_response_body->len > 0) {
+    if (error_code && meta_request_result->error_response_body && meta_request_result->error_response_body->len > 0) {
         /* The Create Session failed with an error response from S3, provide a specific error code for user. */
         error_code = AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED;
         AWS_LOGF_ERROR(
