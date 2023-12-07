@@ -326,8 +326,9 @@ static void s_on_request_finished(
         error_code = AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED;
         AWS_LOGF_ERROR(
             AWS_LS_AUTH_CREDENTIALS_PROVIDER,
-            "(id=%p): CreateSession call failed with http status: %d, and error response body is: : %.*s",
+            "(id=%p): CreateSession call failed with http status: %d, and error response body is: %.*s",
             (void *)session_creator->provider,
+            meta_request_result->response_status,
             (int)meta_request_result->error_response_body->len,
             meta_request_result->error_response_body->buffer);
     }
