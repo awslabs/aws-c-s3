@@ -1293,13 +1293,6 @@ static int s_s3_meta_request_headers_block_done(
             if (content_length > meta_request->part_size) {
                 return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE);
             }
-            // if (content_length > meta_request->part_size ||
-            //     (content_length < meta_request->part_size &&
-            //      aws_http_headers_has(
-            //          request->send_data.response_headers,
-            //          g_mp_parts_count_header_name) /* Object has multiple parts if this header is present */)) {
-            //     return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_TOO_LARGE_RETRYING_WITH_RANGE);
-            // }
         }
     }
     return AWS_OP_SUCCESS;

@@ -259,7 +259,7 @@ static int s_validate_part_ranges(
     uint32_t num_parts,
     const uint64_t *part_ranges) {
     ASSERT_TRUE(part_ranges != NULL);
-
+    uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
     for (uint32_t i = 0; i < num_parts; ++i) {
         uint64_t part_range_start = 0ULL;
         uint64_t part_range_end = 0ULL;
@@ -268,7 +268,7 @@ static int s_validate_part_ranges(
             object_range_start,
             object_range_end,
             part_size,
-            part_size - (object_range_start % part_size),
+            aligned_first_part_size,
             i + 1,
             &part_range_start,
             &part_range_end);
@@ -316,6 +316,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
         const uint64_t half_part_size = part_size >> 1ULL;
         const uint64_t object_range_start = half_part_size;
         const uint64_t object_range_end = (object_range_start + half_part_size + (uint64_t)part_size * 2ULL) - 1ULL;
+        uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
 
         const uint64_t part_ranges[] = {
             object_range_start,
@@ -330,8 +331,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
 
         ASSERT_TRUE(
             aws_s3_calculate_auto_ranged_get_num_parts(
-                part_size, part_size - (object_range_start % part_size), object_range_start, object_range_end) ==
-            expected_num_parts);
+                part_size, aligned_first_part_size, object_range_start, object_range_end) == expected_num_parts);
 
         ASSERT_SUCCESS(
             s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
@@ -344,6 +344,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
         const uint64_t object_range_start = half_part_size;
         const uint64_t object_range_end =
             (object_range_start + half_part_size + (uint64_t)part_size * 2ULL + half_part_size) - 1ULL;
+        uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
 
         const uint64_t part_ranges[] = {
             object_range_start,
@@ -361,8 +362,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
 
         ASSERT_TRUE(
             aws_s3_calculate_auto_ranged_get_num_parts(
-                part_size, part_size - (object_range_start % part_size), object_range_start, object_range_end) ==
-            expected_num_parts);
+                part_size, aligned_first_part_size, object_range_start, object_range_end) == expected_num_parts);
 
         ASSERT_SUCCESS(
             s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
@@ -373,13 +373,13 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
         const uint32_t expected_num_parts = 1;
         const uint64_t object_range_start = 8;
         const uint64_t object_range_end = 8;
+        uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
 
         const uint64_t part_ranges[] = {8, 8};
 
         ASSERT_TRUE(
             aws_s3_calculate_auto_ranged_get_num_parts(
-                part_size, part_size - (object_range_start % part_size), object_range_start, object_range_end) ==
-            expected_num_parts);
+                part_size, aligned_first_part_size, object_range_start, object_range_end) == expected_num_parts);
 
         ASSERT_SUCCESS(
             s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
