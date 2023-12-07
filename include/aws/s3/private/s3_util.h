@@ -251,10 +251,7 @@ int aws_s3_parse_content_length_response_header(
     struct aws_http_headers *response_headers,
     uint64_t *out_content_length);
 
-// waahm7 todo update documentation
-/* Calculate the number of parts based on overall object-range and part_size. This takes into account aligning
- * part-ranges on part_size. (ie: if object_range_start is not evenly divisible by part_size, it is considered in the
- * middle of a contiguous part, and that first part will be smaller than part_size.) */
+/* Calculate the number of parts based on overall object-range and part_size. */
 AWS_S3_API
 uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
     size_t part_size,
@@ -277,7 +274,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     uint32_t *out_num_parts);
 
 /* Calculates the part range for a part given overall object range, size of each part, and the part's number. Note: part
- * numbers begin at one. This takes into account aligning part-ranges on part_size. Intended to be used in conjunction
+ * numbers begin at one. Intended to be used in conjunction
  * with aws_s3_calculate_auto_ranged_get_num_parts. part_number should be less than or equal to the result of
  * aws_s3_calculate_auto_ranged_get_num_parts. */
 AWS_S3_API
