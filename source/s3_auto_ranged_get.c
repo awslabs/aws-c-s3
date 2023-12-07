@@ -760,7 +760,7 @@ update_synced_data:
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
-            // waahm7
+            // TODO: align the range_start on first part
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
