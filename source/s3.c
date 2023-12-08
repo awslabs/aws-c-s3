@@ -44,6 +44,7 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_EXCEEDS_MEMORY_LIMIT, "Request was not created due to used memory exceeding memory limit."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, "Specified memory configuration is invalid for the system. "
         "Memory limit should be at least 1GiB. Part size and max part size should be smaller than memory limit."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED, "CreateSession call failed when signing with S3 Express."),
 };
 /* clang-format on */
 

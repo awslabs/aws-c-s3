@@ -689,7 +689,7 @@ static bool s_s3_auto_ranged_put_update(
         }
 
         if (!work_remaining) {
-            aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
+            aws_s3_meta_request_set_success_synced(meta_request, AWS_HTTP_STATUS_CODE_200_OK);
         }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -1412,7 +1412,7 @@ static void s_s3_auto_ranged_put_request_finished(
                             "(request finished prior to being paused?)",
                             (void *)meta_request);
 
-                        aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
+                        aws_s3_meta_request_set_success_synced(meta_request, AWS_HTTP_STATUS_CODE_200_OK);
                     } else {
                         aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
                     }
