@@ -114,6 +114,7 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_discovers_size_request_
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     AWS_ASSERT(auto_ranged_get);
 
+    // TODO: align the range_start on first part
     if (auto_ranged_get->initial_message_has_range_header != 0)
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
 
@@ -756,7 +757,6 @@ update_synced_data:
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
-            // TODO: align the range_start on first part
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);

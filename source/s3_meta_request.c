@@ -1289,11 +1289,9 @@ static int s_s3_meta_request_headers_block_done(
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER) {
         uint64_t content_length;
         if (!aws_s3_parse_content_length_response_header(
-                request->allocator, request->send_data.response_headers, &content_length)) {
-
-            if (content_length > meta_request->part_size) {
-                return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
-            }
+                request->allocator, request->send_data.response_headers, &content_length) &&
+            content_length > meta_request->part_size) {
+            return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
         }
     }
     return AWS_OP_SUCCESS;
