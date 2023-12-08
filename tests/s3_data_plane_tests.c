@@ -3648,6 +3648,7 @@ static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *all
                 .object_path = object_path,
             },
         .finish_callback = s_s3_test_validate_checksum,
+        .size_hint = 1 /* pass a size_hint > 0 so that the request goes through the getPart flow */,
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
@@ -3679,7 +3680,7 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
         allocator, &path_buf, aws_byte_cursor_from_c_str("/single-part-10Mb-CRC32.txt")));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
-    uint64_t object_size = 10;
+    uint64_t object_size_mb = 10;
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -3688,17 +3689,17 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
         .checksum_algorithm = AWS_SCA_CRC32,
         .put_options =
             {
-                .object_size_mb = object_size,
+                .object_size_mb = object_size_mb,
                 .object_path_override = object_path,
             },
     };
 
-    //  ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
     /*** GET FILE with part_size < file_size ***/
-    client_options.part_size = MB_TO_BYTES(10);
+    client_options.part_size = MB_TO_BYTES(3);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
@@ -3714,9 +3715,10 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
                 .object_path = object_path,
             },
         .finish_callback = s_s3_test_validate_checksum,
-        .size_hint = object_size,
+        .size_hint = MB_TO_BYTES(object_size_mb),
     };
 
+    /* will do headRequest */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
@@ -3726,16 +3728,30 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
-    // ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    /* will do getPart */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
+    /* will do getPart */
     /*** GET FILE with part_size = file_size ***/
     client_options.part_size = MB_TO_BYTES(10);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
-    // ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size < file_size and wrong size_hint ***/
+    client_options.part_size = MB_TO_BYTES(3);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    get_options.size_hint = MB_TO_BYTES(1);
+    /* will do getPart first, cancel it and then rangedGet */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
@@ -3745,8 +3761,8 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_download_multi_part_file_with_checksum, s_test_s3_download_multi_part_file_with_checksum)
-static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_download_multipart_file_with_checksum, s_test_s3_download_multipart_file_with_checksum)
+static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     /* Upload the file */
@@ -3763,9 +3779,10 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
     AWS_ZERO_STRUCT(path_buf);
 
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        allocator, &path_buf, aws_byte_cursor_from_c_str("/multi-part-10Mb-CRC32.txt")));
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/multipart-10Mb-CRC32.txt")));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+    uint64_t object_size_mb = 10;
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -3774,7 +3791,7 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
         .checksum_algorithm = AWS_SCA_CRC32,
         .put_options =
             {
-                .object_size_mb = 10,
+                .object_size_mb = object_size_mb,
                 .object_path_override = object_path,
             },
     };
@@ -3799,8 +3816,10 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
             {
                 .object_path = object_path,
             },
+        .size_hint = MB_TO_BYTES(object_size_mb),
     };
 
+    /* will do HeadRequest first */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
@@ -3810,6 +3829,7 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
+    /* will do HeadObject first */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
@@ -3820,6 +3840,45 @@ static int s_test_s3_download_multi_part_file_with_checksum(struct aws_allocator
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
     get_options.finish_callback = s_s3_test_validate_checksum;
+    /* will do HeadObject First */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with with wrong size_hint ***/
+    get_options.size_hint = MB_TO_BYTES(1);
+    get_options.finish_callback = NULL;
+
+    /*** GET FILE with part_size < first_part_size***/
+    client_options.part_size = MB_TO_BYTES(3);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+
+    /* will do GetPart, cancel the request and then do ranged Gets. */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size > first_part_size ***/
+    client_options.part_size = MB_TO_BYTES(7);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    get_options.finish_callback = s_s3_test_validate_checksum;
+
+    /* will do GetPart first */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size = first_part_size ***/
+    client_options.part_size = MB_TO_BYTES(5);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    get_options.finish_callback = s_s3_test_validate_checksum;
+    /* will do GetPart first */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
