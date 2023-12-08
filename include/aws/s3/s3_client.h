@@ -689,6 +689,9 @@ struct aws_s3_meta_request_options {
      * from the buffer and compare them them to previously uploaded part checksums.
      */
     struct aws_s3_meta_request_resume_token *resume_token;
+
+    // TODO: agonize over name and documentation
+    uint64_t size_hint;
 };
 
 /* Result details of a meta request.

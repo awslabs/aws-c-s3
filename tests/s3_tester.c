@@ -1453,6 +1453,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .message = options->message,
         .checksum_config = &checksum_config,
         .resume_token = options->put_options.resume_token,
+        .size_hint = options->size_hint,
     };
 
     if (options->mock_server) {

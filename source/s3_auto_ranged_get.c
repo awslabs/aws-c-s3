@@ -91,6 +91,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
     auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
+    auto_ranged_get->size_hint = options->size_hint;
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
@@ -105,6 +106,24 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
+}
+
+static enum aws_s3_auto_ranged_get_request_type s_s3_get_discovers_size_request_type(
+    const struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    AWS_ASSERT(auto_ranged_get);
+
+    if (auto_ranged_get->initial_message_has_range_header != 0)
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
+
+    if (!meta_request->checksum_config.validate_response_checksum)
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE;
+
+    if (auto_ranged_get->size_hint > 0 && auto_ranged_get->size_hint <= meta_request->part_size)
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER;
+
+    return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
 }
 
 static bool s_s3_auto_ranged_get_update(
@@ -148,37 +167,19 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.num_parts_requested > 0) {
                     goto has_work_remaining;
                 }
-
-                /* If there exists a range header, we currently always do a head request first. For the range header
-                 * value could be parsed client-side, doing so presents a number of complications. For example, the
-                 * given range could be an unsatisfiable range, and might not even specify a complete range. To keep
-                 * things simple, we are currently relying on the service to handle turning the Range header into a
-                 * Content-Range response header.*/
-                if (auto_ranged_get->initial_message_has_range_header != 0) {
-                    // TODO: align the first part
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
-                        AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
-                        0 /*part_number*/,
-                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
-
-                    request->discovers_object_size = true;
-
-                    auto_ranged_get->synced_data.head_object_sent = true;
-                } else {
-                    /* Get the object range from the first request */
-
-                    if (meta_request->checksum_config.validate_response_checksum) {
-                        /*
-                         * Discover the size of the object while attempting to retrieve the first part. We use
-                         * getFirstPart instead of a ranged get to do checksum validation for objects not uploaded
-                         * via MPU. If the first part is not equal to the part_size, we cancel the request
-                         * upon receiving the headers, which is similar to a head request. This approach helps to avoid
-                         * an extra head request for small files.
-                         */
-                        struct aws_s3_buffer_pool_ticket *ticket =
-                            aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                struct aws_s3_buffer_pool_ticket *ticket = NULL;
+                switch (s_s3_get_discovers_size_request_type(meta_request)) {
+                    case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
+                        request = aws_s3_request_new(
+                            meta_request,
+                            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
+                            AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+                            0 /*part_number*/,
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
+                        auto_ranged_get->synced_data.head_object_sent = true;
+                        break;
+                    case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
+                        ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                         if (ticket == NULL) {
                             goto has_work_remaining;
@@ -191,12 +192,12 @@ static bool s_s3_auto_ranged_get_update(
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
                         request->ticket = ticket;
-                        auto_ranged_get->synced_data.get_first_part_sent = true;
-                    } else {
-                        /* If checksum validation is not required, then discover the size of the object during the
-                         * first ranged get request. */
-                        struct aws_s3_buffer_pool_ticket *ticket =
-                            aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                        // auto_ranged_get->synced_data.get_first_part_sent = true;
+                        ++auto_ranged_get->synced_data.num_parts_requested;
+
+                        break;
+                    case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE:
+                        ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                         if (ticket == NULL) {
                             goto has_work_remaining;
@@ -208,15 +209,82 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_TYPE_GET_OBJECT,
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                        request->ticket = ticket;
                         request->part_range_start = 0;
                         request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
-                        request->ticket = ticket;
-                    }
-                    ++auto_ranged_get->synced_data.num_parts_requested;
-                    request->discovers_object_size = true;
+                        ++auto_ranged_get->synced_data.num_parts_requested;
+                        break;
+                    default:
+                        AWS_FATAL_ASSERT("Unexpected Discovers object size request type");
                 }
-
+                request->discovers_object_size = true;
                 goto has_work_remaining;
+                // bool headObjectRequired = auto_ranged_get->initial_message_has_range_header != 0;
+                // headObjectRequired =
+                //     headObjectRequired ||
+                //     (meta_request->checksum_config.validate_response_checksum &&
+                //      (auto_ranged_get->size_hint == 0 || auto_ranged_get->size_hint > meta_request->part_size));
+                // /* If there exists a range header, we currently always do a head request first. For the range header
+                //  * value could be parsed client-side, doing so presents a number of complications. For example, the
+                //  * given range could be an unsatisfiable range, and might not even specify a complete range. To keep
+                //  * things simple, we are currently relying on the service to handle turning the Range header into a
+                //  * Content-Range response header.*/
+                // if (headObjectRequired) {
+                //     // TODO: align the first part
+
+                // } else {
+                //     /* Get the object range from the first request */
+
+                //     if (meta_request->checksum_config.validate_response_checksum) {
+                //         /*
+                //          * Discover the size of the object while attempting to retrieve the first part. We use
+                //          * getFirstPart instead of a ranged get to do checksum validation for objects not uploaded
+                //          * via MPU. If the first part is not equal to the part_size, we cancel the request
+                //          * upon receiving the headers, which is similar to a head request. This approach helps to
+                //          avoid
+                //          * an extra head request for small files.
+                //          */
+                //         struct aws_s3_buffer_pool_ticket *ticket =
+                //             aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+                //         if (ticket == NULL) {
+                //             goto has_work_remaining;
+                //         }
+
+                //         request = aws_s3_request_new(
+                //             meta_request,
+                //             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER,
+                //             AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                //             1 /*part_number*/,
+                //             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
+                //             AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                //         request->ticket = ticket;
+                //         auto_ranged_get->synced_data.get_first_part_sent = true;
+                //     } else {
+                //         /* If checksum validation is not required, then discover the size of the object during the
+                //          * first ranged get request. */
+                //         struct aws_s3_buffer_pool_ticket *ticket =
+                //             aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+                //         if (ticket == NULL) {
+                //             goto has_work_remaining;
+                //         }
+
+                //         request = aws_s3_request_new(
+                //             meta_request,
+                //             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE,
+                //             AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                //             1 /*part_number*/,
+                //             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
+                //             AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                //         request->part_range_start = 0;
+                //         request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
+                //         request->ticket = ticket;
+                //     }
+                //     request->discovers_object_size = true;
+                // }
+
+                // goto has_work_remaining;
             }
 
             /* If the object range is known and that range is empty, then we have an empty file to request. */
@@ -760,7 +828,6 @@ update_synced_data:
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
-            // TODO: align the range_start on first part
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
