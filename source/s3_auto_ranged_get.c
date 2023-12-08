@@ -108,22 +108,36 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
-static enum aws_s3_auto_ranged_get_request_type s_s3_get_discovers_size_request_type(
+/*
+ * This function returns the type of first request which we will also use to discover overall object size.
+ */
+static enum aws_s3_auto_ranged_get_request_type s_s3_get_discovers_object_size_request_type(
     const struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     AWS_ASSERT(auto_ranged_get);
 
     // TODO: align the range_start on first part
+    /* If there exists a range header or we require validation of the response checksum, we currently always
+     * do a head request first.
+     * S3 returns the checksum of the entire object from the HEAD response
+     *
+     * For the range header value could be parsed client-side, doing so presents a number of
+     * complications. For example, the given range could be an unsatisfiable range, and might not even
+     * specify a complete range. To keep things simple, we are currently relying on the service to handle
+     * turning the Range header into a Content-Range response header.*/
     if (auto_ranged_get->initial_message_has_range_header != 0)
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
 
+    /* If we don't need checksum validation, then discover the size of the object while trying to get the first part. */
     if (!meta_request->checksum_config.validate_response_checksum)
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE;
 
+    /* If the size_hint indicates that it is a small one part file, then try to get the file directly */
     if (auto_ranged_get->size_hint > 0 && auto_ranged_get->size_hint <= meta_request->part_size)
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER;
 
+    /* Otherwise, do a headObject so that we can validate checksum if the file was uploaded as a single part */
     return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
 }
 
@@ -169,7 +183,7 @@ static bool s_s3_auto_ranged_get_update(
                     goto has_work_remaining;
                 }
                 struct aws_s3_buffer_pool_ticket *ticket = NULL;
-                switch (s_s3_get_discovers_size_request_type(meta_request)) {
+                switch (s_s3_get_discovers_object_size_request_type(meta_request)) {
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
                         request = aws_s3_request_new(
                             meta_request,
@@ -215,7 +229,8 @@ static bool s_s3_auto_ranged_get_update(
                         ++auto_ranged_get->synced_data.num_parts_requested;
                         break;
                     default:
-                        AWS_FATAL_ASSERT("Unexpected Discovers object size request type");
+                        AWS_FATAL_ASSERT("s_s3_get_discovers_object_size_request_type returned unexpected discover "
+                                         "object size request type");
                 }
                 request->discovers_object_size = true;
                 goto has_work_remaining;
@@ -779,7 +794,7 @@ update_synced_data:
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
-                if (first_part_size_mismatch) {
+                if (first_part_size_mismatch && found_object_size) {
                     /* Try to fetch the first part again as a ranged get */
                     auto_ranged_get->synced_data.num_parts_requested = 0;
                     break;
