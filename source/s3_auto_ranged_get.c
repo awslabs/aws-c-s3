@@ -133,7 +133,9 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_discovers_object_size_r
     if (!meta_request->checksum_config.validate_response_checksum)
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE;
 
-    /* If the size_hint indicates that it is a small one part file, then try to get the file directly */
+    /* If the size_hint indicates that it is a small one part file, then try to get the file directly
+     * TODO: Bypass memory limiter so that we don't overallocate memory for small files
+     */
     if (auto_ranged_get->size_hint > 0 && auto_ranged_get->size_hint <= meta_request->part_size)
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER;
 
@@ -185,6 +187,10 @@ static bool s_s3_auto_ranged_get_update(
                 struct aws_s3_buffer_pool_ticket *ticket = NULL;
                 switch (s_s3_get_discovers_object_size_request_type(meta_request)) {
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
+                        AWS_LOGF_INFO(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Doing a headObject to discover the size of the object",
+                            (void *)meta_request);
                         request = aws_s3_request_new(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
@@ -194,6 +200,10 @@ static bool s_s3_auto_ranged_get_update(
                         auto_ranged_get->synced_data.head_object_sent = true;
                         break;
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
+                        AWS_LOGF_INFO(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Doing a getPart to discover the size of the object and get the first part",
+                            (void *)meta_request);
                         ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                         if (ticket == NULL) {
@@ -211,6 +221,10 @@ static bool s_s3_auto_ranged_get_update(
 
                         break;
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE:
+                        AWS_LOGF_INFO(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Doing a ranged get to discover the size of the object and get the first part",
+                            (void *)meta_request);
                         ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
                         if (ticket == NULL) {
@@ -577,7 +591,7 @@ static int s_discover_object_range_and_content_length(
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
             AWS_ASSERT(request->part_number == 1);
             AWS_ASSERT(request->send_data.response_headers != NULL);
-            /* There should be a Content-Length header that indicates the size of first part.*/
+            /* There should be a Content-Length header that indicates the size of first part. */
             if (aws_s3_parse_content_length_response_header(
                     meta_request->allocator, request->send_data.response_headers, &first_part_size)) {
 
