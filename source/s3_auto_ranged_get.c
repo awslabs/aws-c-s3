@@ -163,7 +163,7 @@ static bool s_s3_auto_ranged_get_update(
             /* If the overall range of the object that we are trying to retrieve isn't known yet, then we need to send a
              * request to figure that out. */
             if (!auto_ranged_get->synced_data.object_range_known) {
-                if (auto_ranged_get->synced_data.head_object_sent || auto_ranged_get->synced_data.get_first_part_sent ||
+                if (auto_ranged_get->synced_data.head_object_sent ||
                     auto_ranged_get->synced_data.num_parts_requested > 0) {
                     goto has_work_remaining;
                 }
@@ -192,7 +192,6 @@ static bool s_s3_auto_ranged_get_update(
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
                         request->ticket = ticket;
-                        // auto_ranged_get->synced_data.get_first_part_sent = true;
                         ++auto_ranged_get->synced_data.num_parts_requested;
 
                         break;
@@ -378,11 +377,6 @@ static bool s_s3_auto_ranged_get_update(
              * request completely exits. */
 
             if (auto_ranged_get->synced_data.head_object_sent && !auto_ranged_get->synced_data.head_object_completed) {
-                goto has_work_remaining;
-            }
-
-            if (auto_ranged_get->synced_data.get_first_part_sent &&
-                !auto_ranged_get->synced_data.get_first_part_completed) {
                 goto has_work_remaining;
             }
 
@@ -828,6 +822,7 @@ update_synced_data:
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
+            // TODO: align the range_start on first part
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
@@ -849,7 +844,6 @@ update_synced_data:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER:
-                auto_ranged_get->synced_data.get_first_part_completed = true;
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
                 if (first_part_size_mismatch) {
                     /* Try to fetch the first part again as a ranged get */
