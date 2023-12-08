@@ -59,7 +59,7 @@ struct aws_s3_auto_ranged_get {
     uint32_t initial_message_has_if_match_header : 1;
 
     struct aws_string *etag;
-    uint64_t size_hint;
+    uint64_t object_size_hint;
 };
 
 AWS_EXTERN_C_BEGIN
