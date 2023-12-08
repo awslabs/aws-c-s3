@@ -3680,7 +3680,7 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
         allocator, &path_buf, aws_byte_cursor_from_c_str("/single-part-10Mb-CRC32.txt")));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
-    uint64_t object_size_mb = 10;
+    uint32_t object_size_mb = 10;
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -3782,7 +3782,7 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
         allocator, &path_buf, aws_byte_cursor_from_c_str("/multipart-10Mb-CRC32.txt")));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
-    uint64_t object_size_mb = 10;
+    uint32_t object_size_mb = 10;
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
