@@ -393,8 +393,9 @@ struct aws_s3_client_config {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If set, this should be at least 5MiB.
-     * If not set, this defaults to 8MiB.
+     * If not set, this defaults to 8 MiB.
+     * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
+     * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      *
      * You can also set this per meta-request, via `aws_s3_meta_request_options.part_size`.
      */
@@ -569,8 +570,6 @@ struct aws_s3_checksum_config {
  * 3) If the data will be be produced in asynchronous chunks, set `send_async_stream`.
  */
 struct aws_s3_meta_request_options {
-    /* TODO: The meta request options cannot control the request to be split or not. Should consider to add one */
-
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 
@@ -631,8 +630,10 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If set, this should be at least 5MiB.
      * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to 8MiB.
+     *
+     * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
+     * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      */
     uint64_t part_size;
 
@@ -645,7 +646,7 @@ struct aws_s3_meta_request_options {
      * If set, this should be at least `part_size`.
      * If not set, `part_size` will be used as the threshold.
      * If both `part_size` and `multipart_upload_threshold` are not set,
-     * the values from `aws_s3_client_config` are used, which default to 8MiB.
+     * the values from `aws_s3_client_config` are used.
      */
     uint64_t multipart_upload_threshold;
 
