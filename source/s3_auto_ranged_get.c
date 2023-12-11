@@ -46,10 +46,10 @@ static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_
     AWS_PRECONDITION(auto_ranged_get);
 
     if (auto_ranged_get->initial_message_has_range_header) {
-        return AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS;
+        return AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT;
     }
 
-    return AWS_S3_RESPONSE_STATUS_SUCCESS;
+    return AWS_HTTP_STATUS_CODE_200_OK;
 }
 
 /* Allocate a new auto-ranged-get meta request. */

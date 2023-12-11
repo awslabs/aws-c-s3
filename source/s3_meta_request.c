@@ -1088,15 +1088,16 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
     int error_code = AWS_ERROR_UNKNOWN;
 
     switch (response_status) {
-        case AWS_S3_RESPONSE_STATUS_SUCCESS:
-        case AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS:
-        case AWS_S3_RESPONSE_STATUS_NO_CONTENT_SUCCESS:
+        case AWS_HTTP_STATUS_CODE_200_OK:
+        case AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT:
+        case AWS_HTTP_STATUS_CODE_204_NO_CONTENT:
             error_code = AWS_ERROR_SUCCESS;
             break;
-        case AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR:
+        case AWS_HTTP_STATUS_CODE_500_INTERNAL_SERVER_ERROR:
             error_code = AWS_ERROR_S3_INTERNAL_ERROR;
             break;
-        case AWS_S3_RESPONSE_STATUS_SLOW_DOWN:
+        case AWS_HTTP_STATUS_CODE_503_SERVICE_UNAVAILABLE:
+            /* S3 response 503 for throttling, slow down the sending */
             error_code = AWS_ERROR_S3_SLOW_DOWN;
             break;
         default:

@@ -3,12 +3,12 @@ scales resource usage, such as number of parallel requests in flight, to achieve
 target throughput. The client creates buffers to hold data it is sending or
 receiving for each request and scaling requests in flight has direct impact on
 memory used. In practice, setting high target throughput or larger part size can
-lead to high observed memory usage. 
+lead to high observed memory usage.
 
 To mitigate high memory usages, memory reuse improvements were recently added to
 the client along with options to limit max memory used. The following sections
 will go into more detail on aspects of those changes and how the affect the
-client. 
+client.
 
 ### Memory Reuse
 At the basic level, CRT S3 client starts with a meta request for operation like
@@ -18,7 +18,7 @@ requests and release it right after the request was done. That approach,
 resulted in a lot of very short lived allocations and allocator thrashing,
 overall leading to memory use spikes considerably higher than whats needed. To
 address that, the client is switching to a pooled buffer approach, discussed
-below. 
+below.
 
 Note: approach described below is work in progress and concentrates on improving
 the common cases (default 8mb part sizes and part sizes smaller than 64mb).
@@ -29,7 +29,7 @@ Several observations about the client usage of buffers:
 - Get operations always use either the configured part size or default of 8mb.
   Part size for get is not adjusted, since there is no 10,000 part limitation.
 - Both Put and Get operations go through fill and drain phases. Ex. for Put, the
-  client first schedules a number of reads to 'fil' the buffers from the source
+  client first schedules a number of reads to 'fill' the buffers from the source
   and as those reads complete, the buffer are send over to the networking layer
   are 'drained'
 - individual uploadParts or ranged gets operations typically have a similar
@@ -37,16 +37,16 @@ Several observations about the client usage of buffers:
   in bulk at the same time
 
 The buffer pooling takes advantage of some of those allocation patterns and
-works as follows. 
+works as follows.
 The memory is split into primary and secondary areas. Secondary area is used for
 requests with part size bigger than a predefined value (currently 4 times part size)
 allocations from it got directly to allocator and are effectively old way of
-doing things. 
+doing things.
 
 Primary memory area is split into blocks of fixed size (part size if defined or
 8mb if not times 16). Blocks are allocated on demand. Each block is logically
 subdivided into part sized chunks. Pool allocates and releases in chunk sizes
-only, and supports acquiring several chunks (up to 4) at once. 
+only, and supports acquiring several chunks (up to 4) at once.
 
 Blocks are kept around while there are ongoing requests and are released async,
 when there is low pressure on memory.

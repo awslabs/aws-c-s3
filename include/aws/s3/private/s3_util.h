@@ -37,14 +37,6 @@ struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
 
-enum aws_s3_response_status {
-    AWS_S3_RESPONSE_STATUS_SUCCESS = 200,
-    AWS_S3_RESPONSE_STATUS_NO_CONTENT_SUCCESS = 204,
-    AWS_S3_RESPONSE_STATUS_RANGE_SUCCESS = 206,
-    AWS_S3_RESPONSE_STATUS_INTERNAL_ERROR = 500,
-    AWS_S3_RESPONSE_STATUS_SLOW_DOWN = 503,
-};
-
 struct aws_cached_signing_config_aws {
     struct aws_allocator *allocator;
     struct aws_string *service;

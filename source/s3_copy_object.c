@@ -324,7 +324,7 @@ no_work_remaining:
     }
 
     if (!work_remaining) {
-        aws_s3_meta_request_set_success_synced(meta_request, AWS_S3_RESPONSE_STATUS_SUCCESS);
+        aws_s3_meta_request_set_success_synced(meta_request, AWS_HTTP_STATUS_CODE_200_OK);
     }
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
