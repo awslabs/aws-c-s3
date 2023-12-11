@@ -290,8 +290,7 @@ AWS_S3_API
 void aws_s3_request_finish_up_metrics_synced(
     struct aws_s3_request *request,
     struct aws_s3_meta_request *meta_request,
-    int error_code,
-    bool record_end);
+    int error_code);
 
 AWS_EXTERN_C_END
 

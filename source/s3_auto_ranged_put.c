@@ -1621,7 +1621,7 @@ static void s_s3_auto_ranged_put_request_finished(
         } break;
     }
 
-    aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code, true /*record_end*/);
+    aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code);
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 

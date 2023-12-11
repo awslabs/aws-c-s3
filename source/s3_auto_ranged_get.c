@@ -673,7 +673,7 @@ update_synced_data:
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
-        bool record_end = true;
+        bool finishing_metrics = true;
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
@@ -723,9 +723,8 @@ update_synced_data:
                     }
 
                     aws_s3_meta_request_stream_response_body_synced(meta_request, request);
-                    /* The body of the request is queued to be streamed, don't record the end timestamp for the request
-                     * yet. */
-                    record_end = false;
+                    /* The body of the request is queued to be streamed, don't finish the metrics yet. */
+                    finishing_metrics = false;
 
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
@@ -760,8 +759,9 @@ update_synced_data:
                 meta_request->synced_data.finish_result.validation_algorithm = request->validation_algorithm;
             }
         }
-        aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code, record_end);
-
+        if (finishing_metrics) {
+            aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code);
+        }
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */

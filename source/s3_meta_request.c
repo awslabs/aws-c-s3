@@ -1710,6 +1710,22 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
                 ++num_parts_delivered;
+
+                if (request->send_data.metrics != NULL) {
+                    /* Request is done streaming the body, complete the metrics for the request now. */
+                    struct aws_s3_request_metrics *metrics = request->send_data.metrics;
+                    metrics->crt_info_metrics.error_code = error_code;
+                    aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
+                    metrics->time_metrics.total_duration_ns =
+                        metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+
+                    if (meta_request->telemetry_callback != NULL) {
+                        /* We already in the meta request event thread, invoke the telemetry callback directly */
+                        meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
+                    }
+                    request->send_data.metrics = aws_s3_request_metrics_release(metrics);
+                }
+
                 aws_s3_request_release(request);
             } break;
 
@@ -1744,16 +1760,16 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
             } break;
 
             case AWS_S3_META_REQUEST_EVENT_TELEMETRY: {
-                struct aws_s3_request_metrics *metric = event.u.telemetry.metrics;
+                struct aws_s3_request_metrics *metrics = event.u.telemetry.metrics;
                 AWS_FATAL_ASSERT(meta_request->telemetry_callback != NULL);
-                AWS_FATAL_ASSERT(metric != NULL);
+                AWS_FATAL_ASSERT(metrics != NULL);
 
-                if (metric->time_metrics.end_timestamp_ns == -1) {
-                    aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
-                    metric->time_metrics.total_duration_ns =
-                        metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
+                if (metrics->time_metrics.end_timestamp_ns == -1) {
+                    aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
+                    metrics->time_metrics.total_duration_ns =
+                        metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
                 }
-                meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
+                meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
                 event.u.telemetry.metrics = aws_s3_request_metrics_release(event.u.telemetry.metrics);
             } break;
 
