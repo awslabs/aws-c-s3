@@ -413,7 +413,7 @@ struct aws_s3_client_config {
      * Uploads smaller or equal to this will use a single HTTP request.
      * This only affects AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
      * If set, this should be at least `part_size`.
-     * If not set, `part_size` will be used as the threshold.
+     * If not set, maximal of `part_size` and 5 MiB will be used.
      *
      * You can also set this per meta-request, via `aws_s3_meta_request_options.multipart_upload_threshold`.
      */
@@ -644,7 +644,7 @@ struct aws_s3_meta_request_options {
      * Uploads smaller or equal to this will use a single HTTP request.
      * This only affects AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
      * If set, this should be at least `part_size`.
-     * If not set, `part_size` will be used as the threshold.
+     * If not set, `part_size` adjusted by client will be used as the threshold.
      * If both `part_size` and `multipart_upload_threshold` are not set,
      * the values from `aws_s3_client_config` are used.
      */
