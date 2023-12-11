@@ -1558,10 +1558,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 /* Copy over any response headers that we've previously determined are needed for this final
                  * response.
                  */
-
-                /* BEGIN CRITICAL SECTION */
-                { copy_http_headers(auto_ranged_put->synced_data.needed_response_headers, final_response_headers); }
-                /* END CRITICAL SECTION */
+                copy_http_headers(auto_ranged_put->synced_data.needed_response_headers, final_response_headers);
 
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
