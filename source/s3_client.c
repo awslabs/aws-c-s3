@@ -428,8 +428,6 @@ struct aws_s3_client *aws_s3_client_new(
 
     if (client_config->multipart_upload_threshold != 0) {
         *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
-    } else {
-        *((uint64_t *)&client->multipart_upload_threshold) = part_size;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
@@ -1214,13 +1212,16 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     client_max_part_size = (uint64_t)g_s3_min_upload_part_size;
                 }
 
-                uint64_t multipart_upload_threshold = client->multipart_upload_threshold;
+                uint64_t multipart_upload_threshold = part_size_config;
                 if (options->multipart_upload_threshold != 0) {
                     /* If the threshold is set for the meta request, use it */
                     multipart_upload_threshold = options->multipart_upload_threshold;
                 } else if (options->part_size != 0) {
-                    /* If the threshold is not set, but the part size is set for the meta request, us it */
+                    /* If the threshold is not set, but the part size is set for the meta request, use it */
                     multipart_upload_threshold = options->part_size;
+                } else if (client->multipart_upload_threshold != 0) {
+                    /* If client has threshold set, use it */
+                    multipart_upload_threshold = client->multipart_upload_threshold;
                 }
 
                 if (content_length_found && content_length <= multipart_upload_threshold) {
