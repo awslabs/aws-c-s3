@@ -345,15 +345,13 @@ struct aws_s3_client *aws_s3_client_new(
         mem_limit = client_config->memory_limit_in_bytes;
     }
 
-    size_t part_size;
+    size_t part_size = s_default_part_size;
     if (client_config->part_size != 0) {
         if (client_config->part_size > SIZE_MAX) {
             part_size = SIZE_MAX;
         } else {
             part_size = (size_t)client_config->part_size;
         }
-    } else {
-        part_size = s_default_part_size;
     }
 
     client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
@@ -1158,7 +1156,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
-    size_t part_size_config = options->part_size == 0 ? client->part_size : options->part_size;
+    size_t part_size_config = client->part_size;
+    if (options->part_size != 0) {
+        if (options->part_size > SIZE_MAX) {
+            part_size_config = SIZE_MAX;
+        } else {
+            part_size_config = (size_t)options->part_size;
+        }
+    }
 
     /* Call the appropriate meta-request new function. */
     switch (options->type) {
