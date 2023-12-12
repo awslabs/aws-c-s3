@@ -692,7 +692,7 @@ struct aws_s3_meta_request_options {
 
     /*
      * Optional.
-     * Object size hint in bytes.
+     * Total object size hint, in bytes.
      * This hint helps optimize downloads for small (less than or equal to part_size) or large files.
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
      * If not set, the client will assume a large file by default.
