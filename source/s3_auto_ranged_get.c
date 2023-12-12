@@ -126,18 +126,21 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
      * complications. For example, the given range could be an unsatisfiable range, and might not even
      * specify a complete range. To keep things simple, we are currently relying on the service to handle
      * turning the Range header into a Content-Range response header.*/
-    if (auto_ranged_get->initial_message_has_range_header != 0)
+    if (auto_ranged_get->initial_message_has_range_header != 0) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
+    }
 
     /* If we don't need checksum validation, then discover the size of the object while trying to get the first part. */
-    if (!meta_request->checksum_config.validate_response_checksum)
+    if (!meta_request->checksum_config.validate_response_checksum) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_RANGE;
+    }
 
     /* If the object_size_hint indicates that it is a small one part file, then try to get the file directly
      * TODO: Bypass memory limiter so that we don't overallocate memory for small files
      */
-    if (auto_ranged_get->object_size_hint > 0 && auto_ranged_get->object_size_hint <= meta_request->part_size)
+    if (auto_ranged_get->object_size_hint > 0 && auto_ranged_get->object_size_hint <= meta_request->part_size) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER;
+    }
 
     /* Otherwise, do a headObject so that we can validate checksum if the file was uploaded as a single part */
     return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
