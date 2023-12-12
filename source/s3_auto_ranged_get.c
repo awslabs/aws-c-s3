@@ -189,7 +189,7 @@ static bool s_s3_auto_ranged_get_update(
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
                         AWS_LOGF_INFO(
                             AWS_LS_S3_META_REQUEST,
-                            "id=%p: Doing a headObject to discover the size of the object",
+                            "id=%p: Doing a HeadObject to discover the size of the object",
                             (void *)meta_request);
                         request = aws_s3_request_new(
                             meta_request,
