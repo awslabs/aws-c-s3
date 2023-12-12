@@ -490,6 +490,10 @@ uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
     uint64_t first_part_size,
     uint64_t object_range_start,
     uint64_t object_range_end) {
+    if (first_part_size == 0) {
+        return 1;
+    }
+
     uint32_t num_parts = 1;
 
     uint64_t second_part_start = object_range_start + first_part_size;

@@ -287,6 +287,51 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
 
     const size_t part_size = 16 * 1024;
 
+    /* Empty File . */
+    {
+        const uint32_t expected_num_parts = 1;
+        const uint64_t object_range_start = 0;
+        const uint64_t object_range_end = 0;
+
+        ASSERT_INT_EQUALS(
+            aws_s3_calculate_auto_ranged_get_num_parts(part_size, 0, object_range_start, object_range_end),
+            expected_num_parts);
+    }
+
+    /* first_part_size is < part_size . */
+    {
+        const uint32_t expected_num_parts = 2;
+        const uint64_t first_part_size = 2;
+        const uint64_t object_range_start = 0;
+        const uint64_t object_range_end = 5;
+
+        const uint64_t part_ranges[] = {
+            0, /* first_part start */
+            1, /* first_part end */
+
+            2, /* second_part start */
+            5, /* second_part end */
+        };
+
+        ASSERT_INT_EQUALS(
+            aws_s3_calculate_auto_ranged_get_num_parts(
+                part_size, first_part_size, object_range_start, object_range_end),
+            expected_num_parts);
+
+        uint64_t part_range_start, part_range_end;
+        aws_s3_calculate_auto_ranged_get_part_range(
+            object_range_start, object_range_end, part_size, first_part_size, 1, &part_range_start, &part_range_end);
+
+        ASSERT_INT_EQUALS(part_range_start, part_ranges[0]);
+        ASSERT_INT_EQUALS(part_range_end, part_ranges[1]);
+
+        aws_s3_calculate_auto_ranged_get_part_range(
+            object_range_start, object_range_end, part_size, first_part_size, 2, &part_range_start, &part_range_end);
+
+        ASSERT_INT_EQUALS(part_range_start, part_ranges[2]);
+        ASSERT_INT_EQUALS(part_range_end, part_ranges[3]);
+    }
+
     /* Perfectly aligned on part boundaries. */
     {
         const uint32_t expected_num_parts = 2;
