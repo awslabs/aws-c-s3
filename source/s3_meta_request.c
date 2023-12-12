@@ -1285,6 +1285,10 @@ static int s_s3_meta_request_headers_block_done(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    /*
+     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so we
+     * don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets instead.
+     */
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_PART_NUMBER) {
         uint64_t content_length;
