@@ -1221,12 +1221,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 }
 
                 uint32_t num_parts = 0;
+                size_t out_part_size = 0;
                 if (content_length_found) {
                     if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
-                            content_length, part_size, client_max_part_size, &part_size, &num_parts)) {
+                            content_length, part_size, client_max_part_size, &out_part_size, &num_parts)) {
                         return NULL;
                     }
                 }
+                part_size = out_part_size;
                 if (part_size != options->part_size && part_size != client->part_size) {
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
