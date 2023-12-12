@@ -327,6 +327,8 @@ add_test_case(test_s3_buffer_pool_too_small)
 add_net_test_case(test_s3_put_object_buffer_pool_trim)
 
 add_net_test_case(client_update_upload_part_timeout)
+add_net_test_case(client_meta_request_override_part_size)
+add_net_test_case(client_meta_request_override_multipart_upload_threshold)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
