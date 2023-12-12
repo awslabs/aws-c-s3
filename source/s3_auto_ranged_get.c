@@ -111,7 +111,7 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 /*
  * This function returns the type of first request which we will also use to discover overall object size.
  */
-static enum aws_s3_auto_ranged_get_request_type s_s3_get_discovers_object_size_request_type(
+static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discovering_object_size(
     const struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
@@ -185,7 +185,7 @@ static bool s_s3_auto_ranged_get_update(
                     goto has_work_remaining;
                 }
                 struct aws_s3_buffer_pool_ticket *ticket = NULL;
-                switch (s_s3_get_discovers_object_size_request_type(meta_request)) {
+                switch (s_s3_get_request_type_for_discovering_object_size(meta_request)) {
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
                         AWS_LOGF_INFO(
                             AWS_LS_S3_META_REQUEST,
@@ -243,8 +243,9 @@ static bool s_s3_auto_ranged_get_update(
                         ++auto_ranged_get->synced_data.num_parts_requested;
                         break;
                     default:
-                        AWS_FATAL_ASSERT("s_s3_get_discovers_object_size_request_type returned unexpected discover "
-                                         "object size request type");
+                        AWS_FATAL_ASSERT(
+                            0 && "s_s3_get_request_type_for_discovering_object_size returned unexpected discover "
+                                 "object size request type");
                 }
                 request->discovers_object_size = true;
                 goto has_work_remaining;
