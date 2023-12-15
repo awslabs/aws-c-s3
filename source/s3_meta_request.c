@@ -226,6 +226,7 @@ int aws_s3_meta_request_init_base(
         /* Priority queue */
         goto error;
     }
+    aws_linked_list_init(&meta_request->synced_data.ongoing_http_request_list);
 
     aws_array_list_init_dynamic(
         &meta_request->synced_data.event_delivery_array,
