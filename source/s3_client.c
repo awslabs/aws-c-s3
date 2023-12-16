@@ -345,11 +345,13 @@ struct aws_s3_client *aws_s3_client_new(
         mem_limit = client_config->memory_limit_in_bytes;
     }
 
-    size_t part_size;
+    size_t part_size = s_default_part_size;
     if (client_config->part_size != 0) {
-        part_size = (size_t)client_config->part_size;
-    } else {
-        part_size = s_default_part_size;
+        if (client_config->part_size > SIZE_MAX) {
+            part_size = SIZE_MAX;
+        } else {
+            part_size = (size_t)client_config->part_size;
+        }
     }
 
     client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
@@ -424,6 +426,9 @@ struct aws_s3_client *aws_s3_client_new(
 
     if (client_config->multipart_upload_threshold != 0) {
         *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
+    } else {
+        *((uint64_t *)&client->multipart_upload_threshold) =
+            part_size > g_s3_min_upload_part_size ? part_size : g_s3_min_upload_part_size;
     }
 
     if (client_config->max_part_size < client_config->part_size) {
@@ -1151,6 +1156,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+    size_t part_size = client->part_size;
+    if (options->part_size != 0) {
+        if (options->part_size > SIZE_MAX) {
+            part_size = SIZE_MAX;
+        } else {
+            part_size = (size_t)options->part_size;
+        }
+    }
 
     /* Call the appropriate meta-request new function. */
     switch (options->type) {
@@ -1169,7 +1182,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     options);
             }
 
-            return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, client->part_size, options);
+            return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, part_size, options);
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
             if (body_source_count == 0) {
@@ -1182,19 +1195,17 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             }
 
             if (options->resume_token == NULL) {
-
-                size_t client_part_size = client->part_size;
                 uint64_t client_max_part_size = client->max_part_size;
 
-                if (client_part_size < g_s3_min_upload_part_size) {
+                if (part_size < g_s3_min_upload_part_size) {
                     AWS_LOGF_WARN(
                         AWS_LS_S3_META_REQUEST,
-                        "Client config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
+                        "Config part size of %" PRIu64 " is less than the minimum upload part size of %" PRIu64
                         ". Using to the minimum part-size for upload.",
-                        (uint64_t)client_part_size,
+                        (uint64_t)part_size,
                         (uint64_t)g_s3_min_upload_part_size);
 
-                    client_part_size = g_s3_min_upload_part_size;
+                    part_size = g_s3_min_upload_part_size;
                 }
 
                 if (client_max_part_size < (uint64_t)g_s3_min_upload_part_size) {
@@ -1208,8 +1219,32 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
 
                     client_max_part_size = (uint64_t)g_s3_min_upload_part_size;
                 }
-                uint64_t multipart_upload_threshold =
-                    client->multipart_upload_threshold == 0 ? client_part_size : client->multipart_upload_threshold;
+
+                uint32_t num_parts = 0;
+                if (content_length_found) {
+                    size_t out_part_size = 0;
+                    if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+                            content_length, part_size, client_max_part_size, &out_part_size, &num_parts)) {
+                        return NULL;
+                    }
+                    part_size = out_part_size;
+                }
+                if (part_size != options->part_size && part_size != client->part_size) {
+                    AWS_LOGF_DEBUG(
+                        AWS_LS_S3_META_REQUEST,
+                        "The multipart upload part size has been adjusted to %" PRIu64 "",
+                        (uint64_t)part_size);
+                }
+
+                /* Default to client level setting */
+                uint64_t multipart_upload_threshold = client->multipart_upload_threshold;
+                if (options->multipart_upload_threshold != 0) {
+                    /* If the threshold is set for the meta request, use it */
+                    multipart_upload_threshold = options->multipart_upload_threshold;
+                } else if (options->part_size != 0) {
+                    /* If the threshold is not set, but the part size is set for the meta request, use it */
+                    multipart_upload_threshold = part_size;
+                }
 
                 if (content_length_found && content_length <= multipart_upload_threshold) {
                     return aws_s3_meta_request_default_new(
@@ -1229,15 +1264,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                             "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
                             "single part upload.");
                         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                        return NULL;
-                    }
-                }
-
-                size_t part_size = client_part_size;
-                uint32_t num_parts = 0;
-                if (content_length_found) {
-                    if (aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
-                            content_length, client_part_size, client_max_part_size, &part_size, &num_parts)) {
                         return NULL;
                     }
                 }

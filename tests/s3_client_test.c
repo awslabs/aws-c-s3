@@ -246,3 +246,144 @@ TEST_CASE(client_update_upload_part_timeout) {
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;
 }
+
+/* Test meta request can override the part size as expected */
+TEST_CASE(client_meta_request_override_part_size) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
+    struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str("/mytest");
+
+    size_t override_part_size = MB_TO_BYTES(10);
+    size_t content_length =
+        MB_TO_BYTES(20); /* Let the content length larger than the override part size to make sure we do MPU */
+
+    /* MPU put object */
+    struct aws_input_stream_tester_options stream_options = {
+        .autogen_length = content_length,
+    };
+    struct aws_input_stream *input_stream = aws_input_stream_new_tester(allocator, &stream_options);
+
+    struct aws_http_message *put_messages = aws_s3_test_put_object_request_new(
+        allocator, &host_cur, g_test_body_content_type, test_object_path, input_stream, 0 /*flags*/);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .message = put_messages,
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .part_size = override_part_size,
+    };
+    struct aws_s3_meta_request *put_meta_request = client->vtable->meta_request_factory(client, &meta_request_options);
+    ASSERT_UINT_EQUALS(put_meta_request->part_size, override_part_size);
+
+    /* auto ranged Get Object */
+    struct aws_http_message *get_message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
+
+    struct aws_s3_meta_request_options get_meta_request_options = {
+        .message = get_message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .part_size = override_part_size,
+    };
+
+    struct aws_s3_meta_request *get_meta_request =
+        client->vtable->meta_request_factory(client, &get_meta_request_options);
+    ASSERT_UINT_EQUALS(get_meta_request->part_size, override_part_size);
+
+    aws_http_message_release(put_messages);
+    aws_s3_meta_request_release(put_meta_request);
+    aws_http_message_release(get_message);
+    aws_s3_meta_request_release(get_meta_request);
+    aws_string_destroy(host_name);
+    aws_s3_client_release(client);
+    aws_input_stream_release(input_stream);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test meta request can override the multipart upload threshold as expected */
+TEST_CASE(client_meta_request_override_multipart_upload_threshold) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(8),
+        .multipart_upload_threshold = MB_TO_BYTES(15),
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
+    struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str("/mytest");
+
+    size_t override_multipart_upload_threshold = MB_TO_BYTES(20);
+    size_t content_length =
+        MB_TO_BYTES(20); /* Let the content length larger than the override part size to make sure we do MPU */
+
+    /* MPU put object */
+    struct aws_input_stream_tester_options stream_options = {
+        .autogen_length = content_length,
+    };
+    struct aws_input_stream *input_stream = aws_input_stream_new_tester(allocator, &stream_options);
+
+    struct aws_http_message *put_messages = aws_s3_test_put_object_request_new(
+        allocator, &host_cur, g_test_body_content_type, test_object_path, input_stream, 0 /*flags*/);
+
+    {
+        /* Content length is smaller than the override multipart_upload_threshold */
+        struct aws_s3_meta_request_options meta_request_options = {
+            .message = put_messages,
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .multipart_upload_threshold = override_multipart_upload_threshold,
+        };
+        struct aws_s3_meta_request *put_meta_request =
+            client->vtable->meta_request_factory(client, &meta_request_options);
+
+        /* Part size will be 0, as we don't use MPU */
+        ASSERT_UINT_EQUALS(put_meta_request->part_size, 0);
+        aws_s3_meta_request_release(put_meta_request);
+    }
+
+    {
+        /* meta request override the part size, so the override part size will be used as the multipart upload threshold
+         */
+        struct aws_s3_meta_request_options meta_request_options = {
+            .message = put_messages,
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .part_size = override_multipart_upload_threshold,
+        };
+        struct aws_s3_meta_request *put_meta_request =
+            client->vtable->meta_request_factory(client, &meta_request_options);
+
+        /* Part size will be 0, as we don't use MPU */
+        ASSERT_UINT_EQUALS(put_meta_request->part_size, 0);
+        aws_s3_meta_request_release(put_meta_request);
+    }
+
+    aws_http_message_release(put_messages);
+    aws_string_destroy(host_name);
+    aws_s3_client_release(client);
+    aws_input_stream_release(input_stream);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
