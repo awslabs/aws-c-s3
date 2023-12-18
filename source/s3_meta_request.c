@@ -203,6 +203,7 @@ int aws_s3_meta_request_init_base(
     meta_request->type = options->type;
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
+    aws_linked_list_init(&meta_request->synced_data.ongoing_http_request_list);
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -226,7 +227,6 @@ int aws_s3_meta_request_init_base(
         /* Priority queue */
         goto error;
     }
-    aws_linked_list_init(&meta_request->synced_data.ongoing_http_request_list);
 
     aws_array_list_init_dynamic(
         &meta_request->synced_data.event_delivery_array,

@@ -228,8 +228,23 @@ static int s3_cancel_test_helper_ex(
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
         ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, meta_request_test_results.finished_error_code);
 
-        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+        if (cancel_type == S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS) {
+            /* Check the metric and see we have at least a request completed with AWS_ERROR_S3_CANCELED */
+            /* The meta request completed, we can access the synced data now. */
+            struct aws_array_list *metrics_list = &meta_request_test_results.synced_data.metrics;
+            bool cancelled_successfully = false;
+            for (size_t i = 0; i < aws_array_list_length(metrics_list); ++i) {
+                struct aws_s3_request_metrics *metrics = NULL;
+                aws_array_list_get_at(metrics_list, (void **)&metrics, i);
+                if (metrics->crt_info_metrics.error_code == AWS_ERROR_S3_CANCELED) {
+                    cancelled_successfully = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(cancelled_successfully);
+        }
 
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
         if (cancel_type != S3_UPDATE_CANCEL_TYPE_MPU_CREATE_NOT_SENT) {
             ASSERT_TRUE(test_user_data.abort_successful);
         }
