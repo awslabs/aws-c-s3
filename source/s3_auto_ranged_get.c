@@ -749,6 +749,7 @@ static void s_s3_auto_ranged_get_request_finished(
             aws_http_headers_erase(response_headers, g_content_range_header_name);
         }
 
+        // TODO: store total_content length as this might not be the first request anymore.
         char content_length_buffer[64] = "";
         snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, total_content_length);
         aws_http_headers_set(

@@ -360,10 +360,6 @@ static int s3_cancel_test_helper_fc(
                 options.get_options.object_range = range;
                 break;
 
-            case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED:
-                options.get_options.object_path = g_pre_existing_empty_object;
-                break;
-
             default:
                 break;
         }
