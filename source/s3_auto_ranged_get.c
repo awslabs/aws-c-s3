@@ -118,8 +118,8 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
     AWS_ASSERT(auto_ranged_get);
 
     /*
-     * If the object range is empty, download the file using a GetObject with PartNumber request. It will succeeds if
-     * the file is empty or download the file.
+     * If the object is empty, download the file using a GetObject with PartNumber request. This will succeed if
+     * the file is empty, or it will download the file.
      */
     if (auto_ranged_get->synced_data.object_range_empty != 0) {
         auto_ranged_get->synced_data.object_range_known = 0;
@@ -805,9 +805,11 @@ update_synced_data:
                 /* fall through */
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
                 if (empty_file_error) {
-                    /* Try to download the object again using GET_OBJECT_WITH_PART_NUMBER_1. If the file is still
-                     * empty, a successful response headers will be provided to users. If not, the newer version of the
-                     * file will be downloaded. */
+                    /*
+                     * Try to download the object again using GET_OBJECT_WITH_PART_NUMBER_1. If the file is still
+                     * empty, successful response headers will be provided to users. If not, the newer version of the
+                     * file will be downloaded.
+                     */
                     auto_ranged_get->synced_data.num_parts_requested = 0;
                     auto_ranged_get->synced_data.object_range_known = 0;
                     break;
