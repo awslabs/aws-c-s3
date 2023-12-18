@@ -17,6 +17,7 @@ enum s3_update_cancel_type {
     S3_UPDATE_CANCEL_TYPE_MPU_CREATE_COMPLETED,
     S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED,
     S3_UPDATE_CANCEL_TYPE_MPU_ALL_PARTS_COMPLETED,
+    S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS,
     S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES,
 
     S3_UPDATE_CANCEL_TYPE_MPD_NOTHING_SENT,
@@ -67,6 +68,10 @@ static bool s_s3_meta_request_update_cancel_test(
         case S3_UPDATE_CANCEL_TYPE_MPU_ALL_PARTS_COMPLETED:
             call_cancel = auto_ranged_put->synced_data.num_parts_completed ==
                           auto_ranged_put->total_num_parts_from_content_length;
+            break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS:
+            call_cancel = !aws_linked_list_empty(&meta_request->synced_data.ongoing_http_request_list);
             break;
 
         case S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES:
@@ -470,6 +475,15 @@ static int s_test_s3_cancel_mpu_all_parts_completed(struct aws_allocator *alloca
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPU_ALL_PARTS_COMPLETED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpu_ongoing_http_requests, s_test_s3_cancel_mpu_ongoing_http_requests)
+static int s_test_s3_cancel_mpu_ongoing_http_requests(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS));
 
     return 0;
 }

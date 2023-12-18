@@ -350,7 +350,13 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
         struct aws_linked_list_node *request_node =
             aws_linked_list_pop_front(&meta_request->synced_data.ongoing_http_request_list);
         struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, on_going_http_node);
-        aws_http_stream_cancel(request->synced_data.http_stream, AWS_ERROR_S3_CANCELED);
+        if (!request->always_send) {
+            /* Cancel the ongoing http stream, unless it's always send. */
+
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST, "id=%p: Cancelling S3 request=%p", (void *)meta_request, (void *)request);
+            aws_http_stream_cancel(request->synced_data.http_stream, AWS_ERROR_S3_CANCELED);
+        }
         request->synced_data.http_stream = NULL;
     }
     aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -493,6 +499,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
+
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.ongoing_http_request_list));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
