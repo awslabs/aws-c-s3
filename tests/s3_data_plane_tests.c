@@ -3635,7 +3635,7 @@ static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *all
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /*** GET FILE ***/
-
+    uint64_t small_object_size_hint = 1;
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
@@ -3648,7 +3648,8 @@ static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *all
                 .object_path = object_path,
             },
         .finish_callback = s_s3_test_validate_checksum,
-        .object_size_hint = 1 /* pass a object_size_hint > 0 so that the request goes through the getPart flow */,
+        .object_size_hint =
+            &small_object_size_hint /* pass a object_size_hint > 0 so that the request goes through the getPart flow */,
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
@@ -3702,6 +3703,7 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
     client_options.part_size = MB_TO_BYTES(3);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    uint64_t object_size_hint = MB_TO_BYTES(object_size_mb);
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -3715,8 +3717,9 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
                 .object_path = object_path,
             },
         .finish_callback = s_s3_test_validate_checksum,
-        .object_size_hint = MB_TO_BYTES(object_size_mb),
+        .object_size_hint = &object_size_hint,
     };
+    uint64_t small_object_size_hint = MB_TO_BYTES(1);
 
     /* will do headRequest */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
@@ -3749,7 +3752,7 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
-    get_options.object_size_hint = MB_TO_BYTES(1);
+    get_options.object_size_hint = &small_object_size_hint;
     /* will do getPart first, cancel it and then rangedGet */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
@@ -3804,6 +3807,7 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
     client_options.part_size = MB_TO_BYTES(3);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    uint64_t object_size_hint = MB_TO_BYTES(object_size_mb);
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -3816,7 +3820,7 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
             {
                 .object_path = object_path,
             },
-        .object_size_hint = MB_TO_BYTES(object_size_mb),
+        .object_size_hint = &object_size_hint,
     };
 
     /* will do HeadRequest first */
@@ -3845,8 +3849,10 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
 
+    uint64_t small_object_size_hint = 1;
+
     /*** GET FILE with with wrong object_size_hint ***/
-    get_options.object_size_hint = MB_TO_BYTES(1);
+    get_options.object_size_hint = &small_object_size_hint;
     get_options.finish_callback = NULL;
 
     /*** GET FILE with part_size < first_part_size***/

@@ -91,8 +91,10 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
     auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
-    auto_ranged_get->object_size_hint = options->object_size_hint;
-
+    if (options->object_size_hint) {
+        auto_ranged_get->object_size_hint_available = true;
+        auto_ranged_get->object_size_hint = *options->object_size_hint;
+    }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
@@ -148,7 +150,7 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
     /* If the object_size_hint indicates that it is a small one part file, then try to get the file directly
      * TODO: Bypass memory limiter so that we don't overallocate memory for small files
      */
-    if (auto_ranged_get->object_size_hint > 0 && auto_ranged_get->object_size_hint <= meta_request->part_size) {
+    if (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint <= meta_request->part_size) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
 

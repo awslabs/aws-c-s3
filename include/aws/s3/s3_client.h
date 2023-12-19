@@ -697,7 +697,7 @@ struct aws_s3_meta_request_options {
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
      * If not set, the client will assume a large file by default.
      */
-    uint64_t object_size_hint;
+    uint64_t *object_size_hint;
 };
 
 /* Result details of a meta request.
