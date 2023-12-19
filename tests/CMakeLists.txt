@@ -55,7 +55,6 @@ add_net_test_case(test_s3_cancel_mpd_one_part_completed)
 add_net_test_case(test_s3_cancel_mpd_two_parts_completed)
 add_net_test_case(test_s3_cancel_mpd_head_object_sent)
 add_net_test_case(test_s3_cancel_mpd_head_object_completed)
-
 add_net_test_case(test_s3_cancel_prepare)
 
 add_net_test_case(test_s3_get_object_tls_disabled)
