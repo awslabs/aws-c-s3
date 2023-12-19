@@ -590,7 +590,6 @@ static int s_discover_object_range_and_content_length(
                     (void *)request);
                 break;
             }
-            // TODO: can we make sure that content range is present for Get_Object request with part number?
             if (first_part_size > 0) {
                 /* Parse the object size from the part response. */
                 if (aws_s3_parse_content_range_response_header(
