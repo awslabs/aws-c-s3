@@ -1882,6 +1882,7 @@ int aws_s3_tester_validate_get_object_results(
             meta_request_test_results->response_headers, aws_byte_cursor_from_c_str("Content-Range"))) {
         ASSERT_TRUE(meta_request_test_results->finished_response_status == 206);
     } else {
+        ASSERT_INT_EQUALS(200, meta_request_test_results->headers_response_status);
         ASSERT_TRUE(meta_request_test_results->finished_response_status == 200);
     }
 
