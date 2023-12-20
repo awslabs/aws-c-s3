@@ -432,7 +432,7 @@ static void s_s3_meta_request_default_request_finished(
         }
 
         if (finishing_metrics) {
-            aws_s3_request_finish_up_metrics_synced(request, meta_request, error_code);
+            aws_s3_request_finish_up_metrics_synced(request, meta_request);
         }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);

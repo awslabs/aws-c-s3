@@ -633,17 +633,13 @@ int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor e
     return AWS_ERROR_UNKNOWN;
 }
 
-void aws_s3_request_finish_up_metrics_synced(
-    struct aws_s3_request *request,
-    struct aws_s3_meta_request *meta_request,
-    int error_code) {
+void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
 
     if (request->send_data.metrics != NULL) {
         /* Request is done, complete the metrics for the request now. */
         struct aws_s3_request_metrics *metrics = request->send_data.metrics;
-        metrics->crt_info_metrics.error_code = error_code;
         aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
         metrics->time_metrics.total_duration_ns =
             metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;

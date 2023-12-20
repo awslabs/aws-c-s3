@@ -22,12 +22,12 @@
 #else
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
 #endif
-#define KB_TO_BYTES(kb) ((kb)*1024)
-#define MB_TO_BYTES(mb) ((mb)*1024 * 1024)
-#define GB_TO_BYTES(gb) ((gb)*1024 * 1024 * 1024ULL)
+#define KB_TO_BYTES(kb) ((kb) * 1024)
+#define MB_TO_BYTES(mb) ((mb) * 1024 * 1024)
+#define GB_TO_BYTES(gb) ((gb) * 1024 * 1024 * 1024ULL)
 
-#define MS_TO_NS(ms) ((uint64_t)(ms)*1000000)
-#define SEC_TO_NS(ms) ((uint64_t)(ms)*1000000000)
+#define MS_TO_NS(ms) ((uint64_t)(ms) * 1000000)
+#define SEC_TO_NS(ms) ((uint64_t)(ms) * 1000000000)
 
 struct aws_allocator;
 struct aws_http_stream;
@@ -279,10 +279,7 @@ AWS_S3_API
 int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string);
 
 AWS_S3_API
-void aws_s3_request_finish_up_metrics_synced(
-    struct aws_s3_request *request,
-    struct aws_s3_meta_request *meta_request,
-    int error_code);
+void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
 AWS_EXTERN_C_END
 
