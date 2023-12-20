@@ -91,7 +91,6 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
     if (auto_ranged_get->initial_message_has_range_header) {
         aws_s3_parse_request_range_header(
-            allocator,
             headers,
             &auto_ranged_get->initial_message_has_start_range,
             &auto_ranged_get->initial_message_has_end_range,
@@ -255,9 +254,9 @@ static bool s_s3_auto_ranged_get_update(
 
                         uint64_t part_range_start = 0;
                         uint64_t first_part_size = meta_request->part_size;
-
-                        if (auto_ranged_get->initial_message_has_start_range) {
-                            // TODO: should we align the first part? Was it getting aligned before?
+                        // TODO: should we align the first part? Was it getting aligned before?
+                        if (auto_ranged_get->initial_message_has_range_header) {
+                            AWS_ASSERT(auto_ranged_get->initial_message_has_start_range);
                             part_range_start = auto_ranged_get->initial_object_range_start;
 
                             if (auto_ranged_get->initial_message_has_end_range) {

@@ -487,7 +487,6 @@ int aws_s3_parse_content_length_response_header(
 
 int aws_s3_parse_request_range_header(
     struct aws_http_headers *request_headers,
-
     bool *out_initial_message_has_start_range,
     bool *out_initial_message_has_end_range,
     uint64_t *out_initial_start_range,
