@@ -53,6 +53,12 @@ struct aws_s3_auto_ranged_get {
     } synced_data;
 
     uint32_t initial_message_has_range_header : 1;
+
+    bool initial_message_has_start_range;
+    bool initial_message_has_end_range;
+    uint64_t initial_object_range_start;
+    uint64_t initial_object_range_end;
+
     uint32_t initial_message_has_if_match_header : 1;
 
     struct aws_string *etag;

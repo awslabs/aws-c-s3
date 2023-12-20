@@ -89,6 +89,15 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     AWS_ASSERT(headers != NULL);
 
     auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
+    if (auto_ranged_get->initial_message_has_range_header) {
+        aws_s3_parse_request_range_header(
+            allocator,
+            headers,
+            &auto_ranged_get->initial_message_has_start_range,
+            &auto_ranged_get->initial_message_has_end_range,
+            &auto_ranged_get->initial_object_range_start,
+            &auto_ranged_get->initial_object_range_end);
+    }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
     auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
     if (options->object_size_hint) {

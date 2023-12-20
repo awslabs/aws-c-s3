@@ -485,6 +485,70 @@ int aws_s3_parse_content_length_response_header(
     return result;
 }
 
+int aws_s3_parse_request_range_header(
+    struct aws_allocator *allocator,
+    struct aws_http_headers *request_headers,
+
+    bool *out_initial_message_has_start_range,
+    bool *out_initial_message_has_end_range,
+    uint64_t *out_initial_start_range,
+    uint64_t *out_initial_end_range) {
+
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(request_headers);
+    AWS_PRECONDITION(out_initial_message_has_start_range);
+    AWS_PRECONDITION(out_initial_message_has_end_range);
+    AWS_PRECONDITION(out_initial_start_range);
+    AWS_PRECONDITION(out_initial_end_range);
+
+    struct aws_byte_cursor range_header_value;
+
+    if (aws_http_headers_get(request_headers, g_range_header_name, &range_header_value)) {
+        // TODO: Just assert?
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
+    }
+    struct aws_byte_cursor range_header_start = aws_byte_cursor_from_c_str("bytes=");
+
+    int result = AWS_OP_ERR;
+    /* verify bytes= */
+    if (aws_byte_cursor_starts_with(&range_header_value, &range_header_start)) {
+        aws_byte_cursor_advance(&range_header_value, range_header_start.len);
+        struct aws_byte_cursor substr = {0};
+        /* parse start range */
+        if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+            goto done;
+        }
+        if (substr.len > 0) {
+            if (aws_byte_cursor_utf8_parse_u64(substr, out_initial_start_range)) {
+                goto done;
+            }
+            *out_initial_message_has_start_range = true;
+        }
+        /* parse end range */
+        if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+            goto done;
+        }
+        if (substr.len > 0) {
+            if (aws_byte_cursor_utf8_parse_u64(substr, out_initial_end_range)) {
+                goto done;
+            }
+            *out_initial_message_has_end_range = true;
+        }
+
+        /* verify there is not anything extra */
+        if (aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+            goto done;
+        }
+
+        result = AWS_OP_SUCCESS;
+    }
+done:
+    if (result != AWS_OP_SUCCESS) {
+        aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+    return result;
+}
+
 uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
     size_t part_size,
     uint64_t first_part_size,

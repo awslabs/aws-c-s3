@@ -243,9 +243,19 @@ int aws_s3_parse_content_length_response_header(
     struct aws_http_headers *response_headers,
     uint64_t *out_content_length);
 
-/* Calculate the number of parts based on overall object-range and part_size. */
+// TODO: documentation
 AWS_S3_API
-uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
+int aws_s3_parse_request_range_header(
+    struct aws_allocator *allocator,
+    struct aws_http_headers *request_headers,
+
+    bool *out_initial_message_has_start_range,
+    bool *out_initial_message_has_end_range,
+    uint64_t *out_initial_start_range,
+    uint64_t *out_initial_end_range);
+
+/* Calculate the number of parts based on overall object-range and part_size. */
+AWS_S3_API uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
     size_t part_size,
     uint64_t first_part_size,
     uint64_t object_range_start,
