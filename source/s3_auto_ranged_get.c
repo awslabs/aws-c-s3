@@ -271,7 +271,7 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_LS_S3_META_REQUEST,
                             "id=%p: Doing a ranged get to discover the size of the object and get the first part",
                             (void *)meta_request);
-                        ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, first_part_size);
+                        ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, (size_t)first_part_size);
 
                         if (ticket == NULL) {
                             goto has_work_remaining;
