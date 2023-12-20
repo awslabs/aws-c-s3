@@ -486,7 +486,6 @@ int aws_s3_parse_content_length_response_header(
 }
 
 int aws_s3_parse_request_range_header(
-    struct aws_allocator *allocator,
     struct aws_http_headers *request_headers,
 
     bool *out_initial_message_has_start_range,
@@ -494,7 +493,6 @@ int aws_s3_parse_request_range_header(
     uint64_t *out_initial_start_range,
     uint64_t *out_initial_end_range) {
 
-    AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(request_headers);
     AWS_PRECONDITION(out_initial_message_has_start_range);
     AWS_PRECONDITION(out_initial_message_has_end_range);
