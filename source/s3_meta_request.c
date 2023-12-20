@@ -347,6 +347,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_cancel_ongoing_http_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 }
 
