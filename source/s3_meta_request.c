@@ -203,6 +203,7 @@ int aws_s3_meta_request_init_base(
     meta_request->type = options->type;
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
+    aws_linked_list_init(&meta_request->synced_data.ongoing_http_requests_list);
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -345,6 +346,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
+    aws_s3_meta_request_cancel_ongoing_http_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 }
@@ -485,6 +487,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
+
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.ongoing_http_requests_list));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
@@ -1077,6 +1081,15 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         goto error_finish;
     }
 
+    {
+        /* BEGIN CRITICAL SECTION */
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_linked_list_push_back(
+            &meta_request->synced_data.ongoing_http_requests_list, &request->ongoing_http_requests_list_node);
+        request->synced_data.http_stream = stream;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* END CRITICAL SECTION */
+    }
     return;
 
 error_finish:
@@ -1366,8 +1379,19 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
 
     struct aws_s3_connection *connection = user_data;
     AWS_PRECONDITION(connection);
-    if (connection->request->meta_request->checksum_config.validate_response_checksum) {
+    struct aws_s3_request *request = connection->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    if (meta_request->checksum_config.validate_response_checksum) {
         s_get_response_part_finish_checksum_helper(connection, error_code);
+    }
+    if (error_code != AWS_ERROR_S3_CANCELED && error_code != AWS_ERROR_S3_PAUSED) {
+        /* BEGIN CRITICAL SECTION */
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        AWS_ASSERT(request->synced_data.http_stream != NULL);
+        aws_linked_list_remove(&request->ongoing_http_requests_list_node);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* END CRITICAL SECTION */
     }
     s_s3_meta_request_send_request_finish(connection, stream, error_code);
 }
@@ -1644,6 +1668,21 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
            meta_request->synced_data.event_delivery_active;
 }
 
+void aws_s3_meta_request_cancel_ongoing_http_requests_synced(struct aws_s3_meta_request *meta_request, int error_code) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+    while (!aws_linked_list_empty(&meta_request->synced_data.ongoing_http_requests_list)) {
+        struct aws_linked_list_node *request_node =
+            aws_linked_list_pop_front(&meta_request->synced_data.ongoing_http_requests_list);
+        struct aws_s3_request *request =
+            AWS_CONTAINER_OF(request_node, struct aws_s3_request, ongoing_http_requests_list_node);
+        if (!request->always_send) {
+            /* Cancel the ongoing http stream, unless it's always send. */
+            aws_http_stream_cancel(request->synced_data.http_stream, error_code);
+        }
+        request->synced_data.http_stream = NULL;
+    }
+}
+
 /* Deliver events in event_delivery_array.
  * This task runs on the meta-request's io_event_loop thread. */
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -1887,9 +1926,9 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         finish_result.error_code,
         aws_error_str(finish_result.error_code));
 
-    /* As the meta request has been finished with any HTTP message, we can safely release the http message that hold. So
-     * that, the downstream high level language doesn't need to wait for shutdown to clean related resource (eg: input
-     * stream) */
+    /* As the meta request has been finished with any HTTP message, we can safely release the http message that
+     * hold. So that, the downstream high level language doesn't need to wait for shutdown to clean related resource
+     * (eg: input stream) */
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
     meta_request->request_body_parallel_stream =
         aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
