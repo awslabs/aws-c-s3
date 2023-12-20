@@ -565,6 +565,12 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     AWS_FATAL_ASSERT(out_part_size);
     AWS_FATAL_ASSERT(out_num_parts);
 
+    if (content_length == 0) {
+        *out_part_size = 0;
+        *out_num_parts = 0;
+        return AWS_OP_SUCCESS;
+    }
+
     uint64_t part_size_uint64 = content_length / (uint64_t)g_s3_max_num_upload_parts;
 
     if ((content_length % g_s3_max_num_upload_parts) > 0) {

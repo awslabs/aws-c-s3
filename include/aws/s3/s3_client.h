@@ -388,7 +388,16 @@ struct aws_s3_client_config {
      */
     struct aws_signing_config_aws *signing_config;
 
-    /* Size of parts the files will be downloaded or uploaded in. */
+    /**
+     * Optional.
+     * Size of parts the object will be downloaded or uploaded in, in bytes.
+     * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
+     * If not set, this defaults to 8 MiB.
+     * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
+     * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
+     *
+     * You can also set this per meta-request, via `aws_s3_meta_request_options.part_size`.
+     */
     uint64_t part_size;
 
     /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to. On 32
@@ -396,13 +405,20 @@ struct aws_s3_client_config {
      * is 5TiB for now. We should be good enough for all the cases. */
     uint64_t max_part_size;
 
-    /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
-     * request. Uploads over this size will automatically use a multipart upload strategy,while uploads smaller or
-     * equal to this threshold will use a single request to upload the whole object. If not set, `part_size` will be
-     * used as threshold. */
+    /**
+     * Optional.
+     * The size threshold in bytes for when to use multipart uploads.
+     * Uploads larger than this will use the multipart upload strategy.
+     * Uploads smaller or equal to this will use a single HTTP request.
+     * This only affects AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
+     * If set, this should be at least `part_size`.
+     * If not set, maximal of `part_size` and 5 MiB will be used.
+     *
+     * You can also set this per meta-request, via `aws_s3_meta_request_options.multipart_upload_threshold`.
+     */
     uint64_t multipart_upload_threshold;
 
-    /* Throughput target in Gbps that we are trying to reach. */
+    /* Throughput target in gigabits per second (Gbps) that we are trying to reach. */
     double throughput_target_gbps;
 
     /* How much memory can we use. */
@@ -553,8 +569,6 @@ struct aws_s3_checksum_config {
  * 3) If the data will be be produced in asynchronous chunks, set `send_async_stream`.
  */
 struct aws_s3_meta_request_options {
-    /* TODO: The meta request options cannot control the request to be split or not. Should consider to add one */
-
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 
@@ -610,6 +624,30 @@ struct aws_s3_meta_request_options {
      * if set, the flexible checksum will be performed by client based on the config.
      */
     const struct aws_s3_checksum_config *checksum_config;
+
+    /**
+     * Optional.
+     * Size of parts the object will be downloaded or uploaded in, in bytes.
+     * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
+     * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to 8MiB.
+     *
+     * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
+     * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
+     */
+    uint64_t part_size;
+
+    /**
+     * Optional.
+     * The size threshold in bytes for when to use multipart uploads.
+     * Uploads larger than this will use the multipart upload strategy.
+     * Uploads smaller or equal to this will use a single HTTP request.
+     * This only affects AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
+     * If set, this should be at least `part_size`.
+     * If not set, `part_size` adjusted by client will be used as the threshold.
+     * If both `part_size` and `multipart_upload_threshold` are not set,
+     * the values from `aws_s3_client_config` are used.
+     */
+    uint64_t multipart_upload_threshold;
 
     /* User data for all callbacks. */
     void *user_data;
