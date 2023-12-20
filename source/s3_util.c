@@ -540,6 +540,8 @@ int aws_s3_parse_request_range_header(
             goto done;
         }
 
+        // TODO: verify startRange<=endRange?
+
         result = AWS_OP_SUCCESS;
     }
 done:
