@@ -1711,16 +1711,7 @@ static int s_s3_auto_ranged_put_pause(
      */
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
 
-    while (!aws_linked_list_empty(&meta_request->synced_data.ongoing_http_request_list)) {
-        struct aws_linked_list_node *request_node =
-            aws_linked_list_pop_front(&meta_request->synced_data.ongoing_http_request_list);
-        struct aws_s3_request *request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, on_going_http_node);
-        if (!request->always_send) {
-            /* Cancel the ongoing http stream, unless it's always send. */
-            aws_http_stream_cancel(request->synced_data.http_stream, AWS_ERROR_S3_PAUSED);
-        }
-        request->synced_data.http_stream = NULL;
-    }
+    aws_s3_meta_request_cancel_ongoing_http_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
 
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);

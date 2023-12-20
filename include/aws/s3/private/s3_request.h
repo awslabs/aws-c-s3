@@ -114,7 +114,7 @@ struct aws_s3_request {
     struct aws_linked_list_node node;
 
     /* Linked list node used for tracking the request is active from HTTP level. */
-    struct aws_linked_list_node on_going_http_node;
+    struct aws_linked_list_node ongoing_http_requests_list_node;
 
     /* The meta request lock must be held to access the data */
     struct {

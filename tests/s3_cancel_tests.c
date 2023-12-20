@@ -78,7 +78,7 @@ static bool s_s3_meta_request_update_cancel_test(
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS:
-            call_cancel_or_pause = !aws_linked_list_empty(&meta_request->synced_data.ongoing_http_request_list);
+            call_cancel_or_pause = !aws_linked_list_empty(&meta_request->synced_data.ongoing_http_requests_list);
             break;
 
         case S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES:
