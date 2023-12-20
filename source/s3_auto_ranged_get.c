@@ -806,7 +806,9 @@ static void s_s3_auto_ranged_get_request_finished(
                 content_length_buffer,
                 sizeof(content_length_buffer),
                 "%" PRIu64,
-                object_range_end - object_range_start + 1); // TODO: maybe this should be a helper function?
+                total_content_length == 0
+                    ? 0
+                    : object_range_end - object_range_start + 1); // TODO: maybe this should be a helper function?
             aws_http_headers_set(
                 response_headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
 
