@@ -258,7 +258,8 @@ int aws_s3_parse_request_range_header(
     uint64_t *out_initial_end_range);
 
 /* Calculate the number of parts based on overall object-range and part_size. */
-AWS_S3_API uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
+AWS_S3_API
+uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
     size_t part_size,
     uint64_t first_part_size,
     uint64_t object_range_start,
