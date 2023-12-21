@@ -404,6 +404,8 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
 
     request->send_data.response_headers = aws_http_headers_new(allocator);
     ASSERT_TRUE(request->send_data.response_headers != NULL);
+    ASSERT_TRUE(request->send_data.metrics != NULL);
+    request->send_data.metrics = aws_s3_request_metrics_release(request->send_data.metrics);
 
     aws_s3_request_clean_up_send_data(request);
 
@@ -4277,25 +4279,17 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     aws_s3_tester_unlock_synced_data(&tester);
 
-    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
-
-    meta_request = aws_s3_meta_request_release(meta_request);
-
-    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
-
-    /*
-     * TODO: telemetry is sent from request destructor, http threads hold on to
-     * req for a little bit after on_req_finished callback and its possible that
-     * telemetry callback will be invoked after meta reqs on_finished callback.
-     * Moving the telemetry check to after meta req shutdown callback. Need to
-     * figure out whether current behavior can be improved.
-     */
     /* Check the size of the metrics should be the same as the number of
     requests, which should be 1 */
     ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
     struct aws_s3_request_metrics *metrics = NULL;
     aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
 
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+
+    meta_request = aws_s3_meta_request_release(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_http_message_release(message);

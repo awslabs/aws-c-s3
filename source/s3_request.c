@@ -51,6 +51,24 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(message);
 
+    if (request != NULL && request->send_data.metrics != NULL) {
+        /* If there is a metrics from previous attempt, complete it now. */
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
+        metric->time_metrics.total_duration_ns =
+            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
+
+        struct aws_s3_meta_request *meta_request = request->meta_request;
+        if (meta_request != NULL && meta_request->telemetry_callback != NULL) {
+
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
+            event.u.telemetry.metrics = aws_s3_request_metrics_acquire(metric);
+            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+        }
+        request->send_data.metrics = aws_s3_request_metrics_release(metric);
+    }
     aws_s3_request_clean_up_send_data(request);
 
     request->send_data.message = message;
@@ -76,24 +94,13 @@ static void s_s3_request_clean_up_send_data_message(struct aws_s3_request *reque
 
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
+    /* The metrics should be collected and provided to user before reaching here */
+    AWS_FATAL_ASSERT(request->send_data.metrics == NULL);
 
     s_s3_request_clean_up_send_data_message(request);
 
     aws_signable_destroy(request->send_data.signable);
     request->send_data.signable = NULL;
-    if (request->send_data.metrics) {
-        /* invoke callback */
-        struct aws_s3_meta_request *meta_request = request->meta_request;
-        struct aws_s3_request_metrics *metric = request->send_data.metrics;
-        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
-        metric->time_metrics.total_duration_ns =
-            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
-        if (meta_request->telemetry_callback) {
-            meta_request->telemetry_callback(meta_request, metric, meta_request->user_data);
-        }
-        request->send_data.metrics = aws_s3_request_metrics_release(metric);
-    }
-
     aws_http_headers_release(request->send_data.response_headers);
     request->send_data.response_headers = NULL;
 

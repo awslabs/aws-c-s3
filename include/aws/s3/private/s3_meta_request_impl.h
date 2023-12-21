@@ -59,7 +59,7 @@ struct aws_s3_meta_request_event {
     enum aws_s3_meta_request_event_type {
         AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY, /* body_callback */
         AWS_S3_META_REQUEST_EVENT_PROGRESS,      /* progress_callback */
-        /* TODO: AWS_S3_META_REQUEST_EVENT_TELEMETRY */
+        AWS_S3_META_REQUEST_EVENT_TELEMETRY,     /* telemetry_callback */
     } type;
 
     union {
@@ -72,6 +72,11 @@ struct aws_s3_meta_request_event {
         struct {
             struct aws_s3_meta_request_progress info;
         } progress;
+
+        /* data for AWS_S3_META_REQUEST_EVENT_TELEMETRY */
+        struct {
+            struct aws_s3_request_metrics *metrics;
+        } telemetry;
     } u;
 };
 
@@ -221,6 +226,9 @@ struct aws_s3_meta_request {
         /* True if the finish result has been set. */
         uint32_t finish_result_set : 1;
 
+        /* To track the aws_s3_request that are active from HTTP level */
+        struct aws_linked_list ongoing_http_requests_list;
+
     } synced_data;
 
     /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */
@@ -358,6 +366,9 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
 /* Returns whether any events are out for delivery.
  * The meta-request's finish callback must not be invoked until this returns false. */
 bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
+
+/* Cancel the requests with ongoing HTTP activities for the meta request */
+void aws_s3_meta_request_cancel_ongoing_http_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
  * as reading from the stream could cause user code to call back into aws-c-s3.
