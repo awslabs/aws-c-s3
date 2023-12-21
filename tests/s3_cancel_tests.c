@@ -25,8 +25,8 @@ enum s3_update_cancel_type {
     S3_UPDATE_CANCEL_TYPE_MPD_NOTHING_SENT,
     S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_SENT,
     S3_UPDATE_CANCEL_TYPE_MPD_HEAD_OBJECT_COMPLETED,
-    S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT,
-    S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED,
+    S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_SENT,
+    S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_COMPLETED,
     S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_SENT,
     S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED,
     S3_UPDATE_CANCEL_TYPE_MPD_TWO_PARTS_COMPLETED,
@@ -97,12 +97,13 @@ static bool s_s3_meta_request_update_cancel_test(
             call_cancel_or_pause = auto_ranged_get->synced_data.head_object_completed != 0;
             break;
 
-        case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT:
-            call_cancel_or_pause = auto_ranged_get->synced_data.get_without_range_sent != 0;
+        case S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_SENT:
+            call_cancel_or_pause = auto_ranged_get->synced_data.object_range_known != 0 &&
+                                   auto_ranged_get->synced_data.num_parts_requested > 0;
             break;
 
-        case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED:
-            call_cancel_or_pause = auto_ranged_get->synced_data.get_without_range_completed != 0;
+        case S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_COMPLETED:
+            call_cancel_or_pause = auto_ranged_get->synced_data.num_parts_completed > 0;
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_SENT:
@@ -312,11 +313,11 @@ static int s3_cancel_test_helper_ex(
                 options.get_options.object_range = range;
                 break;
 
-            case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT:
+            case S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_SENT:
                 options.get_options.object_path = g_pre_existing_empty_object;
                 break;
 
-            case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED:
+            case S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_COMPLETED:
                 options.get_options.object_path = g_pre_existing_empty_object;
                 break;
 
@@ -430,11 +431,11 @@ static int s3_cancel_test_helper_fc(
                 options.get_options.object_range = range;
                 break;
 
-            case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT:
+            case S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_SENT:
                 options.get_options.object_path = g_pre_existing_empty_object;
                 break;
 
-            case S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED:
+            case S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_COMPLETED:
                 options.get_options.object_path = g_pre_existing_empty_object;
                 break;
 
@@ -600,20 +601,28 @@ static int s_test_s3_cancel_mpd_head_object_completed(struct aws_allocator *allo
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_cancel_mpd_get_without_range_sent, s_test_s3_cancel_mpd_get_without_range_sent)
-static int s_test_s3_cancel_mpd_get_without_range_sent(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(
+    test_s3_cancel_mpd_empty_object_get_with_part_number_1_sent,
+    s_test_s3_cancel_mpd_empty_object_get_with_part_number_1_sent)
+static int s_test_s3_cancel_mpd_empty_object_get_with_part_number_1_sent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_SENT));
+    ASSERT_SUCCESS(
+        s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_SENT));
 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_cancel_mpd_get_without_range_completed, s_test_s3_cancel_mpd_get_without_range_completed)
-static int s_test_s3_cancel_mpd_get_without_range_completed(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(
+    test_s3_cancel_mpd_empty_object_get_with_part_number_1_completed,
+    s_test_s3_cancel_mpd_empty_object_get_with_part_number_1_completed)
+static int s_test_s3_cancel_mpd_empty_object_get_with_part_number_1_completed(
+    struct aws_allocator *allocator,
+    void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED));
+    ASSERT_SUCCESS(
+        s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_GET_EMPTY_OBJECT_WITH_PART_NUMBER_1_COMPLETED));
 
     return 0;
 }
