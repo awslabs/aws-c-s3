@@ -305,6 +305,8 @@ static int s3_cancel_test_helper_ex(
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
             .get_options =
                 {
+                    /* Note 1: 10MB object with 16KB parts, so that tests have many requests in-flight.
+                     * We want to try and stress stuff like parts arriving out of order. */
                     .object_path = g_pre_existing_object_10MB,
                 },
         };
