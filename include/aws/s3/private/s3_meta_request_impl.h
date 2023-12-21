@@ -59,7 +59,7 @@ struct aws_s3_meta_request_event {
     enum aws_s3_meta_request_event_type {
         AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY, /* body_callback */
         AWS_S3_META_REQUEST_EVENT_PROGRESS,      /* progress_callback */
-        /* TODO: AWS_S3_META_REQUEST_EVENT_TELEMETRY */
+        AWS_S3_META_REQUEST_EVENT_TELEMETRY,     /* telemetry_callback */
     } type;
 
     union {
@@ -72,6 +72,11 @@ struct aws_s3_meta_request_event {
         struct {
             struct aws_s3_meta_request_progress info;
         } progress;
+
+        /* data for AWS_S3_META_REQUEST_EVENT_TELEMETRY */
+        struct {
+            struct aws_s3_request_metrics *metrics;
+        } telemetry;
     } u;
 };
 

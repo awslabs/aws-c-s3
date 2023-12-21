@@ -34,6 +34,8 @@ struct aws_http_stream;
 struct aws_http_headers;
 struct aws_http_message;
 struct aws_s3_client;
+struct aws_s3_request;
+struct aws_s3_meta_request;
 
 struct aws_cached_signing_config_aws {
     struct aws_allocator *allocator;
@@ -275,6 +277,9 @@ void aws_s3_get_part_range(
 /* Match the S3 error code to CRT error code, return AWS_ERROR_UNKNOWN when not matched */
 AWS_S3_API
 int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string);
+
+AWS_S3_API
+void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
 AWS_EXTERN_C_END
 
