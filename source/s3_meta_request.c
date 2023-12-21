@@ -1940,7 +1940,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&release_request_list);
         struct aws_s3_request *release_request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_FATAL_ASSERT(release_request != NULL);
-        /* The pending body streaming requests cleaned up here. Finish the metrics for those requests. */
+        /* This pending-body-streaming request was never moved to the event-delivery queue,
+         * so its metrics were never finished. Finish them now. */
         s_s3_request_finish_up_metrics(release_request, meta_request);
         aws_s3_request_release(release_request);
     }
