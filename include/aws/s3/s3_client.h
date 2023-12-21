@@ -209,8 +209,7 @@ typedef void(aws_s3_meta_request_progress_fn)(
     void *user_data);
 
 /**
- * Invoked to report the telemetry of the meta request once a single request finishes. Invoked from the thread of the
- * connection that request made from.
+ * Invoked to report the telemetry of the meta request once a single request finishes.
  * Note: *metrics is only valid for the duration of the callback. If you need to keep it around, use
  * `aws_s3_request_metrics_acquire`
  */
@@ -690,9 +689,6 @@ struct aws_s3_meta_request_options {
      * If set the request will keep track of the metrics from `aws_s3_request_metrics`, and fire the callback when the
      * request finishes receiving response.
      * See `aws_s3_meta_request_telemetry_fn`
-     *
-     * Notes:
-     * - The callback will be invoked multiple times from different threads.
      */
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
 
