@@ -245,7 +245,10 @@ int aws_s3_parse_content_length_response_header(
     struct aws_http_headers *response_headers,
     uint64_t *out_content_length);
 
-// TODO: documentation
+/*
+ * Given the request headers list, finds the Range header and parses the range-start and range-end. All arguments are
+ * required.
+ * */
 AWS_S3_API
 int aws_s3_parse_request_range_header(
     struct aws_http_headers *request_headers,

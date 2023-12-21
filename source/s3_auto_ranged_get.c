@@ -88,8 +88,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
     AWS_ASSERT(headers != NULL);
 
-    auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
-    if (auto_ranged_get->initial_message_has_range_header) {
+    if (aws_http_headers_has(headers, g_range_header_name)) {
+        auto_ranged_get->initial_message_has_range_header = true;
         aws_s3_parse_request_range_header(
             headers,
             &auto_ranged_get->initial_message_has_start_range,
@@ -137,17 +137,13 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
 
-    // TODO: align the range_start on first part
-    /* If there exists a range header or we require validation of the response checksum, we currently always
-     * do a head request first.
-     * S3 returns the checksum of the entire object from the HEAD response
-     *
-     * For the range header value could be parsed client-side, doing so presents a number of
-     * complications. For example, the given range could be an unsatisfiable range, and might not even
-     * specify a complete range. To keep things simple, we are currently relying on the service to handle
-     * turning the Range header into a Content-Range response header.*/
+    /*
+     * If a range header exists, we currently perform a HeadRequest if it does not include the start-range. If the
+     * start-range is unknown, we could potentially execute a request from the end-range and keep that request around
+     * until the meta request finishes. However, this approach involves the complexity of managing back pressure. For
+     * simplicity, we execute a HeadRequest if the start-range is not specified.
+     */
     if (auto_ranged_get->initial_message_has_range_header != 0) {
-
         return auto_ranged_get->initial_message_has_start_range
                    ? AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE
                    : AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
