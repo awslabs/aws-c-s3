@@ -226,8 +226,8 @@ struct aws_s3_meta_request {
         /* True if the finish result has been set. */
         uint32_t finish_result_set : 1;
 
-        /* To track the aws_s3_request that are active from HTTP level */
-        struct aws_linked_list ongoing_http_requests_list;
+        /* To track the aws_s3_request that are cancelled from HTTP level */
+        struct aws_linked_list cancelable_http_streams_list;
 
     } synced_data;
 
