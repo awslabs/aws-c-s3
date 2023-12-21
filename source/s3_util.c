@@ -505,7 +505,7 @@ int aws_s3_parse_request_range_header(
 
     if (aws_http_headers_get(request_headers, g_range_header_name, &range_header_value)) {
         // TODO: Just assert?
-        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_LENGTH_HEADER);
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
     }
     struct aws_byte_cursor range_header_start = aws_byte_cursor_from_c_str("bytes=");
 
@@ -540,10 +540,14 @@ int aws_s3_parse_request_range_header(
             goto done;
         }
 
-        // TODO: verify startRange<=endRange?
+        /* verify that start-range <= end-range */
+        if (out_initial_message_has_end_range && out_initial_start_range >= out_initial_end_range) {
+            goto done;
+        }
 
         result = AWS_OP_SUCCESS;
     }
+
 done:
     if (result != AWS_OP_SUCCESS) {
         aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
