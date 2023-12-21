@@ -1074,7 +1074,7 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     {
         /* BEGIN CRITICAL SECTION */
         aws_s3_meta_request_lock_synced_data(meta_request);
-        if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+        if (aws_s3_meta_request_has_finish_result_synced(meta_request) && !request->always_send) {
             /* The meta request is finishing up, drop the HTTP stream to the ground. */
             aws_raise_error(meta_request->synced_data.finish_result.error_code);
             aws_s3_meta_request_unlock_synced_data(meta_request);
