@@ -30,6 +30,7 @@ enum s3_update_cancel_type {
     S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_SENT,
     S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED,
     S3_UPDATE_CANCEL_TYPE_MPD_TWO_PARTS_COMPLETED,
+    S3_UPDATE_CANCEL_TYPE_MPD_PENDING_STREAMING,
 };
 
 struct s3_cancel_test_user_data {
@@ -121,6 +122,11 @@ static bool s_s3_meta_request_update_cancel_test(
 
             /* Prevent other parts from being queued while we wait for these two to complete. */
             block_update = !call_cancel_or_pause && auto_ranged_get->synced_data.num_parts_requested == 2;
+            break;
+
+        case S3_UPDATE_CANCEL_TYPE_MPD_PENDING_STREAMING:
+            call_cancel_or_pause =
+                aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0;
             break;
     }
 
@@ -299,7 +305,7 @@ static int s3_cancel_test_helper_ex(
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
             .get_options =
                 {
-                    .object_path = g_pre_existing_object_1MB,
+                    .object_path = g_pre_existing_object_10MB,
                 },
         };
 
@@ -614,6 +620,15 @@ static int s_test_s3_cancel_mpd_get_without_range_completed(struct aws_allocator
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_GET_WITHOUT_RANGE_COMPLETED));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_cancel_mpd_pending_streaming, s_test_s3_cancel_mpd_pending_streaming)
+static int s_test_s3_cancel_mpd_pending_streaming(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPD_PENDING_STREAMING));
 
     return 0;
 }

@@ -1385,14 +1385,16 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
     if (meta_request->checksum_config.validate_response_checksum) {
         s_get_response_part_finish_checksum_helper(connection, error_code);
     }
-    if (error_code != AWS_ERROR_S3_CANCELED && error_code != AWS_ERROR_S3_PAUSED) {
-        /* BEGIN CRITICAL SECTION */
+    /* BEGIN CRITICAL SECTION */
+    {
         aws_s3_meta_request_lock_synced_data(meta_request);
-        AWS_ASSERT(request->synced_data.http_stream != NULL);
-        aws_linked_list_remove(&request->ongoing_http_requests_list_node);
+        if (request->synced_data.http_stream) {
+            /* The request has been cancelled, and the node has been removed. */
+            aws_linked_list_remove(&request->ongoing_http_requests_list_node);
+        }
         aws_s3_meta_request_unlock_synced_data(meta_request);
-        /* END CRITICAL SECTION */
     }
+    /* END CRITICAL SECTION */
     s_s3_meta_request_send_request_finish(connection, stream, error_code);
 }
 
@@ -1683,6 +1685,23 @@ void aws_s3_meta_request_cancel_ongoing_http_requests_synced(struct aws_s3_meta_
     }
 }
 
+static void s_s3_request_finish_up_metrics(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request) {
+
+    if (request->send_data.metrics != NULL) {
+        /* Request is done streaming the body, complete the metrics for the request now. */
+        struct aws_s3_request_metrics *metrics = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
+        metrics->time_metrics.total_duration_ns =
+            metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+
+        if (meta_request->telemetry_callback != NULL) {
+            /* We already in the meta request event thread, invoke the telemetry callback directly */
+            meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
+        }
+        request->send_data.metrics = aws_s3_request_metrics_release(metrics);
+    }
+}
+
 /* Deliver events in event_delivery_array.
  * This task runs on the meta-request's io_event_loop thread. */
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -1750,21 +1769,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
                 ++num_parts_delivered;
-
-                if (request->send_data.metrics != NULL) {
-                    /* Request is done streaming the body, complete the metrics for the request now. */
-                    struct aws_s3_request_metrics *metrics = request->send_data.metrics;
-                    metrics->crt_info_metrics.error_code = error_code;
-                    aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
-                    metrics->time_metrics.total_duration_ns =
-                        metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
-
-                    if (meta_request->telemetry_callback != NULL) {
-                        /* We already in the meta request event thread, invoke the telemetry callback directly */
-                        meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
-                    }
-                    request->send_data.metrics = aws_s3_request_metrics_release(metrics);
-                }
+                s_s3_request_finish_up_metrics(request, meta_request);
 
                 aws_s3_request_release(request);
             } break;
@@ -1935,6 +1940,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&release_request_list);
         struct aws_s3_request *release_request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_FATAL_ASSERT(release_request != NULL);
+        /* The pending body streaming requests cleaned up here. Finish the metrics for those requests. */
+        s_s3_request_finish_up_metrics(release_request, meta_request);
         aws_s3_request_release(release_request);
     }
 
