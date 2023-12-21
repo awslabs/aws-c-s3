@@ -1071,28 +1071,41 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
 
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
 
-    if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
-        aws_http_stream_release(stream);
-        stream = NULL;
-
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "id=%p: Could not activate HTTP stream %p", (void *)meta_request, (void *)request);
-
-        goto error_finish;
-    }
-
     {
         /* BEGIN CRITICAL SECTION */
         aws_s3_meta_request_lock_synced_data(meta_request);
+        if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+            /* The meta request is finishing up, drop the HTTP stream to the ground. */
+            aws_raise_error(meta_request->synced_data.finish_result.error_code);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            goto error_finish;
+        }
+
+        /* Activate the stream within the lock as once the activate invoked, the HTTP level callback can happen right
+         * after.  */
+        if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Could not activate HTTP stream %p",
+                (void *)meta_request,
+                (void *)request);
+            goto error_finish;
+        }
         aws_linked_list_push_back(
             &meta_request->synced_data.ongoing_http_requests_list, &request->ongoing_http_requests_list_node);
-        request->synced_data.http_stream = stream;
+        request->synced_data.ongoing_http_stream = stream;
+
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
     }
     return;
 
 error_finish:
+    if (stream) {
+        aws_http_stream_release(stream);
+        stream = NULL;
+    }
 
     s_s3_meta_request_send_request_finish(connection, NULL, aws_last_error_or_unknown());
 }
@@ -1388,7 +1401,7 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
-        if (request->synced_data.http_stream) {
+        if (request->synced_data.ongoing_http_stream) {
             /* The request has been cancelled, and the node has been removed. */
             aws_linked_list_remove(&request->ongoing_http_requests_list_node);
         }
@@ -1679,9 +1692,9 @@ void aws_s3_meta_request_cancel_ongoing_http_requests_synced(struct aws_s3_meta_
             AWS_CONTAINER_OF(request_node, struct aws_s3_request, ongoing_http_requests_list_node);
         if (!request->always_send) {
             /* Cancel the ongoing http stream, unless it's always send. */
-            aws_http_stream_cancel(request->synced_data.http_stream, error_code);
+            aws_http_stream_cancel(request->synced_data.ongoing_http_stream, error_code);
         }
-        request->synced_data.http_stream = NULL;
+        request->synced_data.ongoing_http_stream = NULL;
     }
 }
 

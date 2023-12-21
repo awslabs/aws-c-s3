@@ -119,7 +119,7 @@ struct aws_s3_request {
     /* The meta request lock must be held to access the data */
     struct {
         /* The underlying http stream, only valid when the request is active from HTTP level */
-        struct aws_http_stream *http_stream;
+        struct aws_http_stream *ongoing_http_stream;
     } synced_data;
 
     /* TODO Ref count on the request is no longer needed--only one part of code should ever be holding onto a request,
