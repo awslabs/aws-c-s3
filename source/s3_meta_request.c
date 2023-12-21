@@ -1685,21 +1685,26 @@ void aws_s3_meta_request_cancel_ongoing_http_requests_synced(struct aws_s3_meta_
     }
 }
 
-static void s_s3_request_finish_up_metrics(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request) {
+static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics(
+    struct aws_s3_request_metrics *metrics,
+    struct aws_s3_meta_request *meta_request) {
 
-    if (request->send_data.metrics != NULL) {
+    if (metrics != NULL) {
         /* Request is done streaming the body, complete the metrics for the request now. */
-        struct aws_s3_request_metrics *metrics = request->send_data.metrics;
-        aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
-        metrics->time_metrics.total_duration_ns =
-            metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+
+        if (metrics->time_metrics.end_timestamp_ns == -1) {
+            aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
+            metrics->time_metrics.total_duration_ns =
+                metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+        }
 
         if (meta_request->telemetry_callback != NULL) {
             /* We already in the meta request event thread, invoke the telemetry callback directly */
             meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
         }
-        request->send_data.metrics = aws_s3_request_metrics_release(metrics);
+        aws_s3_request_metrics_release(metrics);
     }
+    return NULL;
 }
 
 /* Deliver events in event_delivery_array.
@@ -1769,7 +1774,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
                 ++num_parts_delivered;
-                s_s3_request_finish_up_metrics(request, meta_request);
+                request->send_data.metrics =
+                    s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
 
                 aws_s3_request_release(request);
             } break;
@@ -1809,13 +1815,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 AWS_FATAL_ASSERT(meta_request->telemetry_callback != NULL);
                 AWS_FATAL_ASSERT(metrics != NULL);
 
-                if (metrics->time_metrics.end_timestamp_ns == -1) {
-                    aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
-                    metrics->time_metrics.total_duration_ns =
-                        metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
-                }
-                meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
-                event.u.telemetry.metrics = aws_s3_request_metrics_release(event.u.telemetry.metrics);
+                event.u.telemetry.metrics =
+                    s_s3_request_finish_up_and_release_metrics(event.u.telemetry.metrics, meta_request);
             } break;
 
             default:
@@ -1941,7 +1942,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         struct aws_s3_request *release_request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_FATAL_ASSERT(release_request != NULL);
         /* The pending body streaming requests cleaned up here. Finish the metrics for those requests. */
-        s_s3_request_finish_up_metrics(release_request, meta_request);
+        release_request->send_data.metrics =
+            s_s3_request_finish_up_and_release_metrics(release_request->send_data.metrics, meta_request);
         aws_s3_request_release(release_request);
     }
 
