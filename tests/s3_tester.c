@@ -136,7 +136,7 @@ static int s_s3_test_meta_request_body_callback(
 
     /* If this is an auto-ranged-get meta request, then grab the object range start so that the expected_range_start can
      * be properly offset.*/
-    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT && meta_request->part_size != 0) {
 
         aws_s3_meta_request_lock_synced_data(meta_request);
 
@@ -1498,6 +1498,12 @@ int aws_s3_tester_send_meta_request_with_options(
 
             struct aws_http_message *message = aws_s3_test_get_object_request_new(
                 allocator, aws_byte_cursor_from_string(host_name), options->get_options.object_path);
+            ASSERT_SUCCESS(aws_s3_message_util_set_multipart_request_path(
+                allocator,
+                NULL /*upload_id*/,
+                options->get_options.part_number,
+                false /*append_uploads_suffix*/,
+                message));
 
             if (options->get_options.object_range.ptr != NULL) {
                 struct aws_http_header range_header = {

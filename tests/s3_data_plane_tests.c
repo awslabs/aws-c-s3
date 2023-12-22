@@ -1613,13 +1613,73 @@ static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_alloca
 
 AWS_TEST_CASE(test_s3_get_object_part, s_test_s3_get_object_part)
 static int s_test_s3_get_object_part(struct aws_allocator *allocator, void *ctx) {
-    /* Test with initial window size of zero */
-    (void)ctx;
-    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
-    size_t part_size = file_size / 4;
-    size_t window_initial_size = 0;
-    uint64_t window_increment_size = part_size / 2;
-    return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    /*** PUT FILE ***/
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(
+        aws_s3_tester_upload_file_path_init(allocator, &path_buf, aws_byte_cursor_from_c_str("/get_object_part_test")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /* GET FILE */
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
+        .get_options =
+            {
+                .object_path = object_path,
+                .part_number = 2,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, meta_request_test_results.finished_error_code);
+    /* Only one request was made to get the second part of the object */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    client = aws_s3_client_release(client);
+
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
 }
 
 static int s_test_s3_put_object_helper(
