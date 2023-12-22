@@ -1168,20 +1168,28 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     /* Call the appropriate meta-request new function. */
     switch (options->type) {
         case AWS_S3_META_REQUEST_TYPE_GET_OBJECT: {
-            /* If the initial request already has partNumber, the request is not
-             * splittable(?). Treat it as a Default request.
-             * TODO: Still need tests to verify that the request of a part is
-             * splittable or not */
-            if (aws_http_headers_has(initial_message_headers, aws_byte_cursor_from_c_str("partNumber"))) {
-                return aws_s3_meta_request_default_new(
-                    client->allocator,
-                    client,
-                    AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    content_length,
-                    false /*should_compute_content_md5*/,
-                    options);
-            }
+            struct aws_byte_cursor path_and_query;
 
+            if (aws_http_message_get_request_path(options->message, &path_and_query) == AWS_OP_SUCCESS) {
+                /* If the initial request already has partNumber, the request is not
+                 * splittable(?). Treat it as a Default request.
+                 * TODO: Still need tests to verify that the request of a part is
+                 * splittable or not */
+                struct aws_byte_cursor found_string;
+                struct aws_byte_cursor part_number_query_str = aws_byte_cursor_from_c_str("partNumber");
+                if (aws_byte_cursor_find_exact(&path_and_query, &part_number_query_str, &found_string) ==
+                    AWS_OP_SUCCESS) {
+                    return aws_s3_meta_request_default_new(
+                        client->allocator,
+                        client,
+                        AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                        content_length,
+                        false /*should_compute_content_md5*/,
+                        options);
+                }
+            }
+            /* Ignore any error while we try to find the partNumber query parameter. */
+            aws_reset_error();
             return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, part_size, options);
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {

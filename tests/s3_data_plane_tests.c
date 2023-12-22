@@ -1611,6 +1611,17 @@ static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_alloca
     return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
 }
 
+AWS_TEST_CASE(test_s3_get_object_part, s_test_s3_get_object_part)
+static int s_test_s3_get_object_part(struct aws_allocator *allocator, void *ctx) {
+    /* Test with initial window size of zero */
+    (void)ctx;
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t part_size = file_size / 4;
+    size_t window_initial_size = 0;
+    uint64_t window_increment_size = part_size / 2;
+    return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
+}
+
 static int s_test_s3_put_object_helper(
     struct aws_allocator *allocator,
     enum aws_s3_client_tls_usage tls_usage,
