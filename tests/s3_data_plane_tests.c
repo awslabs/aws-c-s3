@@ -5789,6 +5789,49 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_invalid_start_range_greator_than_end_range, s_test_s3_invalid_start_range_greator_than_end_range)
+static int s_test_s3_invalid_start_range_greator_than_end_range(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .headers_callback = s_range_requests_headers_callback,
+        .body_callback = s_range_requests_receive_body_callback,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_1MB,
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=20-10"),
+            },
+    };
+
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
+    // TODO: Fix this test with proper behavior
+    // ASSERT_INT_EQUALS(results.finished_error_code, AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
+
+    aws_s3_meta_request_test_results_clean_up(&results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 static const struct aws_byte_cursor g_x_amz_copy_source_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
 

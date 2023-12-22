@@ -180,6 +180,7 @@ add_net_test_case(test_s3_auto_ranged_put_sending_user_agent)
 add_net_test_case(test_s3_default_sending_meta_request_user_agent)
 add_net_test_case(test_s3_range_requests)
 add_net_test_case(test_s3_not_satisfiable_range)
+add_net_test_case(test_s3_invalid_start_range_greator_than_end_range)
 
 add_net_test_case(test_s3_bad_endpoint)
 add_net_test_case(test_s3_different_endpoints)
