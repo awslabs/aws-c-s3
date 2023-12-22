@@ -1613,6 +1613,7 @@ static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_alloca
 
 AWS_TEST_CASE(test_s3_get_object_part, s_test_s3_get_object_part)
 static int s_test_s3_get_object_part(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
 
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
