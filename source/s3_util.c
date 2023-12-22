@@ -542,7 +542,7 @@ int aws_s3_parse_request_range_header(
         }
 
         /* verify that start-range <= end-range */
-        if (out_initial_message_has_end_range && out_initial_start_range > out_initial_end_range) {
+        if (*out_initial_message_has_end_range && *out_initial_start_range > *out_initial_end_range) {
             goto done;
         }
 

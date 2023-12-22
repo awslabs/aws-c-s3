@@ -90,12 +90,18 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
 
     if (aws_http_headers_has(headers, g_range_header_name)) {
         auto_ranged_get->initial_message_has_range_header = true;
-        aws_s3_parse_request_range_header(
-            headers,
-            &auto_ranged_get->initial_message_has_start_range,
-            &auto_ranged_get->initial_message_has_end_range,
-            &auto_ranged_get->initial_object_range_start,
-            &auto_ranged_get->initial_object_range_end);
+        if (aws_s3_parse_request_range_header(
+                headers,
+                &auto_ranged_get->initial_message_has_start_range,
+                &auto_ranged_get->initial_message_has_end_range,
+                &auto_ranged_get->initial_object_range_start,
+                &auto_ranged_get->initial_object_range_end)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Could not parse Range header for Auto-Ranged-Get Meta Request.",
+                (void *)auto_ranged_get);
+            goto on_error;
+        }
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
     auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
@@ -107,6 +113,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
     return &auto_ranged_get->base;
+
+on_error:
+    /* This will also clean up the auto_ranged_get */
+    aws_s3_meta_request_release(&(auto_ranged_get->base));
+    return NULL;
 }
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request) {
