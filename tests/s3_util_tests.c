@@ -144,6 +144,121 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_parse_request_range_header, s_test_s3_parse_request_range_header)
+static int s_test_s3_parse_request_range_header(struct aws_allocator *allocator, void *ctx) {
+
+    (void)ctx;
+
+    struct range_header_example {
+        struct aws_byte_cursor header_value;
+
+        bool initial_message_has_start_range;
+        bool initial_message_has_end_range;
+        uint64_t initial_object_range_start;
+        uint64_t initial_object_range_end;
+    };
+
+    const struct range_header_example valid_range_examples[] = {
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=5-10"),
+            .initial_message_has_start_range = true,
+            .initial_message_has_end_range = true,
+            .initial_object_range_start = 5,
+            .initial_object_range_end = 10,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
+            .initial_message_has_start_range = true,
+            .initial_message_has_end_range = true,
+            .initial_object_range_start = 0,
+            .initial_object_range_end = 0,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-"),
+            .initial_message_has_start_range = true,
+            .initial_message_has_end_range = false,
+            .initial_object_range_start = 0,
+            .initial_object_range_end = 0,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-0"),
+            .initial_message_has_start_range = false,
+            .initial_message_has_end_range = true,
+            .initial_object_range_start = 0,
+            .initial_object_range_end = 0,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=5-"),
+            .initial_message_has_start_range = true,
+            .initial_message_has_end_range = false,
+            .initial_object_range_start = 5,
+            .initial_object_range_end = 0,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-10"),
+            .initial_message_has_start_range = false,
+            .initial_message_has_end_range = true,
+            .initial_object_range_start = 0,
+            .initial_object_range_end = 10,
+        },
+    };
+
+    const struct aws_byte_cursor invalid_range_header_values[] = {
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=10-5"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("byts=0-5"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("5-10"),
+    };
+    bool initial_message_has_start_range = false, initial_message_has_end_range = false;
+    uint64_t initial_object_range_start = 0, initial_object_range_end = 0;
+
+    struct aws_http_headers *headers = aws_http_headers_new(allocator);
+    /* Check it fails is there is no Range header */
+    ASSERT_FAILS(aws_s3_parse_request_range_header(
+        headers,
+        &initial_message_has_start_range,
+        &initial_message_has_end_range,
+        &initial_object_range_start,
+        &initial_object_range_end));
+
+    /* Check the valid test cases */
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_range_examples); ++i) {
+        printf("valid example [%zu]: " PRInSTR "\n", i, AWS_BYTE_CURSOR_PRI(valid_range_examples[i].header_value));
+
+        aws_http_headers_set(headers, g_range_header_name, valid_range_examples[i].header_value);
+
+        ASSERT_SUCCESS(aws_s3_parse_request_range_header(
+            headers,
+            &initial_message_has_start_range,
+            &initial_message_has_end_range,
+            &initial_object_range_start,
+            &initial_object_range_end));
+
+        ASSERT_INT_EQUALS(valid_range_examples[i].initial_message_has_start_range, initial_message_has_start_range);
+        ASSERT_INT_EQUALS(valid_range_examples[i].initial_message_has_end_range, initial_message_has_end_range);
+        ASSERT_INT_EQUALS(valid_range_examples[i].initial_object_range_start, initial_object_range_start);
+        ASSERT_INT_EQUALS(valid_range_examples[i].initial_object_range_end, initial_object_range_end);
+    }
+
+    /* Check the invalid test cases */
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(invalid_range_header_values); ++i) {
+        printf("invalid example [%zu]: " PRInSTR "\n", i, AWS_BYTE_CURSOR_PRI(invalid_range_header_values[i]));
+
+        aws_http_headers_set(headers, g_range_header_name, invalid_range_header_values[i]);
+
+        ASSERT_FAILS(aws_s3_parse_request_range_header(
+            headers,
+            &initial_message_has_start_range,
+            &initial_message_has_end_range,
+            &initial_object_range_start,
+            &initial_object_range_end));
+    }
+
+    aws_http_headers_release(headers);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_parse_content_range_response_header, s_test_s3_parse_content_range_response_header)
 static int s_test_s3_parse_content_range_response_header(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

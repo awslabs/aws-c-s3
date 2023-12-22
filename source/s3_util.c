@@ -501,6 +501,9 @@ int aws_s3_parse_request_range_header(
     AWS_PRECONDITION(out_initial_start_range);
     AWS_PRECONDITION(out_initial_end_range);
 
+    bool initial_message_has_start_range = false, initial_message_has_end_range = false;
+    uint64_t initial_start_range = 0, initial_end_range = 0;
+
     struct aws_byte_cursor range_header_value;
 
     if (aws_http_headers_get(request_headers, g_range_header_name, &range_header_value)) {
@@ -519,10 +522,10 @@ int aws_s3_parse_request_range_header(
             goto done;
         }
         if (substr.len > 0) {
-            if (aws_byte_cursor_utf8_parse_u64(substr, out_initial_start_range)) {
+            if (aws_byte_cursor_utf8_parse_u64(substr, &initial_start_range)) {
                 goto done;
             }
-            *out_initial_message_has_start_range = true;
+            initial_message_has_start_range = true;
         }
 
         /* parse end range */
@@ -530,10 +533,10 @@ int aws_s3_parse_request_range_header(
             goto done;
         }
         if (substr.len > 0) {
-            if (aws_byte_cursor_utf8_parse_u64(substr, out_initial_end_range)) {
+            if (aws_byte_cursor_utf8_parse_u64(substr, &initial_end_range)) {
                 goto done;
             }
-            *out_initial_message_has_end_range = true;
+            initial_message_has_end_range = true;
         }
 
         /* Verify that there is nothing extra */
@@ -542,10 +545,19 @@ int aws_s3_parse_request_range_header(
         }
 
         /* verify that start-range <= end-range */
-        if (*out_initial_message_has_end_range && *out_initial_start_range > *out_initial_end_range) {
+        if (initial_message_has_end_range && initial_start_range > initial_end_range) {
             goto done;
         }
 
+        /*verify that start-range or end-range is present */
+        if (!initial_message_has_start_range && !initial_message_has_end_range) {
+            goto done;
+        }
+
+        *out_initial_message_has_start_range = initial_message_has_start_range;
+        *out_initial_message_has_end_range = initial_message_has_end_range;
+        *out_initial_start_range = initial_start_range;
+        *out_initial_end_range = initial_end_range;
         result = AWS_OP_SUCCESS;
     }
 
