@@ -267,7 +267,7 @@ static bool s_s3_auto_ranged_get_update(
                             /*
                              * Currently, we only discover the size of the object when the initial range header includes
                              * a start-range. If we ever implement skipping the HeadRequest for a Range request without
-                             * a start-range, this will need an update.
+                             * a start-range, this will need to update.
                              */
                             AWS_ASSERT(auto_ranged_get->initial_message_has_start_range);
                             part_range_start = auto_ranged_get->initial_object_range_start;
@@ -791,13 +791,14 @@ static void s_s3_auto_ranged_get_request_finished(
 
             copy_http_headers(request->send_data.response_headers, response_headers);
 
-            /* If this request is a part, then the content range isn't applicable. */
             if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE ||
                 request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
 
                 if (!auto_ranged_get->initial_message_has_range_header) {
+                    /* content range isn't applicable. */
                     aws_http_headers_erase(response_headers, g_content_range_header_name);
                 } else {
+                    /* Populate the header with object_range */
                     char content_range_buffer[64] = "";
                     snprintf(
                         content_range_buffer,
