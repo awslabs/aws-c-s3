@@ -79,7 +79,7 @@ static bool s_s3_meta_request_update_cancel_test(
             break;
 
         case S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS:
-            call_cancel_or_pause = !aws_linked_list_empty(&meta_request->synced_data.cancelable_http_streams_list);
+            call_cancel_or_pause = !aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list);
             break;
 
         case S3_UPDATE_CANCEL_TYPE_NUM_MPU_CANCEL_TYPES:
@@ -535,8 +535,8 @@ static int s_test_s3_cancel_mpu_all_parts_completed(struct aws_allocator *alloca
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_cancel_mpu_ongoing_http_requests, s_test_s3_cancel_mpu_ongoing_http_requests)
-static int s_test_s3_cancel_mpu_ongoing_http_requests(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_cancel_mpu_cancellable_requests, s_test_s3_cancel_mpu_cancellable_requests)
+static int s_test_s3_cancel_mpu_cancellable_requests(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper(allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS));
@@ -544,8 +544,8 @@ static int s_test_s3_cancel_mpu_ongoing_http_requests(struct aws_allocator *allo
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_pause_mpu_ongoing_http_requests, s_test_s3_pause_mpu_ongoing_http_requests)
-static int s_test_s3_pause_mpu_ongoing_http_requests(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_pause_mpu_cancellable_requests, s_test_s3_pause_mpu_cancellable_requests)
+static int s_test_s3_pause_mpu_cancellable_requests(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper_ex(
