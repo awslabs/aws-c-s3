@@ -367,7 +367,7 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
  * The meta-request's finish callback must not be invoked until this returns false. */
 bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
 
-/* Cancel the requests with ongoing HTTP activities for the meta request */
+/* Cancel the requests with cancellable HTTP stream for the meta request */
 void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
