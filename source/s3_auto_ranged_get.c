@@ -648,7 +648,8 @@ static int s_discover_object_range_and_size(
                         (void *)request);
                     break;
                 }
-                /* When discovering the object size via first-part, the object range is the entire object. */
+                /* When discovering the object size via GET_OBJECT_WITH_PART_NUMBER_1, the object range is the entire
+                 * object. */
                 object_range_start = 0;
                 object_range_end = object_size - 1; /* range-end is inclusive */
             }
@@ -747,7 +748,7 @@ static void s_s3_auto_ranged_get_request_finished(
     bool empty_file_error = false;
 
     if (request->discovers_object_size) {
-        /* Try to discover the object-range and content length.*/
+        /* Try to discover the object-range and object-size.*/
         if (s_discover_object_range_and_size(
                 meta_request,
                 request,
