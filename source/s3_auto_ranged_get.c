@@ -276,10 +276,7 @@ static bool s_s3_auto_ranged_get_update(
                                     auto_ranged_get->initial_object_range_end -
                                         auto_ranged_get->initial_object_range_start + 1);
                             }
-                            uint64_t first_part_alignment_offset = part_range_start % meta_request->part_size;
-                            if (first_part_alignment_offset < first_part_size) {
-                                first_part_size = first_part_size - first_part_alignment_offset;
-                            }
+
                             auto_ranged_get->synced_data.first_part_size = first_part_size;
                         }
                         AWS_LOGF_INFO(
@@ -765,7 +762,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
             goto update_synced_data;
         }
-        if (!request_failed && !auto_ranged_get->initial_message_has_if_match_header) {
+        if ((!request_failed || first_part_size_mismatch) && !auto_ranged_get->initial_message_has_if_match_header) {
             AWS_ASSERT(auto_ranged_get->etag == NULL);
             struct aws_byte_cursor etag_header_value;
 
