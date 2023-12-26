@@ -276,9 +276,12 @@ static bool s_s3_auto_ranged_get_update(
                                     auto_ranged_get->initial_object_range_end -
                                         auto_ranged_get->initial_object_range_start + 1);
                             }
+                            uint64_t first_part_alignment_offset = part_range_start % meta_request->part_size;
+                            if (first_part_alignment_offset < first_part_size) {
+                                first_part_size = first_part_size - first_part_alignment_offset;
+                            }
                             auto_ranged_get->synced_data.first_part_size = first_part_size;
                         }
-
                         AWS_LOGF_INFO(
                             AWS_LS_S3_META_REQUEST,
                             "id=%p: Doing a ranged get to discover the size of the object and get the first part",
