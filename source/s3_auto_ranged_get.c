@@ -663,7 +663,7 @@ static int s_discover_object_range_and_size(
                 /* If we hit an empty file while trying to discover the object-size via part, then this request
                 failure
                  * is as designed. */
-                if (s_check_empty_file_download_error(request)) {
+                if (!auto_ranged_get->initial_message_has_range_header && s_check_empty_file_download_error(request)) {
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p Detected empty file with request %p. Sending new request without range header.",
@@ -699,9 +699,10 @@ static int s_discover_object_range_and_size(
                 break;
             }
             if (auto_ranged_get->initial_message_has_range_header) {
-                object_range_end = object_size - 1;
                 if (auto_ranged_get->initial_message_has_end_range) {
-                    object_range_end = aws_min_u64(object_range_end, auto_ranged_get->initial_object_range_end);
+                    object_range_end = aws_min_u64(object_size - 1, auto_ranged_get->initial_object_range_end);
+                } else {
+                    object_range_end = object_size - 1;
                 }
             } else {
                 /* When discovering the object size via GET_OBJECT_WITH_RANGE, the object range is the entire object. */
