@@ -23,8 +23,8 @@ struct aws_s3_auto_ranged_get {
 
     bool initial_message_has_start_range;
     bool initial_message_has_end_range;
-    uint64_t initial_object_range_start;
-    uint64_t initial_object_range_end;
+    uint64_t initial_range_start;
+    uint64_t initial_range_end;
 
     uint64_t object_size_hint;
     bool object_size_hint_available;

@@ -94,8 +94,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
                 headers,
                 &auto_ranged_get->initial_message_has_start_range,
                 &auto_ranged_get->initial_message_has_end_range,
-                &auto_ranged_get->initial_object_range_start,
-                &auto_ranged_get->initial_object_range_end)) {
+                &auto_ranged_get->initial_range_start,
+                &auto_ranged_get->initial_range_end)) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p Could not parse Range header for Auto-Ranged-Get Meta Request.",
@@ -268,13 +268,12 @@ static bool s_s3_auto_ranged_get_update(
                              * a start-range, this will need to update.
                              */
                             AWS_ASSERT(auto_ranged_get->initial_message_has_start_range);
-                            part_range_start = auto_ranged_get->initial_object_range_start;
+                            part_range_start = auto_ranged_get->initial_range_start;
 
                             if (auto_ranged_get->initial_message_has_end_range) {
                                 first_part_size = aws_min_u64(
                                     first_part_size,
-                                    auto_ranged_get->initial_object_range_end -
-                                        auto_ranged_get->initial_object_range_start + 1);
+                                    auto_ranged_get->initial_range_end - auto_ranged_get->initial_range_start + 1);
                             }
 
                             auto_ranged_get->synced_data.first_part_size = first_part_size;
@@ -700,7 +699,7 @@ static int s_discover_object_range_and_size(
             }
             if (auto_ranged_get->initial_message_has_range_header) {
                 if (auto_ranged_get->initial_message_has_end_range) {
-                    object_range_end = aws_min_u64(object_size - 1, auto_ranged_get->initial_object_range_end);
+                    object_range_end = aws_min_u64(object_size - 1, auto_ranged_get->initial_range_end);
                 } else {
                     object_range_end = object_size - 1;
                 }
