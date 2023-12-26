@@ -704,7 +704,7 @@ static int s_discover_object_range_and_size(
                     object_range_end = aws_min_u64(object_range_end, auto_ranged_get->initial_object_range_end);
                 }
             } else {
-                /* When discovering the object size via first-part, the object range is the entire object. */
+                /* When discovering the object size via GET_OBJECT_WITH_RANGE, the object range is the entire object. */
                 object_range_start = 0;
                 object_range_end = object_size - 1; /* range-end is inclusive */
             }
