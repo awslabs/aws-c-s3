@@ -793,10 +793,7 @@ static void s_s3_auto_ranged_get_request_finished(
             if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE ||
                 request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
 
-                if (!auto_ranged_get->initial_message_has_range_header) {
-                    /* content range isn't applicable. */
-                    aws_http_headers_erase(response_headers, g_content_range_header_name);
-                } else {
+                if (auto_ranged_get->initial_message_has_range_header) {
                     /* Populate the header with object_range */
                     char content_range_buffer[64] = "";
                     snprintf(
@@ -810,6 +807,9 @@ static void s_s3_auto_ranged_get_request_finished(
                         response_headers,
                         g_content_range_header_name,
                         aws_byte_cursor_from_c_str(content_range_buffer));
+                } else {
+                    /* content range isn't applicable. */
+                    aws_http_headers_erase(response_headers, g_content_range_header_name);
                 }
             }
 

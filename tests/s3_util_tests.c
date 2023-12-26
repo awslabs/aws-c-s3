@@ -213,7 +213,7 @@ static int s_test_s3_parse_request_range_header(struct aws_allocator *allocator,
     uint64_t initial_object_range_start = 0, initial_object_range_end = 0;
 
     struct aws_http_headers *headers = aws_http_headers_new(allocator);
-    /* Check it fails is there is no Range header */
+    /* Check that it fails if there is no Range header */
     ASSERT_FAILS(aws_s3_parse_request_range_header(
         headers,
         &initial_message_has_start_range,
