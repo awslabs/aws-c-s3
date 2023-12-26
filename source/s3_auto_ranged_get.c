@@ -278,6 +278,8 @@ static bool s_s3_auto_ranged_get_update(
                                     auto_ranged_get->initial_object_range_end -
                                         auto_ranged_get->initial_object_range_start + 1);
                             }
+                            first_part_size = first_part_size - (part_range_start % meta_request->part_size);
+                            auto_ranged_get->synced_data.first_part_size = first_part_size;
                         }
 
                         AWS_LOGF_INFO(
@@ -575,7 +577,7 @@ static int s_discover_object_range_and_size(
     uint64_t object_size = 0;
     uint64_t object_range_start = 0;
     uint64_t object_range_end = 0;
-    uint64_t first_part_size = meta_request->part_size;
+    uint64_t first_part_size = 0;
 
     AWS_ASSERT(request->discovers_object_size);
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
@@ -848,7 +850,7 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_empty = (object_size == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
-            if (!first_part_size_mismatch) {
+            if (!first_part_size_mismatch && first_part_size) {
                 auto_ranged_get->synced_data.first_part_size = first_part_size;
             }
             auto_ranged_get->synced_data.total_num_parts = aws_s3_calculate_auto_ranged_get_num_parts(
