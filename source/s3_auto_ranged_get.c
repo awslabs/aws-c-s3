@@ -91,7 +91,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
     auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
-    if (options->object_size_hint) {
+    if (options->object_size_hint != NULL) {
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
     }
