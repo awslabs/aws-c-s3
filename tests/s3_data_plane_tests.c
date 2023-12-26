@@ -5530,6 +5530,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         // Single byte range (first byte).
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
 
+        // Single byte range (last byte).
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-0"),
+
         // First 8K.  8K < client's 16K part size.
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-8191"),
 
@@ -5766,7 +5769,7 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
-                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=2097151-"),
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=3097151-"),
             },
     };
 
@@ -5775,7 +5778,7 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
 
-    ASSERT_TRUE(results.finished_response_status == AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE, results.finished_response_status);
     ASSERT_NOT_NULL(results.error_response_operation_name);
     ASSERT_TRUE(
         aws_string_eq_c_str(results.error_response_operation_name, "GetObject") ||
