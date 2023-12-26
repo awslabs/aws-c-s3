@@ -514,7 +514,6 @@ int aws_s3_parse_request_range_header(
 
     struct aws_byte_cursor range_header_start = aws_byte_cursor_from_c_str("bytes=");
 
-    int result = AWS_OP_ERR;
     /* verify bytes= */
     if (!aws_byte_cursor_starts_with(&range_header_value, &range_header_start)) {
         return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
