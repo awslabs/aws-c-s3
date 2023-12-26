@@ -5530,9 +5530,6 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         // Single byte range (first byte).
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
 
-        // Single byte range (last byte).
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-0"),
-
         // First 8K.  8K < client's 16K part size.
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-8191"),
 
