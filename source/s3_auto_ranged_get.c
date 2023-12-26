@@ -149,7 +149,7 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
     }
 
     /*
-     * If a range header exists, we currently perform a HeadRequest if it does not include the start-range. If the
+     * If a range header exists but has no start-range (i.e. Range: bytes=-100), we perform a HeadRequest. If the
      * start-range is unknown, we could potentially execute a request from the end-range and keep that request around
      * until the meta request finishes. However, this approach involves the complexity of managing back pressure. For
      * simplicity, we execute a HeadRequest if the start-range is not specified.
