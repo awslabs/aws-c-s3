@@ -261,8 +261,6 @@ static bool s_s3_auto_ranged_get_update(
 
                         uint64_t part_range_start = 0;
                         uint64_t first_part_size = meta_request->part_size;
-                        // TODO: Should we align the first part? I need to run some benchmarks before re-adding first
-                        // part alignment.
                         if (auto_ranged_get->initial_message_has_range_header) {
                             /*
                              * Currently, we only discover the size of the object when the initial range header includes
@@ -278,7 +276,6 @@ static bool s_s3_auto_ranged_get_update(
                                     auto_ranged_get->initial_object_range_end -
                                         auto_ranged_get->initial_object_range_start + 1);
                             }
-                            first_part_size = first_part_size - (part_range_start % meta_request->part_size);
                             auto_ranged_get->synced_data.first_part_size = first_part_size;
                         }
 
