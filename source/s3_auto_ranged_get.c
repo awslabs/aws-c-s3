@@ -601,8 +601,10 @@ static int s_discover_object_range_and_size(
              * object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
-                object_range_end = content_length - 1; /* range-end is inclusive */
                 object_size = content_length;
+                if (content_length > 0) {
+                    object_range_end = content_length - 1; /* range-end is inclusive */
+                }
             } else if (aws_s3_parse_content_range_response_header(
                            meta_request->allocator,
                            request->send_data.response_headers,
@@ -851,11 +853,13 @@ update_synced_data:
             if (!first_part_size_mismatch && first_part_size) {
                 auto_ranged_get->synced_data.first_part_size = first_part_size;
             }
-            auto_ranged_get->synced_data.total_num_parts = aws_s3_calculate_auto_ranged_get_num_parts(
-                meta_request->part_size,
-                auto_ranged_get->synced_data.first_part_size,
-                object_range_start,
-                object_range_end);
+            if (auto_ranged_get->synced_data.object_range_empty == 0) {
+                auto_ranged_get->synced_data.total_num_parts = aws_s3_calculate_auto_ranged_get_num_parts(
+                    meta_request->part_size,
+                    auto_ranged_get->synced_data.first_part_size,
+                    object_range_start,
+                    object_range_end);
+            }
         }
 
         switch (request->request_tag) {

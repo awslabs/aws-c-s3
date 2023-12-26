@@ -3636,7 +3636,7 @@ static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *all
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
-    /*** GET FILE ***/
+    /*** GET FILE WITH GET_FIRST_PART ***/
     uint64_t small_object_size_hint = 1;
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -3653,6 +3653,10 @@ static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *all
         .object_size_hint =
             &small_object_size_hint /* pass a object_size_hint > 0 so that the request goes through the getPart flow */,
     };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    /*** GET FILE WITH HEAD_OBJECT ***/
+    get_options.object_size_hint = NULL;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
 
     aws_s3_client_release(client);
