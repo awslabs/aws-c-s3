@@ -5769,7 +5769,7 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
-                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=3097151-"),
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=2097151-"),
             },
     };
 
