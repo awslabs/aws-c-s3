@@ -120,11 +120,13 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
     AWS_ASSERT(auto_ranged_get);
 
     /*
-     * If the object is empty, download the file using a GetObject with PartNumber request. This will succeed if
-     * the file is empty, or it will download the file.
+     * When we attempt to download an empty file using `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE`
+     * request type, the request fails with an empty file error. We then reset `object_range_known`
+     * (`object_range_empty` is set to true) and try to download the file again with
+     * `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1`. If the file is still empty, successful
+     * response headers will be provided to the users. Otherwise, the newer version of the file will be downloaded.
      */
     if (auto_ranged_get->synced_data.object_range_empty != 0) {
-        auto_ranged_get->synced_data.object_range_known = 0;
         auto_ranged_get->synced_data.object_range_empty = 0;
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
@@ -519,7 +521,7 @@ static int s_discover_object_range_and_content_length(
     uint64_t *out_object_range_start,
     uint64_t *out_object_range_end,
     uint64_t *out_first_part_size,
-    bool *empty_file_error) {
+    bool *out_empty_file_error) {
     AWS_PRECONDITION(out_total_content_length);
     AWS_PRECONDITION(out_object_range_start);
     AWS_PRECONDITION(out_object_range_end);
@@ -558,7 +560,9 @@ static int s_discover_object_range_and_content_length(
              * object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
-                object_range_end = total_content_length - 1; /* range-end is inclusive */
+                if (total_content_length > 0) {
+                    object_range_end = total_content_length - 1; /* range-end is inclusive */
+                }
             } else if (aws_s3_parse_content_range_response_header(
                            meta_request->allocator,
                            request->send_data.response_headers,
@@ -628,7 +632,7 @@ static int s_discover_object_range_and_content_length(
                         (void *)request);
 
                     total_content_length = 0ULL;
-                    *empty_file_error = true;
+                    *out_empty_file_error = true;
                     result = AWS_OP_SUCCESS;
                 } else {
                     /* Otherwise, resurface the error code. */
@@ -784,11 +788,13 @@ update_synced_data:
             if (!first_part_size_mismatch) {
                 auto_ranged_get->synced_data.first_part_size = first_part_size;
             }
-            auto_ranged_get->synced_data.total_num_parts = aws_s3_calculate_auto_ranged_get_num_parts(
-                meta_request->part_size,
-                auto_ranged_get->synced_data.first_part_size,
-                object_range_start,
-                object_range_end);
+            if (auto_ranged_get->synced_data.object_range_empty == 0) {
+                auto_ranged_get->synced_data.total_num_parts = aws_s3_calculate_auto_ranged_get_num_parts(
+                    meta_request->part_size,
+                    auto_ranged_get->synced_data.first_part_size,
+                    object_range_start,
+                    object_range_end);
+            }
         }
 
         switch (request->request_tag) {
