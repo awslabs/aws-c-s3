@@ -120,11 +120,12 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
     AWS_ASSERT(auto_ranged_get);
 
     /*
-     * When we attempt to download an empty file using `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE`
+     * When we attempt to download an empty file using the `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE`
      * request type, the request fails with an empty file error. We then reset `object_range_known`
      * (`object_range_empty` is set to true) and try to download the file again with
-     * `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1`. If the file is still empty, successful
-     * response headers will be provided to the users. Otherwise, the newer version of the file will be downloaded.
+     * `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1`. We send another request, even though there is
+     * no body, to provide successful response headers to the user. If the file is still empty, successful response
+     * headers will be provided to the users. Otherwise, the newer version of the file will be downloaded.
      */
     if (auto_ranged_get->synced_data.object_range_empty != 0) {
         auto_ranged_get->synced_data.object_range_empty = 0;
