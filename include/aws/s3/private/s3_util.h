@@ -252,10 +252,10 @@ int aws_s3_parse_content_length_response_header(
 AWS_S3_API
 int aws_s3_parse_request_range_header(
     struct aws_http_headers *request_headers,
-    bool *out_initial_message_has_start_range,
-    bool *out_initial_message_has_end_range,
-    uint64_t *out_initial_start_range,
-    uint64_t *out_initial_end_range);
+    bool *out_has_start_range,
+    bool *out_has_end_range,
+    uint64_t *out_start_range,
+    uint64_t *out_end_range);
 
 /* Calculate the number of parts based on overall object-range and part_size. */
 AWS_S3_API

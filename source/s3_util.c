@@ -490,19 +490,21 @@ int aws_s3_parse_content_length_response_header(
 
 int aws_s3_parse_request_range_header(
     struct aws_http_headers *request_headers,
-    bool *out_initial_message_has_start_range,
-    bool *out_initial_message_has_end_range,
-    uint64_t *out_initial_start_range,
-    uint64_t *out_initial_end_range) {
+    bool *out_has_start_range,
+    bool *out_has_end_range,
+    uint64_t *out_start_range,
+    uint64_t *out_end_range) {
 
     AWS_PRECONDITION(request_headers);
-    AWS_PRECONDITION(out_initial_message_has_start_range);
-    AWS_PRECONDITION(out_initial_message_has_end_range);
-    AWS_PRECONDITION(out_initial_start_range);
-    AWS_PRECONDITION(out_initial_end_range);
+    AWS_PRECONDITION(out_has_start_range);
+    AWS_PRECONDITION(out_has_end_range);
+    AWS_PRECONDITION(out_start_range);
+    AWS_PRECONDITION(out_end_range);
 
-    bool initial_message_has_start_range = false, initial_message_has_end_range = false;
-    uint64_t initial_start_range = 0, initial_end_range = 0;
+    bool has_start_range = false;
+    bool has_end_range = false;
+    uint64_t start_range = 0;
+    uint64_t end_range = 0;
 
     struct aws_byte_cursor range_header_value;
 
@@ -514,58 +516,54 @@ int aws_s3_parse_request_range_header(
 
     int result = AWS_OP_ERR;
     /* verify bytes= */
-    if (aws_byte_cursor_starts_with(&range_header_value, &range_header_start)) {
-        aws_byte_cursor_advance(&range_header_value, range_header_start.len);
-        struct aws_byte_cursor substr = {0};
-        /* parse start range */
-        if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
-            goto done;
-        }
-        if (substr.len > 0) {
-            if (aws_byte_cursor_utf8_parse_u64(substr, &initial_start_range)) {
-                goto done;
-            }
-            initial_message_has_start_range = true;
-        }
-
-        /* parse end range */
-        if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
-            goto done;
-        }
-        if (substr.len > 0) {
-            if (aws_byte_cursor_utf8_parse_u64(substr, &initial_end_range)) {
-                goto done;
-            }
-            initial_message_has_end_range = true;
-        }
-
-        /* Verify that there is nothing extra */
-        if (aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
-            goto done;
-        }
-
-        /* verify that start-range <= end-range */
-        if (initial_message_has_end_range && initial_start_range > initial_end_range) {
-            goto done;
-        }
-
-        /*verify that start-range or end-range is present */
-        if (!initial_message_has_start_range && !initial_message_has_end_range) {
-            goto done;
-        }
-
-        *out_initial_message_has_start_range = initial_message_has_start_range;
-        *out_initial_message_has_end_range = initial_message_has_end_range;
-        *out_initial_start_range = initial_start_range;
-        *out_initial_end_range = initial_end_range;
-        result = AWS_OP_SUCCESS;
+    if (!aws_byte_cursor_starts_with(&range_header_value, &range_header_start)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
     }
 
-done:
-    if (result != AWS_OP_SUCCESS) {
-        aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    aws_byte_cursor_advance(&range_header_value, range_header_start.len);
+    struct aws_byte_cursor substr = {0};
+    /* parse start range */
+    if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
     }
-    return result;
+    if (substr.len > 0) {
+        if (aws_byte_cursor_utf8_parse_u64(substr, &start_range)) {
+            return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+        }
+        has_start_range = true;
+    }
+
+    /* parse end range */
+    if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+    if (substr.len > 0) {
+        if (aws_byte_cursor_utf8_parse_u64(substr, &end_range)) {
+            return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+        }
+        has_end_range = true;
+    }
+
+    /* Verify that there is nothing extra */
+    if (aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+
+    /* verify that start-range <= end-range */
+    if (has_end_range && start_range > end_range) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+
+    /*verify that start-range or end-range is present */
+    if (!has_start_range && !has_end_range) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+
+    *out_has_start_range = has_start_range;
+    *out_has_end_range = has_end_range;
+    *out_start_range = start_range;
+    *out_end_range = end_range;
+    return AWS_OP_SUCCESS;
 }
 
 uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
