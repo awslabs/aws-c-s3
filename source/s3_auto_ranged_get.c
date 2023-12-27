@@ -238,7 +238,8 @@ static bool s_s3_auto_ranged_get_update(
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
                         AWS_LOGF_INFO(
                             AWS_LS_S3_META_REQUEST,
-                            "id=%p: Doing a getPart to discover the size of the object and get the first part",
+                            "id=%p: Doing a 'GET_OBJECT_WITH_PART_NUMBER_1' to discover the size of the object and get "
+                            "the first part",
                             (void *)meta_request);
                         ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
@@ -259,7 +260,8 @@ static bool s_s3_auto_ranged_get_update(
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
                         AWS_LOGF_INFO(
                             AWS_LS_S3_META_REQUEST,
-                            "id=%p: Doing a getObject with range to discover the size of the object",
+                            "id=%p: Doing a 'GET_OBJECT_WITH_RANGE' to discover the size of the object and get the "
+                            "first part",
                             (void *)meta_request);
 
                         uint64_t part_range_start = 0;
