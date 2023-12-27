@@ -226,8 +226,8 @@ struct aws_s3_meta_request {
         /* True if the finish result has been set. */
         uint32_t finish_result_set : 1;
 
-        /* To track the aws_s3_request that are active from HTTP level */
-        struct aws_linked_list ongoing_http_requests_list;
+        /* To track aws_s3_requests with cancellable HTTP streams */
+        struct aws_linked_list cancellable_http_streams_list;
 
     } synced_data;
 
@@ -367,8 +367,8 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
  * The meta-request's finish callback must not be invoked until this returns false. */
 bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
 
-/* Cancel the requests with ongoing HTTP activities for the meta request */
-void aws_s3_meta_request_cancel_ongoing_http_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
+/* Cancel the requests with cancellable HTTP stream for the meta request */
+void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
  * as reading from the stream could cause user code to call back into aws-c-s3.
