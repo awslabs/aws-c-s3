@@ -543,7 +543,7 @@ int aws_s3_parse_request_range_header(
         has_end_range = true;
     }
 
-    /* Verify that there is nothing extra */
+    /* verify that there is nothing extra */
     if (aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
         return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
     }
@@ -553,7 +553,7 @@ int aws_s3_parse_request_range_header(
         return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
     }
 
-    /*verify that start-range or end-range is present */
+    /* verify that start-range or end-range is present */
     if (!has_start_range && !has_end_range) {
         return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
     }
