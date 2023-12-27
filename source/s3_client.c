@@ -1175,15 +1175,15 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                  * splittable(?). Treat it as a Default request.
                  * TODO: Still need tests to verify that the request of a part is
                  * splittable or not */
-                struct aws_byte_cursor out_path;
-                struct aws_byte_cursor out_query;
+                struct aws_byte_cursor sub_string;
+                AWS_ZERO_STRUCT(sub_string);
                 /* The first split on '?' for path and query is path, the second is query */
-                if (aws_byte_cursor_next_split(&path_and_query, '?', &out_path) == true) {
-                    aws_byte_cursor_next_split(&path_and_query, '?', &out_query);
+                if (aws_byte_cursor_next_split(&path_and_query, '?', &sub_string) == true) {
+                    aws_byte_cursor_next_split(&path_and_query, '?', &sub_string);
                     struct aws_uri_param param;
                     AWS_ZERO_STRUCT(param);
                     struct aws_byte_cursor part_number_query_str = aws_byte_cursor_from_c_str("partNumber");
-                    while (aws_query_string_next_param(&out_query, &param)) {
+                    while (aws_query_string_next_param(&sub_string, &param)) {
                         if (aws_byte_cursor_eq(&param.key, &part_number_query_str)) {
                             return aws_s3_meta_request_default_new(
                                 client->allocator,
