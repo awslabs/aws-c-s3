@@ -730,7 +730,6 @@ struct aws_s3_meta_request_options {
      * The optimal strategy for downloading a file depends on its size.
      * Set this hint to help the S3 client choose the best strategy for this particular file.
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
-     * If not set, the client will assume a large file by default.
      */
     uint64_t *object_size_hint;
 };

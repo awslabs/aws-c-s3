@@ -105,7 +105,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
     auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
-    if (options->object_size_hint) {
+    if (options->object_size_hint != NULL) {
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
     }
@@ -139,11 +139,14 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
     AWS_ASSERT(auto_ranged_get);
 
     /*
-     * If the object is empty, download the file using a GetObject with PartNumber request. This will succeed if
-     * the file is empty, or it will download the file.
+     * When we attempt to download an empty file using the `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE`
+     * request type, the request fails with an empty file error. We then reset `object_range_known`
+     * (`object_range_empty` is set to true) and try to download the file again with
+     * `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1`. We send another request, even though there is
+     * no body, to provide successful response headers to the user. If the file is still empty, successful response
+     * headers will be provided to the users. Otherwise, the newer version of the file will be downloaded.
      */
     if (auto_ranged_get->synced_data.object_range_empty != 0) {
-        auto_ranged_get->synced_data.object_range_known = 0;
         auto_ranged_get->synced_data.object_range_empty = 0;
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
@@ -561,7 +564,8 @@ static int s_discover_object_range_and_size(
     uint64_t *out_object_range_end,
     uint64_t *out_object_size,
     uint64_t *out_first_part_size,
-    bool *empty_file_error) {
+    bool *out_empty_file_error) {
+
     AWS_PRECONDITION(out_object_size);
     AWS_PRECONDITION(out_object_range_start);
     AWS_PRECONDITION(out_object_range_end);
@@ -673,7 +677,7 @@ static int s_discover_object_range_and_size(
                         (void *)request);
 
                     object_size = 0ULL;
-                    *empty_file_error = true;
+                    *out_empty_file_error = true;
                     result = AWS_OP_SUCCESS;
                 } else {
                     /* Otherwise, resurface the error code. */
