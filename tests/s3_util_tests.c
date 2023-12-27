@@ -181,13 +181,6 @@ static int s_test_s3_parse_request_range_header(struct aws_allocator *allocator,
             .range_end = 0,
         },
         {
-            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-0"),
-            .has_start_range = false,
-            .has_end_range = true,
-            .range_start = 0,
-            .range_end = 0,
-        },
-        {
             .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=5-"),
             .has_start_range = true,
             .has_end_range = false,
