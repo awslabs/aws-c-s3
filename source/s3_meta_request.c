@@ -209,7 +209,7 @@ int aws_s3_meta_request_init_base(
     meta_request->type = options->type;
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
-    aws_linked_list_init(&meta_request->synced_data.ongoing_http_requests_list);
+    aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -352,7 +352,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
-    aws_s3_meta_request_cancel_ongoing_http_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 }
@@ -494,7 +494,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
 
-    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.ongoing_http_requests_list));
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
@@ -1077,28 +1077,51 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
 
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
 
-    if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
-        aws_http_stream_release(stream);
-        stream = NULL;
-
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST, "id=%p: Could not activate HTTP stream %p", (void *)meta_request, (void *)request);
-
-        goto error_finish;
-    }
-
-    {
+    if (!request->always_send) {
         /* BEGIN CRITICAL SECTION */
         aws_s3_meta_request_lock_synced_data(meta_request);
+        if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+            /* The meta request has finish result already, for this request, treat it as canceled. */
+            aws_raise_error(AWS_ERROR_S3_CANCELED);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            goto error_finish;
+        }
+
+        /* Activate the stream within the lock as once the activate invoked, the HTTP level callback can happen right
+         * after.  */
+        if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Could not activate HTTP stream %p",
+                (void *)meta_request,
+                (void *)request);
+            goto error_finish;
+        }
         aws_linked_list_push_back(
-            &meta_request->synced_data.ongoing_http_requests_list, &request->ongoing_http_requests_list_node);
-        request->synced_data.http_stream = stream;
+            &meta_request->synced_data.cancellable_http_streams_list, &request->cancellable_http_streams_list_node);
+        request->synced_data.cancellable_http_stream = stream;
+
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
+    } else {
+        /* If the request always send, it is not cancellable. We simply activate the stream. */
+        if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Could not activate HTTP stream %p",
+                (void *)meta_request,
+                (void *)request);
+            goto error_finish;
+        }
     }
     return;
 
 error_finish:
+    if (stream) {
+        aws_http_stream_release(stream);
+        stream = NULL;
+    }
 
     s_s3_meta_request_send_request_finish(connection, NULL, aws_last_error_or_unknown());
 }
@@ -1427,14 +1450,16 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
     if (meta_request->checksum_config.validate_response_checksum) {
         s_get_response_part_finish_checksum_helper(connection, error_code);
     }
-    if (error_code != AWS_ERROR_S3_CANCELED && error_code != AWS_ERROR_S3_PAUSED) {
-        /* BEGIN CRITICAL SECTION */
+    /* BEGIN CRITICAL SECTION */
+    {
         aws_s3_meta_request_lock_synced_data(meta_request);
-        AWS_ASSERT(request->synced_data.http_stream != NULL);
-        aws_linked_list_remove(&request->ongoing_http_requests_list_node);
+        if (request->synced_data.cancellable_http_stream) {
+            aws_linked_list_remove(&request->cancellable_http_streams_list_node);
+            request->synced_data.cancellable_http_stream = NULL;
+        }
         aws_s3_meta_request_unlock_synced_data(meta_request);
-        /* END CRITICAL SECTION */
     }
+    /* END CRITICAL SECTION */
     s_s3_meta_request_send_request_finish(connection, stream, error_code);
 }
 
@@ -1722,19 +1747,40 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
            meta_request->synced_data.event_delivery_active;
 }
 
-void aws_s3_meta_request_cancel_ongoing_http_requests_synced(struct aws_s3_meta_request *meta_request, int error_code) {
+void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code) {
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
-    while (!aws_linked_list_empty(&meta_request->synced_data.ongoing_http_requests_list)) {
+    while (!aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list)) {
         struct aws_linked_list_node *request_node =
-            aws_linked_list_pop_front(&meta_request->synced_data.ongoing_http_requests_list);
+            aws_linked_list_pop_front(&meta_request->synced_data.cancellable_http_streams_list);
         struct aws_s3_request *request =
-            AWS_CONTAINER_OF(request_node, struct aws_s3_request, ongoing_http_requests_list_node);
-        if (!request->always_send) {
-            /* Cancel the ongoing http stream, unless it's always send. */
-            aws_http_stream_cancel(request->synced_data.http_stream, error_code);
-        }
-        request->synced_data.http_stream = NULL;
+            AWS_CONTAINER_OF(request_node, struct aws_s3_request, cancellable_http_streams_list_node);
+        AWS_ASSERT(!request->always_send);
+
+        aws_http_stream_cancel(request->synced_data.cancellable_http_stream, error_code);
+        request->synced_data.cancellable_http_stream = NULL;
     }
+}
+
+static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics(
+    struct aws_s3_request_metrics *metrics,
+    struct aws_s3_meta_request *meta_request) {
+
+    if (metrics != NULL) {
+        /* Request is done streaming the body, complete the metrics for the request now. */
+
+        if (metrics->time_metrics.end_timestamp_ns == -1) {
+            aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
+            metrics->time_metrics.total_duration_ns =
+                metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+        }
+
+        if (meta_request->telemetry_callback != NULL) {
+            /* We already in the meta request event thread, invoke the telemetry callback directly */
+            meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
+        }
+        aws_s3_request_metrics_release(metrics);
+    }
+    return NULL;
 }
 
 /* Deliver events in event_delivery_array.
@@ -1804,21 +1850,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
                 ++num_parts_delivered;
-
-                if (request->send_data.metrics != NULL) {
-                    /* Request is done streaming the body, complete the metrics for the request now. */
-                    struct aws_s3_request_metrics *metrics = request->send_data.metrics;
-                    metrics->crt_info_metrics.error_code = error_code;
-                    aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
-                    metrics->time_metrics.total_duration_ns =
-                        metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
-
-                    if (meta_request->telemetry_callback != NULL) {
-                        /* We already in the meta request event thread, invoke the telemetry callback directly */
-                        meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
-                    }
-                    request->send_data.metrics = aws_s3_request_metrics_release(metrics);
-                }
+                request->send_data.metrics =
+                    s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
 
                 aws_s3_request_release(request);
             } break;
@@ -1858,13 +1891,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 AWS_FATAL_ASSERT(meta_request->telemetry_callback != NULL);
                 AWS_FATAL_ASSERT(metrics != NULL);
 
-                if (metrics->time_metrics.end_timestamp_ns == -1) {
-                    aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
-                    metrics->time_metrics.total_duration_ns =
-                        metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
-                }
-                meta_request->telemetry_callback(meta_request, metrics, meta_request->user_data);
-                event.u.telemetry.metrics = aws_s3_request_metrics_release(event.u.telemetry.metrics);
+                event.u.telemetry.metrics =
+                    s_s3_request_finish_up_and_release_metrics(event.u.telemetry.metrics, meta_request);
             } break;
 
             default:
@@ -1989,6 +2017,10 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&release_request_list);
         struct aws_s3_request *release_request = AWS_CONTAINER_OF(request_node, struct aws_s3_request, node);
         AWS_FATAL_ASSERT(release_request != NULL);
+        /* This pending-body-streaming request was never moved to the event-delivery queue,
+         * so its metrics were never finished. Finish them now. */
+        release_request->send_data.metrics =
+            s_s3_request_finish_up_and_release_metrics(release_request->send_data.metrics, meta_request);
         aws_s3_request_release(release_request);
     }
 
