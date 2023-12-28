@@ -57,6 +57,8 @@ const struct aws_byte_cursor g_sha1_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_S
 const struct aws_byte_cursor g_sha256_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
+const struct aws_byte_cursor g_mp_parts_count_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-mp-parts-count");
 const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
 const struct aws_byte_cursor g_head_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("HEAD");
 const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DELETE");
@@ -486,17 +488,93 @@ int aws_s3_parse_content_length_response_header(
     return result;
 }
 
-uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end) {
-    uint32_t num_parts = 1;
+int aws_s3_parse_request_range_header(
+    struct aws_http_headers *request_headers,
+    bool *out_has_start_range,
+    bool *out_has_end_range,
+    uint64_t *out_start_range,
+    uint64_t *out_end_range) {
 
-    uint64_t first_part_size = part_size;
-    uint64_t first_part_alignment_offset = object_range_start % part_size;
+    AWS_PRECONDITION(request_headers);
+    AWS_PRECONDITION(out_has_start_range);
+    AWS_PRECONDITION(out_has_end_range);
+    AWS_PRECONDITION(out_start_range);
+    AWS_PRECONDITION(out_end_range);
 
-    /* If the first part size isn't aligned on the assumed part boundary, make it smaller so that it is. */
-    if (first_part_alignment_offset > 0) {
-        first_part_size = part_size - first_part_alignment_offset;
+    bool has_start_range = false;
+    bool has_end_range = false;
+    uint64_t start_range = 0;
+    uint64_t end_range = 0;
+
+    struct aws_byte_cursor range_header_value;
+
+    if (aws_http_headers_get(request_headers, g_range_header_name, &range_header_value)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
     }
 
+    struct aws_byte_cursor range_header_start = aws_byte_cursor_from_c_str("bytes=");
+
+    /* verify bytes= */
+    if (!aws_byte_cursor_starts_with(&range_header_value, &range_header_start)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+
+    aws_byte_cursor_advance(&range_header_value, range_header_start.len);
+    struct aws_byte_cursor substr = {0};
+    /* parse start range */
+    if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+    if (substr.len > 0) {
+        if (aws_byte_cursor_utf8_parse_u64(substr, &start_range)) {
+            return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+        }
+        has_start_range = true;
+    }
+
+    /* parse end range */
+    if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+    if (substr.len > 0) {
+        if (aws_byte_cursor_utf8_parse_u64(substr, &end_range)) {
+            return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+        }
+        has_end_range = true;
+    }
+
+    /* verify that there is nothing extra */
+    if (aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+
+    /* verify that start-range <= end-range */
+    if (has_end_range && start_range > end_range) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+
+    /* verify that start-range or end-range is present */
+    if (!has_start_range && !has_end_range) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
+    }
+
+    *out_has_start_range = has_start_range;
+    *out_has_end_range = has_end_range;
+    *out_start_range = start_range;
+    *out_end_range = end_range;
+    return AWS_OP_SUCCESS;
+}
+
+uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
+    size_t part_size,
+    uint64_t first_part_size,
+    uint64_t object_range_start,
+    uint64_t object_range_end) {
+    uint32_t num_parts = 1;
+
+    if (first_part_size == 0) {
+        return num_parts;
+    }
     uint64_t second_part_start = object_range_start + first_part_size;
 
     /* If the range has room for a second part, calculate the additional amount of parts. */
@@ -512,10 +590,11 @@ uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uin
     return num_parts;
 }
 
-void aws_s3_get_part_range(
+void aws_s3_calculate_auto_ranged_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
     size_t part_size,
+    uint64_t first_part_size,
     uint32_t part_number,
     uint64_t *out_part_range_start,
     uint64_t *out_part_range_end) {
@@ -527,16 +606,11 @@ void aws_s3_get_part_range(
     const uint32_t part_index = part_number - 1;
 
     /* Part index is assumed to be in a valid range. */
-    AWS_ASSERT(part_index < aws_s3_get_num_parts(part_size, object_range_start, object_range_end));
+    AWS_ASSERT(
+        part_index <
+        aws_s3_calculate_auto_ranged_get_num_parts(part_size, first_part_size, object_range_start, object_range_end));
 
     uint64_t part_size_uint64 = (uint64_t)part_size;
-    uint64_t first_part_size = part_size_uint64;
-    uint64_t first_part_alignment_offset = object_range_start % part_size_uint64;
-
-    /* Shrink the part to a smaller size if need be to align to the assumed part boundary. */
-    if (first_part_alignment_offset > 0) {
-        first_part_size = part_size_uint64 - first_part_alignment_offset;
-    }
 
     if (part_index == 0) {
         /* If this is the first part, then use the first part size. */
