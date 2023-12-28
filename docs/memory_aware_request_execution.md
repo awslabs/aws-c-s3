@@ -5,7 +5,7 @@ receiving for each request and scaling requests in flight has direct impact on
 memory used. In practice, setting high target throughput or larger part size can
 lead to high observed memory usage.
 
-To mitigate high memory usages, memory reuse improvements were recently added to
+To mitigate high memory usages, memory reuse improvements were added to
 the client along with options to limit max memory used. The following sections
 will go into more detail on aspects of those changes and how the affect the
 client.
