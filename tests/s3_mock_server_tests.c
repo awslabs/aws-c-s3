@@ -433,7 +433,7 @@ TEST_CASE(get_object_invalid_responses_mock_server) {
         aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
     struct aws_http_header range_header = {
         .name = g_range_header_name,
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-1"),
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-1"),
     };
     ASSERT_SUCCESS(aws_http_message_add_header(message, range_header));
     get_options.get_options.object_path = object_path;

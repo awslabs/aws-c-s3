@@ -114,12 +114,12 @@ struct aws_s3_request {
     struct aws_linked_list_node node;
 
     /* Linked list node used for tracking the request is active from HTTP level. */
-    struct aws_linked_list_node ongoing_http_requests_list_node;
+    struct aws_linked_list_node cancellable_http_streams_list_node;
 
     /* The meta request lock must be held to access the data */
     struct {
         /* The underlying http stream, only valid when the request is active from HTTP level */
-        struct aws_http_stream *http_stream;
+        struct aws_http_stream *cancellable_http_stream;
     } synced_data;
 
     /* TODO Ref count on the request is no longer needed--only one part of code should ever be holding onto a request,
