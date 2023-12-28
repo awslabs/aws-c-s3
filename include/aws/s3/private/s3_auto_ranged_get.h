@@ -18,6 +18,17 @@ struct aws_s3_auto_ranged_get {
     struct aws_s3_meta_request base;
 
     enum aws_s3_checksum_algorithm validation_algorithm;
+
+    struct aws_string *etag;
+
+    bool initial_message_has_start_range;
+    bool initial_message_has_end_range;
+    uint64_t initial_range_start;
+    uint64_t initial_range_end;
+
+    uint64_t object_size_hint;
+    bool object_size_hint_available;
+
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
         /* The starting byte of the data that we will be retrieved from the object.
@@ -54,10 +65,6 @@ struct aws_s3_auto_ranged_get {
 
     uint32_t initial_message_has_range_header : 1;
     uint32_t initial_message_has_if_match_header : 1;
-
-    struct aws_string *etag;
-    uint64_t object_size_hint;
-    bool object_size_hint_available;
 };
 
 AWS_EXTERN_C_BEGIN

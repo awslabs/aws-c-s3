@@ -1346,7 +1346,9 @@ static int s_s3_meta_request_incoming_body(
         request->send_data.response_status,
         (uint64_t)data->len,
         (void *)connection);
-    if (request->send_data.response_status < 200 || request->send_data.response_status > 299) {
+    bool successful_response =
+        s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
+    if (!successful_response) {
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
     }
 
@@ -1355,7 +1357,7 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->has_part_size_response_body) {
+        if (request->has_part_size_response_body && successful_response) {
             AWS_FATAL_ASSERT(request->ticket);
             request->send_data.response_body =
                 aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);

@@ -290,8 +290,8 @@ static int s3_cancel_test_helper_ex(
         struct aws_s3_meta_request_test_results meta_request_test_results;
         aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
-        // Range for the second 16k
-        const struct aws_byte_cursor range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=16384-32767");
+        /* Specify a range without start-range to trigger HeadRequest */
+        const struct aws_byte_cursor range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-32767");
 
         struct aws_s3_tester_meta_request_options options = {
             .allocator = allocator,
