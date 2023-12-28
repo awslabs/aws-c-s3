@@ -13,5 +13,5 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 ## Documentation
 
-- [GetObject](Diagrams/GetObjectFlow.md): A visual representation of the GetObject request flow.
+- [GetObject](GetObject.md): A visual representation of the GetObject request flow.
 - [Memory Aware Requests Execution](memory_aware_requests_execution.md): An in-depth guide on optimizing memory usage during request executions.
