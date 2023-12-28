@@ -216,7 +216,7 @@ struct aws_s3_tester_meta_request_options {
 
     uint32_t mrap_test : 1;
 
-    uint64_t object_size_hint;
+    uint64_t *object_size_hint;
 };
 
 /* TODO Rename to something more generic such as "aws_s3_meta_request_test_data" */

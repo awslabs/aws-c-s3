@@ -424,6 +424,10 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
     else:
         RETRY_REQUEST_COUNT = 0
 
+    if parsed_path.path == "/get_object_invalid_response_missing_content_range" or parsed_path.path == "/get_object_invalid_response_missing_etags":
+        # Don't generate the body for those requests
+        return response_config
+
     body_range_value = get_request_header_value(request, "range")
 
     if body_range_value:
@@ -439,9 +443,6 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
 
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)
-    elif parsed_path.path == "/get_object_invalid_response_missing_content_range" or parsed_path.path == "/get_object_invalid_response_missing_etags":
-        # Don't generate the body for those requests
-        return response_config
 
     response_config.generate_body_size = data_length
     return response_config
