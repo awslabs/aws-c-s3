@@ -60,6 +60,11 @@ static int s_s3_meta_request_incoming_headers(
     size_t headers_count,
     void *user_data);
 
+static int s_s3_meta_request_headers_block_done(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    void *user_data);
+
 static void s_s3_meta_request_stream_metrics(
     struct aws_http_stream *stream,
     const struct aws_http_stream_metrics *metrics,
@@ -95,7 +100,8 @@ static int s_meta_request_get_response_headers_checksum_callback(
             continue;
         }
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
-        if (aws_http_headers_has(headers, *algorithm_header_name)) {
+        if (aws_http_headers_has(headers, *algorithm_header_name) &&
+            !aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
             struct aws_byte_cursor header_sum;
             aws_http_headers_get(headers, *algorithm_header_name, &header_sum);
             size_t encoded_len = 0;
@@ -1049,7 +1055,7 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     options.request = request->send_data.message;
     options.user_data = connection;
     options.on_response_headers = s_s3_meta_request_incoming_headers;
-    options.on_response_header_block_done = NULL;
+    options.on_response_header_block_done = s_s3_meta_request_headers_block_done;
     options.on_response_body = s_s3_meta_request_incoming_body;
     if (request->send_data.metrics) {
         options.on_metrics = s_s3_meta_request_stream_metrics;
@@ -1229,7 +1235,6 @@ static int s_s3_meta_request_incoming_headers(
     const struct aws_http_header *headers,
     size_t headers_count,
     void *user_data) {
-
     (void)header_block;
 
     AWS_PRECONDITION(stream);
@@ -1297,6 +1302,41 @@ static int s_s3_meta_request_incoming_headers(
     return AWS_OP_SUCCESS;
 }
 
+static int s_s3_meta_request_headers_block_done(
+    struct aws_http_stream *stream,
+    enum aws_http_header_block header_block,
+    void *user_data) {
+    (void)stream;
+
+    if (header_block != AWS_HTTP_HEADER_BLOCK_MAIN) {
+        return AWS_OP_SUCCESS;
+    }
+
+    struct aws_s3_connection *connection = user_data;
+    AWS_PRECONDITION(connection);
+
+    struct aws_s3_request *request = connection->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    /*
+     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so we
+     * don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets instead.
+     */
+    if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
+        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
+        uint64_t content_length;
+        if (!aws_s3_parse_content_length_response_header(
+                request->allocator, request->send_data.response_headers, &content_length) &&
+            content_length > meta_request->part_size) {
+            return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+        }
+    }
+    return AWS_OP_SUCCESS;
+}
+
 /*
  * Small helper to either do a static or dynamic append.
  * TODO: something like this would be useful in common.
@@ -1329,7 +1369,9 @@ static int s_s3_meta_request_incoming_body(
         request->send_data.response_status,
         (uint64_t)data->len,
         (void *)connection);
-    if (request->send_data.response_status < 200 || request->send_data.response_status > 299) {
+    bool successful_response =
+        s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS;
+    if (!successful_response) {
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
     }
 
@@ -1338,7 +1380,7 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->has_part_size_response_body) {
+        if (request->has_part_size_response_body && successful_response) {
             AWS_FATAL_ASSERT(request->ticket);
             request->send_data.response_body =
                 aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
@@ -1555,17 +1597,29 @@ void aws_s3_meta_request_send_request_finish_default(
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
+            error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
-
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
-                (void *)meta_request,
-                error_code,
-                aws_error_str(error_code),
-                (void *)request,
-                response_status);
+            if (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
+                /* Log at info level instead of error as it's expected and not a fatal error */
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Cancelling the request because of error %d (%s). (request=%p, response status=%d)",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code),
+                    (void *)request,
+                    response_status);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code),
+                    (void *)request,
+                    response_status);
+            }
 
         } else {
             if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT) {

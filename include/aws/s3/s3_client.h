@@ -723,6 +723,15 @@ struct aws_s3_meta_request_options {
      * from the buffer and compare them them to previously uploaded part checksums.
      */
     struct aws_s3_meta_request_resume_token *resume_token;
+
+    /*
+     * Optional.
+     * Total object size hint, in bytes.
+     * The optimal strategy for downloading a file depends on its size.
+     * Set this hint to help the S3 client choose the best strategy for this particular file.
+     * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
+     */
+    uint64_t *object_size_hint;
 };
 
 /* Result details of a meta request.
