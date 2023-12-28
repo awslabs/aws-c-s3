@@ -1183,7 +1183,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     struct aws_uri_param param;
                     AWS_ZERO_STRUCT(param);
                     struct aws_byte_cursor part_number_query_str = aws_byte_cursor_from_c_str("partNumber");
-                    while (aws_query_string_next_param(&sub_string, &param)) {
+                    while (aws_query_string_next_param(sub_string, &param)) {
                         if (aws_byte_cursor_eq(&param.key, &part_number_query_str)) {
                             return aws_s3_meta_request_default_new(
                                 client->allocator,
