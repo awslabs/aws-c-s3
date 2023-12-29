@@ -183,6 +183,8 @@ struct aws_s3_tester_meta_request_options {
     struct {
         struct aws_byte_cursor object_path;
         struct aws_byte_cursor object_range;
+        /* Get the part from S3, starts from 1. 0 means not set. */
+        int part_number;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -215,6 +217,8 @@ struct aws_s3_tester_meta_request_options {
     uint32_t dont_wait_for_shutdown : 1;
 
     uint32_t mrap_test : 1;
+
+    uint64_t *object_size_hint;
 };
 
 /* TODO Rename to something more generic such as "aws_s3_meta_request_test_data" */

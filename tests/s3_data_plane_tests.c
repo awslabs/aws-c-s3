@@ -404,6 +404,8 @@ static int s_test_s3_request_create_destroy(struct aws_allocator *allocator, voi
 
     request->send_data.response_headers = aws_http_headers_new(allocator);
     ASSERT_TRUE(request->send_data.response_headers != NULL);
+    ASSERT_TRUE(request->send_data.metrics != NULL);
+    request->send_data.metrics = aws_s3_request_metrics_release(request->send_data.metrics);
 
     aws_s3_request_clean_up_send_data(request);
 
@@ -499,10 +501,11 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
             struct aws_s3_request *request = aws_s3_request_new(
                 meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_number, 0 /*flags*/);
 
-            aws_s3_get_part_range(
+            aws_s3_calculate_auto_ranged_get_part_range(
                 0ULL,
                 total_object_size - 1,
-                (uint64_t)request_response_body_size,
+                request_response_body_size /*part_size*/,
+                (uint64_t)request_response_body_size /*first_part_size*/,
                 part_number,
                 &request->part_range_start,
                 &request->part_range_end);
@@ -536,10 +539,11 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
             struct aws_s3_request *request = aws_s3_request_new(
                 meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_number, 0 /*flags*/);
 
-            aws_s3_get_part_range(
+            aws_s3_calculate_auto_ranged_get_part_range(
                 0ULL,
                 total_object_size - 1,
-                (uint64_t)request_response_body_size,
+                request_response_body_size /*part_size*/,
+                (uint64_t)request_response_body_size /*first_part_size*/,
                 part_number,
                 &request->part_range_start,
                 &request->part_range_end);
@@ -565,10 +569,11 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
         struct aws_s3_request *request = aws_s3_request_new(
             meta_request, 0 /*request_tag*/, AWS_S3_REQUEST_TYPE_GET_OBJECT, part_range1_start, 0 /*flags*/);
 
-        aws_s3_get_part_range(
+        aws_s3_calculate_auto_ranged_get_part_range(
             0ULL,
             total_object_size - 1,
-            (uint64_t)request_response_body_size,
+            request_response_body_size /*part_size*/,
+            (uint64_t)request_response_body_size /*first_part_size*/,
             part_range1_start,
             &request->part_range_start,
             &request->part_range_end);
@@ -1607,6 +1612,78 @@ static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_alloca
     size_t window_initial_size = 0;
     uint64_t window_increment_size = part_size / 2;
     return s_test_s3_get_object_backpressure_helper(allocator, part_size, window_initial_size, window_increment_size);
+}
+
+AWS_TEST_CASE(test_s3_get_object_part, s_test_s3_get_object_part)
+static int s_test_s3_get_object_part(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    /*** PUT FILE ***/
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(
+        aws_s3_tester_upload_file_path_init(allocator, &path_buf, aws_byte_cursor_from_c_str("/get_object_part_test")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /* GET FILE */
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
+        .get_options =
+            {
+                .object_path = object_path,
+                .part_number = 2,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, meta_request_test_results.finished_error_code);
+    /* Only one request was made to get the second part of the object */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    client = aws_s3_client_release(client);
+
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
 }
 
 static int s_test_s3_put_object_helper(
@@ -3595,6 +3672,320 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_download_empty_file_with_checksum, s_test_s3_download_empty_file_with_checksum)
+static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Upload the file */
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(
+        aws_s3_tester_upload_file_path_init(allocator, &path_buf, aws_byte_cursor_from_c_str("/empty-file-CRC32.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_size_mb = 0,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /*** GET FILE WITH GET_FIRST_PART ***/
+    uint64_t small_object_size_hint = 1;
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .finish_callback = s_s3_test_validate_checksum,
+        .object_size_hint =
+            &small_object_size_hint /* pass a object_size_hint > 0 so that the request goes through the getPart flow */,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    /*** GET FILE WITH HEAD_OBJECT ***/
+    get_options.object_size_hint = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_client_release(client);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_download_single_part_file_with_checksum, s_test_s3_download_single_part_file_with_checksum)
+static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Upload the file */
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(10),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/single-part-10Mb-CRC32.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+    uint32_t object_size_mb = 10;
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_size_mb = object_size_mb,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size < file_size ***/
+    client_options.part_size = MB_TO_BYTES(3);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    uint64_t object_size_hint = MB_TO_BYTES(object_size_mb);
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .finish_callback = s_s3_test_validate_checksum,
+        .object_size_hint = &object_size_hint,
+    };
+    uint64_t small_object_size_hint = MB_TO_BYTES(1);
+
+    /* will do headRequest */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size > file_size ***/
+    client_options.part_size = MB_TO_BYTES(20);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+
+    /* will do getPart */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /* will do getPart */
+    /*** GET FILE with part_size = file_size ***/
+    client_options.part_size = MB_TO_BYTES(10);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size < file_size and wrong object_size_hint ***/
+    client_options.part_size = MB_TO_BYTES(3);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    get_options.object_size_hint = &small_object_size_hint;
+    /* will do getPart first, cancel it and then rangedGet */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_download_multipart_file_with_checksum, s_test_s3_download_multipart_file_with_checksum)
+static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Upload the file */
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/multipart-10Mb-CRC32.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+    uint32_t object_size_mb = 10;
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_size_mb = object_size_mb,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size < first_part_size ***/
+    client_options.part_size = MB_TO_BYTES(3);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    uint64_t object_size_hint = MB_TO_BYTES(object_size_mb);
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .object_size_hint = &object_size_hint,
+    };
+
+    /* will do HeadRequest first */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size > first_part_size ***/
+    client_options.part_size = MB_TO_BYTES(7);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    /* will do HeadObject first */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size = first_part_size ***/
+    client_options.part_size = MB_TO_BYTES(5);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    get_options.finish_callback = s_s3_test_validate_checksum;
+    /* will do HeadObject First */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    uint64_t small_object_size_hint = 1;
+
+    /*** GET FILE with with wrong object_size_hint ***/
+    get_options.object_size_hint = &small_object_size_hint;
+    get_options.finish_callback = NULL;
+
+    /*** GET FILE with part_size < first_part_size***/
+    client_options.part_size = MB_TO_BYTES(3);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+
+    /* will do GetPart, cancel the request and then do ranged Gets. */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size > first_part_size ***/
+    client_options.part_size = MB_TO_BYTES(7);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    get_options.finish_callback = s_s3_test_validate_checksum;
+
+    /* will do GetPart first */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size = first_part_size ***/
+    client_options.part_size = MB_TO_BYTES(5);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    get_options.finish_callback = s_s3_test_validate_checksum;
+    /* will do GetPart first */
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+
+    /*** GET FILE with part_size > fileSize ***/
+    /* TODO: Enable this test once the checksum issue is resolved. Currently, when the S3 GetObject API is called with
+     * the range 0-contentLength, it returns a checksum of checksums without the -numParts portion. This leads to a
+     * checksum mismatch error, as it is incorrectly validated as a part checksum. */
+    /*
+    client_options.part_size = MB_TO_BYTES(20);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    get_options.client = client;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
+    */
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(
     test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc,
     s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc)
@@ -3964,25 +4355,17 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     aws_s3_tester_unlock_synced_data(&tester);
 
-    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
-
-    meta_request = aws_s3_meta_request_release(meta_request);
-
-    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
-
-    /*
-     * TODO: telemetry is sent from request destructor, http threads hold on to
-     * req for a little bit after on_req_finished callback and its possible that
-     * telemetry callback will be invoked after meta reqs on_finished callback.
-     * Moving the telemetry check to after meta req shutdown callback. Need to
-     * figure out whether current behavior can be improved.
-     */
     /* Check the size of the metrics should be the same as the number of
     requests, which should be 1 */
     ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
     struct aws_s3_request_metrics *metrics = NULL;
     aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
 
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+
+    meta_request = aws_s3_meta_request_release(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_http_message_release(message);
@@ -5468,11 +5851,93 @@ static int s_test_s3_not_satisfiable_range(struct aws_allocator *allocator, void
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
 
-    ASSERT_TRUE(results.finished_response_status == AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE, results.finished_response_status);
     ASSERT_NOT_NULL(results.error_response_operation_name);
     ASSERT_TRUE(
         aws_string_eq_c_str(results.error_response_operation_name, "GetObject") ||
         aws_string_eq_c_str(results.error_response_operation_name, "HeadObject"));
+
+    aws_s3_meta_request_test_results_clean_up(&results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_invalid_start_range_greator_than_end_range, s_test_s3_invalid_start_range_greator_than_end_range)
+static int s_test_s3_invalid_start_range_greator_than_end_range(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_1MB,
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=20-10"),
+            },
+    };
+
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
+    ASSERT_INT_EQUALS(results.finished_error_code, AWS_ERROR_S3_INVALID_RANGE_HEADER);
+
+    aws_s3_meta_request_test_results_clean_up(&results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_invalid_empty_file_with_range, s_test_s3_invalid_empty_file_with_range)
+static int s_test_s3_invalid_empty_file_with_range(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 16 * 1024,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .client = client,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .get_options =
+            {
+                .object_path = g_pre_existing_empty_object,
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
+            },
+    };
+
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_416_REQUESTED_RANGE_NOT_SATISFIABLE, results.finished_response_status);
+    ASSERT_NOT_NULL(results.error_response_operation_name);
+    ASSERT_TRUE(aws_string_eq_c_str(results.error_response_operation_name, "GetObject"));
 
     aws_s3_meta_request_test_results_clean_up(&results);
 

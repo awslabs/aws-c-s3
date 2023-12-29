@@ -34,6 +34,8 @@ struct aws_http_stream;
 struct aws_http_headers;
 struct aws_http_message;
 struct aws_s3_client;
+struct aws_s3_request;
+struct aws_s3_meta_request;
 
 struct aws_cached_signing_config_aws {
     struct aws_allocator *allocator;
@@ -153,6 +155,9 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_accept_ranges_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_mp_parts_count_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_post_method;
 
 AWS_S3_API
@@ -240,11 +245,25 @@ int aws_s3_parse_content_length_response_header(
     struct aws_http_headers *response_headers,
     uint64_t *out_content_length);
 
-/* Calculate the number of parts based on overall object-range and part_size. This takes into account aligning
- * part-ranges on part_size. (ie: if object_range_start is not evenly divisible by part_size, it is considered in the
- * middle of a contiguous part, and that first part will be smaller than part_size.) */
+/*
+ * Given the request headers list, finds the Range header and parses the range-start and range-end. All arguments are
+ * required.
+ * */
 AWS_S3_API
-uint32_t aws_s3_get_num_parts(size_t part_size, uint64_t object_range_start, uint64_t object_range_end);
+int aws_s3_parse_request_range_header(
+    struct aws_http_headers *request_headers,
+    bool *out_has_start_range,
+    bool *out_has_end_range,
+    uint64_t *out_start_range,
+    uint64_t *out_end_range);
+
+/* Calculate the number of parts based on overall object-range and part_size. */
+AWS_S3_API
+uint32_t aws_s3_calculate_auto_ranged_get_num_parts(
+    size_t part_size,
+    uint64_t first_part_size,
+    uint64_t object_range_start,
+    uint64_t object_range_end);
 
 /**
  * Calculates the optimal part size and num parts given the 'content_length' and 'client_part_size'.
@@ -261,13 +280,15 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     uint32_t *out_num_parts);
 
 /* Calculates the part range for a part given overall object range, size of each part, and the part's number. Note: part
- * numbers begin at one. This takes into account aligning part-ranges on part_size. Intended to be used in conjunction
- * with aws_s3_get_num_parts. part_number should be less than or equal to the result of aws_s3_get_num_parts. */
+ * numbers begin at one. Intended to be used in conjunction
+ * with aws_s3_calculate_auto_ranged_get_num_parts. part_number should be less than or equal to the result of
+ * aws_s3_calculate_auto_ranged_get_num_parts. */
 AWS_S3_API
-void aws_s3_get_part_range(
+void aws_s3_calculate_auto_ranged_get_part_range(
     uint64_t object_range_start,
     uint64_t object_range_end,
     size_t part_size,
+    uint64_t first_part_size,
     uint32_t part_number,
     uint64_t *out_part_range_start,
     uint64_t *out_part_range_end);
@@ -275,6 +296,9 @@ void aws_s3_get_part_range(
 /* Match the S3 error code to CRT error code, return AWS_ERROR_UNKNOWN when not matched */
 AWS_S3_API
 int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string);
+
+AWS_S3_API
+void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
 AWS_EXTERN_C_END
 

@@ -88,13 +88,36 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
     AWS_ASSERT(headers != NULL);
 
-    auto_ranged_get->initial_message_has_range_header = aws_http_headers_has(headers, g_range_header_name);
+    if (aws_http_headers_has(headers, g_range_header_name)) {
+        auto_ranged_get->initial_message_has_range_header = true;
+        if (aws_s3_parse_request_range_header(
+                headers,
+                &auto_ranged_get->initial_message_has_start_range,
+                &auto_ranged_get->initial_message_has_end_range,
+                &auto_ranged_get->initial_range_start,
+                &auto_ranged_get->initial_range_end)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Could not parse Range header for Auto-Ranged-Get Meta Request.",
+                (void *)auto_ranged_get);
+            goto on_error;
+        }
+    }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
-
+    auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
+    if (options->object_size_hint != NULL) {
+        auto_ranged_get->object_size_hint_available = true;
+        auto_ranged_get->object_size_hint = *options->object_size_hint;
+    }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
     return &auto_ranged_get->base;
+
+on_error:
+    /* This will also clean up the auto_ranged_get */
+    aws_s3_meta_request_release(&(auto_ranged_get->base));
+    return NULL;
 }
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request) {
@@ -104,6 +127,56 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
+}
+
+/*
+ * This function returns the type of first request which we will also use to discover overall object size.
+ */
+static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discovering_object_size(
+    const struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    AWS_ASSERT(auto_ranged_get);
+
+    /*
+     * When we attempt to download an empty file using the `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE`
+     * request type, the request fails with an empty file error. We then reset `object_range_known`
+     * (`object_range_empty` is set to true) and try to download the file again with
+     * `AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1`. We send another request, even though there is
+     * no body, to provide successful response headers to the user. If the file is still empty, successful response
+     * headers will be provided to the users. Otherwise, the newer version of the file will be downloaded.
+     */
+    if (auto_ranged_get->synced_data.object_range_empty != 0) {
+        auto_ranged_get->synced_data.object_range_empty = 0;
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
+    }
+
+    /*
+     * If a range header exists but has no start-range (i.e. Range: bytes=-100), we perform a HeadRequest. If the
+     * start-range is unknown, we could potentially execute a request from the end-range and keep that request around
+     * until the meta request finishes. However, this approach involves the complexity of managing backpressure. For
+     * simplicity, we execute a HeadRequest if the start-range is not specified.
+     */
+    if (auto_ranged_get->initial_message_has_range_header != 0) {
+        return auto_ranged_get->initial_message_has_start_range
+                   ? AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE
+                   : AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
+    }
+
+    /* If we don't need checksum validation, then discover the size of the object while trying to get the first part. */
+    if (!meta_request->checksum_config.validate_response_checksum) {
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE;
+    }
+
+    /* If the object_size_hint indicates that it is a small one part file, then try to get the file directly
+     * TODO: Bypass memory limiter so that we don't overallocate memory for small files
+     */
+    if (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint <= meta_request->part_size) {
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
+    }
+
+    /* Otherwise, do a headObject so that we can validate checksum if the file was uploaded as a single part */
+    return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
 }
 
 static bool s_s3_auto_ranged_get_update(
@@ -143,78 +216,100 @@ static bool s_s3_auto_ranged_get_update(
             /* If the overall range of the object that we are trying to retrieve isn't known yet, then we need to send a
              * request to figure that out. */
             if (!auto_ranged_get->synced_data.object_range_known) {
-
-                /* If there exists a range header or we require validation of the response checksum, we currently always
-                 * do a head request first.
-                 * S3 returns the checksum of the entire object from the HEAD response
-                 *
-                 * For the range header value could be parsed client-side, doing so presents a number of
-                 * complications. For example, the given range could be an unsatisfiable range, and might not even
-                 * specify a complete range. To keep things simple, we are currently relying on the service to handle
-                 * turning the Range header into a Content-Range response header.*/
-                bool head_object_required = auto_ranged_get->initial_message_has_range_header != 0 ||
-                                            meta_request->checksum_config.validate_response_checksum;
-
-                if (head_object_required) {
-                    /* If the head object request hasn't been sent yet, then send it now. */
-                    if (!auto_ranged_get->synced_data.head_object_sent) {
+                if (auto_ranged_get->synced_data.head_object_sent ||
+                    auto_ranged_get->synced_data.num_parts_requested > 0) {
+                    goto has_work_remaining;
+                }
+                struct aws_s3_buffer_pool_ticket *ticket = NULL;
+                switch (s_s3_get_request_type_for_discovering_object_size(meta_request)) {
+                    case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
+                        AWS_LOGF_INFO(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Doing a HeadObject to discover the size of the object",
+                            (void *)meta_request);
                         request = aws_s3_request_new(
                             meta_request,
                             AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT,
                             AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
                             0 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
-
-                        request->discovers_object_size = true;
-
                         auto_ranged_get->synced_data.head_object_sent = true;
-                    }
-                } else if (auto_ranged_get->synced_data.num_parts_requested == 0) {
+                        break;
+                    case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+                        AWS_LOGF_INFO(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Doing a 'GET_OBJECT_WITH_PART_NUMBER_1' to discover the size of the object and get "
+                            "the first part",
+                            (void *)meta_request);
+                        ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
 
-                    struct aws_s3_buffer_pool_ticket *ticket =
-                        aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                        if (ticket == NULL) {
+                            goto has_work_remaining;
+                        }
 
-                    if (ticket == NULL) {
-                        goto has_work_remaining;
-                    }
+                        request = aws_s3_request_new(
+                            meta_request,
+                            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1,
+                            AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                            1 /*part_number*/,
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                        request->ticket = ticket;
+                        ++auto_ranged_get->synced_data.num_parts_requested;
 
-                    /* If we aren't using a head object, then discover the size of the object while trying to get the
-                     * first part. */
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
-                        AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                        1 /*part_number*/,
-                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                        break;
+                    case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
+                        AWS_LOGF_INFO(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Doing a 'GET_OBJECT_WITH_RANGE' to discover the size of the object and get the "
+                            "first part",
+                            (void *)meta_request);
 
-                    request->ticket = ticket;
-                    request->part_range_start = 0;
-                    request->part_range_end = meta_request->part_size - 1; /* range-end is inclusive */
-                    request->discovers_object_size = true;
+                        uint64_t part_range_start = 0;
+                        uint64_t first_part_size = meta_request->part_size;
+                        if (auto_ranged_get->initial_message_has_range_header) {
+                            /*
+                             * Currently, we only discover the size of the object when the initial range header includes
+                             * a start-range. If we ever implement skipping the HeadRequest for a Range request without
+                             * a start-range, this will need to update.
+                             */
+                            AWS_ASSERT(auto_ranged_get->initial_message_has_start_range);
+                            part_range_start = auto_ranged_get->initial_range_start;
 
-                    ++auto_ranged_get->synced_data.num_parts_requested;
+                            if (auto_ranged_get->initial_message_has_end_range) {
+                                first_part_size = aws_min_u64(
+                                    first_part_size,
+                                    auto_ranged_get->initial_range_end - auto_ranged_get->initial_range_start + 1);
+                            }
+
+                            auto_ranged_get->synced_data.first_part_size = first_part_size;
+                        }
+                        AWS_LOGF_INFO(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Doing a ranged get to discover the size of the object and get the first part",
+                            (void *)meta_request);
+                        ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, (size_t)first_part_size);
+
+                        if (ticket == NULL) {
+                            goto has_work_remaining;
+                        }
+
+                        request = aws_s3_request_new(
+                            meta_request,
+                            AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
+                            AWS_S3_REQUEST_TYPE_GET_OBJECT,
+                            1 /*part_number*/,
+                            AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
+                        request->ticket = ticket;
+                        request->part_range_start = part_range_start;
+                        request->part_range_end = part_range_start + first_part_size - 1; /* range-end is inclusive */
+                        ++auto_ranged_get->synced_data.num_parts_requested;
+                        break;
+                    default:
+                        AWS_FATAL_ASSERT(
+                            0 && "s_s3_get_request_type_for_discovering_object_size returned unexpected discover "
+                                 "object size request type");
                 }
-
-                goto has_work_remaining;
-            }
-
-            /* If the object range is known and that range is empty, then we have an empty file to request. */
-            if (auto_ranged_get->synced_data.object_range_empty != 0) {
-                if (auto_ranged_get->synced_data.get_without_range_sent) {
-                    if (auto_ranged_get->synced_data.get_without_range_completed) {
-                        goto no_work_remaining;
-                    } else {
-                        goto has_work_remaining;
-                    }
-                }
-                request = aws_s3_request_new(
-                    meta_request,
-                    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE,
-                    AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    0 /*part_number*/,
-                    AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS);
-
-                auto_ranged_get->synced_data.get_without_range_sent = true;
+                request->discovers_object_size = true;
                 goto has_work_remaining;
             }
 
@@ -259,17 +354,18 @@ static bool s_s3_auto_ranged_get_update(
 
                 request = aws_s3_request_new(
                     meta_request,
-                    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART,
+                    AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
                     auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY);
 
                 request->ticket = ticket;
 
-                aws_s3_get_part_range(
+                aws_s3_calculate_auto_ranged_get_part_range(
                     auto_ranged_get->synced_data.object_range_start,
                     auto_ranged_get->synced_data.object_range_end,
                     meta_request->part_size,
+                    auto_ranged_get->synced_data.first_part_size,
                     request->part_number,
                     &request->part_range_start,
                     &request->part_range_end);
@@ -293,11 +389,6 @@ static bool s_s3_auto_ranged_get_update(
 
             /* Wait for all requests to complete (successfully or unsuccessfully) before finishing.*/
             if (auto_ranged_get->synced_data.num_parts_completed < auto_ranged_get->synced_data.num_parts_requested) {
-                goto has_work_remaining;
-            }
-
-            if (auto_ranged_get->synced_data.get_without_range_sent &&
-                !auto_ranged_get->synced_data.get_without_range_completed) {
                 goto has_work_remaining;
             }
 
@@ -375,16 +466,20 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
                 aws_http_message_set_request_method(message, g_head_method);
             }
             break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
             message = aws_s3_ranged_get_object_message_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 request->part_range_start,
                 request->part_range_end);
             break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
             message = aws_s3_message_util_copy_http_message_no_body_all_headers(
                 meta_request->allocator, meta_request->initial_request_message);
+            if (message) {
+                aws_s3_message_util_set_multipart_request_path(
+                    meta_request->allocator, NULL, request->part_number, false, message);
+            }
             break;
     }
 
@@ -463,22 +558,28 @@ static bool s_check_empty_file_download_error(struct aws_s3_request *failed_requ
     return false;
 }
 
-static int s_discover_object_range_and_content_length(
+static int s_discover_object_range_and_size(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code,
-    uint64_t *out_total_content_length,
     uint64_t *out_object_range_start,
-    uint64_t *out_object_range_end) {
-    AWS_PRECONDITION(out_total_content_length);
+    uint64_t *out_object_range_end,
+    uint64_t *out_object_size,
+    uint64_t *out_first_part_size,
+    bool *out_empty_file_error) {
+
+    AWS_PRECONDITION(out_object_size);
     AWS_PRECONDITION(out_object_range_start);
     AWS_PRECONDITION(out_object_range_end);
+    AWS_PRECONDITION(out_first_part_size);
 
     int result = AWS_OP_ERR;
 
-    uint64_t total_content_length = 0;
+    uint64_t content_length = 0;
+    uint64_t object_size = 0;
     uint64_t object_range_start = 0;
     uint64_t object_range_end = 0;
+    uint64_t first_part_size = 0;
 
     AWS_ASSERT(request->discovers_object_size);
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
@@ -492,7 +593,7 @@ static int s_discover_object_range_and_content_length(
 
             /* There should be a Content-Length header that indicates the total size of the range.*/
             if (aws_s3_parse_content_length_response_header(
-                    meta_request->allocator, request->send_data.response_headers, &total_content_length)) {
+                    meta_request->allocator, request->send_data.response_headers, &content_length)) {
 
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
@@ -506,13 +607,16 @@ static int s_discover_object_range_and_content_length(
              * object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
-                object_range_end = total_content_length - 1; /* range-end is inclusive */
+                object_size = content_length;
+                if (content_length > 0) {
+                    object_range_end = content_length - 1; /* range-end is inclusive */
+                }
             } else if (aws_s3_parse_content_range_response_header(
                            meta_request->allocator,
                            request->send_data.response_headers,
                            &object_range_start,
                            &object_range_end,
-                           NULL)) {
+                           &object_size)) {
 
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
@@ -524,22 +628,58 @@ static int s_discover_object_range_and_content_length(
 
             result = AWS_OP_SUCCESS;
             break;
-        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+            AWS_ASSERT(request->part_number == 1);
+            AWS_ASSERT(request->send_data.response_headers != NULL);
+            /* There should be a Content-Length header that indicates the size of first part. */
+            if (aws_s3_parse_content_length_response_header(
+                    meta_request->allocator, request->send_data.response_headers, &content_length)) {
+
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Could not find content-length header for request %p",
+                    (void *)meta_request,
+                    (void *)request);
+                break;
+            }
+            first_part_size = content_length;
+
+            if (first_part_size > 0) {
+                /* Parse the object size from the part response. */
+                if (aws_s3_parse_content_range_response_header(
+                        meta_request->allocator, request->send_data.response_headers, NULL, NULL, &object_size)) {
+
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p Could not find content-range header for request %p",
+                        (void *)meta_request,
+                        (void *)request);
+                    break;
+                }
+                /* When discovering the object size via GET_OBJECT_WITH_PART_NUMBER_1, the object range is the entire
+                 * object. */
+                object_range_start = 0;
+                object_range_end = object_size - 1; /* range-end is inclusive */
+            }
+
+            result = AWS_OP_SUCCESS;
+            break;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
             AWS_ASSERT(request->part_number == 1);
 
             if (error_code != AWS_ERROR_SUCCESS) {
                 /* If we hit an empty file while trying to discover the object-size via part, then this request
                 failure
                  * is as designed. */
-                if (s_check_empty_file_download_error(request)) {
+                if (!auto_ranged_get->initial_message_has_range_header && s_check_empty_file_download_error(request)) {
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p Detected empty file with request %p. Sending new request without range header.",
                         (void *)meta_request,
                         (void *)request);
 
-                    total_content_length = 0ULL;
-
+                    object_size = 0ULL;
+                    *out_empty_file_error = true;
                     result = AWS_OP_SUCCESS;
                 } else {
                     /* Otherwise, resurface the error code. */
@@ -552,7 +692,11 @@ static int s_discover_object_range_and_content_length(
 
             /* Parse the object size from the part response. */
             if (aws_s3_parse_content_range_response_header(
-                    meta_request->allocator, request->send_data.response_headers, NULL, NULL, &total_content_length)) {
+                    meta_request->allocator,
+                    request->send_data.response_headers,
+                    &object_range_start,
+                    &object_range_end,
+                    &object_size)) {
 
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
@@ -562,11 +706,17 @@ static int s_discover_object_range_and_content_length(
 
                 break;
             }
-
-            /* When discovering the object size via first-part, the object range is the entire object. */
-            object_range_start = 0;
-            object_range_end = total_content_length - 1; /* range-end is inclusive */
-
+            if (auto_ranged_get->initial_message_has_range_header) {
+                if (auto_ranged_get->initial_message_has_end_range) {
+                    object_range_end = aws_min_u64(object_size - 1, auto_ranged_get->initial_range_end);
+                } else {
+                    object_range_end = object_size - 1;
+                }
+            } else {
+                /* When discovering the object size via GET_OBJECT_WITH_RANGE, the object range is the entire object. */
+                object_range_start = 0;
+                object_range_end = object_size - 1; /* range-end is inclusive */
+            }
             result = AWS_OP_SUCCESS;
             break;
         default:
@@ -575,9 +725,10 @@ static int s_discover_object_range_and_content_length(
     }
 
     if (result == AWS_OP_SUCCESS) {
-        *out_total_content_length = total_content_length;
+        *out_object_size = object_size;
         *out_object_range_start = object_range_start;
         *out_object_range_end = object_range_end;
+        *out_first_part_size = first_part_size;
     }
 
     return result;
@@ -594,25 +745,33 @@ static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     AWS_PRECONDITION(auto_ranged_get);
 
-    uint64_t total_content_length = 0ULL;
     uint64_t object_range_start = 0ULL;
     uint64_t object_range_end = 0ULL;
+    uint64_t object_size = 0ULL;
+    uint64_t first_part_size = 0ULL;
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
+    bool first_part_size_mismatch = (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+    bool empty_file_error = false;
 
     if (request->discovers_object_size) {
-
-        /* Try to discover the object-range and content length.*/
-        if (s_discover_object_range_and_content_length(
-                meta_request, request, error_code, &total_content_length, &object_range_start, &object_range_end)) {
+        /* Try to discover the object-range and object-size.*/
+        if (s_discover_object_range_and_size(
+                meta_request,
+                request,
+                error_code,
+                &object_range_start,
+                &object_range_end,
+                &object_size,
+                &first_part_size,
+                &empty_file_error)) {
 
             error_code = aws_last_error_or_unknown();
 
             goto update_synced_data;
         }
-
-        if (!request_failed && !auto_ranged_get->initial_message_has_if_match_header) {
+        if ((!request_failed || first_part_size_mismatch) && !auto_ranged_get->initial_message_has_if_match_header) {
             AWS_ASSERT(auto_ranged_get->etag == NULL);
             struct aws_byte_cursor etag_header_value;
 
@@ -635,22 +794,37 @@ static void s_s3_auto_ranged_get_request_finished(
         error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
 
-        if (meta_request->headers_callback != NULL) {
+        if (!empty_file_error && meta_request->headers_callback != NULL) {
             struct aws_http_headers *response_headers = aws_http_headers_new(meta_request->allocator);
 
             copy_http_headers(request->send_data.response_headers, response_headers);
 
-            /* If this request is a part, then the content range isn't applicable. */
-            if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART) {
-                /* For now, we can assume that discovery of size via the first part of the object does not apply to
-                 * breaking up a ranged request. If it ever does, then we will need to repopulate this header. */
-                AWS_ASSERT(!auto_ranged_get->initial_message_has_range_header);
+            if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE ||
+                request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
 
-                aws_http_headers_erase(response_headers, g_content_range_header_name);
+                if (auto_ranged_get->initial_message_has_range_header) {
+                    /* Populate the header with object_range */
+                    char content_range_buffer[64] = "";
+                    snprintf(
+                        content_range_buffer,
+                        sizeof(content_range_buffer),
+                        "bytes %" PRIu64 "-%" PRIu64 "/%" PRIu64,
+                        object_range_start,
+                        object_range_end,
+                        object_size);
+                    aws_http_headers_set(
+                        response_headers,
+                        g_content_range_header_name,
+                        aws_byte_cursor_from_c_str(content_range_buffer));
+                } else {
+                    /* content range isn't applicable. */
+                    aws_http_headers_erase(response_headers, g_content_range_header_name);
+                }
             }
 
+            uint64_t content_length = object_size ? object_range_end - object_range_start + 1 : 0;
             char content_length_buffer[64] = "";
-            snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, total_content_length);
+            snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, content_length);
             aws_http_headers_set(
                 response_headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
 
@@ -673,17 +847,25 @@ update_synced_data:
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
+        bool finishing_metrics = true;
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
-
             auto_ranged_get->synced_data.object_range_known = true;
-            auto_ranged_get->synced_data.object_range_empty = (total_content_length == 0);
+            auto_ranged_get->synced_data.object_range_empty = (object_size == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
-            auto_ranged_get->synced_data.total_num_parts =
-                aws_s3_get_num_parts(meta_request->part_size, object_range_start, object_range_end);
+            if (!first_part_size_mismatch && first_part_size) {
+                auto_ranged_get->synced_data.first_part_size = first_part_size;
+            }
+            if (auto_ranged_get->synced_data.object_range_empty == 0) {
+                auto_ranged_get->synced_data.total_num_parts = aws_s3_calculate_auto_ranged_get_num_parts(
+                    meta_request->part_size,
+                    auto_ranged_get->synced_data.first_part_size,
+                    object_range_start,
+                    object_range_end);
+            }
         }
 
         switch (request->request_tag) {
@@ -691,7 +873,27 @@ update_synced_data:
                 auto_ranged_get->synced_data.head_object_completed = true;
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Head object completed.", (void *)meta_request);
                 break;
-            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_PART:
+            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+                AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
+                if (first_part_size_mismatch && found_object_size) {
+                    /* We canceled GET_OBJECT_WITH_PART_NUMBER_1 request because the Content-Length was bigger than
+                     * part_size. Try to fetch the first part again as a ranged get */
+                    auto_ranged_get->synced_data.num_parts_requested = 0;
+                    break;
+                }
+                /* fall through */
+            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
+                if (empty_file_error) {
+                    /*
+                     * Try to download the object again using GET_OBJECT_WITH_PART_NUMBER_1. If the file is still
+                     * empty, successful response headers will be provided to users. If not, the newer version of the
+                     * file will be downloaded.
+                     */
+                    auto_ranged_get->synced_data.num_parts_requested = 0;
+                    auto_ranged_get->synced_data.object_range_known = 0;
+                    break;
+                }
+
                 ++auto_ranged_get->synced_data.num_parts_completed;
 
                 if (!request_failed) {
@@ -722,6 +924,8 @@ update_synced_data:
                     }
 
                     aws_s3_meta_request_stream_response_body_synced(meta_request, request);
+                    /* The body of the request is queued to be streamed, don't finish the metrics yet. */
+                    finishing_metrics = false;
 
                     AWS_LOGF_DEBUG(
                         AWS_LS_S3_META_REQUEST,
@@ -733,11 +937,6 @@ update_synced_data:
                 } else {
                     ++auto_ranged_get->synced_data.num_parts_failed;
                 }
-                break;
-            case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_INITIAL_MESSAGE:
-                AWS_LOGF_DEBUG(
-                    AWS_LS_S3_META_REQUEST, "id=%p Get of file using initial message completed.", (void *)meta_request);
-                auto_ranged_get->synced_data.get_without_range_completed = true;
                 break;
         }
 
@@ -756,7 +955,9 @@ update_synced_data:
                 meta_request->synced_data.finish_result.validation_algorithm = request->validation_algorithm;
             }
         }
-
+        if (finishing_metrics) {
+            aws_s3_request_finish_up_metrics_synced(request, meta_request);
+        }
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
