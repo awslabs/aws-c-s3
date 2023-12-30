@@ -23,8 +23,8 @@
 #include <inttypes.h>
 
 static const uint32_t s_connection_timeout_ms = 3000;
-static const uint16_t s_http_port = 80;
-static const uint16_t s_https_port = 443;
+static const uint32_t s_http_port = 80;
+static const uint32_t s_https_port = 443;
 
 static void s_s3_endpoint_on_host_resolver_address_resolved(
     struct aws_host_resolver *resolver,
@@ -39,7 +39,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
-    uint16_t port,
+    uint32_t port,
     const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,
@@ -136,7 +136,7 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     struct aws_client_bootstrap *client_bootstrap,
     const struct aws_tls_connection_options *tls_connection_options,
     uint32_t max_connections,
-    uint16_t port,
+    uint32_t port,
     const struct aws_http_proxy_config *proxy_config,
     const struct proxy_env_var_settings *proxy_ev_settings,
     uint32_t connect_timeout_ms,

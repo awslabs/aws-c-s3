@@ -944,7 +944,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     AWS_FATAL_ASSERT(aws_http_headers_get(message_headers, g_host_header_name, &host_header_value) == AWS_OP_SUCCESS);
 
     bool is_https = true;
-    uint16_t port = 0;
+    uint32_t port = 0;
 
     if (options->endpoint != NULL) {
         struct aws_byte_cursor https_scheme = aws_byte_cursor_from_c_str("https");
