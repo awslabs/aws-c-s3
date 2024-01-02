@@ -8,7 +8,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 - **DNS Load Balancing**: DNS resolver continuously harvests Amazon S3 IP addresses. When load is spread across the S3 fleet, overall throughput is better than if all connections hammered on the same IP simultaneously.
 - **Advanced Network Management**: The client incorporates automatic request parallelization, effective timeouts and retries, and efficient connection reuse. This approach helps to maximize throughput and network utilization, and to avoid network overloads.
 - **Thread Pools and Async I/O**: Avoids bottlenecks associated with single-thread processing.
-- **Parallel Reads**: Supports parallel file reads from disk when uploading a file to S3.
+- **Parallel Reads**: When uploading a large file from disk, reads from multiple parts of the file in parallel. This is faster than reading the file sequentially from beginning to end.
 
 ### Documentation
 
