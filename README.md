@@ -5,7 +5,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 ### Key features:
 - **Automatic Request Splitting**: Improves throughput by automatically splitting the request into part-sized chunks and performing parallel uploads/downloads of these chunks over multiple connections. There's a cap on the throughput of single S3 connection, the only way to go faster is multiple parallel connections.
 - **Automatic Retries**: Increases resilience by retrying individual failed chunks of a file transfer, eliminating the need to restart transfers from scratch after an intermittent error.
-- **DNS Load Balancing**: DNS resolver continuously harvests Amazon S3 IP addresses. When load is spread across the S3 fleet, overall throughput is better than if all connections hammered on the same IP simultaneously.
+- **DNS Load Balancing**: DNS resolver continuously harvests Amazon S3 IP addresses. When load is spread across the S3 fleet, overall throughput is better than if all connections were hammering the same IP simultaneously.
 - **Advanced Network Management**: The client incorporates automatic request parallelization, effective timeouts and retries, and efficient connection reuse. This approach helps to maximize throughput and network utilization, and to avoid network overloads.
 - **Thread Pools and Async I/O**: Avoids bottlenecks associated with single-thread processing.
 - **Parallel Reads**: When uploading a large file from disk, reads from multiple parts of the file in parallel. This is faster than reading the file sequentially from beginning to end.
