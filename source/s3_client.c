@@ -513,8 +513,8 @@ struct aws_s3_client *aws_s3_client_new(
             .shutdown_callback_fn = s_s3_client_body_streaming_elg_shutdown,
             .shutdown_callback_user_data = client,
         };
-
-        if (aws_get_cpu_group_count() > 1) {
+        // waahm7
+        if (false && aws_get_cpu_group_count() > 1) {
             client->body_streaming_elg = aws_event_loop_group_new_default_pinned_to_cpu_group(
                 client->allocator, num_streaming_threads, 1, &body_streaming_elg_shutdown_options);
         } else {
