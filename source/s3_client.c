@@ -342,7 +342,12 @@ struct aws_s3_client *aws_s3_client_new(
         }
 #endif
     } else {
-        mem_limit = client_config->memory_limit_in_bytes;
+        // cap memory limit to SIZE_MAX
+        if (client_config->memory_limit_in_bytes > SIZE_MAX) {
+            mem_limit = SIZE_MAX;
+        } else {
+            mem_limit = (size_t)client_config->memory_limit_in_bytes;
+        }
     }
 
     size_t part_size = s_default_part_size;

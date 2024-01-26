@@ -421,8 +421,8 @@ struct aws_s3_client_config {
     /* Throughput target in gigabits per second (Gbps) that we are trying to reach. */
     double throughput_target_gbps;
 
-    /* How much memory can we use. */
-    size_t memory_limit_in_bytes;
+    /* How much memory can we use. This will be capped to SIZE_MAX */
+    uint64_t memory_limit_in_bytes;
 
     /* Retry strategy to use. If NULL, a default retry strategy will be used. */
     struct aws_retry_strategy *retry_strategy;
