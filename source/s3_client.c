@@ -258,7 +258,6 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     return s3express_provider;
 }
 
-
 static size_t s_default_part_mem_limit_multiplier = 2;
 
 bool s_mem_limit_enough_for_part_size(size_t part_size, size_t mem_limit) {
@@ -269,8 +268,12 @@ bool s_mem_limit_enough_for_part_size(size_t part_size, size_t mem_limit) {
 /*
  * Calculates default value for mem limit if 0 mem limit was specified in
  * config, and otherwise boxes it to allowable value (ex. size max on 32 bit)
-*/
-static int s_calculate_mem_limit_based_off_config(uint64_t config_mem_limit, double target_throughput, size_t part_size, size_t *out_mem_limit) {
+ */
+static int s_calculate_mem_limit_based_off_config(
+    uint64_t config_mem_limit,
+    double target_throughput,
+    size_t part_size,
+    size_t *out_mem_limit) {
 
     if (config_mem_limit == 0) {
 #if SIZE_BITS == 32
@@ -291,7 +294,8 @@ static int s_calculate_mem_limit_based_off_config(uint64_t config_mem_limit, dou
         if (!s_mem_limit_enough_for_part_size(part_size, *out_mem_limit)) {
             AWS_LOGF_WARN(
                 AWS_LS_S3_CLIENT,
-                "Default memory limit is not sufficient for configured part size and memory limit has been automatically increased. "
+                "Default memory limit is not sufficient for configured part size and memory limit has been "
+                "automatically increased. "
                 "Consider manually adjusting memory limit for better performance");
             *out_mem_limit = aws_mul_size_saturating(part_size, s_default_part_mem_limit_multiplier);
         }
@@ -392,8 +396,8 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     size_t mem_limit = 0;
-    if (s_calculate_mem_limit_based_off_config(client_config->memory_limit_in_bytes, 
-        client_config->throughput_target_gbps, part_size, &mem_limit)) {
+    if (s_calculate_mem_limit_based_off_config(
+            client_config->memory_limit_in_bytes, client_config->throughput_target_gbps, part_size, &mem_limit)) {
         goto on_early_fail;
     }
 
@@ -408,7 +412,8 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->max_part_size > pool_usage.mem_limit) {
         AWS_LOGF_WARN(
             AWS_LS_S3_CLIENT,
-            "Configured max part size might result in some requests failing due to calculated part size exceeding memory limit. "
+            "Configured max part size might result in some requests failing due to calculated part size exceeding "
+            "memory limit. "
             "Consider decreasing max part size or increasing memory limit.");
     }
 
