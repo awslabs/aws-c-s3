@@ -307,7 +307,7 @@ static int s_calculate_mem_limit_based_off_config(uint64_t config_mem_limit, dou
         if (!s_mem_limit_enough_for_part_size(part_size, *out_mem_limit)) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_CLIENT,
-                "Configured memory limit is not sufficient to run for the configured part size. " 
+                "Configured memory limit is not sufficient to run for the configured part size. "
                 "Memory limit should be at least 2 times the part size.");
             return aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         }
