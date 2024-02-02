@@ -262,7 +262,7 @@ static size_t s_default_part_mem_limit_multiplier = 2;
 
 bool s_mem_limit_enough_for_part_size(size_t part_size, size_t mem_limit) {
     size_t part_mem_limit = aws_mul_size_saturating(part_size, s_default_part_mem_limit_multiplier);
-    return part_mem_limit > mem_limit;
+    return part_mem_limit <= mem_limit;
 }
 
 /*
