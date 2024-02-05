@@ -335,6 +335,7 @@ add_test_case(test_s3_buffer_pool_trim)
 add_test_case(test_s3_buffer_pool_reservation_hold)
 add_test_case(test_s3_buffer_pool_too_small)
 add_net_test_case(test_s3_put_object_buffer_pool_trim)
+add_test_case(client_part_size_over_mem_limit)
 
 add_net_test_case(client_update_upload_part_timeout)
 add_net_test_case(client_meta_request_override_part_size)

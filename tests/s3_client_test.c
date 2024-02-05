@@ -387,3 +387,23 @@ TEST_CASE(client_meta_request_override_multipart_upload_threshold) {
 
     return AWS_OP_SUCCESS;
 }
+
+/* Test meta request can override the multipart upload threshold as expected */
+TEST_CASE(client_part_size_over_mem_limit) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = GB_TO_BYTES(2),
+        .memory_limit_in_bytes = GB_TO_BYTES(1)
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_NULL(client);
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, aws_last_error());
+}
