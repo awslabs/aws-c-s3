@@ -406,4 +406,6 @@ TEST_CASE(client_part_size_over_mem_limit) {
 
     ASSERT_NULL(client);
     ASSERT_INT_EQUALS(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, aws_last_error());
+
+    return AWS_OP_SUCCESS;
 }
