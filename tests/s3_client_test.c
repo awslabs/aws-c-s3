@@ -391,7 +391,9 @@ TEST_CASE(client_meta_request_override_multipart_upload_threshold) {
 /* Test meta request can override the multipart upload threshold as expected */
 TEST_CASE(client_part_size_over_mem_limit) {
     (void)ctx;
+
     struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client_config client_config = {
@@ -407,6 +409,7 @@ TEST_CASE(client_part_size_over_mem_limit) {
     ASSERT_NULL(client);
     ASSERT_INT_EQUALS(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, aws_last_error());
 
+    tester.bound_to_client = false;
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
