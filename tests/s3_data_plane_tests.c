@@ -6919,7 +6919,7 @@ static int s_test_s3_put_pause_resume_happy_path(struct aws_allocator *allocator
     aws_input_stream_destroy(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_put_pause_resume_all_parts_done, s_test_s3_put_pause_resume_all_parts_done)
@@ -6998,7 +6998,7 @@ static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *alloc
     aws_input_stream_destroy(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_put_pause_resume_invalid_resume_data, s_test_s3_put_pause_resume_invalid_resume_data)
@@ -7076,7 +7076,7 @@ static int s_test_s3_put_pause_resume_invalid_resume_data(struct aws_allocator *
     aws_input_stream_destroy(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_put_pause_resume_invalid_resume_stream, s_test_s3_put_pause_resume_invalid_resume_stream)
@@ -7159,7 +7159,7 @@ static int s_test_s3_put_pause_resume_invalid_resume_stream(struct aws_allocator
     aws_input_stream_release(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_put_pause_resume_invalid_content_length, s_test_s3_put_pause_resume_invalid_content_length)
@@ -7238,7 +7238,7 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
     aws_input_stream_release(resume_upload_stream);
     aws_s3_tester_clean_up(&tester);
 
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 /* Most basic test of the upload_review_callback */
