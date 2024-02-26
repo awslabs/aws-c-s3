@@ -51,21 +51,14 @@ struct aws_s3_meta_request_work {
 
 static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 
+/* max-requests-in-flight = ideal-num-connections * s_max_requests_multiplier */
 static const uint32_t s_max_requests_multiplier = 4;
 
-/* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 4.0;
-
-/* Preferred amount of active connections per meta request type. */
-const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE_MAX] = {
-    10, /* AWS_S3_META_REQUEST_TYPE_DEFAULT */
-    10, /* AWS_S3_META_REQUEST_TYPE_GET_OBJECT */
-    10, /* AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
-    10  /* AWS_S3_META_REQUEST_TYPE_COPY_OBJECT */
+const double g_throughput_per_connection_gbps[AWS_S3_STORAGE_CLASS_COUNT] = {
+    /* Values based on tests downloading 30GiB file (3840 8MiB) parts on c5n.18xlarge (100Gbps NIC) */
+    [AWS_S3_STORAGE_CLASS_DEFAULT] = 100.0 / 160,   /* 160 connections performed best */
+    [AWS_S3_STORAGE_CLASS_S3EXPRESS] = 100.0 / 120, /* 120 connections performed best */
 };
-
-/* Should be max of s_num_conns_per_vip_meta_request_look_up */
-const uint32_t g_max_num_connections_per_vip = 10;
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
@@ -152,6 +145,12 @@ uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
 
+#if 1
+
+
+
+#else
+
     uint32_t num_connections_per_vip = g_max_num_connections_per_vip;
     uint32_t num_vips = client->ideal_vip_count;
 
@@ -184,6 +183,7 @@ uint32_t aws_s3_client_get_max_active_connections(
     }
 
     return max_active_connections;
+#endif
 }
 
 /* Returns the max number of requests allowed to be in memory */
@@ -541,8 +541,9 @@ struct aws_s3_client *aws_s3_client_new(
 
     /* Determine how many vips are ideal by dividing target-throughput by throughput-per-vip. */
     {
-        double ideal_vip_count_double = client->throughput_target_gbps / s_throughput_per_vip_gbps;
-        *((uint32_t *)&client->ideal_vip_count) = (uint32_t)ceil(ideal_vip_count_double);
+        double throughput_per_conn = s_throughput_per_connection_gbps[AWS_S3_STORAGE_CLASS_DEFAULT];
+        double ideal_conn_count_double = client->throughput_target_gbps / throughput_per_conn;
+        *((uint32_t *)&client->ideal_connection_count) = (uint32_t)ceil(ideal_conn_count_double);
     }
 
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);

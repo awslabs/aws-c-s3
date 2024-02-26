@@ -345,6 +345,15 @@ struct aws_s3_tcp_keep_alive_options {
     uint16_t keep_alive_max_failed_probes;
 };
 
+enum aws_s3_storage_class {
+    AWS_S3_STORAGE_CLASS_DEFAULT = 0,
+
+    /** S3 Express One Zone */
+    AWS_S3_STORAGE_CLASS_S3EXPRESS,
+
+    AWS_S3_STORAGE_CLASS_COUNT,
+};
+
 /* Options for a new client. */
 struct aws_s3_client_config {
 
@@ -624,6 +633,16 @@ struct aws_s3_meta_request_options {
      * if set, the flexible checksum will be performed by client based on the config.
      */
     const struct aws_s3_checksum_config *checksum_config;
+
+    /**
+     * Optional.
+     * The storage class for this object.
+     * This value is used to optimize performance (e.g. S3 Express connections
+     * have better throughput, so it takes fe
+     * connections are faster, so the client
+     * This value is used to tune th
+     */
+    enum aws_s3_storage_class storage_class;
 
     /**
      * Optional.
