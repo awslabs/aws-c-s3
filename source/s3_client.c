@@ -51,21 +51,24 @@ struct aws_s3_meta_request_work {
 
 static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 
+/* max-requests-in-flight = ideal-num-connections * s_max_requests_multiplier */
 static const uint32_t s_max_requests_multiplier = 4;
 
-/* TODO Provide analysis on origins of this value. */
-static const double s_throughput_per_vip_gbps = 4.0;
+/* This is used to determine the ideal number of HTTP connections. Algorithm is roughly:
+ * ideal-num-connections = throughput-target-gpbs / s_throughput_per_connection_gbps
+ *
+ * Magic value based on:
+ * We found 160 connections gave best performance for 30 GiB download
+ * (3840 8MiB parts) on 100Gbps c5n.18xlarge.
+ *
+ * TODO: Improve this algorithm (expect higher throughput for S3 Express,
+ * expect lower throughput for small objects, etc)
+ */
+static const double s_throughput_per_connection_gbps = 100.0 / 160;
 
-/* Preferred amount of active connections per meta request type. */
-const uint32_t g_num_conns_per_vip_meta_request_look_up[AWS_S3_META_REQUEST_TYPE_MAX] = {
-    10, /* AWS_S3_META_REQUEST_TYPE_DEFAULT */
-    10, /* AWS_S3_META_REQUEST_TYPE_GET_OBJECT */
-    10, /* AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
-    10  /* AWS_S3_META_REQUEST_TYPE_COPY_OBJECT */
-};
-
-/* Should be max of s_num_conns_per_vip_meta_request_look_up */
-const uint32_t g_max_num_connections_per_vip = 10;
+/* After throughput math, clamp the min/max number of connections */
+const uint32_t g_min_num_connections = 10;     /* Magic value based on: 10 was old behavior */
+const uint32_t g_max_num_connections = 100000; /* Magic value based on: 100000 is pretty big */
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
@@ -151,32 +154,9 @@ uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
+    (void)meta_request;
 
-    uint32_t num_connections_per_vip = g_max_num_connections_per_vip;
-    uint32_t num_vips = client->ideal_vip_count;
-
-    if (meta_request != NULL) {
-        num_connections_per_vip = g_num_conns_per_vip_meta_request_look_up[meta_request->type];
-
-        struct aws_s3_endpoint *endpoint = meta_request->endpoint;
-        AWS_ASSERT(endpoint != NULL);
-
-        AWS_ASSERT(client->vtable->get_host_address_count);
-        size_t num_known_vips = client->vtable->get_host_address_count(
-            client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
-
-        /* If the number of known vips is less than our ideal VIP count, clamp it. */
-        if (num_known_vips < (size_t)num_vips) {
-            num_vips = (uint32_t)num_known_vips;
-        }
-    }
-
-    /* We always want to allow for at least one VIP worth of connections. */
-    if (num_vips == 0) {
-        num_vips = 1;
-    }
-
-    uint32_t max_active_connections = num_vips * num_connections_per_vip;
+    uint32_t max_active_connections = client->ideal_connection_count;
 
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
@@ -530,7 +510,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
     /* Setup cannot fail after this point. */
 
-    if (client_config->throughput_target_gbps != 0.0) {
+    if (client_config->throughput_target_gbps > 0.0) {
         *((double *)&client->throughput_target_gbps) = client_config->throughput_target_gbps;
     } else {
         *((double *)&client->throughput_target_gbps) = s_default_throughput_target_gbps;
@@ -539,10 +519,14 @@ struct aws_s3_client *aws_s3_client_new(
     *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
         client_config->compute_content_md5;
 
-    /* Determine how many vips are ideal by dividing target-throughput by throughput-per-vip. */
+    /* Determine how many connections are ideal by dividing target-throughput by throughput-per-connection. */
     {
-        double ideal_vip_count_double = client->throughput_target_gbps / s_throughput_per_vip_gbps;
-        *((uint32_t *)&client->ideal_vip_count) = (uint32_t)ceil(ideal_vip_count_double);
+        double ideal_connection_count_double = client->throughput_target_gbps / s_throughput_per_connection_gbps;
+        /* round up and clamp */
+        ideal_connection_count_double = ceil(ideal_connection_count_double);
+        ideal_connection_count_double = aws_max_double(g_min_num_connections, ideal_connection_count_double);
+        ideal_connection_count_double = aws_min_double(g_max_num_connections, ideal_connection_count_double);
+        *(uint32_t *)&client->ideal_connection_count = (uint32_t)ideal_connection_count_double;
     }
 
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
@@ -1687,7 +1671,7 @@ static bool s_s3_client_should_update_meta_request(
     size_t num_known_vips = client->vtable->get_host_address_count(
         client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
     if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
-                                client->threaded_data.request_queue_size) >= g_max_num_connections_per_vip) {
+                                client->threaded_data.request_queue_size) >= g_min_num_connections) {
         return false;
     }
 
