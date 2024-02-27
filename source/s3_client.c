@@ -64,7 +64,7 @@ static const uint32_t s_max_requests_multiplier = 4;
  * TODO: Improve this algorithm (expect higher throughput for S3 Express,
  * expect lower throughput for small objects, etc)
  */
-static const double s_throughput_per_connection_gbps = 100.0 / 160;
+static const double s_throughput_per_connection_gbps = 100.0 / 250;
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10;     /* Magic value based on: 10 was old behavior */
