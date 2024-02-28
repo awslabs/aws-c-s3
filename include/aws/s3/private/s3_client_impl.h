@@ -487,9 +487,6 @@ AWS_S3_API
 extern const uint32_t g_min_num_connections;
 
 AWS_S3_API
-extern const uint32_t g_max_num_connections;
-
-AWS_S3_API
 extern const size_t g_expect_timeout_offset_ms;
 
 AWS_S3_API
