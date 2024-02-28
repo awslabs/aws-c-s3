@@ -66,7 +66,7 @@ static const uint32_t s_max_requests_multiplier = 4;
 static const double s_throughput_per_connection_gbps = 100.0 / 250;
 
 /* After throughput math, clamp the min/max number of connections */
-const uint32_t g_min_num_connections = 10;     /* Magic value based on: 10 was old behavior */
+const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
