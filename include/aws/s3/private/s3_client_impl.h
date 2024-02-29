@@ -242,8 +242,8 @@ struct aws_s3_client {
     /* Throughput target in Gbps that we are trying to reach. */
     const double throughput_target_gbps;
 
-    /* The calculated ideal number of VIP's based on throughput target and throughput per vip. */
-    const uint32_t ideal_vip_count;
+    /* The calculated ideal number of HTTP connections, based on throughput target and throughput per connection. */
+    const uint32_t ideal_connection_count;
 
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
@@ -484,10 +484,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
-extern const uint32_t g_max_num_connections_per_vip;
-
-AWS_S3_API
-extern const uint32_t g_num_conns_per_vip_meta_request_look_up[];
+extern const uint32_t g_min_num_connections;
 
 AWS_S3_API
 extern const size_t g_expect_timeout_offset_ms;
