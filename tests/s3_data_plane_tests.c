@@ -1358,6 +1358,50 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_multiple_serial, s_test_s3_get_object_multiple_serial)
+static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request *meta_requests[4];
+    struct aws_s3_meta_request_test_results meta_request_test_results[4];
+    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_requests);
+
+    ASSERT_TRUE(num_meta_requests == AWS_ARRAY_SIZE(meta_request_test_results));
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("pre-existing-1MB");
+    for (size_t i = 0; i < num_meta_requests; ++i) {
+        struct aws_s3_tester_meta_request_options get_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .client = client,
+            .get_options =
+                {
+                    .object_path = object_path,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+    }
+
+    client = aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_get_object_empty_object, s_test_s3_get_object_empty_default)
 static int s_test_s3_get_object_empty_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
