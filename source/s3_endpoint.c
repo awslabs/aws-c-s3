@@ -9,6 +9,7 @@
 
 #include <aws/auth/credentials.h>
 #include <aws/common/assert.h>
+#include <aws/common/clock.h>
 #include <aws/common/device_random.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>
@@ -77,6 +78,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
 
     endpoint->allocator = allocator;
     endpoint->host_name = options->host_name;
+    endpoint->client_bootstrap = options->client_bootstrap;
 
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);
@@ -260,6 +262,24 @@ void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     }
 }
 
+static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_task_status status) {
+    (void)status;
+    struct aws_s3_endpoint *endpoint = arg;
+
+    aws_mem_release(endpoint->allocator, task);
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_client_lock_synced_data(endpoint->client);
+    bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+    if (should_destroy) {
+        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+    }
+    aws_s3_client_unlock_synced_data(endpoint->client);
+    /* END CRITICAL SECTION */
+    if (should_destroy) {
+        s_s3_endpoint_ref_count_zero(endpoint);
+    }
+}
+
 static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(endpoint->client);
@@ -268,21 +288,31 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     aws_s3_client_lock_synced_data(endpoint->client);
 
     bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+    if (!should_destroy) {
+        --endpoint->client_synced_data.ref_count;
+    }
     if (should_destroy) {
         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-    } else {
-        --endpoint->client_synced_data.ref_count;
     }
 
     aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
 
     if (should_destroy) {
+        struct aws_task *clean_up_endpoint_task = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_task));
+        aws_task_init(clean_up_endpoint_task, s_clean_up_endpoint_task, endpoint, "clean_up_endpoint_task");
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(endpoint->client_bootstrap->event_loop_group);
+        uint64_t now_ns = 0;
+        aws_event_loop_current_clock_time(loop, &now_ns);
+        aws_event_loop_schedule_task_future(
+            endpoint->client_bootstrap->event_loop_group,
+            clean_up_endpoint_task,
+            now_ns + aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
         /* The endpoint may have async cleanup to do (connection manager).
          * When that's all done we'll invoke a completion callback.
          * Since it's a crime to hold a lock while invoking a callback,
          * we make sure that we've released the client's lock before proceeding... */
-        s_s3_endpoint_ref_count_zero(endpoint);
+        // s_s3_endpoint_ref_count_zero(endpoint);
     }
 }
 

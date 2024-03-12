@@ -121,6 +121,8 @@ struct aws_s3_endpoint {
 
     /* Client that owns this endpoint */
     struct aws_s3_client *client;
+
+    struct aws_client_bootstrap *client_bootstrap;
 };
 
 /* Represents one connection on a particular VIP. */
