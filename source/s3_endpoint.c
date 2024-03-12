@@ -305,7 +305,7 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
         uint64_t now_ns = 0;
         aws_event_loop_current_clock_time(loop, &now_ns);
         aws_event_loop_schedule_task_future(
-            endpoint->client_bootstrap->event_loop_group,
+            loop,
             clean_up_endpoint_task,
             now_ns + aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
         /* The endpoint may have async cleanup to do (connection manager).
