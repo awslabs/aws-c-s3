@@ -1362,27 +1362,20 @@ AWS_TEST_CASE(test_s3_get_object_multiple_serial, s_test_s3_get_object_multiple_
 static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_meta_request *meta_requests[4];
-    struct aws_s3_meta_request_test_results meta_request_test_results[4];
-    size_t num_meta_requests = AWS_ARRAY_SIZE(meta_requests);
-
-    ASSERT_TRUE(num_meta_requests == AWS_ARRAY_SIZE(meta_request_test_results));
-
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config = {
-        .part_size = 64 * 1024,
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-1MB");
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("pre-existing-1MB");
-    for (size_t i = 0; i < num_meta_requests; ++i) {
+    for (size_t i = 0; i < 2; ++i) {
         struct aws_s3_tester_meta_request_options get_options = {
             .allocator = allocator,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
