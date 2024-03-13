@@ -69,6 +69,8 @@ void aws_s3_endpoint_set_system_vtable(const struct aws_s3_endpoint_system_vtabl
 struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_allocator *allocator,
     const struct aws_s3_endpoint_options *options) {
+    AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: aws_s3_endpoint_new");
+
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->host_name);
@@ -249,6 +251,7 @@ static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already
     }
 
     AWS_ASSERT(endpoint->client_synced_data.ref_count > 0);
+    AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: acquiring the ref count");
     ++endpoint->client_synced_data.ref_count;
 
     if (!already_holding_lock) {
@@ -258,24 +261,33 @@ static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already
 
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     if (endpoint) {
+        AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: releasing the ref count");
         s_s3_endpoint_system_vtable->release(endpoint);
     }
 }
 
 static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_task_status status) {
     (void)status;
+    AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: cleanup endpoint task started");
     struct aws_s3_endpoint *endpoint = arg;
 
     aws_mem_release(endpoint->allocator, task);
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(endpoint->client);
     bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+
     if (should_destroy) {
+        AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: removing the endpoint from hashmap");
         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+    } else {
+        --endpoint->client_synced_data.ref_count;
     }
+    AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: refcount in cleanup task %zu", endpoint->client_synced_data.ref_count);
+
     aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
     if (should_destroy) {
+        AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: endpoint refcount is 0, cleanup everything");
         s_s3_endpoint_ref_count_zero(endpoint);
     }
 }
@@ -288,17 +300,17 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     aws_s3_client_lock_synced_data(endpoint->client);
 
     bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+
     if (!should_destroy) {
         --endpoint->client_synced_data.ref_count;
     }
-    if (should_destroy) {
-        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-    }
+    AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: refcount %zu", endpoint->client_synced_data.ref_count);
 
     aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
 
     if (should_destroy) {
+        AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: init cleanup task");
         struct aws_task *clean_up_endpoint_task = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_task));
         aws_task_init(clean_up_endpoint_task, s_clean_up_endpoint_task, endpoint, "clean_up_endpoint_task");
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(endpoint->client_bootstrap->event_loop_group);
@@ -307,14 +319,38 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
         aws_event_loop_schedule_task_future(
             loop,
             clean_up_endpoint_task,
-            now_ns + aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-        /* The endpoint may have async cleanup to do (connection manager).
-         * When that's all done we'll invoke a completion callback.
-         * Since it's a crime to hold a lock while invoking a callback,
-         * we make sure that we've released the client's lock before proceeding... */
-        // s_s3_endpoint_ref_count_zero(endpoint);
+            now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
     }
 }
+// waahm7:  old release function
+// static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
+//     AWS_PRECONDITION(endpoint);
+//     AWS_PRECONDITION(endpoint->client);
+
+//     /* BEGIN CRITICAL SECTION */
+//     aws_s3_client_lock_synced_data(endpoint->client);
+
+//     bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+//     if (should_destroy) {
+//         // AWS_FATAL_ASSERT(0 && "waahm7: destroying the connection manager");
+//         AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: destroying the connection manager");
+
+//         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+//     } else {
+//         --endpoint->client_synced_data.ref_count;
+//     }
+
+//     aws_s3_client_unlock_synced_data(endpoint->client);
+//     /* END CRITICAL SECTION */
+
+//     if (should_destroy) {
+//         /* The endpoint may have async cleanup to do (connection manager).
+//          * When that's all done we'll invoke a completion callback.
+//          * Since it's a crime to hold a lock while invoking a callback,
+//          * we make sure that we've released the client's lock before proceeding... */
+//         s_s3_endpoint_ref_count_zero(endpoint);
+//     }
+// }
 
 static void s_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
