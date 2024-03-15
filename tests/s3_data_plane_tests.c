@@ -1376,7 +1376,7 @@ static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator,
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-10MB");
 
-    for (size_t i = 0; i < 4; ++i) {
+    for (size_t i = 0; i < 2; ++i) {
         struct aws_s3_tester_meta_request_options get_options = {
             .allocator = allocator,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,

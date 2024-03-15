@@ -108,6 +108,8 @@ struct aws_s3_endpoint {
          * The endpoint lives in hashtable: `aws_s3_client.synced_data.endpoints`
          * This ref-count can only be touched while holding client's lock */
         size_t ref_count;
+        bool cleanup_task_running;
+        bool run_cleanup_task;
     } client_synced_data;
 
     /* What allocator was used to create this endpoint. */
@@ -123,6 +125,8 @@ struct aws_s3_endpoint {
     struct aws_s3_client *client;
 
     struct aws_client_bootstrap *client_bootstrap;
+
+    struct aws_task *cleanup_task;
 };
 
 /* Represents one connection on a particular VIP. */
