@@ -26,7 +26,6 @@
 #include <aws/testing/aws_test_harness.h>
 #include <aws/testing/stream_tester.h>
 #include <inttypes.h>
-#include <unistd.h>
 
 AWS_TEST_CASE(test_s3_client_create_destroy, s_test_s3_client_create_destroy)
 static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void *ctx) {
@@ -1389,7 +1388,7 @@ static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator,
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
-        sleep(1);
+        // sleep(1);
     }
 
     client = aws_s3_client_release(client);
