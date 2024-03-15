@@ -645,7 +645,7 @@ static void s_s3_client_start_destroy(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.start_destroy_executing = false;
-
+        client->synced_data.process_endpoint_lifecycle_changes = true;
         /* Schedule the work task to clean up outstanding connections and to call s_s3_client_finish_destroy function if
          * everything cleaning up asynchronously has finished.  */
         s_s3_client_schedule_process_work_synced(client);
@@ -1534,25 +1534,39 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(client);
+    if (client->synced_data.process_endpoint_lifecycle_changes) {
+        client->synced_data.process_endpoint_lifecycle_changes = false;
+        for (struct aws_hash_iter iter = aws_hash_iter_begin(&client->synced_data.endpoints);
+             !aws_hash_iter_done(&iter);
+             aws_hash_iter_next(&iter)) {
 
-    for (struct aws_hash_iter iter = aws_hash_iter_begin(&client->synced_data.endpoints); !aws_hash_iter_done(&iter);
-         aws_hash_iter_next(&iter)) {
-
-        struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
-        AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: endpoint loop:%s", aws_string_c_str(endpoint->host_name));
-
-        uint64_t now_ns = 0;
-        aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
-        if (endpoint->client_synced_data.run_cleanup_task && !endpoint->client_synced_data.cleanup_task_running) {
-            AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: sechedling the task");
-            aws_event_loop_schedule_task_future(
-                client->process_work_event_loop,
-                endpoint->cleanup_task,
-                now_ns + aws_timestamp_convert(2, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-            endpoint->client_synced_data.cleanup_task_running = true;
+            struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
+            // AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: endpoint loop:%s", aws_string_c_str(endpoint->host_name));
+            if (client->synced_data.active) {
+                uint64_t now_ns = 0;
+                aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
+                if (endpoint->client_synced_data.run_cleanup_task &&
+                    !endpoint->client_synced_data.cleanup_task_running) {
+                    //     AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: sechedling the task");
+                    aws_event_loop_schedule_task_future(
+                        client->process_work_event_loop,
+                        endpoint->cleanup_task,
+                        now_ns + aws_timestamp_convert(2, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+                    endpoint->client_synced_data.run_cleanup_task = false;
+                    endpoint->client_synced_data.cleanup_task_running = true;
+                }
+            } else {
+                if (endpoint->client_synced_data.cleanup_task_running) {
+                    aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
+                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
+                } else if (endpoint->client_synced_data.run_cleanup_task) {
+                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
+                    endpoint->client_synced_data.run_cleanup_task = false;
+                    endpoint->client_synced_data.cleanup_task_running = true;
+                }
+            }
         }
     }
-
     aws_s3_client_unlock_synced_data(client);
     /* END CRITICAL SECTION */
 
