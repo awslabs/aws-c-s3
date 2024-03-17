@@ -308,7 +308,7 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     aws_s3_client_lock_synced_data(endpoint->client);
 
     bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
-    bool client_active = endpoint->client->synced_data.active;
+    bool client_active = endpoint->client->synced_data.active == 1;
     if (!should_destroy) {
         // if the cleanup_task is scheduled, that refcount will not be gone until task runs so we won't have multiple
         // cleanup tasks in parallel.
