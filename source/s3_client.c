@@ -1552,7 +1552,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                     aws_event_loop_schedule_task_future(
                         client->process_work_event_loop,
                         endpoint->cleanup_task,
-                        now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+                        now_ns + aws_timestamp_convert(5, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
                     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED;
                 }
             } else {
