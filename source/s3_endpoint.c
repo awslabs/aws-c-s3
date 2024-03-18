@@ -301,13 +301,15 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
 
     bool should_destroy = endpoint->client_synced_data.ref_count == 1;
     bool client_active = endpoint->client->synced_data.active == 1;
-    if (!should_destroy) {
-        --endpoint->client_synced_data.ref_count;
-    } else if (client_active) {
-        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP;
-        endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
+    if (should_destroy) {
+        if (client_active) {
+            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP;
+            endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
+        } else {
+            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+        }
     } else {
-        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+        --endpoint->client_synced_data.ref_count;
     }
 
     aws_s3_client_unlock_synced_data(endpoint->client);
