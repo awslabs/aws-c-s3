@@ -66,7 +66,7 @@ void aws_s3_endpoint_set_system_vtable(const struct aws_s3_endpoint_system_vtabl
     s_s3_endpoint_system_vtable = vtable;
 }
 
-static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_task_status status) {
+static void s_cleanup_endpoint_task(struct aws_task *task, void *arg, enum aws_task_status status) {
     (void)task;
     if (status != AWS_TASK_STATUS_RUN_READY) {
         return;
@@ -76,8 +76,8 @@ static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(endpoint->client);
-    bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
 
+    bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
     if (should_destroy) {
         endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
@@ -85,6 +85,7 @@ static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_
         endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
         --endpoint->client_synced_data.ref_count;
     }
+
     aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
 
@@ -96,7 +97,6 @@ static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_
 struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_allocator *allocator,
     const struct aws_s3_endpoint_options *options) {
-
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(options);
     AWS_PRECONDITION(options->host_name);
@@ -108,7 +108,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     endpoint->host_name = options->host_name;
     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
     endpoint->cleanup_task = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_task));
-    aws_task_init(endpoint->cleanup_task, s_clean_up_endpoint_task, endpoint, "clean_up_endpoint_task");
+    aws_task_init(endpoint->cleanup_task, s_cleanup_endpoint_task, endpoint, "cleanup_endpoint_task");
 
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);

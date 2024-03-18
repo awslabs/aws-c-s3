@@ -1543,6 +1543,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
 
             if (client->synced_data.active) {
+                /* If the client is active, we want to add a delay before destroying the connection pool. This helps us
+                 * cater to the use cases where customers are making requests to the same bucket in serial by
+                 * avoiding the destruction of the connection pool after each request. */
                 uint64_t now_ns = 0;
                 aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
                 if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
@@ -1555,12 +1558,12 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             } else {
                 /* client is shutting down, cleanup the endpoints now instead of waiting */
                 if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED) {
+                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
                     aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
                     aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
-                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
                 } else if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
-                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
                     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
                 }
             }
         }

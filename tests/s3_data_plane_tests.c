@@ -1374,19 +1374,18 @@ static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator,
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-10MB");
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+    };
 
     for (size_t i = 0; i < 4; ++i) {
-        struct aws_s3_tester_meta_request_options get_options = {
-            .allocator = allocator,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-            .client = client,
-            .get_options =
-                {
-                    .object_path = object_path,
-                },
-        };
-
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     }
 
