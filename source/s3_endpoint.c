@@ -306,6 +306,7 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
             endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP;
             endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
         } else {
+            aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
             endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
         }
     } else {
