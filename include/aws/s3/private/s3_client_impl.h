@@ -102,14 +102,20 @@ struct aws_s3_endpoint_system_vtable {
     void (*release)(struct aws_s3_endpoint *endpoint);
 };
 
+enum aws_s3_endpoint_state {
+    AWS_S3_ENDPOINT_STATE_ACTIVE,
+    AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP,
+    AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED,
+    AWS_S3_ENDPOINT_STATE_DESTROYING,
+};
+
 struct aws_s3_endpoint {
     struct {
         /* This is NOT an atomic ref-count.
          * The endpoint lives in hashtable: `aws_s3_client.synced_data.endpoints`
          * This ref-count can only be touched while holding client's lock */
         size_t ref_count;
-        bool cleanup_task_running;
-        bool run_cleanup_task;
+        enum aws_s3_endpoint_state state;
     } client_synced_data;
 
     /* What allocator was used to create this endpoint. */
@@ -123,8 +129,6 @@ struct aws_s3_endpoint {
 
     /* Client that owns this endpoint */
     struct aws_s3_client *client;
-
-    struct aws_client_bootstrap *client_bootstrap;
 
     struct aws_task *cleanup_task;
 };

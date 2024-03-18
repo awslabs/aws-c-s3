@@ -1534,39 +1534,39 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(client);
+
     if (client->synced_data.process_endpoint_lifecycle_changes) {
         client->synced_data.process_endpoint_lifecycle_changes = false;
         for (struct aws_hash_iter iter = aws_hash_iter_begin(&client->synced_data.endpoints);
              !aws_hash_iter_done(&iter);
              aws_hash_iter_next(&iter)) {
-
             struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
-            // AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: endpoint loop:%s", aws_string_c_str(endpoint->host_name));
+
             if (client->synced_data.active) {
                 uint64_t now_ns = 0;
                 aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
-                if (endpoint->client_synced_data.run_cleanup_task &&
-                    !endpoint->client_synced_data.cleanup_task_running) {
-                    //     AWS_LOGF_ERROR(AWS_LS_S3_ENDPOINT, "waahm7: sechedling the task");
+                if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
                     aws_event_loop_schedule_task_future(
                         client->process_work_event_loop,
                         endpoint->cleanup_task,
                         now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-                    endpoint->client_synced_data.run_cleanup_task = false;
-                    endpoint->client_synced_data.cleanup_task_running = true;
+                    // waahm7: idea: state enum? instead of 2 booleans
+                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED;
                 }
             } else {
-                if (endpoint->client_synced_data.cleanup_task_running) {
+                /* client is shutting down, cleanup the endpoints now instead of waiting */
+                if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED) {
                     aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
                     aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
-                } else if (endpoint->client_synced_data.run_cleanup_task) {
+                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+                } else if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
                     aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
-                    endpoint->client_synced_data.run_cleanup_task = false;
-                    endpoint->client_synced_data.cleanup_task_running = true;
+                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
                 }
             }
         }
     }
+
     aws_s3_client_unlock_synced_data(client);
     /* END CRITICAL SECTION */
 
@@ -1574,6 +1574,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* Step 4: Log client stats. */
     /*******************/
     {
+        // waahm7: idea: log pending endpoint cleanup?
         uint32_t num_requests_tracked_requests = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
         uint32_t num_auto_ranged_get_network_io =

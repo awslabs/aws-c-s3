@@ -76,12 +76,13 @@ static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(endpoint->client);
-    endpoint->client_synced_data.cleanup_task_running = false;
     bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
 
     if (should_destroy) {
         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
     } else {
+        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
         --endpoint->client_synced_data.ref_count;
     }
     aws_s3_client_unlock_synced_data(endpoint->client);
@@ -105,7 +106,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
 
     endpoint->allocator = allocator;
     endpoint->host_name = options->host_name;
-    endpoint->client_bootstrap = options->client_bootstrap;
+    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
     endpoint->cleanup_task = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_task));
     aws_task_init(endpoint->cleanup_task, s_clean_up_endpoint_task, endpoint, "clean_up_endpoint_task");
 
@@ -303,8 +304,10 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     if (!should_destroy) {
         --endpoint->client_synced_data.ref_count;
     } else if (client_active) {
-        endpoint->client_synced_data.run_cleanup_task = true;
+        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP;
         endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
+    } else {
+        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
     }
 
     aws_s3_client_unlock_synced_data(endpoint->client);
