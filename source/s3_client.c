@@ -1529,7 +1529,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         aws_s3_client_update_connections_threaded(client);
     }
     /*******************/
-    /* Step _: Clean up endpoints. */
+    /* Step 4: Cleanup Endpoints if Required. */
     /*******************/
 
     /* BEGIN CRITICAL SECTION */
@@ -1550,7 +1550,6 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                         client->process_work_event_loop,
                         endpoint->cleanup_task,
                         now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-                    // waahm7: idea: state enum? instead of 2 booleans
                     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED;
                 }
             } else {
@@ -1571,10 +1570,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     /* END CRITICAL SECTION */
 
     /*******************/
-    /* Step 4: Log client stats. */
+    /* Step 5: Log client stats. */
     /*******************/
     {
-        // waahm7: idea: log pending endpoint cleanup?
         uint32_t num_requests_tracked_requests = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
         uint32_t num_auto_ranged_get_network_io =
@@ -1621,7 +1619,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 
     /*******************/
-    /* Step 5: Check for client shutdown. */
+    /* Step 6: Check for client shutdown. */
     /*******************/
     {
         /* BEGIN CRITICAL SECTION */

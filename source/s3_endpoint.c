@@ -79,8 +79,8 @@ static void s_clean_up_endpoint_task(struct aws_task *task, void *arg, enum aws_
     bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
 
     if (should_destroy) {
-        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
         endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
     } else {
         endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
         --endpoint->client_synced_data.ref_count;
@@ -306,8 +306,8 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
             endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP;
             endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
         } else {
-            aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
             endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+            aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
         }
     } else {
         --endpoint->client_synced_data.ref_count;
