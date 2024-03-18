@@ -56,11 +56,6 @@ jobs:
           - gcc-7
           - gcc-8
     steps:
-      - name: Fix kernel mmap rnd bits
-        # High entropy setting in GH runner images >= 20240310.1.0
-        # causes ASAN blowing up here and there:
-        # https://github.com/actions/runner-images/issues/9491
-        run: sudo sysctl vm.mmap_rnd_bits=28
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
@@ -73,11 +68,6 @@ jobs:
       matrix:
         sanitizers: [",thread", ",address,undefined"]
     steps:
-      - name: Fix kernel mmap rnd bits
-        # High entropy setting in GH runner images >= 20240310.1.0
-        # causes ASAN blowing up here and there:
-        # https://github.com/actions/runner-images/issues/9491
-        run: sudo sysctl vm.mmap_rnd_bits=28
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
@@ -87,11 +77,6 @@ jobs:
   linux-shared-libs:
     runs-on: ubuntu-22.04 # latest
     steps:
-      - name: Fix kernel mmap rnd bits
-        # High entropy setting in GH runner images >= 20240310.1.0
-        # causes ASAN blowing up here and there:
-        # https://github.com/actions/runner-images/issues/9491
-        run: sudo sysctl vm.mmap_rnd_bits=28
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
@@ -101,11 +86,6 @@ jobs:
   byo-crypto:
     runs-on: ubuntu-22.04 # latest
     steps:
-      - name: Fix kernel mmap rnd bits
-        # High entropy setting in GH runner images >= 20240310.1.0
-        # causes ASAN blowing up here and there:
-        # https://github.com/actions/runner-images/issues/9491
-        run: sudo sysctl vm.mmap_rnd_bits=28
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
@@ -166,11 +146,6 @@ jobs:
   downstream:
     runs-on: ubuntu-22.04 # latest
     steps:
-      - name: Fix kernel mmap rnd bits
-        # High entropy setting in GH runner images >= 20240310.1.0
-        # causes ASAN blowing up here and there:
-        # https://github.com/actions/runner-images/issues/9491
-        run: sudo sysctl vm.mmap_rnd_bits=28
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
@@ -180,12 +155,7 @@ jobs:
   linux-debug:
     runs-on: ubuntu-22.04 # latest
     steps:
-      - name: Fix kernel mmap rnd bits
-        # High entropy setting in GH runner images >= 20240310.1.0
-        # causes ASAN blowing up here and there:
-        # https://github.com/actions/runner-images/issues/9491
-        run: sudo sysctl vm.mmap_rnd_bits=28
-      - name: Build ${{ env.PACKAGE_NAME }}
-        run: |
-          aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
-          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --config Debug
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
+        ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --config Debug
