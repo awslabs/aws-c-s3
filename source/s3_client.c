@@ -1545,7 +1545,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             if (client->synced_data.active) {
                 uint64_t now_ns = 0;
                 aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
-                if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
+                if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
                     aws_event_loop_schedule_task_future(
                         client->process_work_event_loop,
                         endpoint->cleanup_task,
@@ -1558,7 +1558,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                     aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
                     aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
                     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
-                } else if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
+                } else if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
                     aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
                     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
                 }

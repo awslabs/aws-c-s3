@@ -104,7 +104,7 @@ struct aws_s3_endpoint_system_vtable {
 
 enum aws_s3_endpoint_state {
     AWS_S3_ENDPOINT_STATE_ACTIVE,
-    AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP,
+    AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK,
     AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED,
     AWS_S3_ENDPOINT_STATE_DESTROYING,
 };
@@ -386,6 +386,7 @@ struct aws_s3_client {
         /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
         uint32_t finish_destroy : 1;
 
+        /* True if client has been flagged to process any enpoint lifecycle changes. */
         uint32_t process_endpoint_lifecycle_changes : 1;
 
         struct aws_s3_upload_part_timeout_stats upload_part_stats;

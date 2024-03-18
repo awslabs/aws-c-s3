@@ -1357,7 +1357,7 @@ static int s_test_s3_get_object_multiple(struct aws_allocator *allocator, void *
 
     return 0;
 }
-// waahm7
+
 AWS_TEST_CASE(test_s3_get_object_multiple_serial, s_test_s3_get_object_multiple_serial)
 static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1388,7 +1388,6 @@ static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator,
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
-        // sleep(1);
     }
 
     client = aws_s3_client_release(client);
