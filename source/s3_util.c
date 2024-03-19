@@ -401,7 +401,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
     }
 
-    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "UserAgentHeader: %" PRInSTR "", AWS_BYTE_BUF_PRI(user_agent_buffer));
+    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "UserAgentHeader:" PRInSTR "\n", AWS_BYTE_BUF_PRI(user_agent_buffer));
     /* Apply the updated header. */
     aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&user_agent_buffer));
 
