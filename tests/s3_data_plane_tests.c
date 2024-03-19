@@ -5274,7 +5274,6 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
     const struct aws_byte_cursor single_space = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
 
     struct aws_byte_buf expected_user_agent_value_buf;
