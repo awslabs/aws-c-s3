@@ -161,6 +161,7 @@ struct aws_s3_tester_meta_request_options {
     enum aws_s3_checksum_algorithm checksum_algorithm;
     struct aws_array_list *validate_checksum_algorithms;
     enum aws_s3_checksum_algorithm expected_validate_checksum_alg;
+    bool disable_put_trailing_checksum;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;
