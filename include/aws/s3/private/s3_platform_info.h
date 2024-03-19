@@ -42,7 +42,8 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_instance_type(
  */
 AWS_S3_API
 const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environment(
-    struct aws_s3_platform_info_loader *loader);
+    struct aws_s3_platform_info_loader *loader,
+    bool cached_only);
 
 /*
  * Retrieves a list of EC2 instance types with recommended configuration.

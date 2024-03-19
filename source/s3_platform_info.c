@@ -554,9 +554,12 @@ return_instance_and_unlock:
 }
 
 const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environment(
-    struct aws_s3_platform_info_loader *loader) {
+    struct aws_s3_platform_info_loader *loader,
+    bool cached_only) {
     /* getting the instance type will set it on the loader the first time if it can */
-    aws_s3_get_ec2_instance_type(loader);
+    if (cached_only) {
+        aws_s3_get_ec2_instance_type(loader);
+    }
     /* will never be mutated after the above call. */
     return &loader->lock_data.current_env_platform_info;
 }

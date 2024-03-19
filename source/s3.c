@@ -101,7 +101,11 @@ void aws_s3_library_init(struct aws_allocator *allocator) {
 }
 
 const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void) {
-    return aws_s3_get_platform_info_for_current_environment(s_loader);
+    return aws_s3_get_platform_info_for_current_environment(s_loader, false);
+}
+
+const struct aws_s3_platform_info *aws_s3_get_cached_current_platform_info(void) {
+    return aws_s3_get_platform_info_for_current_environment(s_loader, true);
 }
 
 struct aws_array_list aws_s3_get_platforms_with_recommended_config(void) {
