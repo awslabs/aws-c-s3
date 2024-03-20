@@ -321,7 +321,7 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
             /* schedule the cleanup task */
             aws_s3_client_schedule_process_work(endpoint->client);
         } else {
-            /* do a sync cleanup since client is not active anymore to avoid any cleanup delay */
+            /* do a sync cleanup since client is getting destroyed to avoid any cleanup delay */
             s_s3_endpoint_ref_count_zero(endpoint);
         }
     }
