@@ -23,10 +23,10 @@
  */
 
 /* Number of simultaneous upload meta-requests to create */
-const int MANY_ASYNC_UPLOADS_COUNT = 200;
+#define MANY_ASYNC_UPLOADS_COUNT 200
 
 /* Number of bytes each meta-request should upload (small so this this doesn't take forever) */
-const uint64_t MANY_ASYNC_UPLOADS_OBJECT_SIZE = 1;
+#define MANY_ASYNC_UPLOADS_OBJECT_SIZE 1
 
 /* How long to spend doing nothing, before assuming we're deadlocked */
 #define SEND_DATA_TIMEOUT_NANOS ((uint64_t)AWS_TIMESTAMP_NANOS * 10) /* 10secs */
