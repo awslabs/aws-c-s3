@@ -20,12 +20,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Sources
-        uses: actions/checkout@v4
-      - name: Fix kernel mmap rnd bits
-        # High entropy setting in GH runner images >= 20240310.1.0
-        # causes ASAN blowing up here and there:
-        # https://github.com/actions/runner-images/issues/9491
-        run: sudo sysctl vm.mmap_rnd_bits=28
+        uses: actions/checkout@v3
       - name: Build ${{ env.PACKAGE_NAME }} + consumers
         run: |
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
