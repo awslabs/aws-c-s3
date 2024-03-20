@@ -23,7 +23,13 @@
  */
 
 /* Number of simultaneous upload meta-requests to create */
-#define MANY_ASYNC_UPLOADS_COUNT 200
+/* TODO: when we come up with a real fix, increase to 1000 for all cases.
+ * But for now the memory_limit_in_bytes limits us, and it has a different default value for 32 and 64 bit */
+#if SIZE_BITS == 32
+#    define MANY_ASYNC_UPLOADS_COUNT 80
+#else
+#    define MANY_ASYNC_UPLOADS_COUNT 200
+#endif
 
 /* Number of bytes each meta-request should upload (small so this this doesn't take forever) */
 #define MANY_ASYNC_UPLOADS_OBJECT_SIZE 1
