@@ -355,7 +355,6 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
 
     const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
-    aws_s3_get_current_platform_info();
     struct aws_byte_cursor platform_cursor = aws_s3_get_cached_current_platform_info()->instance_type;
     if (!platform_cursor.len) {
         platform_cursor = g_user_agent_header_unknown;
@@ -401,7 +400,6 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
     }
-    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "UserAgentHeader:" PRInSTR "\n", AWS_BYTE_BUF_PRI(user_agent_buffer));
 
     /* Apply the updated header. */
     aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&user_agent_buffer));
