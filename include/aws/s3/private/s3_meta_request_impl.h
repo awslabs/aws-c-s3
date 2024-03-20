@@ -147,6 +147,11 @@ struct aws_s3_meta_request {
     struct aws_async_input_stream *request_body_async_stream;
     struct aws_parallel_input_stream *request_body_parallel_stream;
 
+    /* Whether to let this meta-request exceed the regular limits on num-request-being-prepared.
+     * This lets as many async-stream reads be pending as possible, reducing the chance of deadlock
+     * when the user can't control when data arrives. */
+    bool maximize_async_stream_reads;
+
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
 

@@ -1644,6 +1644,13 @@ static bool s_s3_client_should_update_meta_request(
         }
     }
 
+    /* If maximize_async_stream_reads, let this meta-request ignore max_requests_prepare & max_requests_in_flight.
+     * We need to maximize the number of async-streams being read from, because the user has no idea
+     * when data will arrive to any of them. */
+    if (meta_request->request_body_async_stream != NULL && meta_request->maximize_async_stream_reads) {
+        return true;
+    }
+
     /**
      * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
      * be in the preparation stage.

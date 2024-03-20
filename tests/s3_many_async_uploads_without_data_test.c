@@ -5,14 +5,15 @@
 #include "s3_tester.h"
 
 #include <aws/common/clock.h>
+#include <aws/s3/private/s3_util.h>
 #include <aws/testing/aws_test_harness.h>
 
 /**
  * Regression test for deadlock discovered by a user of Mountpoint (which wraps aws-c-s3
  * with a filesystem-like API). The user opened MANY files at once.
- * The user wrote data to some of the later files they opened, and waited
- * for those writes to complete. But the writes would never complete
- * because CRT was waiting on data from the first few files.
+ * The user wrote data to some of the later files they opened,
+ * and waited for those writes to complete.
+ * But aws-c-s3 was waiting on data from the first few files.
  * Both sides were waiting on each other. It was a deadlock.
  *
  * This test starts N upload meta-requests.
@@ -24,8 +25,8 @@
 /* Number of simultaneous upload meta-requests to create */
 const int MANY_ASYNC_UPLOADS_COUNT = 200;
 
-/* Number of bytes each meta-request should upload */
-const uint64_t MANY_ASYNC_CONTENT_LENGTH = 1;
+/* Number of bytes each meta-request should upload (small so this this doesn't take forever) */
+const uint64_t MANY_ASYNC_UPLOADS_OBJECT_SIZE = 1;
 
 /* How long to spend doing nothing, before assuming we're deadlocked */
 #define SEND_DATA_TIMEOUT_NANOS ((uint64_t)AWS_TIMESTAMP_NANOS * 10) /* 10secs */
@@ -152,13 +153,20 @@ static int s_test_s3_many_async_uploads_without_data(struct aws_allocator *alloc
             &host_name_cursor,
             g_test_body_content_type,
             aws_byte_cursor_from_buf(&object_path),
-            MANY_ASYNC_CONTENT_LENGTH,
+            MANY_ASYNC_UPLOADS_OBJECT_SIZE,
             0 /*flags*/);
+
+        /* Erase content-length header, because Mountpoint always uploads with unknown content-length */
+        aws_http_headers_erase(aws_http_message_get_headers(message), g_content_length_header_name);
 
         struct aws_s3_meta_request_options options = {
             .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
             .message = message,
             .send_async_stream = async_stream,
+            /* TODO: come up with a real fix, this "internal_use_only" setting is just a temporary workaround.
+             * that lets us deal with 200+ "stalled" meta-requests. The client still deadlocks if you
+             * increase MANY_ASYNC_UPLOADS_COUNT to 1000. */
+            .maximize_async_stream_reads_internal_use_only = true,
         };
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
@@ -201,11 +209,11 @@ static int s_test_s3_many_async_uploads_without_data(struct aws_allocator *alloc
             test_data->async_futures[i] = NULL;
 
             size_t space_available = dest->capacity - dest->len;
-            size_t bytes_remaining = MANY_ASYNC_CONTENT_LENGTH - test_data->bytes_uploaded[i];
+            size_t bytes_remaining = MANY_ASYNC_UPLOADS_OBJECT_SIZE - test_data->bytes_uploaded[i];
             size_t bytes_to_send = aws_min_size(space_available, bytes_remaining);
             ASSERT_TRUE(aws_byte_buf_write_u8_n(dest, 'z', bytes_to_send));
             test_data->bytes_uploaded[i] += bytes_to_send;
-            upload_done = test_data->bytes_uploaded[i] == MANY_ASYNC_CONTENT_LENGTH;
+            upload_done = test_data->bytes_uploaded[i] == MANY_ASYNC_UPLOADS_OBJECT_SIZE;
             aws_mutex_unlock(&test_data->mutex);
 
             aws_future_bool_set_result(future, upload_done);
