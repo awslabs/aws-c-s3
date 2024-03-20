@@ -1559,7 +1559,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                 }
             } else if (
                 endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED ||
-                AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
+                endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
                 /* client is shutting down, cleanup the endpoints now instead of waiting. We can't do a sync
                  * cleanup here since the cleanup task might modify the endpoints hashmap while we are looping through
                  * it */
