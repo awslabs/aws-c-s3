@@ -355,6 +355,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
 
     const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+    aws_s3_get_current_platform_info();
     struct aws_byte_cursor platform_cursor = aws_s3_get_cached_current_platform_info()->instance_type;
     if (!platform_cursor.len) {
         platform_cursor = g_user_agent_header_unknown;
