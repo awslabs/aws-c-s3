@@ -1557,16 +1557,15 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                                 3 /* Value pulled from thin air */, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
                     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED;
                 }
-            } else {
-                /* client is shutting down, cleanup the endpoints now instead of waiting */
-                if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED) {
-                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
-                    aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
-                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
-                } else if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
-                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
-                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
-                }
+            } else if (
+                endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED ||
+                AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
+                /* client is shutting down, cleanup the endpoints now instead of waiting. We can't do a sync
+                 * cleanup here since the cleanup task might modify the endpoints hashmap while we are looping through
+                 * it */
+                endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+                aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
+                aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
             }
         }
     }
