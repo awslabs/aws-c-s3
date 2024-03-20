@@ -5259,10 +5259,10 @@ static int s_get_expected_user_agent(struct aws_allocator *allocator, struct aws
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_product_name));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_s3_client_version));
-    aws_byte_buf_append_dynamic(dest, &single_space);
-    aws_byte_buf_append_dynamic(dest, &g_user_agent_header_platform);
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &single_space));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_platform));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
-    aws_byte_buf_append_dynamic(dest, &g_user_agent_header_unknown);
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_unknown));
     return AWS_OP_SUCCESS;
 }
 
