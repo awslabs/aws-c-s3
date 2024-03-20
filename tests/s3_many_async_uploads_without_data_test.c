@@ -209,8 +209,8 @@ static int s_test_s3_many_async_uploads_without_data(struct aws_allocator *alloc
             test_data->async_futures[i] = NULL;
 
             size_t space_available = dest->capacity - dest->len;
-            size_t bytes_remaining = MANY_ASYNC_UPLOADS_OBJECT_SIZE - test_data->bytes_uploaded[i];
-            size_t bytes_to_send = aws_min_size(space_available, bytes_remaining);
+            uint64_t bytes_remaining = MANY_ASYNC_UPLOADS_OBJECT_SIZE - test_data->bytes_uploaded[i];
+            size_t bytes_to_send = (size_t)aws_min_u64(space_available, bytes_remaining);
             ASSERT_TRUE(aws_byte_buf_write_u8_n(dest, 'z', bytes_to_send));
             test_data->bytes_uploaded[i] += bytes_to_send;
             upload_done = test_data->bytes_uploaded[i] == MANY_ASYNC_UPLOADS_OBJECT_SIZE;
