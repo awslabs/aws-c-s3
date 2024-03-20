@@ -277,6 +277,7 @@ int aws_s3_meta_request_init_base(
         /* Read from async body-stream, but keep original message around for headers, method, etc */
         meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);
         meta_request->initial_request_message = aws_http_message_acquire(options->message);
+        meta_request->maximize_async_stream_reads = options->maximize_async_stream_reads_internal_use_only;
 
     } else {
         /* Keep original message around, we'll read from its synchronous body-stream */
