@@ -557,7 +557,7 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environm
     struct aws_s3_platform_info_loader *loader,
     bool cached_only) {
     /* getting the instance type will set it on the loader the first time if it can */
-    if (cached_only) {
+    if (!cached_only) {
         aws_s3_get_ec2_instance_type(loader);
     }
     /* will never be mutated after the above call. */
