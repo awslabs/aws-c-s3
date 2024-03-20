@@ -620,6 +620,20 @@ struct aws_s3_meta_request_options {
     struct aws_async_input_stream *send_async_stream;
 
     /**
+     * NOT FOR PUBLIC USE
+     *
+     * The S3 client can currently deadlock if too many uploads using
+     * `send_async_stream` are "stalled" and failing to provide data.
+     * Set this true to raise the number of "stalled" meta-requests the S3 client
+     * can tolerate before it deadlocks. The downside of setting this is that
+     * the S3 client will use as much memory as it is allowed.
+     * (see `aws_s3_client_config.memory_limit_in_bytes`).
+     *
+     * This setting will be removed when a better solution is developed.
+     */
+    bool maximize_async_stream_reads_internal_use_only;
+
+    /**
      * Optional.
      * if set, the flexible checksum will be performed by client based on the config.
      */
