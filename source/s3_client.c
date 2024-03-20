@@ -1559,14 +1559,23 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                 }
             } else {
                 /* client is shutting down, cleanup the endpoints now instead of waiting */
-                if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED) {
+                if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED ||
+                    endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
                     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+
+                    aws_s3_client_unlock_synced_data(client);
+                    /* cancel_task makes the task run synchoronously */
                     aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
-                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
-                } else if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
-                    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
-                    aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
+                    aws_s3_client_lock_synced_data(client);
                 }
+                // if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED) {
+                //     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+                //     aws_event_loop_cancel_task(client->process_work_event_loop, endpoint->cleanup_task);
+                //     aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
+                // } else if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK) {
+                //     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+                //     aws_event_loop_schedule_task_now(client->process_work_event_loop, endpoint->cleanup_task);
+                // }
             }
         }
     }

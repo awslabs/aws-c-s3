@@ -68,9 +68,10 @@ void aws_s3_endpoint_set_system_vtable(const struct aws_s3_endpoint_system_vtabl
 
 static void s_cleanup_endpoint_task(struct aws_task *task, void *arg, enum aws_task_status status) {
     (void)task;
-    if (status != AWS_TASK_STATUS_RUN_READY) {
-        return;
-    }
+    (void)status;
+    // if (status != AWS_TASK_STATUS_RUN_READY) {
+    //     return;
+    // }
 
     struct aws_s3_endpoint *endpoint = arg;
 
@@ -300,15 +301,15 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     aws_s3_client_lock_synced_data(endpoint->client);
 
     bool should_destroy = endpoint->client_synced_data.ref_count == 1;
-    bool client_active = endpoint->client->synced_data.active == 1;
+    // bool client_active = endpoint->client->synced_data.active == 1;
     if (should_destroy) {
-        if (client_active) {
-            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK;
-            endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
-        } else {
-            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
-            aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-        }
+        // if (client_active) {
+        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK;
+        endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
+        // } else {
+        //     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+        //     aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+        // }
     } else {
         --endpoint->client_synced_data.ref_count;
     }
@@ -317,13 +318,13 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     /* END CRITICAL SECTION */
 
     if (should_destroy) {
-        if (client_active) {
-            /* schedule the cleanup task */
-            aws_s3_client_schedule_process_work(endpoint->client);
-        } else {
-            /* do a sync cleanup since client is not active anymore to avoid any cleanup delay */
-            s_s3_endpoint_ref_count_zero(endpoint);
-        }
+        // if (client_active) {
+        /* schedule the cleanup task */
+        aws_s3_client_schedule_process_work(endpoint->client);
+        // } else {
+        //     /* do a sync cleanup since client is not active anymore to avoid any cleanup delay */
+        //     s_s3_endpoint_ref_count_zero(endpoint);
+        // }
     }
 }
 
