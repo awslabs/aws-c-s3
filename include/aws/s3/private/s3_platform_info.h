@@ -42,8 +42,7 @@ const struct aws_s3_platform_info *aws_s3_get_platform_info_for_instance_type(
  */
 AWS_S3_API
 const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environment(
-    struct aws_s3_platform_info_loader *loader,
-    bool cached_only);
+    struct aws_s3_platform_info_loader *loader);
 
 /*
  * Retrieves a list of EC2 instance types with recommended configuration.
@@ -74,7 +73,7 @@ bool aws_s3_is_running_on_ec2_nitro(struct aws_s3_platform_info_loader *loader);
  * @return byte_cursor containing the instance type. If this is empty, the instance type could not be determined.
  */
 AWS_S3_API
-struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_loader *loader);
+struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_loader *loader, bool cached_only);
 
 AWS_EXTERN_C_END
 

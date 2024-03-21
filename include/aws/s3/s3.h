@@ -119,11 +119,11 @@ AWS_S3_API
 const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void);
 
 /*
- * Returns the ec2 instance_type for current platform if already available
+ * Returns the ec2 instance_type for current platform if possible
  * NOTE: THIS API IS EXPERIMENTAL AND UNSTABLE
  */
 AWS_S3_API
-const struct aws_s3_platform_info *aws_s3_get_cached_current_platform_info(void);
+struct aws_byte_cursor aws_s3_get_current_platform_ec2_intance_type(bool cached_only);
 
 /*
  * Retrieves a list of EC2 instance types with recommended configuration.
