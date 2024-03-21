@@ -502,7 +502,8 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_
     if (cached_only) {
         AWS_LOGF_TRACE(
             AWS_LS_S3_CLIENT,
-            "id=%p: Instance type has not been cached. Returning without trying to determine instance type.",
+            "id=%p: Instance type has not been cached. Returning without trying to determine instance type since "
+            "cached_only is set.",
             (void *)loader,
             aws_string_bytes(loader->lock_data.detected_instance_type));
         goto return_instance_and_unlock;
