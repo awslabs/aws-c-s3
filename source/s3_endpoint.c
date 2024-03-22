@@ -9,6 +9,7 @@
 
 #include <aws/auth/credentials.h>
 #include <aws/common/assert.h>
+#include <aws/common/clock.h>
 #include <aws/common/device_random.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>
@@ -65,6 +66,34 @@ void aws_s3_endpoint_set_system_vtable(const struct aws_s3_endpoint_system_vtabl
     s_s3_endpoint_system_vtable = vtable;
 }
 
+static void s_cleanup_endpoint_task(struct aws_task *task, void *arg, enum aws_task_status status) {
+    (void)task;
+    if (status != AWS_TASK_STATUS_RUN_READY) {
+        return;
+    }
+
+    struct aws_s3_endpoint *endpoint = arg;
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_client_lock_synced_data(endpoint->client);
+
+    bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+    if (should_destroy) {
+        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+    } else {
+        endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
+        --endpoint->client_synced_data.ref_count;
+    }
+
+    aws_s3_client_unlock_synced_data(endpoint->client);
+    /* END CRITICAL SECTION */
+
+    if (should_destroy) {
+        s_s3_endpoint_ref_count_zero(endpoint);
+    }
+}
+
 struct aws_s3_endpoint *aws_s3_endpoint_new(
     struct aws_allocator *allocator,
     const struct aws_s3_endpoint_options *options) {
@@ -77,6 +106,9 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
 
     endpoint->allocator = allocator;
     endpoint->host_name = options->host_name;
+    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
+    endpoint->cleanup_task = aws_mem_calloc(endpoint->allocator, 1, sizeof(struct aws_task));
+    aws_task_init(endpoint->cleanup_task, s_cleanup_endpoint_task, endpoint, "cleanup_endpoint_task");
 
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);
@@ -267,9 +299,16 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(endpoint->client);
 
-    bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+    bool should_destroy = endpoint->client_synced_data.ref_count == 1;
+    bool client_active = endpoint->client->synced_data.active == 1;
     if (should_destroy) {
-        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+        if (client_active) {
+            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK;
+            endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
+        } else {
+            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+            aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
+        }
     } else {
         --endpoint->client_synced_data.ref_count;
     }
@@ -278,11 +317,13 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     /* END CRITICAL SECTION */
 
     if (should_destroy) {
-        /* The endpoint may have async cleanup to do (connection manager).
-         * When that's all done we'll invoke a completion callback.
-         * Since it's a crime to hold a lock while invoking a callback,
-         * we make sure that we've released the client's lock before proceeding... */
-        s_s3_endpoint_ref_count_zero(endpoint);
+        if (client_active) {
+            /* schedule the cleanup task */
+            aws_s3_client_schedule_process_work(endpoint->client);
+        } else {
+            /* do a sync cleanup since client is getting destroyed to avoid any cleanup delay */
+            s_s3_endpoint_ref_count_zero(endpoint);
+        }
     }
 }
 
@@ -302,7 +343,7 @@ static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_d
     AWS_ASSERT(endpoint);
 
     struct aws_s3_client *client = endpoint->client;
-
+    aws_mem_release(endpoint->allocator, endpoint->cleanup_task);
     aws_mem_release(endpoint->allocator, endpoint);
 
     client->vtable->endpoint_shutdown_callback(client);
