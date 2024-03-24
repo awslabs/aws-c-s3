@@ -807,7 +807,9 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             }
             aws_input_stream_release(input_stream);
             input_stream = chunk_stream;
-        } else if (checksum_config->checksum_algorithm != AWS_SCA_NONE && checksum_config->location == AWS_SCL_NONE) {
+        } else if (
+            checksum_config->checksum_algorithm != AWS_SCA_NONE && checksum_config->location == AWS_SCL_NONE &&
+            out_checksum != NULL) {
             /* The checksum won't be uploaded, but we still need it for the upload review callback */
             size_t checksum_len = aws_get_digest_size_from_algorithm(checksum_config->checksum_algorithm);
             size_t encoded_checksum_len = 0;
