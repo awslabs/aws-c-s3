@@ -1383,6 +1383,15 @@ static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void
         allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256, g_pre_existing_object_aes256_10MB);
 }
 
+AWS_TEST_CASE(test_s3_get_object_error, s_test_s3_get_object_error)
+static int s_test_s3_get_object_error(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor cur = aws_byte_cursor_from_c_str("year=2024/foo");
+
+    return s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED, 0, cur);
+}
+
 /**
  * Test read-backpressure functionality by repeatedly:
  * - letting the download stall
