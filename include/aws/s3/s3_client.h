@@ -566,6 +566,7 @@ struct aws_s3_checksum_config {
  * There are several ways to pass the request's body data:
  * 1) If the data is already in memory, set the body-stream on `message`.
  * 2) If the data is on disk, set `send_filepath` for best performance.
+ * TODO: document async-writes
  * 3) If the data will be be produced in asynchronous chunks, set `send_async_stream`.
  */
 struct aws_s3_meta_request_options {
@@ -613,25 +614,20 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE
+     * TODO: more explains
+     * TODO: name (based on fn name) send_via_write, send_via_write_calls, send_via_write_data?
+     * TODO: only available for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT?
+     * Do not set if the body is being passed by other means (see note above).
+     */
+    bool send_using_data_writes;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
      * If set, the request body comes from this async stream.
      * Use this when outgoing data will be produced in asynchronous chunks.
      * Do not set if the body is being passed by other means (see note above).
      */
     struct aws_async_input_stream *send_async_stream;
-
-    /**
-     * NOT FOR PUBLIC USE
-     *
-     * The S3 client can currently deadlock if too many uploads using
-     * `send_async_stream` are "stalled" and failing to provide data.
-     * Set this true to raise the number of "stalled" meta-requests the S3 client
-     * can tolerate before it deadlocks. The downside of setting this is that
-     * the S3 client will use as much memory as it is allowed.
-     * (see `aws_s3_client_config.memory_limit_in_bytes`).
-     *
-     * This setting will be removed when a better solution is developed.
-     */
-    bool maximize_async_stream_reads_internal_use_only;
 
     /**
      * Optional.
@@ -828,6 +824,19 @@ AWS_S3_API
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
+
+/**
+ * TODO: name: write()? write_async()? write_data()? send_data()?
+ * TODO: options, or args?
+ * TODO: input_stream, or just bytes?
+ * TODO: unknown content-length only?
+ * TODO: future? or callback? (ensure both complete on meta-request-thread)
+ */
+AWS_S3_API
+struct aws_future_void *aws_s3_meta_request_write_data(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_cursor data,
+    bool eof);
 
 /**
  * Increment the flow-control window, so that response data continues downloading.

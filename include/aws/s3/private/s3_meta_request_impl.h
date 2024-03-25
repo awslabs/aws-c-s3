@@ -143,14 +143,11 @@ struct aws_s3_meta_request {
     /* The meta request's outgoing body comes from one of these:
      * 1) request_body_async_stream: if set, then async stream 1 part at a time
      * 2) request_body_parallel_stream: if set, then stream multiple parts in parallel
-     * 3) initial_request_message's body_stream: else synchronously stream parts */
+     * 3) request_body_using_data_writes: if set, then synchronously copy data from 1 part at a time
+     * 4) initial_request_message's body_stream: else synchronously stream parts */
     struct aws_async_input_stream *request_body_async_stream;
     struct aws_parallel_input_stream *request_body_parallel_stream;
-
-    /* Whether to let this meta-request exceed the regular limits on num-request-being-prepared.
-     * This lets as many async-stream reads be pending as possible, reducing the chance of deadlock
-     * when the user can't control when data arrives. */
-    bool maximize_async_stream_reads;
+    bool request_body_using_data_writes;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
@@ -255,6 +252,45 @@ struct aws_s3_meta_request {
          * but swapping two array-lists back and forth avoids an allocation. */
         struct aws_array_list event_delivery_array;
     } io_threaded_data;
+
+    /**
+     * Data for async-writes.
+     * Currently, we only tolerate 1 pending async-write at a time
+     * (supporting more adds complexity, but might be worth it?)
+     *
+     * When the user calls write(), they may not provide enough data for us to send in a part.
+     * In this case, we must copy the data to a buffer and immediately mark the write complete,
+     * so the user can write more data, so we finally get enough to send.
+     *
+     * Thread ownership of this data is as follows:
+     * - Any thread that touches synced_future MUST hold the meta-request lock.
+     * - If synced_future is NULL, the write() call may touch ANY member of this struct (while holding the lock).
+     * - While synced_future is valid, the I/O thread owns all data in this struct.
+     *   It does not need to hold the lock while memcpy'ing data.
+     *   (It does still need to hold the lock whenever it touches synced_future).
+     */
+    struct {
+        /* The future for whatever async-write is pending.
+         * If this is NULL, there isn't enough data to send another part.
+         *
+         * If this is non-NULL, 1+ part requests can be sent.
+         * When all the data has been processed, this future is completed
+         * and cleared, and we can accept another write() call. */
+        struct aws_future_void *synced_future;
+
+        /* True once user has passed `eof` to write() */
+        bool eof;
+
+        /* Holds buffered data we can't immediately send.
+         * The length will always be less than part-size */
+        struct aws_byte_buf buffered_data;
+
+        /* Cursor/pointer to data from the most-recent write() call, which
+         * provides enough data (combined with any buffered_data) to send 1+ parts.
+         * If, there's data left over in unbuffered_cursor after these parts are sent,
+         * it's copied into unbuffered-data, and we wait for more writes... */
+        struct aws_byte_cursor unbuffered_cursor;
+    } async_write;
 
     const bool should_compute_content_md5;
 
@@ -389,8 +425,6 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_s3_meta_request *meta_request,
     uint64_t offset,
     struct aws_byte_buf *buffer);
-
-bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request);
 
 /* Set the meta request finish result as failed. This is meant to be called sometime before aws_s3_meta_request_finish.
  * Subsequent calls to this function or to aws_s3_meta_request_set_success_synced will not overwrite the end result of

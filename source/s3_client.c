@@ -1128,14 +1128,35 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     if (options->send_filepath.len > 0) {
         ++body_source_count;
     }
+    if (options->send_using_data_writes == true) {
+        if (options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+            /* TODO: we could support async-writes for DEFAULT type too, just takes work & testing */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create meta request."
+                "send-using-data-writes can only be used with auto-ranged-put.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+        if (content_length_found) {
+            /* TODO: we could support async-writes with content-length, just takes work & testing */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create meta request."
+                "send-using-data-writes can only be used when Content-Length is unknown.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+        ++body_source_count;
+    }
     if (options->send_async_stream != NULL) {
         ++body_source_count;
     }
     if (body_source_count > 1) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create auto-ranged-put meta request."
-            " More than one data source is set (filepath, async stream, body stream).");
+            "Could not create meta request."
+            " More than one data source is set (filepath, async stream, body stream, data writes).");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -1642,13 +1663,6 @@ static bool s_s3_client_should_update_meta_request(
         if (aws_string_eq_c_str(meta_request_default->operation_name, "CreateSession")) {
             return true;
         }
-    }
-
-    /* If maximize_async_stream_reads, let this meta-request ignore max_requests_prepare & max_requests_in_flight.
-     * We need to maximize the number of async-streams being read from, because the user has no idea
-     * when data will arrive to any of them. */
-    if (meta_request->request_body_async_stream != NULL && meta_request->maximize_async_stream_reads) {
-        return true;
     }
 
     /**
