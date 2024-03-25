@@ -1387,7 +1387,7 @@ AWS_TEST_CASE(test_s3_get_object_error, s_test_s3_get_object_error)
 static int s_test_s3_get_object_error(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor cur = aws_byte_cursor_from_c_str("year=2024/foo");
+    struct aws_byte_cursor cur = aws_byte_cursor_from_c_str("year%3D2024/foo");
 
     return s_test_s3_get_object_helper(allocator, AWS_S3_TLS_ENABLED, 0, cur);
 }
