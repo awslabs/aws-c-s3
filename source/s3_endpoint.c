@@ -77,7 +77,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     endpoint->client_synced_data.ref_count = 1;
 
     endpoint->allocator = allocator;
-    endpoint->host_name = options->host_name;
+    endpoint->host_name = aws_string_new_from_string(allocator, options->host_name);
     endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
 
     struct aws_host_resolution_config host_resolver_config;
@@ -125,7 +125,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
 
 error_cleanup:
 
-    aws_string_destroy(options->host_name);
+    aws_string_destroy(endpoint->host_name);
 
     aws_mem_release(allocator, endpoint);
 
@@ -276,7 +276,7 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
         if (endpoint_active) {
             endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP;
             endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
-        } else if (endpoint->client_synced_data.state != AWS_S3_ENDPOINT_STATE_DESTROYING) {
+        } else {
             endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
             aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
         }
@@ -313,7 +313,7 @@ static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_d
     AWS_ASSERT(endpoint);
 
     struct aws_s3_client *client = endpoint->client;
-    //  aws_mem_release(endpoint->allocator, endpoint->cleanup_task);
+    aws_mem_release(endpoint->allocator, endpoint->host_name);
     aws_mem_release(endpoint->allocator, endpoint);
 
     client->vtable->endpoint_shutdown_callback(client);
