@@ -1441,6 +1441,7 @@ static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
     if (client->threaded_data.endpoints_cleanup_task_scheduled) {
         if (!client->synced_data.active) {
+            // waahm7: TODO how to avoid multiple cancellations and schedule?
             aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
             aws_event_loop_schedule_task_now(
                 client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
@@ -1512,7 +1513,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_request_work_list);
 
     /*******************/
-    /* Step 1: Move relevant data into thread local memory. Do any pending cleanup*/
+    /* Step 1: Move relevant data into thread local memory and schedule any pending cleanups */
     /*******************/
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT,
@@ -1608,7 +1609,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         aws_s3_client_update_connections_threaded(client);
     }
     /*******************/
-    /* Step 5: Log client stats. */
+    /* Step 4: Log client stats. */
     /*******************/
     {
         uint32_t num_requests_tracked_requests = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
@@ -1657,7 +1658,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 
     /*******************/
-    /* Step 6: Check for client shutdown. */
+    /* Step 5: Check for client shutdown. */
     /*******************/
     {
         /* BEGIN CRITICAL SECTION */
