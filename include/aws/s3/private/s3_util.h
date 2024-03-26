@@ -109,6 +109,12 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_user_agent_header_product_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_user_agent_header_platform;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_user_agent_header_unknown;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_acl_header_name;
 
 AWS_S3_API

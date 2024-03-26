@@ -486,7 +486,7 @@ tear_down:
     return callback_info.instance_type;
 }
 
-struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_loader *loader) {
+struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_loader *loader, bool cached_only) {
     aws_mutex_lock(&loader->lock_data.lock);
     struct aws_byte_cursor return_cur;
     AWS_ZERO_STRUCT(return_cur);
@@ -497,6 +497,14 @@ struct aws_byte_cursor aws_s3_get_ec2_instance_type(struct aws_s3_platform_info_
             "id=%p: Instance type has already been determined to be %s. Returning cached version.",
             (void *)loader,
             aws_string_bytes(loader->lock_data.detected_instance_type));
+        goto return_instance_and_unlock;
+    }
+    if (cached_only) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_CLIENT,
+            "id=%p: Instance type has not been cached. Returning without trying to determine instance type since "
+            "cached_only is set.",
+            (void *)loader);
         goto return_instance_and_unlock;
     }
 
@@ -556,7 +564,7 @@ return_instance_and_unlock:
 const struct aws_s3_platform_info *aws_s3_get_platform_info_for_current_environment(
     struct aws_s3_platform_info_loader *loader) {
     /* getting the instance type will set it on the loader the first time if it can */
-    aws_s3_get_ec2_instance_type(loader);
+    aws_s3_get_ec2_instance_type(loader, false /*cached_only*/);
     /* will never be mutated after the above call. */
     return &loader->lock_data.current_env_platform_info;
 }

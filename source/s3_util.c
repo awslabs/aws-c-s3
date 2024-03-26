@@ -6,6 +6,7 @@
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_platform_info.h"
 #include "aws/s3/private/s3_request.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/clock.h>
@@ -66,6 +67,8 @@ const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LIT
 const struct aws_byte_cursor g_user_agent_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("User-Agent");
 const struct aws_byte_cursor g_user_agent_header_product_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRTS3NativeClient");
+const struct aws_byte_cursor g_user_agent_header_platform = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("platform");
+const struct aws_byte_cursor g_user_agent_header_unknown = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("unknown");
 
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
@@ -352,9 +355,13 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
 
     const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
-
-    const size_t user_agent_product_version_length =
-        g_user_agent_header_product_name.len + forward_slash.len + g_s3_client_version.len;
+    struct aws_byte_cursor platform_cursor = aws_s3_get_current_platform_ec2_intance_type(true /* cached_only */);
+    if (!platform_cursor.len) {
+        platform_cursor = g_user_agent_header_unknown;
+    }
+    const size_t user_agent_length = g_user_agent_header_product_name.len + forward_slash.len +
+                                     g_s3_client_version.len + space_delimiter.len + g_user_agent_header_platform.len +
+                                     forward_slash.len + platform_cursor.len;
 
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     AWS_ASSERT(headers != NULL);
@@ -369,9 +376,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
         /* If the header was found, then create a buffer with the total size we'll need, and append the current user
          * agent header with a trailing space. */
         aws_byte_buf_init(
-            &user_agent_buffer,
-            allocator,
-            current_user_agent_header.len + space_delimiter.len + user_agent_product_version_length);
+            &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + user_agent_length);
 
         aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
 
@@ -382,7 +387,7 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
 
         /* If the header was not found, then create a buffer with just the size of the user agent string that is about
          * to be appended to the buffer. */
-        aws_byte_buf_init(&user_agent_buffer, allocator, user_agent_product_version_length);
+        aws_byte_buf_init(&user_agent_buffer, allocator, user_agent_length);
     }
 
     /* Append the client's user-agent string. */
@@ -390,6 +395,10 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_product_name);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_s3_client_version);
+        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
+        aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_platform);
+        aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
+        aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
     }
 
     /* Apply the updated header. */

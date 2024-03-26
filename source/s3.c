@@ -104,6 +104,10 @@ const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void) {
     return aws_s3_get_platform_info_for_current_environment(s_loader);
 }
 
+struct aws_byte_cursor aws_s3_get_current_platform_ec2_intance_type(bool cached_only) {
+    return aws_s3_get_ec2_instance_type(s_loader, cached_only);
+}
+
 struct aws_array_list aws_s3_get_platforms_with_recommended_config(void) {
     return aws_s3_get_recommended_platforms(s_loader);
 }
