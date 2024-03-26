@@ -5289,12 +5289,16 @@ static int s_get_expected_user_agent(struct aws_allocator *allocator, struct aws
     AWS_ASSERT(dest);
 
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+    const struct aws_byte_cursor single_space = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
 
     ASSERT_SUCCESS(aws_byte_buf_init(dest, allocator, 32));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_product_name));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_s3_client_version));
-
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &single_space));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_platform));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_unknown));
     return AWS_OP_SUCCESS;
 }
 
@@ -5306,7 +5310,6 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
     const struct aws_byte_cursor single_space = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
 
     struct aws_byte_buf expected_user_agent_value_buf;
@@ -5326,8 +5329,8 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
 
         ASSERT_TRUE(headers != NULL);
         ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
-        ASSERT_TRUE(aws_byte_cursor_eq(&user_agent_value, &expected_user_agent_value));
-
+        ASSERT_BIN_ARRAYS_EQUALS(
+            user_agent_value.ptr, user_agent_value.len, expected_user_agent_value.ptr, expected_user_agent_value.len);
         aws_http_message_release(message);
     }
 
@@ -5339,10 +5342,7 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
         aws_byte_buf_init(&total_expected_user_agent_value_buf, allocator, 64);
         aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &dummy_agent_header_value);
         aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &single_space);
-
-        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &g_user_agent_header_product_name);
-        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &forward_slash);
-        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &g_s3_client_version);
+        aws_byte_buf_append_dynamic(&total_expected_user_agent_value_buf, &expected_user_agent_value);
 
         struct aws_byte_cursor total_expected_user_agent_value =
             aws_byte_cursor_from_buf(&total_expected_user_agent_value_buf);
@@ -5359,7 +5359,11 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
             struct aws_byte_cursor user_agent_value;
             AWS_ZERO_STRUCT(user_agent_value);
             ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
-            ASSERT_TRUE(aws_byte_cursor_eq(&user_agent_value, &total_expected_user_agent_value));
+            ASSERT_BIN_ARRAYS_EQUALS(
+                user_agent_value.ptr,
+                user_agent_value.len,
+                total_expected_user_agent_value.ptr,
+                total_expected_user_agent_value.len);
         }
 
         aws_byte_buf_clean_up(&total_expected_user_agent_value_buf);
