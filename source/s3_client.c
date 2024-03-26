@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/common/hash_table.h"
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_buffer_pool.h"
@@ -662,6 +661,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     if (client->threaded_data.trim_buffer_pool_task_scheduled) {
         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    }
+
+    if (client->threaded_data.endpoints_cleanup_task_scheduled) {
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
     }
 
     aws_string_destroy(client->region);
