@@ -1392,7 +1392,7 @@ static int s_s3_meta_request_incoming_body(
 
     /* Note: not having part sized response body means the buffer is dynamic and
      * can grow. */
-    if (s_response_body_append(!request->has_part_size_response_body, &request->send_data.response_body, data)) {
+    if (s_response_body_append(request->ticket == NULL, &request->send_data.response_body, data)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Request %p could not append to response body due to error %d (%s)",
