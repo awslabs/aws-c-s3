@@ -1412,7 +1412,14 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
          aws_hash_iter_next(&iter)) {
         struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
         if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
-            aws_array_list_push_back(&endpoints_to_release, &endpoint);
+            if (endpoint->client_synced_data.ref_count == 1) {
+                endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+                aws_array_list_push_back(&endpoints_to_release, &endpoint);
+                aws_hash_iter_delete(&iter, true);
+            } else {
+                endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
+                --endpoint->client_synced_data.ref_count;
+            }
         }
     }
 
