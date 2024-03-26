@@ -131,6 +131,25 @@ add_net_test_case(test_s3_many_async_uploads_without_data)
 add_net_test_case(test_s3_download_empty_file_with_checksum)
 add_net_test_case(test_s3_download_single_part_file_with_checksum)
 add_net_test_case(test_s3_download_multipart_file_with_checksum)
+add_net_test_case(test_s3_asyncwrite_empty_file)
+add_net_test_case(test_s3_asyncwrite_small_file_1_write)
+add_net_test_case(test_s3_asyncwrite_small_file_1_write_then_eof)
+add_net_test_case(test_s3_asyncwrite_small_file_many_writes)
+add_net_test_case(test_s3_asyncwrite_1_part)
+add_net_test_case(test_s3_asyncwrite_1_part_many_writes)
+add_net_test_case(test_s3_asyncwrite_1_part_then_empty_eof)
+add_net_test_case(test_s3_asyncwrite_2_parts_1_write)
+add_net_test_case(test_s3_asyncwrite_2_parts_2_partsize_writes)
+add_net_test_case(test_s3_asyncwrite_2_parts_first_write_over_partsize)
+add_net_test_case(test_s3_asyncwrite_2_parts_first_write_under_partsize)
+
+# misc:
+# - tolerate empty writes
+# - writes from various threads
+# errors:
+# - overlapping write is illegal (and terminates metareq)
+# - write after EOF is illegal
+# - REQUEST_HAS_COMPLETED
 
 if(ENABLE_MRAP_TESTS)
     add_net_test_case(test_s3_get_object_less_than_part_size_mrap)
