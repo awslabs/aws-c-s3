@@ -99,7 +99,7 @@ struct aws_s3_endpoint_options {
 /* global vtable, only used when mocking for tests */
 struct aws_s3_endpoint_system_vtable {
     void (*acquire)(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
-    void (*release)(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
+    void (*release)(struct aws_s3_endpoint *endpoint);
 };
 
 enum aws_s3_endpoint_state {
@@ -497,7 +497,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
  * You MUST NOT call this while the client's lock is held.
  * (this call briefly holds the client's lock and may remove the endpoint
  * from the client's hashtable) */
-void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
+void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_min_num_connections;

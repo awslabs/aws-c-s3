@@ -1398,8 +1398,12 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
     if (task_status != AWS_TASK_STATUS_RUN_READY) {
         return;
     }
+
     struct aws_s3_client *client = arg;
     client->threaded_data.endpoints_cleanup_task_scheduled = false;
+    /* Initialize the array list to store endpoints for later release */
+    struct aws_array_list endpoints_to_release;
+    aws_array_list_init_dynamic(&endpoints_to_release, client->allocator, 10, sizeof(struct aws_s3_endpoint *));
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(client);
@@ -1408,15 +1412,23 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
          aws_hash_iter_next(&iter)) {
         struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
         if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
-            aws_s3_endpoint_release(endpoint, true);
-            if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_DESTROYING) {
-                aws_hash_iter_delete(&iter, true);
-            }
+            aws_array_list_push_back(&endpoints_to_release, &endpoint);
         }
     }
 
     /* END CRITICAL SECTION */
     aws_s3_client_unlock_synced_data(client);
+
+    /* now release all endpoints */
+    size_t list_size = aws_array_list_length(&endpoints_to_release);
+    for (size_t i = 0; i < list_size; ++i) {
+        struct aws_s3_endpoint *endpoint;
+        aws_array_list_get_at(&endpoints_to_release, &endpoint, i);
+        aws_s3_endpoint_release(endpoint);
+    }
+
+    /* Clean up the array list */
+    aws_array_list_clean_up(&endpoints_to_release);
 }
 
 static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *client) {
@@ -2234,7 +2246,7 @@ reset_connection:
     aws_retry_token_release(connection->retry_token);
     connection->retry_token = NULL;
 
-    aws_s3_endpoint_release(connection->endpoint, false);
+    aws_s3_endpoint_release(connection->endpoint);
     connection->endpoint = NULL;
 
     aws_mem_release(client->allocator, connection);

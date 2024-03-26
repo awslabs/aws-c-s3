@@ -483,7 +483,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_mutex_clean_up(&meta_request->synced_data.lock);
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
-    aws_s3_endpoint_release(meta_request->endpoint, false);
+    aws_s3_endpoint_release(meta_request->endpoint);
     meta_request->client = aws_s3_client_release(meta_request->client);
 
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
@@ -2057,7 +2057,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     aws_s3_meta_request_result_clean_up(meta_request, &finish_result);
 
-    aws_s3_endpoint_release(meta_request->endpoint, false);
+    aws_s3_endpoint_release(meta_request->endpoint);
     meta_request->endpoint = NULL;
 
     meta_request->io_event_loop = NULL;
