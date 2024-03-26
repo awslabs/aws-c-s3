@@ -418,9 +418,9 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
         return auto_ranged_put->synced_data.num_parts_pending_read > 0;
     }
 
-    /* If doing async-writes, only allow if there's a pending write-future,
+    /* If doing async-writes, only allow a new part if there's a pending write-future,
      * and no pending-reads yet to copy that data. */
-    if (auto_ranged_put->base.request_body_using_data_writes == true) {
+    if (auto_ranged_put->base.request_body_using_async_writes == true) {
         return (auto_ranged_put->base.async_write.synced_future == NULL) ||
                (auto_ranged_put->synced_data.num_parts_pending_read > 0);
     }

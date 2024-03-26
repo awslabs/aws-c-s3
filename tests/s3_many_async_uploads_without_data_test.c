@@ -80,7 +80,7 @@ static int s_test_s3_many_async_uploads_without_data(struct aws_allocator *alloc
         struct aws_s3_meta_request_options options = {
             .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
             .message = message,
-            .send_using_data_writes = true,
+            .send_using_async_writes = true,
         };
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
@@ -113,7 +113,7 @@ static int s_test_s3_many_async_uploads_without_data(struct aws_allocator *alloc
             aws_byte_buf_write_u8_n(&tmp_data, 'z', bytes_to_write);
 
             struct aws_future_void *write_future =
-                aws_s3_meta_request_write_data(meta_request_i, aws_byte_cursor_from_buf(&tmp_data), eof);
+                aws_s3_meta_request_write(meta_request_i, aws_byte_cursor_from_buf(&tmp_data), eof);
 
             ASSERT_TRUE(
                 aws_future_void_wait(write_future, SEND_DATA_TIMEOUT_NANOS),

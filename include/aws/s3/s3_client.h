@@ -566,8 +566,8 @@ struct aws_s3_checksum_config {
  * There are several ways to pass the request's body data:
  * 1) If the data is already in memory, set the body-stream on `message`.
  * 2) If the data is on disk, set `send_filepath` for best performance.
- * TODO: document async-writes
- * 3) If the data will be be produced in asynchronous chunks, set `send_async_stream`.
+ * 3) If the data is available, but copying each chunk is asynchronous, set `send_async_stream`.
+ * 4) If you're not sure when each chunk of data will be available, use `send_using_async_writes`.
  */
 struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
@@ -614,20 +614,29 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE
-     * TODO: more explains
-     * TODO: name (based on fn name) send_via_write, send_via_write_calls, send_via_write_data?
-     * TODO: only available for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT?
-     * Do not set if the body is being passed by other means (see note above).
-     */
-    bool send_using_data_writes;
-
-    /**
-     * Optional - EXPERIMENTAL/UNSTABLE
      * If set, the request body comes from this async stream.
      * Use this when outgoing data will be produced in asynchronous chunks.
+     * The S3 client will read from the stream whenever it's ready to upload another chunk.
+     *
+     * WARNING: The S3 client can deadlock if many async streams are "stalled",
+     * never completing their async read. If you're not sure when (if ever)
+     * data will be ready, use `send_using_async_writes` instead.
+     *
      * Do not set if the body is being passed by other means (see note above).
      */
     struct aws_async_input_stream *send_async_stream;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * Set this to send request body data using the async aws_s3_meta_request_write() function.
+     * Use this when outgoing data will be produced in asynchronous chunks,
+     * and you're not sure when (if ever) each chunk will be ready.
+     *
+     * This only works with AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
+     *
+     * Do not set if the body is being passed by other means (see note above).
+     */
+    bool send_using_async_writes;
 
     /**
      * Optional.
@@ -826,14 +835,41 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     const struct aws_s3_meta_request_options *options);
 
 /**
- * TODO: name: write()? write_async()? write_data()? send_data()?
- * TODO: options, or args?
- * TODO: input_stream, or just bytes?
- * TODO: unknown content-length only?
- * TODO: future? or callback? (ensure both complete on meta-request-thread)
+ * Write the next chunk of data.
+ *
+ * You must set `aws_s3_meta_request_options.send_using_async_writes` to use this function.
+ *
+ * This function is asynchronous, and returns a future (see <aws/io/future.h>).
+ * If the future completes without error, the data has been copied for upload
+ * and you may call write() again.
+ *
+ * If the future completes with an error code, then write() did not succeed
+ * and you should not call it again. If the future contains any error code,
+ * the meta request is guaranteed to finish soon, if it hasn't already, so
+ * you do not need to worry about canceling the meta request after a failed write().
+ * A common error code is AWS_ERROR_S3_REQUEST_HAS_COMPLETED, indicating
+ * the meta request completed for reasons unrelated to the write() call
+ * (e.g. received a 404 error response). AWS_ERROR_INVALID_STATE usually
+ * indicates that you're calling write() incorrectly (e.g. not waiting for
+ * previous write to complete).
+ *
+ * You can wait any length of time between calls to write().
+ * Data is buffered until there is enough to upload.
+ *
+ * @param meta_request  Meta request
+ *
+ * @param data          The data to send. You MUST keep this data in memory
+ *                      until the future completes. The data can be any size.
+ *
+ * @param eof           Pass true to signal EOF (end of file).
+ *                      Do not call write() again after passing true.
+ *
+ * This function never returns NULL.
+ *
+ * WARNING: This feature is experimental.
  */
 AWS_S3_API
-struct aws_future_void *aws_s3_meta_request_write_data(
+struct aws_future_void *aws_s3_meta_request_write(
     struct aws_s3_meta_request *meta_request,
     struct aws_byte_cursor data,
     bool eof);

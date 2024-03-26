@@ -143,11 +143,11 @@ struct aws_s3_meta_request {
     /* The meta request's outgoing body comes from one of these:
      * 1) request_body_async_stream: if set, then async stream 1 part at a time
      * 2) request_body_parallel_stream: if set, then stream multiple parts in parallel
-     * 3) request_body_using_data_writes: if set, then synchronously copy data from 1 part at a time
+     * 3) request_body_using_async_writes: if set, then synchronously copy async_write data from 1 part at a time
      * 4) initial_request_message's body_stream: else synchronously stream parts */
     struct aws_async_input_stream *request_body_async_stream;
     struct aws_parallel_input_stream *request_body_parallel_stream;
-    bool request_body_using_data_writes;
+    bool request_body_using_async_writes;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
@@ -255,19 +255,20 @@ struct aws_s3_meta_request {
 
     /**
      * Data for async-writes.
-     * Currently, we only tolerate 1 pending async-write at a time
-     * (supporting more adds complexity, but might be worth it?)
+     * Currently, we only allow 1 async-write at a time.
      *
-     * When the user calls write(), they may not provide enough data for us to send in a part.
-     * In this case, we must copy the data to a buffer and immediately mark the write complete,
+     * When the user calls write(), they may not provide enough data for us to send an UploadPart.
+     * In that case, we copy the data to a buffer and immediately mark the write complete,
      * so the user can write more data, so we finally get enough to send.
      *
-     * Thread ownership of this data is as follows:
+     * Thread ownership of this struct is as follows:
      * - Any thread that touches synced_future MUST hold the meta-request lock.
-     * - If synced_future is NULL, the write() call may touch ANY member of this struct (while holding the lock).
-     * - While synced_future is valid, the I/O thread owns all data in this struct.
-     *   It does not need to hold the lock while memcpy'ing data.
-     *   (It does still need to hold the lock whenever it touches synced_future).
+     * - While synced_future==NULL, the write() function owns this struct.
+     * - The write() function sets synced_future=valid to pass ownership to the I/O thread.
+     * - While synced_future!=NULL, the I/O thread owns this struct.
+     * - The I/O thread may copy data without holding the lock.
+     * - But when it's done, it must hold the lock to set synced_future=NULL,
+     *   passing ownership back to the write() function.
      */
     struct {
         /* The future for whatever async-write is pending.
@@ -278,7 +279,7 @@ struct aws_s3_meta_request {
          * and cleared, and we can accept another write() call. */
         struct aws_future_void *synced_future;
 
-        /* True once user has passed `eof` to write() */
+        /* True once user passes `eof` to their final write() call */
         bool eof;
 
         /* Holds buffered data we can't immediately send.
@@ -287,8 +288,8 @@ struct aws_s3_meta_request {
 
         /* Cursor/pointer to data from the most-recent write() call, which
          * provides enough data (combined with any buffered_data) to send 1+ parts.
-         * If, there's data left over in unbuffered_cursor after these parts are sent,
-         * it's copied into unbuffered-data, and we wait for more writes... */
+         * If there's data leftover in unbuffered_cursor after these parts are sent,
+         * it's copied into buffered_data, and we wait for more writes... */
         struct aws_byte_cursor unbuffered_cursor;
     } async_write;
 

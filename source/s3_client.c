@@ -1128,7 +1128,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     if (options->send_filepath.len > 0) {
         ++body_source_count;
     }
-    if (options->send_using_data_writes == true) {
+    if (options->send_using_async_writes == true) {
         if (options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
             /* TODO: we could support async-writes for DEFAULT type too, just takes work & testing */
             AWS_LOGF_ERROR(
