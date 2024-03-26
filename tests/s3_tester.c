@@ -975,7 +975,8 @@ static void s_s3_mock_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool al
     ++endpoint->client_synced_data.ref_count;
 }
 
-static void s_s3_mock_endpoint_release(struct aws_s3_endpoint *endpoint) {
+static void s_s3_mock_endpoint_release(struct aws_s3_endpoint *endpoint, bool already_holding_lock) {
+    (void)already_holding_lock;
     if (--endpoint->client_synced_data.ref_count == 0) {
         aws_string_destroy(endpoint->host_name);
         aws_mem_release(endpoint->allocator, endpoint);

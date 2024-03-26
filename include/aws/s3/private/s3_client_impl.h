@@ -99,13 +99,12 @@ struct aws_s3_endpoint_options {
 /* global vtable, only used when mocking for tests */
 struct aws_s3_endpoint_system_vtable {
     void (*acquire)(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
-    void (*release)(struct aws_s3_endpoint *endpoint);
+    void (*release)(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
 };
 
 enum aws_s3_endpoint_state {
     AWS_S3_ENDPOINT_STATE_ACTIVE,
-    AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP_TASK,
-    AWS_S3_ENDPOINT_STATE_CLEANUP_TASK_SCHEDULED,
+    AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP,
     AWS_S3_ENDPOINT_STATE_DESTROYING,
 };
 
@@ -129,8 +128,6 @@ struct aws_s3_endpoint {
 
     /* Client that owns this endpoint */
     struct aws_s3_client *client;
-
-    struct aws_task *cleanup_task;
 };
 
 /* Represents one connection on a particular VIP. */
@@ -360,6 +357,9 @@ struct aws_s3_client {
         /* Task for trimming buffer bool. */
         struct aws_task trim_buffer_pool_task;
 
+        /* Task to cleanup endpoints */
+        struct aws_task endpoints_cleanup_task;
+
         /* Number of endpoints currently allocated. Used during clean up to know how many endpoints are still in
          * memory.*/
         uint32_t num_endpoints_allocated;
@@ -407,6 +407,9 @@ struct aws_s3_client {
 
         /* Whether or not work processing is currently scheduled. */
         uint32_t trim_buffer_pool_task_scheduled : 1;
+
+        /* Whether or not endpoints cleanup task is currently scheduled. */
+        uint32_t endpoints_cleanup_task_scheduled : 1;
     } threaded_data;
 };
 
@@ -494,7 +497,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
  * You MUST NOT call this while the client's lock is held.
  * (this call briefly holds the client's lock and may remove the endpoint
  * from the client's hashtable) */
-void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
+void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
 
 AWS_S3_API
 extern const uint32_t g_min_num_connections;
