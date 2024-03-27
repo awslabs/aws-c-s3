@@ -142,10 +142,11 @@ add_net_test_case(test_s3_asyncwrite_2_parts_1_write)
 add_net_test_case(test_s3_asyncwrite_2_parts_2_partsize_writes)
 add_net_test_case(test_s3_asyncwrite_2_parts_first_write_over_partsize)
 add_net_test_case(test_s3_asyncwrite_2_parts_first_write_under_partsize)
+add_net_test_case(test_s3_asyncwrite_tolerate_empty_writes)
+add_net_test_case(test_s3_asyncwrite_write_from_future_callback)
 
 # misc:
-# - tolerate empty writes
-# - writes from various threads
+# - alter the many-async test to stripe writes across objects
 # errors:
 # - overlapping write is illegal (and terminates metareq)
 # - write after EOF is illegal

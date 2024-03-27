@@ -2238,6 +2238,9 @@ struct aws_future_void *aws_s3_meta_request_write(
          * or reserve exactly part-size, or reserve exactly how much we need */
         aws_byte_buf_append_dynamic(&meta_request->async_write.buffered_data, &data);
 
+        /* TODO: does a future that completes immediately risk stack overflow?
+         * If a user does tiny writes, and registers callbacks on the write-future,
+         * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
         aws_future_void_set_result(write_future);
     }
 
