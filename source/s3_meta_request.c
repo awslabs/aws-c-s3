@@ -78,7 +78,7 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_http_stream *stream,
     int error_code);
 
-static int s_s3_meta_request_read_from_pending_async_writes(
+static void s_s3_meta_request_read_from_pending_async_writes(
     struct aws_s3_meta_request *meta_request,
     struct aws_byte_buf *dest,
     bool *eof);
@@ -2104,11 +2104,8 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     /* If using async-writes, call function which fills the buffer and/or hits EOF  */
     if (meta_request->request_body_using_async_writes == true) {
         bool eof = false;
-        if (s_s3_meta_request_read_from_pending_async_writes(meta_request, buffer, &eof) == AWS_OP_SUCCESS) {
-            aws_future_bool_set_result(synchronous_read_future, eof);
-        } else {
-            aws_future_bool_set_error(synchronous_read_future, aws_last_error());
-        }
+        s_s3_meta_request_read_from_pending_async_writes(meta_request, buffer, &eof);
+        aws_future_bool_set_result(synchronous_read_future, eof);
         return synchronous_read_future;
     }
 
@@ -2267,7 +2264,7 @@ struct aws_future_void *aws_s3_meta_request_write(
 
 /* Copy pending async-write data into the buffer.
  * This is only called when there's enough data for the next part. */
-static int s_s3_meta_request_read_from_pending_async_writes(
+static void s_s3_meta_request_read_from_pending_async_writes(
     struct aws_s3_meta_request *meta_request,
     struct aws_byte_buf *dest,
     bool *eof) {
@@ -2275,17 +2272,17 @@ static int s_s3_meta_request_read_from_pending_async_writes(
     *eof = false;
 
     /* This read should NOT happen unless there's a pending async-write */
-    AWS_ASSERT(meta_request->async_write.synced_future != NULL);
+    AWS_FATAL_ASSERT(meta_request->async_write.synced_future != NULL);
 
     aws_byte_buf_write_to_capacity(dest, &meta_request->async_write.data_cursor);
 
     /* We should have filled the dest buffer, unless this is the final write */
-    AWS_ASSERT(dest->len == dest->capacity || meta_request->async_write.eof);
+    AWS_FATAL_ASSERT(dest->len == dest->capacity || meta_request->async_write.eof);
 
-    /* If there's still enough data to fill another part, return success.
+    /* If there's still enough data to fill another part, return.
      * We'll copy more the next time this function is called. */
     if (meta_request->async_write.data_cursor.len >= meta_request->part_size) {
-        return AWS_OP_SUCCESS;
+        return;
     }
 
     /* Otherwise, we're done with the current async-write... */
@@ -2320,7 +2317,6 @@ static int s_s3_meta_request_read_from_pending_async_writes(
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: write future complete", (void *)meta_request);
     aws_future_void_set_result(write_future);
     aws_future_void_release(write_future);
-    return AWS_OP_SUCCESS;
 }
 
 void aws_s3_meta_request_result_clean_up(
