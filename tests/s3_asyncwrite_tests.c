@@ -99,10 +99,10 @@ static int s_asyncwrite_tester_validate(struct asyncwrite_tester *tester) {
     struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester->source_buf);
     for (size_t part_i = 0; part_i < tester->test_results.upload_review.part_count; ++part_i) {
         /* calculate checksum of this part, from source_buffer */
-        size_t part_size = tester->test_results.upload_review.part_sizes_array[part_i];
+        uint64_t part_size = tester->test_results.upload_review.part_sizes_array[part_i];
         ASSERT_TRUE(part_size <= source_cursor.len);
-        uint32_t crc32_val = aws_checksums_crc32(source_cursor.ptr, part_size, 0x0 /*previousCrc32*/);
-        aws_byte_cursor_advance(&source_cursor, part_size);
+        uint32_t crc32_val = aws_checksums_crc32(source_cursor.ptr, (size_t)part_size, 0x0 /*previousCrc32*/);
+        aws_byte_cursor_advance(&source_cursor, (size_t)part_size);
 
         /* base64-encode the big-endian representation of the CRC32 */
         uint32_t crc32_be_val = aws_hton32(crc32_val);
