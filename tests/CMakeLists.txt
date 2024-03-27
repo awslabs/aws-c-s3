@@ -128,6 +128,7 @@ add_net_test_case(test_s3_put_object_async_no_content_length_empty_part2)
 add_net_test_case(test_s3_put_object_async_no_content_length_2parts)
 add_net_test_case(test_s3_put_object_async_fail_reading)
 add_net_test_case(test_s3_many_async_uploads_without_data)
+#TODO: add_net_test_case(test_s3_many_async_uploads_with_buffered_data)
 add_net_test_case(test_s3_download_empty_file_with_checksum)
 add_net_test_case(test_s3_download_single_part_file_with_checksum)
 add_net_test_case(test_s3_download_multipart_file_with_checksum)
@@ -144,13 +145,9 @@ add_net_test_case(test_s3_asyncwrite_2_parts_first_write_over_partsize)
 add_net_test_case(test_s3_asyncwrite_2_parts_first_write_under_partsize)
 add_net_test_case(test_s3_asyncwrite_tolerate_empty_writes)
 add_net_test_case(test_s3_asyncwrite_write_from_future_callback)
-
-# misc:
-# - alter the many-async test to stripe writes across objects
-# errors:
-# - overlapping write is illegal (and terminates metareq)
-# - write after EOF is illegal
-# - REQUEST_HAS_COMPLETED
+add_net_test_case(test_s3_asyncwrite_fails_if_request_has_completed)
+add_net_test_case(test_s3_asyncwrite_fails_if_writes_overlap)
+#TODO: add_net_test_case(test_s3_asyncwrite_fails_if_write_after_eof)
 
 if(ENABLE_MRAP_TESTS)
     add_net_test_case(test_s3_get_object_less_than_part_size_mrap)

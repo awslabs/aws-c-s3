@@ -91,41 +91,37 @@ static int s_asyncwrite_tester_init(
     return 0;
 }
 
-static int s_asyncwrite_tester_clean_up(struct asyncwrite_tester *tester, bool validate) {
-    /* Wait for meta request to complete */
-    aws_s3_tester_wait_for_meta_request_finish(&tester->s3_tester);
+static int s_asyncwrite_tester_validate(struct asyncwrite_tester *tester) {
+    ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(&tester->test_results, 0 /*flags*/));
 
-    if (validate) {
-        ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(&tester->test_results, 0 /*flags*/));
+    /* Validate the checksums, to be we uploaded what we meant to upload */
+    ASSERT_TRUE(tester->test_results.upload_review.part_count > 0, "Update this code to handle whole-object checksum");
+    struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester->source_buf);
+    for (size_t part_i = 0; part_i < tester->test_results.upload_review.part_count; ++part_i) {
+        /* calculate checksum of this part, from source_buffer */
+        size_t part_size = tester->test_results.upload_review.part_sizes_array[part_i];
+        ASSERT_TRUE(part_size <= source_cursor.len);
+        uint32_t crc32_val = aws_checksums_crc32(source_cursor.ptr, part_size, 0x0 /*previousCrc32*/);
+        aws_byte_cursor_advance(&source_cursor, part_size);
 
-        /* Validate the checksums, to be we uploaded what we meant to upload */
-        ASSERT_TRUE(
-            tester->test_results.upload_review.part_count > 0, "Update this code to handle whole-object checksum");
-        struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester->source_buf);
-        for (size_t part_i = 0; part_i < tester->test_results.upload_review.part_count; ++part_i) {
-            /* calculate checksum of this part, from source_buffer */
-            size_t part_size = tester->test_results.upload_review.part_sizes_array[part_i];
-            ASSERT_TRUE(part_size <= source_cursor.len);
-            uint32_t crc32_val = aws_checksums_crc32(source_cursor.ptr, part_size, 0x0 /*previousCrc32*/);
-            aws_byte_cursor_advance(&source_cursor, part_size);
+        /* base64-encode the big-endian representation of the CRC32 */
+        uint32_t crc32_be_val = aws_hton32(crc32_val);
+        struct aws_byte_cursor crc32_be_cursor = {.ptr = (uint8_t *)&crc32_be_val, .len = sizeof(crc32_be_val)};
+        struct aws_byte_buf crc32_base64_buf;
+        aws_byte_buf_init(&crc32_base64_buf, tester->allocator, 16);
+        ASSERT_SUCCESS(aws_base64_encode(&crc32_be_cursor, &crc32_base64_buf));
 
-            /* base64-encode the big-endian representation of the CRC32 */
-            uint32_t crc32_be_val = aws_hton32(crc32_val);
-            struct aws_byte_cursor crc32_be_cursor = {.ptr = (uint8_t *)&crc32_be_val, .len = sizeof(crc32_be_val)};
-            struct aws_byte_buf crc32_base64_buf;
-            aws_byte_buf_init(&crc32_base64_buf, tester->allocator, 16);
-            ASSERT_SUCCESS(aws_base64_encode(&crc32_be_cursor, &crc32_base64_buf));
+        /* compare to what got sent */
+        struct aws_string *sent_checksum = tester->test_results.upload_review.part_checksums_array[part_i];
+        ASSERT_BIN_ARRAYS_EQUALS(
+            crc32_base64_buf.buffer, crc32_base64_buf.len, sent_checksum->bytes, sent_checksum->len);
 
-            /* compare to what got sent */
-            struct aws_string *sent_checksum = tester->test_results.upload_review.part_checksums_array[part_i];
-            ASSERT_BIN_ARRAYS_EQUALS(
-                crc32_base64_buf.buffer, crc32_base64_buf.len, sent_checksum->bytes, sent_checksum->len);
-
-            aws_byte_buf_clean_up(&crc32_base64_buf);
-        }
+        aws_byte_buf_clean_up(&crc32_base64_buf);
     }
+    return 0;
+}
 
-    /* Cleanup */
+static int s_asyncwrite_tester_clean_up(struct asyncwrite_tester *tester) {
     tester->meta_request = aws_s3_meta_request_release(tester->meta_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester->s3_tester);
     aws_s3_meta_request_test_results_clean_up(&tester->test_results);
@@ -187,7 +183,10 @@ static int s_basic_asyncwrite(
         ASSERT_SUCCESS(s_write(&tester, (struct aws_byte_cursor){0}, true /*eof*/));
     }
 
-    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester, true /*validate*/));
+    /* Done */
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+    ASSERT_SUCCESS(s_asyncwrite_tester_validate(&tester));
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
     return 0;
 };
 
@@ -344,7 +343,10 @@ static int s_test_s3_asyncwrite_tolerate_empty_writes(struct aws_allocator *allo
     /* OK, finally send EOF */
     ASSERT_SUCCESS(s_write(&tester, empty_data, true /*eof*/));
 
-    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester, true /*validate*/));
+    /* Done */
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+    ASSERT_SUCCESS(s_asyncwrite_tester_validate(&tester));
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
     return 0;
 }
 
@@ -402,6 +404,75 @@ static int s_test_s3_asyncwrite_write_from_future_callback(struct aws_allocator 
     /* Kick off the recursive write-future completion callback loop */
     s_write_from_future_callback(&on_another_thread_ctx);
 
-    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester, true /*validate*/));
+    /* Done */
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+    ASSERT_SUCCESS(s_asyncwrite_tester_validate(&tester));
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
+    return 0;
+}
+
+/* This tests checks that, if the meta request fails before write() is called,
+ * the the write-future fails with AWS_ERROR_S3_REQUEST_HAS_COMPLETED */
+AWS_TEST_CASE(test_s3_asyncwrite_fails_if_request_has_completed, s_test_s3_asyncwrite_fails_if_request_has_completed)
+static int s_test_s3_asyncwrite_fails_if_request_has_completed(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct asyncwrite_tester tester;
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_init(&tester, allocator, PART_SIZE /*object_size*/));
+
+    /* Cancel meta request before write() call */
+    aws_s3_meta_request_cancel(tester.meta_request);
+
+    struct aws_future_void *write_future =
+        aws_s3_meta_request_write(tester.meta_request, aws_byte_cursor_from_buf(&tester.source_buf), true /*eof*/);
+
+    ASSERT_TRUE(aws_future_void_wait(write_future, TIMEOUT_NANOS));
+
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_REQUEST_HAS_COMPLETED, aws_future_void_get_error(write_future));
+    write_future = aws_future_void_release(write_future);
+
+    /* Done */
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+
+    /* The meta request's error-code should still be CANCELED, the failed write() shouldn't affect that */
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, tester.test_results.finished_error_code);
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_asyncwrite_fails_if_writes_overlap, s_test_s3_asyncwrite_fails_if_writes_overlap)
+static int s_test_s3_asyncwrite_fails_if_writes_overlap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct asyncwrite_tester tester;
+
+    /* Make it VERY likely that some writes will overlap by issuing a lot of them as fast as possible */
+    enum { num_writes = 100 };
+    ASSERT_SUCCESS(s_asyncwrite_tester_init(&tester, allocator, num_writes * PART_SIZE /*object_size*/));
+
+    bool had_overlapping_write = false;
+    struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester.source_buf);
+    bool eof = false;
+    while (!eof && !had_overlapping_write) {
+        struct aws_byte_cursor write_cursor = aws_byte_cursor_advance(&source_cursor, PART_SIZE);
+        eof = (source_cursor.len == 0);
+        struct aws_future_void *write_future = aws_s3_meta_request_write(tester.meta_request, write_cursor, eof);
+        int write_error_code = aws_future_void_is_done(write_future) ? aws_future_void_get_error(write_future) : 0;
+        aws_future_void_release(write_future);
+
+        if (write_error_code != 0) {
+            /* INVALID_STATE is the error code for overlapping writes */
+            ASSERT_INT_EQUALS(AWS_ERROR_INVALID_STATE, write_error_code);
+            had_overlapping_write = true;
+        }
+    }
+
+    ASSERT_TRUE(had_overlapping_write);
+
+    /* Any error from the write() call should result in the meta request terminating with INVALID_STATE error */
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_INVALID_STATE, tester.test_results.finished_error_code);
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
     return 0;
 }
