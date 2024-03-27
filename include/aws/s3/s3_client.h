@@ -840,8 +840,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  * You must set `aws_s3_meta_request_options.send_using_async_writes` to use this function.
  *
  * This function is asynchronous, and returns a future (see <aws/io/future.h>).
- * If the future completes without error, the data has been copied for upload
- * and you may call write() again.
+ * When the future completes, if there was no error, then you may call write() again.
  *
  * If the future completes with an error code, then write() did not succeed
  * and you should not call it again. If the future contains any error code,
@@ -858,8 +857,9 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  *
  * @param meta_request  Meta request
  *
- * @param data          The data to send. You MUST keep this data in memory
- *                      until the future completes. The data can be any size.
+ * @param data          The data to send. This data can be any size.
+ *                      You do not need to keep this data in memory,
+ *                      it is immediately buffered by the meta request.
  *
  * @param eof           Pass true to signal EOF (end of file).
  *                      Do not call write() again after passing true.

@@ -285,7 +285,7 @@ int aws_s3_meta_request_init_base(
 
     } else if (options->send_using_async_writes == true) {
         meta_request->request_body_using_async_writes = true;
-        aws_byte_buf_init(&meta_request->async_write.buffered_data, allocator, 0);
+        aws_byte_buf_init(&meta_request->async_write.data_buffer, allocator, 0);
     }
 
     meta_request->synced_data.next_streaming_part = 1;
@@ -503,7 +503,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
-    aws_byte_buf_clean_up(&meta_request->async_write.buffered_data);
+    aws_byte_buf_clean_up(&meta_request->async_write.data_buffer);
 
     if (meta_request->vtable != NULL) {
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", log_id);
@@ -2209,39 +2209,44 @@ struct aws_future_void *aws_s3_meta_request_write(
             AWS_LS_S3_META_REQUEST, "id=%p: Illegal call to write(). EOF already set.", (void *)meta_request);
         illegal_usage_terminate_meta_request = true;
 
-    } else if (eof || (meta_request->async_write.buffered_data.len + data.len >= meta_request->part_size)) {
-        /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: write(data=%zu, eof=%d) previously-buffered=%zu. Ready to upload part...",
-            (void *)meta_request,
-            data.len,
-            eof,
-            meta_request->async_write.buffered_data.len);
-
-        meta_request->async_write.unbuffered_cursor = data;
-        meta_request->async_write.eof = eof;
-        meta_request->async_write.synced_future = aws_future_void_acquire(write_future);
-        ready_to_send = true;
-
     } else {
-        /* Can't send yet. Buffer the data and complete its future, so we can get more data */
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: write(data=%zu, eof=%d) previously-buffered=%zu. Buffering data, not enough to upload.",
-            (void *)meta_request,
-            data.len,
-            eof,
-            meta_request->async_write.buffered_data.len);
+        size_t previously_buffered = meta_request->async_write.data_buffer.len;
+        (void)previously_buffered; /* for logging later */
 
-        /* TODO: something smarter with this buffer: like get it from buffer-pool,
-         * or reserve exactly part-size, or reserve exactly how much we need */
-        aws_byte_buf_append_dynamic(&meta_request->async_write.buffered_data, &data);
+        /* Copy data into buffer */
+        /* TODO: do something smarter, like acquiring from buffer-pool,
+         * and avoiding any future copies */
+        aws_byte_buf_append_dynamic(&meta_request->async_write.data_buffer, &data);
+        meta_request->async_write.data_cursor = aws_byte_cursor_from_buf(&meta_request->async_write.data_buffer);
 
-        /* TODO: does a future that completes immediately risk stack overflow?
-         * If a user does tiny writes, and registers callbacks on the write-future,
-         * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
-        aws_future_void_set_result(write_future);
+        if (eof || meta_request->async_write.data_buffer.len >= meta_request->part_size) {
+            /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: write(data=%zu, eof=%d) previously-buffered=%zu. Ready to upload part...",
+                (void *)meta_request,
+                data.len,
+                eof,
+                previously_buffered);
+
+            meta_request->async_write.eof = eof;
+            meta_request->async_write.synced_future = aws_future_void_acquire(write_future);
+            ready_to_send = true;
+        } else {
+            /* Can't send yet. Complete write's future, so we can get more data */
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: write(data=%zu, eof=%d) previously-buffered=%zu. Not enough to upload.",
+                (void *)meta_request,
+                data.len,
+                eof,
+                previously_buffered);
+
+            /* TODO: does a future that completes immediately risk stack overflow?
+             * If a user does tiny writes, and registers callbacks on the write-future,
+             * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
+            aws_future_void_set_result(write_future);
+        }
     }
 
     if (illegal_usage_terminate_meta_request) {
@@ -2269,55 +2274,52 @@ static int s_s3_meta_request_read_from_pending_async_writes(
 
     *eof = false;
 
-    struct aws_future_void *write_future_to_complete = NULL;
-
-    /* This stream-read should NOT happen unless there's a pending async-write */
+    /* This read should NOT happen unless there's a pending async-write */
     AWS_ASSERT(meta_request->async_write.synced_future != NULL);
 
-    /* Buffered data should not exceed part-size */
-    AWS_ASSERT(dest->capacity - dest->len >= meta_request->async_write.buffered_data.len);
-
-    /* Copy all buffered data */
-    aws_byte_buf_write_from_whole_buffer(dest, meta_request->async_write.buffered_data);
-    meta_request->async_write.buffered_data.len = 0;
-
-    /* Copy as much unbuffered data as possible */
-    aws_byte_buf_write_to_capacity(dest, &meta_request->async_write.unbuffered_cursor);
+    aws_byte_buf_write_to_capacity(dest, &meta_request->async_write.data_cursor);
 
     /* We should have filled the dest buffer, unless this is the final write */
     AWS_ASSERT(dest->len == dest->capacity || meta_request->async_write.eof);
 
-    /* If haven't received EOF, and there's not enough data in unbuffered_cursor to fill another part,
-     * then we need to move it into buffered_data, so we can complete the write's future and get more data */
-    if (!meta_request->async_write.eof && meta_request->async_write.unbuffered_cursor.len < meta_request->part_size) {
-
-        aws_byte_buf_append_dynamic(
-            &meta_request->async_write.buffered_data, &meta_request->async_write.unbuffered_cursor);
-        meta_request->async_write.unbuffered_cursor.len = 0;
+    /* If there's still enough data to fill another part, return success.
+     * We'll copy more the next time this function is called. */
+    if (meta_request->async_write.data_cursor.len >= meta_request->part_size) {
+        return AWS_OP_SUCCESS;
     }
 
-    /* If all unbuffered data is consumed (we sent it, or buffered it) then complete the write's future */
-    if (meta_request->async_write.unbuffered_cursor.len == 0) {
+    /* Otherwise, we're done with the current async-write... */
 
-        /* BEGIN CRITICAL SECTION */
-        aws_s3_meta_request_lock_synced_data(meta_request);
-        write_future_to_complete = meta_request->async_write.synced_future;
-        meta_request->async_write.synced_future = NULL;
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-        /* END CRITICAL SECTION */
+    if (meta_request->async_write.data_cursor.len == 0) {
+        /* We've sent all the data */
+        meta_request->async_write.data_buffer.len = 0;
 
         if (meta_request->async_write.eof) {
             *eof = true;
         }
+    } else {
+        /* There's leftover data. Copy it to the front of the buffer.
+         * We'll send it after we get more writes. */
+        memcpy(
+            meta_request->async_write.data_buffer.buffer,
+            meta_request->async_write.data_cursor.ptr,
+            meta_request->async_write.data_cursor.len);
+        meta_request->async_write.data_buffer.len = meta_request->async_write.data_cursor.len;
     }
 
-    /* Don't hold locks while completing the future, it might trigger a user callback */
-    if (write_future_to_complete != NULL) {
-        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: write future complete", (void *)meta_request);
-        aws_future_void_set_result(write_future_to_complete);
-        aws_future_void_release(write_future_to_complete);
-    }
+    meta_request->async_write.data_cursor = aws_byte_cursor_from_buf(&meta_request->async_write.data_buffer);
 
+    /* Complete the write's future (but not while holding the lock, since it might trigger a user callback) */
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    struct aws_future_void *write_future = meta_request->async_write.synced_future;
+    meta_request->async_write.synced_future = NULL;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: write future complete", (void *)meta_request);
+    aws_future_void_set_result(write_future);
+    aws_future_void_release(write_future);
     return AWS_OP_SUCCESS;
 }
 
