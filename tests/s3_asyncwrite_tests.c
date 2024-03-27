@@ -184,7 +184,7 @@ static int s_basic_asyncwrite(
 
     /* Ensure EOF is sent (eof_requires_extra_write, or object_size==0) */
     if (!eof) {
-        ASSERT_TRUE(s_write(&tester, (struct aws_byte_cursor){0}, true /*eof*/));
+        ASSERT_SUCCESS(s_write(&tester, (struct aws_byte_cursor){0}, true /*eof*/));
     }
 
     ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester, true /*validate*/));
@@ -249,8 +249,8 @@ static int s_test_s3_asyncwrite_1_part_many_writes(struct aws_allocator *allocat
 
 /* Send 1 full part, then a separate empty EOF write.
  * This probably results in a second (empty) part being uploaded. */
-AWS_TEST_CASE(test_s3_asyncwrite_1_part_then_empty_eof, s_test_s3_asyncwrite_1_part_then_empty_eof)
-static int s_test_s3_asyncwrite_1_part_then_empty_eof(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_asyncwrite_1_part_then_eof, s_test_s3_asyncwrite_1_part_then_eof)
+static int s_test_s3_asyncwrite_1_part_then_eof(struct aws_allocator *allocator, void *ctx) {
     struct basic_asyncwrite_options options = {
         .object_size = PART_SIZE,
         .eof_requires_extra_write = true,
