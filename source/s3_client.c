@@ -629,6 +629,7 @@ static void s_s3_client_start_destroy(void *user_data) {
         aws_s3_client_lock_synced_data(client);
 
         client->synced_data.active = false;
+        client->synced_data.process_endpoint_lifecycle_changes = true;
 
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
@@ -645,7 +646,6 @@ static void s_s3_client_start_destroy(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.start_destroy_executing = false;
-        client->synced_data.process_endpoint_lifecycle_changes = true;
 
         /* Schedule the work task to clean up outstanding connections and to call s_s3_client_finish_destroy function if
          * everything cleaning up asynchronously has finished.  */
