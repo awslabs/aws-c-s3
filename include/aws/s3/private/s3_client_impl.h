@@ -102,12 +102,19 @@ struct aws_s3_endpoint_system_vtable {
     void (*release)(struct aws_s3_endpoint *endpoint);
 };
 
+enum aws_s3_endpoint_state {
+    AWS_S3_ENDPOINT_STATE_ACTIVE,
+    AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP,
+    AWS_S3_ENDPOINT_STATE_DESTROYING,
+};
+
 struct aws_s3_endpoint {
     struct {
         /* This is NOT an atomic ref-count.
          * The endpoint lives in hashtable: `aws_s3_client.synced_data.endpoints`
          * This ref-count can only be touched while holding client's lock */
         size_t ref_count;
+        enum aws_s3_endpoint_state state;
     } client_synced_data;
 
     /* What allocator was used to create this endpoint. */
@@ -350,6 +357,9 @@ struct aws_s3_client {
         /* Task for trimming buffer bool. */
         struct aws_task trim_buffer_pool_task;
 
+        /* Task to cleanup endpoints */
+        struct aws_task endpoints_cleanup_task;
+
         /* Number of endpoints currently allocated. Used during clean up to know how many endpoints are still in
          * memory.*/
         uint32_t num_endpoints_allocated;
@@ -376,6 +386,9 @@ struct aws_s3_client {
         /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
         uint32_t finish_destroy : 1;
 
+        /* True if client has been flagged to process any enpoint lifecycle changes. */
+        uint32_t process_endpoint_lifecycle_changes : 1;
+
         struct aws_s3_upload_part_timeout_stats upload_part_stats;
     } synced_data;
 
@@ -394,6 +407,9 @@ struct aws_s3_client {
 
         /* Whether or not work processing is currently scheduled. */
         uint32_t trim_buffer_pool_task_scheduled : 1;
+
+        /* Whether or not endpoints cleanup task is currently scheduled. */
+        uint32_t endpoints_cleanup_task_scheduled : 1;
     } threaded_data;
 };
 

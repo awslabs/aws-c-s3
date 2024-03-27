@@ -629,6 +629,7 @@ static void s_s3_client_start_destroy(void *user_data) {
         aws_s3_client_lock_synced_data(client);
 
         client->synced_data.active = false;
+        client->synced_data.process_endpoint_lifecycle_changes = true;
 
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
@@ -661,6 +662,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     if (client->threaded_data.trim_buffer_pool_task_scheduled) {
         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    }
+
+    if (client->threaded_data.endpoints_cleanup_task_scheduled) {
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
     }
 
     aws_string_destroy(client->region);
@@ -1389,6 +1394,74 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
     client->threaded_data.trim_buffer_pool_task_scheduled = true;
 }
 
+static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    if (task_status != AWS_TASK_STATUS_RUN_READY) {
+        return;
+    }
+
+    struct aws_s3_client *client = arg;
+    client->threaded_data.endpoints_cleanup_task_scheduled = false;
+    struct aws_array_list endpoints_to_release;
+    aws_array_list_init_dynamic(&endpoints_to_release, client->allocator, 10, sizeof(struct aws_s3_endpoint *));
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_client_lock_synced_data(client);
+
+    for (struct aws_hash_iter iter = aws_hash_iter_begin(&client->synced_data.endpoints); !aws_hash_iter_done(&iter);
+         aws_hash_iter_next(&iter)) {
+        struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
+        if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
+            aws_array_list_push_back(&endpoints_to_release, &endpoint);
+            if (endpoint->client_synced_data.ref_count == 1) {
+                endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
+                aws_hash_iter_delete(&iter, true);
+            } else {
+                endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
+            }
+        }
+    }
+
+    /* END CRITICAL SECTION */
+    aws_s3_client_unlock_synced_data(client);
+
+    /* now release all endpoints without holding the lock */
+    size_t list_size = aws_array_list_length(&endpoints_to_release);
+    for (size_t i = 0; i < list_size; ++i) {
+        struct aws_s3_endpoint *endpoint;
+        aws_array_list_get_at(&endpoints_to_release, &endpoint, i);
+        aws_s3_endpoint_release(endpoint);
+    }
+
+    /* Clean up the array list */
+    aws_array_list_clean_up(&endpoints_to_release);
+}
+
+static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *client) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+    if (client->threaded_data.endpoints_cleanup_task_scheduled) {
+        if (!client->synced_data.active) {
+            aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+            aws_event_loop_schedule_task_now(
+                client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+        }
+        return;
+    }
+    client->threaded_data.endpoints_cleanup_task_scheduled = true;
+    aws_task_init(
+        &client->synced_data.endpoints_cleanup_task, s_s3_endpoints_cleanup_task, client, "s3_endpoints_cleanup_task");
+    if (client->synced_data.active) {
+        uint64_t now_ns = 0;
+        aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
+        aws_event_loop_schedule_task_future(
+            client->process_work_event_loop,
+            &client->synced_data.endpoints_cleanup_task,
+            now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+    } else {
+        aws_event_loop_schedule_task_now(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+    }
+}
+
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
@@ -1439,7 +1512,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_request_work_list);
 
     /*******************/
-    /* Step 1: Move relevant data into thread local memory. */
+    /* Step 1: Move relevant data into thread local memory and schedule any pending cleanups */
     /*******************/
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT,
@@ -1454,6 +1527,12 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     if (client->synced_data.active) {
         s_s3_client_schedule_buffer_pool_trim_synced(client);
+    }
+
+    /* cleanup endpoints if required */
+    if (client->synced_data.process_endpoint_lifecycle_changes) {
+        client->synced_data.process_endpoint_lifecycle_changes = false;
+        s_s3_client_schedule_endpoints_cleanup_synced(client);
     }
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
