@@ -1342,8 +1342,8 @@ static int s_s3_meta_request_headers_block_done(
  * Small helper to either do a static or dynamic append.
  * TODO: something like this would be useful in common.
  */
-static int s_response_body_append(bool is_dynamic, struct aws_byte_buf *buf, const struct aws_byte_cursor *data) {
-    return is_dynamic ? aws_byte_buf_append_dynamic(buf, data) : aws_byte_buf_append(buf, data);
+static int s_response_body_append(struct aws_byte_buf *buf, const struct aws_byte_cursor *data) {
+    return buf->allocator != NULL ? aws_byte_buf_append_dynamic(buf, data) : aws_byte_buf_append(buf, data);
 }
 
 static int s_s3_meta_request_incoming_body(
@@ -1392,7 +1392,7 @@ static int s_s3_meta_request_incoming_body(
 
     /* Note: not having part sized response body means the buffer is dynamic and
      * can grow. */
-    if (s_response_body_append(request->ticket == NULL, &request->send_data.response_body, data)) {
+    if (s_response_body_append(&request->send_data.response_body, data)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Request %p could not append to response body due to error %d (%s)",
