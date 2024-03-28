@@ -255,7 +255,7 @@ struct aws_s3_meta_request {
 
     /**
      * Data for async-writes.
-     * Currently, we only allow 1 async-write at a time.
+     * Currently, for a given meta request, only 1 async-write is allowed at a time.
      *
      * When the user calls write(), they may not provide enough data for us to
      * send an UploadPart. In that case, we immediately mark the write complete,

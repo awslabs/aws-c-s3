@@ -2297,6 +2297,13 @@ static void s_s3_meta_request_read_from_pending_async_writes(
     } else {
         /* There's leftover data. Copy it to the front of the buffer.
          * We'll send it after we get more writes. */
+
+        /* Assert there's no overlap between dst and src. It shouldnt' be possible,
+         * since we only do this after uploading 1+ parts and have <1 part remaining. */
+        AWS_FATAL_ASSERT(
+            meta_request->async_write.data_buffer.buffer + meta_request->async_write.data_cursor.len <
+            meta_request->async_write.data_cursor.ptr);
+
         memcpy(
             meta_request->async_write.data_buffer.buffer,
             meta_request->async_write.data_cursor.ptr,

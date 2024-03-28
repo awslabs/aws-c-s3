@@ -840,26 +840,30 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  * You must set `aws_s3_meta_request_options.send_using_async_writes` to use this function.
  *
  * This function is asynchronous, and returns a future (see <aws/io/future.h>).
- * When the future completes, if there was no error, then you may call write() again.
+ * You may not call write() again until the future completes.
  *
  * If the future completes with an error code, then write() did not succeed
  * and you should not call it again. If the future contains any error code,
- * the meta request is guaranteed to finish soon, if it hasn't already, so
- * you do not need to worry about canceling the meta request after a failed write().
+ * the meta request is guaranteed to finish soon (you don't need to worry about
+ * canceling the meta request yourself after a failed write).
  * A common error code is AWS_ERROR_S3_REQUEST_HAS_COMPLETED, indicating
  * the meta request completed for reasons unrelated to the write() call
- * (e.g. received a 404 error response). AWS_ERROR_INVALID_STATE usually
- * indicates that you're calling write() incorrectly (e.g. not waiting for
- * previous write to complete).
+ * (e.g. CreateMultipartUpload received a 403 Forbidden response).
+ * AWS_ERROR_INVALID_STATE usually indicates that you're calling write()
+ * incorrectly (e.g. not waiting for previous write to complete).
  *
- * You can wait any length of time between calls to write().
- * Data is buffered until there is enough to upload.
+ * The write() function always copies data to a buffer. You may free the
+ * data immediately after calling write(), even before the future completes.
+ * Data remains buffered until it can be uploaded in part-sized chunks.
+ * Beware: due to this buffering, a large write will result in high memory
+ * usage until the future completes. If you must write large amounts
+ * of data, consider chunking it up across multiple part-sized write() calls.
+ *
+ * You may wait any length of time between calls to write().
  *
  * @param meta_request  Meta request
  *
  * @param data          The data to send. This data can be any size.
- *                      You do not need to keep this data in memory,
- *                      it is immediately buffered by the meta request.
  *
  * @param eof           Pass true to signal EOF (end of file).
  *                      Do not call write() again after passing true.
