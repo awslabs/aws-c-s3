@@ -11,7 +11,7 @@
 #include <aws/common/string.h>
 #include <inttypes.h>
 
-/* Dont use buffer pool when we know response size and its bellow this number,
+/* Dont use buffer pool when we know response size, and its below this number,
  * i.e. when user provides explicit range that is small, ex. range = 1-100.
  * Instead of going through the pool in that case, we just use a dynamic buffer
  * for response (pre-mempool behavior). */
