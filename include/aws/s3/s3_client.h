@@ -325,12 +325,12 @@ typedef int(aws_s3_meta_request_upload_review_fn)(
  *
  * @return The aws_s3express_credentials_provider.
  */
-typedef struct aws_s3express_credentials_provider *(aws_s3express_provider_factory_fn)(
-    struct aws_allocator *allocator,
-    struct aws_s3_client *client,
-    aws_simple_completion_callback on_provider_shutdown_callback,
-    void *shutdown_user_data,
-    void *factory_user_data);
+typedef struct aws_s3express_credentials_provider *(
+    aws_s3express_provider_factory_fn)(struct aws_allocator *allocator,
+                                       struct aws_s3_client *client,
+                                       aws_simple_completion_callback on_provider_shutdown_callback,
+                                       void *shutdown_user_data,
+                                       void *factory_user_data);
 
 /* Keepalive properties are TCP only.
  * If interval or timeout are zero, then default values are used.

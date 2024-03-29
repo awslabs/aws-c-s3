@@ -12,7 +12,7 @@
 #include <inttypes.h>
 
 /* Dont use buffer pool when we know response size and its bellow this number,
- * i.e. when user provides explicit range that is small, ex. range = 1-100. 
+ * i.e. when user provides explicit range that is small, ex. range = 1-100.
  * Instead of going through the pool in that case, we just use a dynamic buffer
  * for response (pre-mempool behavior). */
 const uint64_t s_min_size_response_for_pooling = 1 * 1024 * 1024;
@@ -298,7 +298,8 @@ static bool s_s3_auto_ranged_get_update(
                              * even if expect to receive less data. Pool will
                              * reserve the whole part size for it anyways, so no
                              * reason getting a smaller chunk. */
-                            ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, (size_t)meta_request->part_size);
+                            ticket = aws_s3_buffer_pool_reserve(
+                                meta_request->client->buffer_pool, (size_t)meta_request->part_size);
 
                             if (ticket == NULL) {
                                 goto has_work_remaining;
