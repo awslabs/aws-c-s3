@@ -231,6 +231,35 @@ struct aws_s3_meta_request {
         /* To track aws_s3_requests with cancellable HTTP streams */
         struct aws_linked_list cancellable_http_streams_list;
 
+        /* Data for async-writes.
+         * Currently, for a given meta request, only 1 async-write is allowed at a time.
+         *
+         * When the user calls write(), they may not provide enough data for us to send an UploadPart.
+         * In that case, we copy the data to a buffer and immediately mark the write complete,
+         * so the user can write more data, so we finally get enough to send. */
+        struct {
+            /* The future for whatever async-write is pending.
+             * If this is NULL, there isn't enough data to send another part.
+             *
+             * If this is non-NULL, 1+ part requests can be sent.
+             * When all the data has been processed, this future is completed
+             * and cleared, and we can accept another write() call. */
+            struct aws_future_void *future;
+
+            /* True once user passes `eof` to their final write() call */
+            bool eof;
+
+            /* Holds buffered data we can't immediately send.
+             * The length will always be less than part-size */
+            struct aws_byte_buf buffered_data;
+
+            /* Cursor/pointer to data from the most-recent write() call, which
+             * provides enough data (combined with any buffered_data) to send 1+ parts.
+             * If there's data leftover in unbuffered_cursor after these parts are sent,
+             * it's copied into buffered_data, and we wait for more writes... */
+            struct aws_byte_cursor unbuffered_cursor;
+        } async_write;
+
     } synced_data;
 
     /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */
@@ -252,50 +281,6 @@ struct aws_s3_meta_request {
          * but swapping two array-lists back and forth avoids an allocation. */
         struct aws_array_list event_delivery_array;
     } io_threaded_data;
-
-    /**
-     * Data for async-writes.
-     * Currently, for a given meta request, only 1 async-write is allowed at a time.
-     *
-     * When the user calls write(), they may not provide enough data for us to send an UploadPart.
-     * In that case, we copy the data to a buffer and immediately mark the write complete,
-     * so the user can write more data, so we finally get enough to send.
-     *
-     *
-     * TODO: move into synced_data
-     * TODO: REWRITE THESE COMMENTS
-     *
-     * Thread ownership of this struct is as follows:
-     * - Any thread that touches synced_future MUST hold the meta-request lock.
-     * - While synced_future==NULL, the write() function owns this struct.
-     * - The write() function sets synced_future=valid to pass ownership to the I/O thread.
-     * - While synced_future!=NULL, the I/O thread owns this struct.
-     * - The I/O thread may copy data without holding the lock.
-     * - But when it's done, it must hold the lock to set synced_future=NULL,
-     *   passing ownership back to the write() function.
-     */
-    struct {
-        /* The future for whatever async-write is pending.
-         * If this is NULL, there isn't enough data to send another part.
-         *
-         * If this is non-NULL, 1+ part requests can be sent.
-         * When all the data has been processed, this future is completed
-         * and cleared, and we can accept another write() call. */
-        struct aws_future_void *synced_future;
-
-        /* True once user passes `eof` to their final write() call */
-        bool eof;
-
-        /* Holds buffered data we can't immediately send.
-         * The length will always be less than part-size */
-        struct aws_byte_buf buffered_data;
-
-        /* Cursor/pointer to data from the most-recent write() call, which
-         * provides enough data (combined with any buffered_data) to send 1+ parts.
-         * If there's data leftover in unbuffered_cursor after these parts are sent,
-         * it's copied into buffered_data, and we wait for more writes... */
-        struct aws_byte_cursor unbuffered_cursor;
-    } async_write;
 
     const bool should_compute_content_md5;
 

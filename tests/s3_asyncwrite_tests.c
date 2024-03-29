@@ -442,6 +442,29 @@ static int s_test_s3_asyncwrite_fails_if_request_has_completed(struct aws_alloca
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_asyncwrite_fails_if_write_after_eof, s_test_s3_asyncwrite_fails_if_write_after_eof)
+static int s_test_s3_asyncwrite_fails_if_write_after_eof(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct asyncwrite_tester tester;
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_init(&tester, allocator, PART_SIZE /*object_size*/));
+
+    /* Write the whole object, with EOF */
+    ASSERT_SUCCESS(s_write(&tester, aws_byte_cursor_from_buf(&tester.source_buf), true /*eof*/));
+
+    /* Any more writes should fail with INVALID_STATE error */
+    struct aws_byte_cursor empty_cursor = {0};
+    struct aws_future_void *write_future = aws_s3_meta_request_write(tester.meta_request, empty_cursor, true /*eof*/);
+    ASSERT_TRUE(aws_future_void_wait(write_future, TIMEOUT_NANOS));
+    ASSERT_INT_EQUALS(AWS_ERROR_INVALID_STATE, aws_future_void_get_error(write_future));
+    write_future = aws_future_void_release(write_future);
+
+    /* Done. Don't really care if the request completes successfully or not */
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_asyncwrite_fails_if_writes_overlap, s_test_s3_asyncwrite_fails_if_writes_overlap)
 static int s_test_s3_asyncwrite_fails_if_writes_overlap(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
