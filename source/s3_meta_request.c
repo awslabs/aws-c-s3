@@ -2296,8 +2296,7 @@ static int s_s3_meta_request_read_from_pending_async_writes(
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    /* We've promised users that, if they call cancel(), they can free the data
-     * behind a pending write without waiting for the write-future to complete.
+    /* If user calls aws_s3_meta_request_cancel(), it will synchronously complete any pending async-writes.
      * So if the write-future is unexpectedly gone, that's what happened, don't touch the data. */
     if (meta_request->synced_data.async_write.future == NULL) {
         error_code = AWS_ERROR_S3_CANCELED;
