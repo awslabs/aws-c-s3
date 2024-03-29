@@ -1381,7 +1381,7 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->ticket != NULL) {
+        if (request->has_part_size_response_body && request->ticket != NULL) {
             request->send_data.response_body =
                 aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
         } else {
