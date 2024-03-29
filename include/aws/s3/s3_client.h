@@ -852,18 +852,18 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  * AWS_ERROR_INVALID_STATE usually indicates that you're calling write()
  * incorrectly (e.g. not waiting for previous write to complete).
  *
- * The write() function always copies data to a buffer. You may free the
- * data immediately after calling write(), even before the future completes.
- * Data remains buffered until it can be uploaded in part-sized chunks.
- * Beware: due to this buffering, a large write will result in high memory
- * usage until the future completes. If you must write large amounts
- * of data, consider chunking it up across multiple part-sized write() calls.
+ * You MUST keep the data in memory until the future completes.
+ * If you need to free the memory early, call aws_s3_meta_request_cancel().
+ * cancel() will synchronously complete the future from any pending write with
+ * error code AWS_ERROR_S3_REQUEST_HAS_COMPLETED.
  *
- * You may wait any length of time between calls to write().
+ * You can wait any length of time between calls to write().
+ * If there's not enough data to upload a part, the data will be copied
+ * to a buffer and the future will immediately complete.
  *
  * @param meta_request  Meta request
  *
- * @param data          The data to send. This data can be any size.
+ * @param data          The data to send. The data can be any size.
  *
  * @param eof           Pass true to signal EOF (end of file).
  *                      Do not call write() again after passing true.

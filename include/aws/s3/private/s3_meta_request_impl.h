@@ -257,9 +257,13 @@ struct aws_s3_meta_request {
      * Data for async-writes.
      * Currently, for a given meta request, only 1 async-write is allowed at a time.
      *
-     * When the user calls write(), they may not provide enough data for us to
-     * send an UploadPart. In that case, we immediately mark the write complete,
+     * When the user calls write(), they may not provide enough data for us to send an UploadPart.
+     * In that case, we copy the data to a buffer and immediately mark the write complete,
      * so the user can write more data, so we finally get enough to send.
+     *
+     *
+     * TODO: move into synced_data
+     * TODO: REWRITE THESE COMMENTS
      *
      * Thread ownership of this struct is as follows:
      * - Any thread that touches synced_future MUST hold the meta-request lock.
@@ -282,14 +286,15 @@ struct aws_s3_meta_request {
         /* True once user passes `eof` to their final write() call */
         bool eof;
 
-        /* When the user calls write(), we immediately copy their data into this buffer */
-        struct aws_byte_buf data_buffer;
+        /* Holds buffered data we can't immediately send.
+         * The length will always be less than part-size */
+        struct aws_byte_buf buffered_data;
 
-        /* data_cursor always points into the data_buffer.
-         * We advance this cursor as the I/O thread copies data into parts.
-         * If there's data leftover after these parts are sent,
-         * it's copied back to the front of data_buffer, and we wait for more writes... */
-        struct aws_byte_cursor data_cursor;
+        /* Cursor/pointer to data from the most-recent write() call, which
+         * provides enough data (combined with any buffered_data) to send 1+ parts.
+         * If there's data leftover in unbuffered_cursor after these parts are sent,
+         * it's copied into buffered_data, and we wait for more writes... */
+        struct aws_byte_cursor unbuffered_cursor;
     } async_write;
 
     const bool should_compute_content_md5;
