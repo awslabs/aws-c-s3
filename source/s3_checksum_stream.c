@@ -16,22 +16,25 @@ struct aws_checksum_stream {
     struct aws_byte_buf checksum_result;
     /* base64 encoded checksum of the stream, updated at end of stream */
     struct aws_byte_buf *encoded_checksum_output;
-    bool finalized;
+    bool checksum_finalized;
 };
 
-void finalize_checksum(struct aws_checksum_stream *impl) {
-    if (impl->finalized) {
-        return;
+int s_aws_finalize_checksum(struct aws_checksum_stream *impl) {
+    if (impl->checksum_finalized) {
+        return AWS_OP_SUCCESS;
     }
 
     int result = aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0);
     if (result != AWS_OP_SUCCESS) {
         aws_byte_buf_reset(&impl->checksum_result, true);
+        impl->checksum_finalized = true;
+        return aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
     }
     AWS_ASSERT(result == AWS_OP_SUCCESS);
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&impl->checksum_result);
     AWS_FATAL_ASSERT(aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_output) == AWS_OP_SUCCESS);
-    impl->finalized = true;
+    impl->checksum_finalized = true;
+    return AWS_OP_SUCCESS;
 }
 
 static int s_aws_input_checksum_stream_seek(
@@ -61,8 +64,7 @@ static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, str
     aws_byte_cursor_advance(&to_sum, original_len);
     /* If read failed, `aws_input_stream_read` will handle the error to restore the dest. No need to handle error here
      */
-    int result = aws_checksum_update(impl->checksum, &to_sum);
-    if (result != AWS_OP_SUCCESS) {
+    if (aws_checksum_update(impl->checksum, &to_sum)) {
         return AWS_OP_ERR;
     }
     /* If we're at the end of the stream, compute and store the final checksum */
@@ -71,7 +73,7 @@ static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, str
         return AWS_OP_ERR;
     }
     if (status.is_end_of_stream) {
-        finalize_checksum(impl);
+        return s_aws_finalize_checksum(impl);
     }
     return AWS_OP_SUCCESS;
 }
@@ -95,8 +97,8 @@ static void s_aws_input_checksum_stream_destroy(struct aws_checksum_stream *impl
         return;
     }
 
-    /* Compute the checksum of whatever was read, if we didn't reach the end of the underlying stream */
-    finalize_checksum(impl);
+    /* Compute the checksum of whatever was read, if we didn't reach the end of the underlying stream. */
+    s_aws_finalize_checksum(impl);
 
     aws_checksum_destroy(impl->checksum);
     aws_input_stream_release(impl->old_stream);
