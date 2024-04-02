@@ -148,6 +148,7 @@ add_net_test_case(test_s3_asyncwrite_fails_if_request_has_completed)
 add_net_test_case(test_s3_asyncwrite_fails_if_write_after_eof)
 add_net_test_case(test_s3_asyncwrite_fails_if_writes_overlap)
 add_net_test_case(test_s3_asyncwrite_cancel_forces_completion)
+add_net_test_case(test_s3_asyncwrite_cancel_sends_abort)
 
 if(ENABLE_MRAP_TESTS)
     add_net_test_case(test_s3_get_object_less_than_part_size_mrap)

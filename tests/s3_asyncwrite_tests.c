@@ -575,3 +575,78 @@ static int s_test_s3_asyncwrite_cancel_forces_completion(struct aws_allocator *a
     ASSERT_TRUE(write_completed_during_cancel);
     return 0;
 }
+
+static int s_wait_for_sub_request_to_send(
+    struct asyncwrite_tester *tester,
+    enum aws_s3_request_type request_type,
+    uint64_t timeout) {
+
+    uint64_t now;
+    ASSERT_SUCCESS(aws_high_res_clock_get_ticks(&now));
+    const uint64_t timeout_timestamp = now + timeout;
+    const uint64_t sleep_between_checks = aws_timestamp_convert(100, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+
+    bool request_sent = false;
+    while (!request_sent) {
+        aws_s3_tester_lock_synced_data(&tester->s3_tester);
+        for (size_t i = 0; i < aws_array_list_length(&tester->test_results.synced_data.metrics); ++i) {
+            struct aws_s3_request_metrics *metrics = NULL;
+            ASSERT_SUCCESS(aws_array_list_get_at(&tester->test_results.synced_data.metrics, (void **)&metrics, i));
+            enum aws_s3_request_type request_type_i;
+            aws_s3_request_metrics_get_request_type(metrics, &request_type_i);
+            if (request_type_i == request_type) {
+                if (aws_s3_request_metrics_get_error_code(metrics) == 0) {
+                    request_sent = true;
+                }
+            }
+        }
+        aws_s3_tester_unlock_synced_data(&tester->s3_tester);
+
+        if (!request_sent) {
+            /* Check for timeout, then sleep a bit before checking again */
+            ASSERT_SUCCESS(aws_high_res_clock_get_ticks(&now));
+            ASSERT_TRUE(
+                now < timeout_timestamp,
+                "Timed out waiting for %s to be sent",
+                aws_s3_request_type_operation_name(request_type));
+            aws_thread_current_sleep(sleep_between_checks);
+        }
+    }
+    return 0;
+}
+
+/* Test that aws_s3_meta_request_cancel() will result in AbortMultipartUpload being sent.
+ * This is a regression test: once upon a time cancel() forgot to trigger the client's update(),
+ * and so the meta-request would hang until something else kicked the update loop. */
+AWS_TEST_CASE(test_s3_asyncwrite_cancel_sends_abort, s_test_s3_asyncwrite_cancel_sends_abort)
+static int s_test_s3_asyncwrite_cancel_sends_abort(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct asyncwrite_tester tester;
+    ASSERT_SUCCESS(s_asyncwrite_tester_init(&tester, allocator, PART_SIZE * 3 /*object_size*/));
+
+    const uint64_t one_sec_in_nanos = aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL);
+
+    /* Wait for StartMultipartUpload to be sent */
+    ASSERT_SUCCESS(s_wait_for_sub_request_to_send(
+        &tester, AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, 10 * one_sec_in_nanos /*timeout*/));
+
+    /* Sleep a bit to ensure the client isn't doing anything, then cancel() */
+    aws_thread_current_sleep(one_sec_in_nanos);
+
+    aws_s3_meta_request_cancel(tester.meta_request);
+
+    /* Wait for AbortMultipartUpload to be sent.
+     * Ugh if timeout is too long we risk some unrelated system updating the client and hiding this bug.
+     * But if timeout is too short CI will randomly fail on super slow system. */
+    ASSERT_SUCCESS(s_wait_for_sub_request_to_send(
+        &tester, AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD, 5 * one_sec_in_nanos /*timeout*/));
+
+    /* Wait for meta request to complete */
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, tester.test_results.finished_error_code);
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
+    return 0;
+}

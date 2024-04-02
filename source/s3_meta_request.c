@@ -360,11 +360,11 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
-    aws_s3_meta_request_unlock_synced_data(meta_request);
     if (meta_request->synced_data.async_write.future != NULL) {
         write_future_to_cancel = meta_request->synced_data.async_write.future;
         meta_request->synced_data.async_write.future = NULL;
     }
+    aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 
     if (write_future_to_cancel != NULL) {
@@ -373,6 +373,9 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
         aws_future_void_set_error(write_future_to_cancel, AWS_ERROR_S3_REQUEST_HAS_COMPLETED);
         aws_future_void_release(write_future_to_cancel);
     }
+
+    /* Schedule the work task, to continue processing the meta-request */
+    aws_s3_client_schedule_process_work(meta_request->client);
 }
 
 int aws_s3_meta_request_pause(
