@@ -1403,7 +1403,7 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
 
     struct aws_s3_client *client = arg;
     struct aws_array_list endpoints_to_release;
-    aws_array_list_init_dynamic(&endpoints_to_release, client->allocator, 10, sizeof(struct aws_s3_endpoint *));
+    aws_array_list_init_dynamic(&endpoints_to_release, client->allocator, 5, sizeof(struct aws_s3_endpoint *));
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(client);

@@ -296,6 +296,7 @@ static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_d
     AWS_ASSERT(endpoint);
 
     struct aws_s3_client *client = endpoint->client;
+
     aws_mem_release(endpoint->allocator, endpoint);
 
     client->vtable->endpoint_shutdown_callback(client);
