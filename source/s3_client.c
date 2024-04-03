@@ -1421,7 +1421,7 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
     /* END CRITICAL SECTION */
     aws_s3_client_unlock_synced_data(client);
 
-    /* now release all endpoints without holding the lock */
+    /* now destroy all endpoints without holding the lock */
     size_t list_size = aws_array_list_length(&endpoints_to_release);
     for (size_t i = 0; i < list_size; ++i) {
         struct aws_s3_endpoint *endpoint;
@@ -1500,7 +1500,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_request_work_list);
 
     /*******************/
-    /* Step 1: Move relevant data into thread local memory and schedule any pending cleanups */
+    /* Step 1: Move relevant data into thread local memory and schedule cleanups */
     /*******************/
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT,
