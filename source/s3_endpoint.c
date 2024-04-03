@@ -274,11 +274,11 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
 
     if (should_destroy) {
         /* do a sync cleanup since client is getting destroyed to avoid any cleanup delay */
-        aws_s3_endpoint_ref_count_zero(endpoint);
+        aws_s3_endpoint_destroy(endpoint);
     }
 }
 
-void aws_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
+void aws_s3_endpoint_destroy(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(endpoint->http_connection_manager);
 

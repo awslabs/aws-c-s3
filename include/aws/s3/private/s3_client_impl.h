@@ -494,9 +494,10 @@ void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
  * ref count must be zero.
  * You MUST NOT call this while the client's lock is held.
  */
-void aws_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
+void aws_s3_endpoint_destroy(struct aws_s3_endpoint *endpoint);
 
-AWS_S3_API extern const uint32_t g_min_num_connections;
+AWS_S3_API
+extern const uint32_t g_min_num_connections;
 
 AWS_S3_API
 extern const size_t g_expect_timeout_offset_ms;

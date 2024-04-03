@@ -1426,7 +1426,7 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
     for (size_t i = 0; i < list_size; ++i) {
         struct aws_s3_endpoint *endpoint;
         aws_array_list_get_at(&endpoints_to_release, &endpoint, i);
-        aws_s3_endpoint_ref_count_zero(endpoint);
+        aws_s3_endpoint_destroy(endpoint);
     }
 
     /* Clean up the array list */
