@@ -1443,10 +1443,11 @@ static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *
     client->synced_data.endpoints_cleanup_task_scheduled = true;
     uint64_t now_ns = 0;
     aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
+    /* S3 closes an idle connection in ~5 seconds */
     aws_event_loop_schedule_task_future(
         client->process_work_event_loop,
         &client->synced_data.endpoints_cleanup_task,
-        now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+        now_ns + aws_timestamp_convert(5, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
 }
 
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {

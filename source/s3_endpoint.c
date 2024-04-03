@@ -266,9 +266,8 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
 
     if (should_destroy) {
         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-    } else {
-        --endpoint->client_synced_data.ref_count;
     }
+    --endpoint->client_synced_data.ref_count;
 
     aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
@@ -283,7 +282,7 @@ void aws_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(endpoint->http_connection_manager);
 
-    AWS_ASSERT(endpoint->client_synced_data.ref_count == 0);
+    AWS_FATAL_ASSERT(endpoint->client_synced_data.ref_count == 0);
 
     struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
     endpoint->http_connection_manager = NULL;

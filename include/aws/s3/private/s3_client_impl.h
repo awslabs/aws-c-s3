@@ -400,7 +400,6 @@ struct aws_s3_client {
 
         /* Whether or not work processing is currently scheduled. */
         uint32_t trim_buffer_pool_task_scheduled : 1;
-
     } threaded_data;
 };
 
@@ -490,6 +489,11 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
  * from the client's hashtable) */
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
 
+/*
+ * Destroy's the endpoint. Before calling this function, endpoint must be removed from the Client's hash table and it's
+ * ref count must be zero.
+ * You MUST NOT call this while the client's lock is held.
+ */
 void aws_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API extern const uint32_t g_min_num_connections;
