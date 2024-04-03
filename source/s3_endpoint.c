@@ -273,7 +273,12 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     /* END CRITICAL SECTION */
 
     if (should_destroy) {
-        /* do a sync cleanup since client is getting destroyed to avoid any cleanup delay */
+        /* Do a sync cleanup since client is getting destroyed to avoid any cleanup delay.
+         * The endpoint may have async cleanup to do (connection manager).
+         * When that's all done we'll invoke a completion callback.
+         * Since it's a crime to hold a lock while invoking a callback,
+         * we make sure that we've released the client's lock before proceeding...
+         */
         aws_s3_endpoint_destroy(endpoint);
     }
 }
