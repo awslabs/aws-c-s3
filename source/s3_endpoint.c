@@ -49,8 +49,6 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
-static void s_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
-
 static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
 
 static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
