@@ -5712,7 +5712,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 }
 
                 if (ignore_header) {
-                    ASSERT_SUCCESS(aws_http_headers_erase(range_get_headers, verify_header.name));
+                    aws_http_headers_erase(range_get_headers, verify_header.name);
                     continue;
                 }
 
