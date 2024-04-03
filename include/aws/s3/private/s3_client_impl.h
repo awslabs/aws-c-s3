@@ -379,6 +379,9 @@ struct aws_s3_client {
         /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
         uint32_t finish_destroy : 1;
 
+        /* Whether or not endpoints cleanup task is currently scheduled. */
+        uint32_t endpoints_cleanup_task_scheduled : 1;
+
         struct aws_s3_upload_part_timeout_stats upload_part_stats;
     } synced_data;
 
@@ -398,8 +401,6 @@ struct aws_s3_client {
         /* Whether or not work processing is currently scheduled. */
         uint32_t trim_buffer_pool_task_scheduled : 1;
 
-        /* Whether or not endpoints cleanup task is currently scheduled. */
-        uint32_t endpoints_cleanup_task_scheduled : 1;
     } threaded_data;
 };
 

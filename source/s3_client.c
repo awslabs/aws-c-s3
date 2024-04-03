@@ -629,7 +629,11 @@ static void s_s3_client_start_destroy(void *user_data) {
         aws_s3_client_lock_synced_data(client);
 
         client->synced_data.active = false;
-
+        if (!client->synced_data.endpoints_cleanup_task_scheduled) {
+            client->synced_data.endpoints_cleanup_task_scheduled = 1;
+            aws_event_loop_schedule_task_now(
+                client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+        }
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
 
@@ -645,9 +649,6 @@ static void s_s3_client_start_destroy(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.start_destroy_executing = false;
-        /* Run the cleanup task now instead of waiting to cleanup as soon as possible */
-        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
-        aws_event_loop_schedule_task_now(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
 
         /* Schedule the work task to clean up outstanding connections and to call s_s3_client_finish_destroy function if
          * everything cleaning up asynchronously has finished.  */
@@ -664,10 +665,6 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     if (client->threaded_data.trim_buffer_pool_task_scheduled) {
         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
-    }
-
-    if (client->threaded_data.endpoints_cleanup_task_scheduled) {
-        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
     }
 
     aws_string_destroy(client->region);
@@ -1398,17 +1395,15 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
 
 static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
-    if (task_status != AWS_TASK_STATUS_RUN_READY) {
-        return;
-    }
+    (void)task_status;
 
     struct aws_s3_client *client = arg;
-    client->threaded_data.endpoints_cleanup_task_scheduled = false;
     struct aws_array_list endpoints_to_release;
     aws_array_list_init_dynamic(&endpoints_to_release, client->allocator, 10, sizeof(struct aws_s3_endpoint *));
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(client);
+    client->synced_data.endpoints_cleanup_task_scheduled = false;
 
     for (struct aws_hash_iter iter = aws_hash_iter_begin(&client->synced_data.endpoints); !aws_hash_iter_done(&iter);
          aws_hash_iter_next(&iter)) {
@@ -1438,8 +1433,10 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
 
 static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *client) {
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
-
-    client->threaded_data.endpoints_cleanup_task_scheduled = true;
+    if (client->synced_data.endpoints_cleanup_task_scheduled) {
+        return;
+    }
+    client->synced_data.endpoints_cleanup_task_scheduled = true;
     aws_task_init(
         &client->synced_data.endpoints_cleanup_task, s_s3_endpoints_cleanup_task, client, "s3_endpoints_cleanup_task");
     uint64_t now_ns = 0;
@@ -1515,11 +1512,12 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     if (client->synced_data.active) {
         s_s3_client_schedule_buffer_pool_trim_synced(client);
-    }
-
-    /* cleanup endpoints if required */
-    if (client->threaded_data.endpoints_cleanup_task_scheduled == 0 && client->synced_data.active) {
         s_s3_client_schedule_endpoints_cleanup_synced(client);
+    } else if (client->synced_data.endpoints_cleanup_task_scheduled) {
+        /* Cancel the task to run it sync */
+        aws_s3_client_unlock_synced_data(client);
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+        aws_s3_client_lock_synced_data(client);
     }
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
