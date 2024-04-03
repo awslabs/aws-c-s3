@@ -106,7 +106,7 @@ struct aws_s3_endpoint {
     struct {
         /* This is NOT an atomic ref-count.
          * The endpoint lives in hashtable: `aws_s3_client.synced_data.endpoints`
-         * This ref-count can only be touched while holding client's lock. */
+         * This ref-count can only be touched while holding client's lock */
         size_t ref_count;
     } client_synced_data;
 
