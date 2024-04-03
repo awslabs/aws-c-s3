@@ -490,9 +490,8 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
 
 /*
- * Destroy's the endpoint. Before calling this function, endpoint must be removed from the Client's hash table and it's
- * ref count must be zero.
- * You MUST NOT call this while the client's lock is held.
+ * Destroys the endpoint. Before calling this function, the endpoint must be removed from the Client's hash table, and
+ * its ref count must be zero. You MUST NOT call this while the client's lock is held.
  */
 void aws_s3_endpoint_destroy(struct aws_s3_endpoint *endpoint);
 
