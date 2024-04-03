@@ -1411,14 +1411,9 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
     for (struct aws_hash_iter iter = aws_hash_iter_begin(&client->synced_data.endpoints); !aws_hash_iter_done(&iter);
          aws_hash_iter_next(&iter)) {
         struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
-        if (endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP) {
+        if (endpoint->client_synced_data.ref_count == 0) {
             aws_array_list_push_back(&endpoints_to_release, &endpoint);
-            if (endpoint->client_synced_data.ref_count == 1) {
-                endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
-                aws_hash_iter_delete(&iter, true);
-            } else {
-                endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
-            }
+            aws_hash_iter_delete(&iter, true);
         }
     }
 
@@ -1430,11 +1425,13 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
     for (size_t i = 0; i < list_size; ++i) {
         struct aws_s3_endpoint *endpoint;
         aws_array_list_get_at(&endpoints_to_release, &endpoint, i);
-        aws_s3_endpoint_release(endpoint);
+        aws_s3_endpoint_ref_count_zero(endpoint);
     }
 
     /* Clean up the array list */
     aws_array_list_clean_up(&endpoints_to_release);
+
+    aws_s3_client_schedule_process_work(client);
 }
 
 static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *client) {

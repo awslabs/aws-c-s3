@@ -78,7 +78,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
 
     endpoint->allocator = allocator;
     endpoint->host_name = aws_string_new_from_string(allocator, options->host_name);
-    endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_ACTIVE;
 
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);
@@ -248,7 +247,6 @@ static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already
         aws_s3_client_lock_synced_data(endpoint->client);
     }
 
-    AWS_ASSERT(endpoint->client_synced_data.ref_count > 0);
     ++endpoint->client_synced_data.ref_count;
 
     if (!already_holding_lock) {
@@ -269,37 +267,28 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(endpoint->client);
 
-    bool should_destroy = endpoint->client_synced_data.ref_count == 1;
-    bool endpoint_active =
-        endpoint->client->synced_data.active == 1 && endpoint->client_synced_data.state == AWS_S3_ENDPOINT_STATE_ACTIVE;
+    bool should_destroy = endpoint->client_synced_data.ref_count == 1 && endpoint->client->synced_data.active != 1;
+
     if (should_destroy) {
-        if (endpoint_active) {
-            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP;
-            endpoint->client->synced_data.process_endpoint_lifecycle_changes = true;
-        } else {
-            endpoint->client_synced_data.state = AWS_S3_ENDPOINT_STATE_DESTROYING;
-            aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-        }
+        aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
     } else {
         --endpoint->client_synced_data.ref_count;
     }
 
     aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
+
     if (should_destroy) {
-        if (endpoint_active) {
-            /* schedule the cleanup task */
-            aws_s3_client_schedule_process_work(endpoint->client);
-        } else {
-            /* do a sync cleanup since client is getting destroyed to avoid any cleanup delay */
-            s_s3_endpoint_ref_count_zero(endpoint);
-        }
+        /* do a sync cleanup since client is getting destroyed to avoid any cleanup delay */
+        aws_s3_endpoint_ref_count_zero(endpoint);
     }
 }
 
-static void s_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
+void aws_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(endpoint->http_connection_manager);
+
+    AWS_ASSERT(endpoint->client_synced_data.ref_count == 0);
 
     struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
     endpoint->http_connection_manager = NULL;

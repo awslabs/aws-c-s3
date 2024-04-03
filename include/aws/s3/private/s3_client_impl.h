@@ -102,19 +102,12 @@ struct aws_s3_endpoint_system_vtable {
     void (*release)(struct aws_s3_endpoint *endpoint);
 };
 
-enum aws_s3_endpoint_state {
-    AWS_S3_ENDPOINT_STATE_ACTIVE,
-    AWS_S3_ENDPOINT_STATE_PENDING_CLEANUP,
-    AWS_S3_ENDPOINT_STATE_DESTROYING,
-};
-
 struct aws_s3_endpoint {
     struct {
         /* This is NOT an atomic ref-count.
          * The endpoint lives in hashtable: `aws_s3_client.synced_data.endpoints`
-         * This ref-count can only be touched while holding client's lock */
+         * This ref-count can only be touched while holding client's lock. */
         size_t ref_count;
-        enum aws_s3_endpoint_state state;
     } client_synced_data;
 
     /* What allocator was used to create this endpoint. */
@@ -499,8 +492,9 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
  * from the client's hashtable) */
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
 
-AWS_S3_API
-extern const uint32_t g_min_num_connections;
+void aws_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
+
+AWS_S3_API extern const uint32_t g_min_num_connections;
 
 AWS_S3_API
 extern const size_t g_expect_timeout_offset_ms;
