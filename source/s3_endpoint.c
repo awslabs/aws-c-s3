@@ -77,7 +77,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     endpoint->client_synced_data.ref_count = 1;
 
     endpoint->allocator = allocator;
-    endpoint->host_name = aws_string_new_from_string(allocator, options->host_name);
+    endpoint->host_name = options->host_name;
 
     struct aws_host_resolution_config host_resolver_config;
     AWS_ZERO_STRUCT(host_resolver_config);
@@ -123,8 +123,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     return endpoint;
 
 error_cleanup:
-
-    aws_string_destroy(endpoint->host_name);
 
     aws_mem_release(allocator, endpoint);
 
@@ -302,7 +300,6 @@ static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_d
     AWS_ASSERT(endpoint);
 
     struct aws_s3_client *client = endpoint->client;
-    aws_mem_release(endpoint->allocator, endpoint->host_name);
     aws_mem_release(endpoint->allocator, endpoint);
 
     client->vtable->endpoint_shutdown_callback(client);
