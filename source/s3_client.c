@@ -629,7 +629,6 @@ static void s_s3_client_start_destroy(void *user_data) {
         aws_s3_client_lock_synced_data(client);
 
         client->synced_data.active = false;
-        client->synced_data.process_endpoint_lifecycle_changes = true;
 
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
@@ -646,6 +645,9 @@ static void s_s3_client_start_destroy(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.start_destroy_executing = false;
+        /* Run the cleanup task now instead of waiting to cleanup as soon as possible */
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+        aws_event_loop_schedule_task_now(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
 
         /* Schedule the work task to clean up outstanding connections and to call s_s3_client_finish_destroy function if
          * everything cleaning up asynchronously has finished.  */
@@ -1436,27 +1438,16 @@ static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum a
 
 static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *client) {
     ASSERT_SYNCED_DATA_LOCK_HELD(client);
-    if (client->threaded_data.endpoints_cleanup_task_scheduled) {
-        if (!client->synced_data.active) {
-            aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
-            aws_event_loop_schedule_task_now(
-                client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
-        }
-        return;
-    }
+
     client->threaded_data.endpoints_cleanup_task_scheduled = true;
     aws_task_init(
         &client->synced_data.endpoints_cleanup_task, s_s3_endpoints_cleanup_task, client, "s3_endpoints_cleanup_task");
-    if (client->synced_data.active) {
-        uint64_t now_ns = 0;
-        aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
-        aws_event_loop_schedule_task_future(
-            client->process_work_event_loop,
-            &client->synced_data.endpoints_cleanup_task,
-            now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
-    } else {
-        aws_event_loop_schedule_task_now(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
-    }
+    uint64_t now_ns = 0;
+    aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
+    aws_event_loop_schedule_task_future(
+        client->process_work_event_loop,
+        &client->synced_data.endpoints_cleanup_task,
+        now_ns + aws_timestamp_convert(3, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
 }
 
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
@@ -1527,8 +1518,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     }
 
     /* cleanup endpoints if required */
-    if (client->synced_data.process_endpoint_lifecycle_changes) {
-        client->synced_data.process_endpoint_lifecycle_changes = false;
+    if (client->threaded_data.endpoints_cleanup_task_scheduled == 0 && client->synced_data.active) {
         s_s3_client_schedule_endpoints_cleanup_synced(client);
     }
 
