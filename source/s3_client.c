@@ -1514,6 +1514,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         s_s3_client_schedule_buffer_pool_trim_synced(client);
         s_s3_client_schedule_endpoints_cleanup_synced(client);
     } else if (client->synced_data.endpoints_cleanup_task_scheduled) {
+        client->synced_data.endpoints_cleanup_task_scheduled = false;
         /* Cancel the task to run it sync */
         aws_s3_client_unlock_synced_data(client);
         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
