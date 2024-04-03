@@ -9,7 +9,6 @@
 
 #include <aws/auth/credentials.h>
 #include <aws/common/assert.h>
-#include <aws/common/clock.h>
 #include <aws/common/device_random.h>
 #include <aws/common/string.h>
 #include <aws/http/connection.h>

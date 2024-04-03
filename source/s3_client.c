@@ -98,6 +98,8 @@ static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
 
 static void s_s3_client_create_connection_for_request(struct aws_s3_client *client, struct aws_s3_request *request);
 
+static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
 /* Callback which handles the HTTP connection retrieved by acquire_http_connection. */
 static void s_s3_client_on_acquire_http_connection(
     struct aws_http_connection *http_connection,
@@ -563,6 +565,8 @@ struct aws_s3_client *aws_s3_client_new(
         aws_hash_callback_string_eq,
         aws_hash_callback_string_destroy,
         NULL);
+    aws_task_init(
+        &client->synced_data.endpoints_cleanup_task, s_s3_endpoints_cleanup_task, client, "s3_endpoints_cleanup_task");
 
     /* Initialize shutdown options and tracking. */
     client->shutdown_callback = client_config->shutdown_callback;
@@ -1437,8 +1441,6 @@ static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *
         return;
     }
     client->synced_data.endpoints_cleanup_task_scheduled = true;
-    aws_task_init(
-        &client->synced_data.endpoints_cleanup_task, s_s3_endpoints_cleanup_task, client, "s3_endpoints_cleanup_task");
     uint64_t now_ns = 0;
     aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
     aws_event_loop_schedule_task_future(
