@@ -1,0 +1,9 @@
+{
+  "status": 403,
+  "headers": {
+    "Content-Type": "application/xml"
+  },
+  "body": [
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error really long error </Message><Resource>/mybucket/myfoto.jpg</Resource><RequestId>4442587FB7D0A2F9</RequestId></Error>"
+  ]
+}
