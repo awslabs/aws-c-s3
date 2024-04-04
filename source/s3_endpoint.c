@@ -262,8 +262,7 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(endpoint->client);
 
-    bool should_destroy = endpoint->client_synced_data.ref_count == 1 && endpoint->client->synced_data.active != 1;
-
+    bool should_destroy = endpoint->client_synced_data.ref_count == 1 && !endpoint->client->synced_data.active;
     if (should_destroy) {
         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
     }

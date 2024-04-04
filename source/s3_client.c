@@ -87,6 +87,10 @@ static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 /* Amount of time spent idling before trimming buffer. */
 static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
+/* Interval for scheduling endpoints cleanup tasks: every X seconds. This is to trim endpoints with a zero reference
+ * count. S3 closes the idle connections in ~5 seconds. */
+static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -1447,7 +1451,8 @@ static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *
     aws_event_loop_schedule_task_future(
         client->process_work_event_loop,
         &client->synced_data.endpoints_cleanup_task,
-        now_ns + aws_timestamp_convert(5, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+        now_ns +
+            aws_timestamp_convert(s_endpoints_cleanup_time_offset_in_s, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
 }
 
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
