@@ -1389,6 +1389,17 @@ static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator,
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     }
 
+    /* Sleep for some time to wait for the cleanup task to run */
+    aws_thread_current_sleep(aws_timestamp_convert(7, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_client_lock_synced_data(client);
+
+    AWS_ASSERT(client->synced_data.num_endpoints_allocated == 0);
+
+    aws_s3_client_unlock_synced_data(client);
+    /* END CRITICAL SECTION */
+
     client = aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return 0;
