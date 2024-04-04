@@ -638,7 +638,7 @@ static void s_s3_client_start_destroy(void *user_data) {
 
         client->synced_data.active = false;
         if (!client->synced_data.endpoints_cleanup_task_scheduled) {
-            client->synced_data.endpoints_cleanup_task_scheduled = 1;
+            client->synced_data.endpoints_cleanup_task_scheduled = true;
             aws_event_loop_schedule_task_now(
                 client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
         }
