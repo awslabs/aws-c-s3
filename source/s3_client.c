@@ -87,7 +87,7 @@ static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 /* Amount of time spent idling before trimming buffer. */
 static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
-/* Interval for scheduling endpoints cleanup tasks: every X seconds. This is to trim endpoints with a zero reference
+/* Interval for scheduling endpoints cleanup task. This is to trim endpoints with a zero reference
  * count. S3 closes the idle connections in ~5 seconds. */
 static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 
