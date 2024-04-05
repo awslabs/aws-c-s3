@@ -350,6 +350,9 @@ struct aws_s3_client {
         /* Task for trimming buffer bool. */
         struct aws_task trim_buffer_pool_task;
 
+        /* Task to cleanup endpoints */
+        struct aws_task endpoints_cleanup_task;
+
         /* Number of endpoints currently allocated. Used during clean up to know how many endpoints are still in
          * memory.*/
         uint32_t num_endpoints_allocated;
@@ -375,6 +378,9 @@ struct aws_s3_client {
 
         /* True if client has been flagged to finish destroying itself. Used to catch double-destroy bugs.*/
         uint32_t finish_destroy : 1;
+
+        /* Whether or not endpoints cleanup task is currently scheduled. */
+        uint32_t endpoints_cleanup_task_scheduled : 1;
 
         struct aws_s3_upload_part_timeout_stats upload_part_stats;
     } synced_data;
@@ -482,6 +488,12 @@ struct aws_s3_endpoint *aws_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint
  * (this call briefly holds the client's lock and may remove the endpoint
  * from the client's hashtable) */
 void aws_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
+
+/*
+ * Destroys the endpoint. Before calling this function, the endpoint must be removed from the Client's hash table, and
+ * its ref count must be zero. You MUST NOT call this while the client's lock is held.
+ */
+void aws_s3_endpoint_destroy(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_min_num_connections;
