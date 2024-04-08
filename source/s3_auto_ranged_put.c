@@ -418,6 +418,13 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
         return auto_ranged_put->synced_data.num_parts_pending_read > 0;
     }
 
+    /* If doing async-writes, only allow a new part if there's a pending write-future,
+     * and no pending-reads yet to copy that data. */
+    if (auto_ranged_put->base.request_body_using_async_writes == true) {
+        return (auto_ranged_put->base.synced_data.async_write.future == NULL) ||
+               (auto_ranged_put->synced_data.num_parts_pending_read > 0);
+    }
+
     /* If this is the conservative pass, only allow 1 pending-read.
      * Reads are serial anyway, so queuing up a whole bunch isn't necessarily a speedup. */
     if ((flags & AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE) != 0) {
