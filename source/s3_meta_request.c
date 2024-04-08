@@ -4,6 +4,7 @@
  */
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
+#include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
@@ -76,6 +77,11 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
     int error_code);
+
+static int s_s3_meta_request_read_from_pending_async_writes(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *dest,
+    bool *eof);
 
 void aws_s3_meta_request_lock_synced_data(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
@@ -261,8 +267,11 @@ int aws_s3_meta_request_init_base(
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
     }
 
-    /* Set initial_meta_request, based on how the request's body is being passed in
-     * (we checked earlier that it's not being passed multiple ways) */
+    /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
+    meta_request->initial_request_message = aws_http_message_acquire(options->message);
+
+    /* If the request's body is being passed in some other way, set that up.
+     * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
@@ -271,17 +280,12 @@ int aws_s3_meta_request_init_base(
             goto error;
         }
 
-        /* but keep original message around for headers, method, etc */
-        meta_request->initial_request_message = aws_http_message_acquire(options->message);
     } else if (options->send_async_stream != NULL) {
-        /* Read from async body-stream, but keep original message around for headers, method, etc */
         meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);
-        meta_request->initial_request_message = aws_http_message_acquire(options->message);
-        meta_request->maximize_async_stream_reads = options->maximize_async_stream_reads_internal_use_only;
 
-    } else {
-        /* Keep original message around, we'll read from its synchronous body-stream */
-        meta_request->initial_request_message = aws_http_message_acquire(options->message);
+    } else if (options->send_using_async_writes == true) {
+        meta_request->request_body_using_async_writes = true;
+        aws_byte_buf_init(&meta_request->synced_data.async_write.buffered_data, allocator, 0);
     }
 
     meta_request->synced_data.next_streaming_part = 1;
@@ -350,12 +354,28 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
 }
 
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
+    struct aws_future_void *write_future_to_cancel = NULL;
+
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
+    if (meta_request->synced_data.async_write.future != NULL) {
+        write_future_to_cancel = meta_request->synced_data.async_write.future;
+        meta_request->synced_data.async_write.future = NULL;
+    }
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
+
+    if (write_future_to_cancel != NULL) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST, "id=%p: write future complete due to cancellation", (void *)meta_request);
+        aws_future_void_set_error(write_future_to_cancel, AWS_ERROR_S3_REQUEST_HAS_COMPLETED);
+        aws_future_void_release(write_future_to_cancel);
+    }
+
+    /* Schedule the work task, to continue processing the meta-request */
+    aws_s3_client_schedule_process_work(meta_request->client);
 }
 
 int aws_s3_meta_request_pause(
@@ -498,6 +518,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
+
+    aws_byte_buf_clean_up(&meta_request->synced_data.async_write.buffered_data);
 
     if (meta_request->vtable != NULL) {
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", log_id);
@@ -1978,6 +2000,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     struct aws_linked_list release_request_list;
     aws_linked_list_init(&release_request_list);
 
+    struct aws_future_void *pending_async_write_future = NULL;
+
     struct aws_s3_meta_request_result finish_result;
     AWS_ZERO_STRUCT(finish_result);
 
@@ -2001,6 +2025,10 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             aws_linked_list_push_back(&release_request_list, &request->node);
         }
 
+        /* Clean out any pending async-write future */
+        pending_async_write_future = meta_request->synced_data.async_write.future;
+        meta_request->synced_data.async_write.future = NULL;
+
         finish_result = meta_request->synced_data.finish_result;
         AWS_ZERO_STRUCT(meta_request->synced_data.finish_result);
 
@@ -2011,6 +2039,15 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     if (already_finished) {
         return;
+    }
+
+    if (pending_async_write_future != NULL) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: write future complete due to meta request's early finish",
+            (void *)meta_request);
+        aws_future_void_set_error(pending_async_write_future, AWS_ERROR_S3_REQUEST_HAS_COMPLETED);
+        pending_async_write_future = aws_future_void_release(pending_async_write_future);
     }
 
     while (!aws_linked_list_empty(&release_request_list)) {
@@ -2080,12 +2117,24 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
     }
 
+    /* Further techniques are synchronous... */
+    struct aws_future_bool *synchronous_read_future = aws_future_bool_new(meta_request->allocator);
+
+    /* If using async-writes, call function which fills the buffer and/or hits EOF  */
+    if (meta_request->request_body_using_async_writes == true) {
+        bool eof = false;
+        if (s_s3_meta_request_read_from_pending_async_writes(meta_request, buffer, &eof) == AWS_OP_SUCCESS) {
+            aws_future_bool_set_result(synchronous_read_future, eof);
+        } else {
+            aws_future_bool_set_error(synchronous_read_future, aws_last_error());
+        }
+        return synchronous_read_future;
+    }
+
     /* Else synchronous aws_input_stream */
     struct aws_input_stream *synchronous_stream =
         aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(synchronous_stream);
-
-    struct aws_future_bool *synchronous_read_future = aws_future_bool_new(meta_request->allocator);
 
     /* Keep calling read() until we fill the buffer, or hit EOF */
     struct aws_stream_status status = {.is_end_of_stream = false, .is_valid = true};
@@ -2107,21 +2156,6 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
 synchronous_read_done:
     return synchronous_read_future;
-}
-
-bool aws_s3_meta_request_body_has_no_more_data(const struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_input_stream *initial_body_stream =
-        aws_http_message_get_body_stream(meta_request->initial_request_message);
-    AWS_FATAL_ASSERT(initial_body_stream);
-
-    struct aws_stream_status status;
-    if (aws_input_stream_get_status(initial_body_stream, &status)) {
-        return true;
-    }
-
-    return status.is_end_of_stream;
 }
 
 void aws_s3_meta_request_result_setup(
@@ -2152,6 +2186,170 @@ void aws_s3_meta_request_result_setup(
 
     result->response_status = response_status;
     result->error_code = error_code;
+}
+
+struct aws_future_void *aws_s3_meta_request_write(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_cursor data,
+    bool eof) {
+
+    struct aws_future_void *write_future = aws_future_void_new(meta_request->allocator);
+
+    /* Set this true, while lock is held, if we're ready to send data */
+    bool ready_to_send = false;
+
+    /* Set this true, while lock is held, if write() was called illegally
+     * and the meta-request should terminate */
+    bool illegal_usage_terminate_meta_request = false;
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+        /* The meta-request is already complete */
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Ignoring write(), the meta request is already complete.",
+            (void *)meta_request);
+        aws_future_void_set_error(write_future, AWS_ERROR_S3_REQUEST_HAS_COMPLETED);
+
+    } else if (!meta_request->request_body_using_async_writes) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Illegal call to write(). The meta-request must be configured to send-using-data-writes.",
+            (void *)meta_request);
+        illegal_usage_terminate_meta_request = true;
+
+    } else if (meta_request->synced_data.async_write.future != NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Illegal call to write(). The previous write is not complete.",
+            (void *)meta_request);
+        illegal_usage_terminate_meta_request = true;
+
+    } else if (meta_request->synced_data.async_write.eof) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST, "id=%p: Illegal call to write(). EOF already set.", (void *)meta_request);
+        illegal_usage_terminate_meta_request = true;
+
+    } else if (eof || (meta_request->synced_data.async_write.buffered_data.len + data.len >= meta_request->part_size)) {
+        /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: write(data=%zu, eof=%d) previously-buffered=%zu. Ready to upload part...",
+            (void *)meta_request,
+            data.len,
+            eof,
+            meta_request->synced_data.async_write.buffered_data.len);
+
+        meta_request->synced_data.async_write.unbuffered_cursor = data;
+        meta_request->synced_data.async_write.eof = eof;
+        meta_request->synced_data.async_write.future = aws_future_void_acquire(write_future);
+        ready_to_send = true;
+
+    } else {
+        /* Can't send yet. Buffer the data and complete its future, so we can get more data */
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: write(data=%zu, eof=%d) previously-buffered=%zu. Buffering data, not enough to upload.",
+            (void *)meta_request,
+            data.len,
+            eof,
+            meta_request->synced_data.async_write.buffered_data.len);
+
+        /* TODO: something smarter with this buffer: like get it from buffer-pool,
+         * or reserve exactly part-size, or reserve exactly how much we need */
+        aws_byte_buf_append_dynamic(&meta_request->synced_data.async_write.buffered_data, &data);
+
+        /* TODO: does a future that completes immediately risk stack overflow?
+         * If a user does tiny writes, and registers callbacks on the write-future,
+         * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
+        aws_future_void_set_result(write_future);
+    }
+
+    if (illegal_usage_terminate_meta_request) {
+        aws_future_void_set_error(write_future, AWS_ERROR_INVALID_STATE);
+        aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_INVALID_STATE);
+    }
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    if (ready_to_send || illegal_usage_terminate_meta_request) {
+        /* Schedule the work task, to continue processing the meta-request */
+        aws_s3_client_schedule_process_work(meta_request->client);
+    }
+
+    return write_future;
+}
+
+/* Copy pending async-write data into the buffer.
+ * This is only called when there's enough data for the next part. */
+static int s_s3_meta_request_read_from_pending_async_writes(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *dest,
+    bool *eof) {
+
+    *eof = false;
+
+    struct aws_future_void *write_future_to_complete = NULL;
+    int error_code = 0;
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    /* If user calls aws_s3_meta_request_cancel(), it will synchronously complete any pending async-writes.
+     * So if the write-future is unexpectedly gone, that's what happened, don't touch the data. */
+    if (meta_request->synced_data.async_write.future == NULL) {
+        error_code = AWS_ERROR_S3_CANCELED;
+        goto unlock;
+    }
+
+    /* Buffered data should not exceed part-size */
+    AWS_FATAL_ASSERT(dest->capacity - dest->len >= meta_request->synced_data.async_write.buffered_data.len);
+
+    /* Copy all buffered data */
+    aws_byte_buf_write_from_whole_buffer(dest, meta_request->synced_data.async_write.buffered_data);
+    meta_request->synced_data.async_write.buffered_data.len = 0;
+
+    /* Copy as much unbuffered data as possible */
+    aws_byte_buf_write_to_capacity(dest, &meta_request->synced_data.async_write.unbuffered_cursor);
+
+    /* We should have filled the dest buffer, unless this is the final write */
+    AWS_FATAL_ASSERT(dest->len == dest->capacity || meta_request->synced_data.async_write.eof);
+
+    /* If we haven't received EOF, and there's not enough data in unbuffered_cursor to fill another part,
+     * then we need to move it into buffered_data, so we can complete the write's future and get more data */
+    if (!meta_request->synced_data.async_write.eof &&
+        meta_request->synced_data.async_write.unbuffered_cursor.len < meta_request->part_size) {
+
+        aws_byte_buf_append_dynamic(
+            &meta_request->synced_data.async_write.buffered_data,
+            &meta_request->synced_data.async_write.unbuffered_cursor);
+        meta_request->synced_data.async_write.unbuffered_cursor.len = 0;
+    }
+
+    /* If all unbuffered data is consumed (we sent it, or buffered it) then complete the write's future */
+    if (meta_request->synced_data.async_write.unbuffered_cursor.len == 0) {
+        write_future_to_complete = meta_request->synced_data.async_write.future;
+        meta_request->synced_data.async_write.future = NULL;
+
+        if (meta_request->synced_data.async_write.eof) {
+            *eof = true;
+        }
+    }
+unlock:
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    /* Don't hold locks while completing the future, it might trigger a user callback */
+    if (write_future_to_complete != NULL) {
+        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: write future complete", (void *)meta_request);
+        aws_future_void_set_result(write_future_to_complete);
+        aws_future_void_release(write_future_to_complete);
+    }
+
+    return error_code == 0 ? AWS_OP_SUCCESS : aws_raise_error(error_code);
 }
 
 void aws_s3_meta_request_result_clean_up(
