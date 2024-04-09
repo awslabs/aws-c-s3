@@ -19,18 +19,21 @@ struct aws_checksum_stream {
     bool checksum_finalized;
 };
 
-int s_aws_finalize_checksum(struct aws_checksum_stream *impl) {
+static int s_finalize_checksum(struct aws_checksum_stream *impl) {
     if (impl->checksum_finalized) {
         return AWS_OP_SUCCESS;
     }
 
-    int result = aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0);
-    if (result != AWS_OP_SUCCESS) {
+    if (aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0) != AWS_OP_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to calculate checksum with error code %d (%s).",
+            aws_last_error(),
+            aws_error_str(aws_last_error()));
         aws_byte_buf_reset(&impl->checksum_result, true);
         impl->checksum_finalized = true;
         return aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
     }
-    AWS_ASSERT(result == AWS_OP_SUCCESS);
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&impl->checksum_result);
     AWS_FATAL_ASSERT(aws_base64_encode(&checksum_result_cursor, impl->encoded_checksum_output) == AWS_OP_SUCCESS);
     impl->checksum_finalized = true;
@@ -73,7 +76,7 @@ static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, str
         return AWS_OP_ERR;
     }
     if (status.is_end_of_stream) {
-        return s_aws_finalize_checksum(impl);
+        return s_finalize_checksum(impl);
     }
     return AWS_OP_SUCCESS;
 }
@@ -98,7 +101,7 @@ static void s_aws_input_checksum_stream_destroy(struct aws_checksum_stream *impl
     }
 
     /* Compute the checksum of whatever was read, if we didn't reach the end of the underlying stream. */
-    s_aws_finalize_checksum(impl);
+    s_finalize_checksum(impl);
 
     aws_checksum_destroy(impl->checksum);
     aws_input_stream_release(impl->old_stream);
