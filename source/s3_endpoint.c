@@ -48,8 +48,6 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
-static void s_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint);
-
 static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already_holding_lock);
 
 static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint);
@@ -122,8 +120,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     return endpoint;
 
 error_cleanup:
-
-    aws_string_destroy(options->host_name);
 
     aws_mem_release(allocator, endpoint);
 
@@ -246,7 +242,6 @@ static void s_s3_endpoint_acquire(struct aws_s3_endpoint *endpoint, bool already
         aws_s3_client_lock_synced_data(endpoint->client);
     }
 
-    AWS_ASSERT(endpoint->client_synced_data.ref_count > 0);
     ++endpoint->client_synced_data.ref_count;
 
     if (!already_holding_lock) {
@@ -267,28 +262,31 @@ static void s_s3_endpoint_release(struct aws_s3_endpoint *endpoint) {
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(endpoint->client);
 
-    bool should_destroy = (endpoint->client_synced_data.ref_count == 1);
+    bool should_destroy = endpoint->client_synced_data.ref_count == 1 && !endpoint->client->synced_data.active;
     if (should_destroy) {
         aws_hash_table_remove(&endpoint->client->synced_data.endpoints, endpoint->host_name, NULL, NULL);
-    } else {
-        --endpoint->client_synced_data.ref_count;
     }
+    --endpoint->client_synced_data.ref_count;
 
     aws_s3_client_unlock_synced_data(endpoint->client);
     /* END CRITICAL SECTION */
 
     if (should_destroy) {
-        /* The endpoint may have async cleanup to do (connection manager).
+        /* Do a sync cleanup since client is getting destroyed to avoid any cleanup delay.
+         * The endpoint may have async cleanup to do (connection manager).
          * When that's all done we'll invoke a completion callback.
          * Since it's a crime to hold a lock while invoking a callback,
-         * we make sure that we've released the client's lock before proceeding... */
-        s_s3_endpoint_ref_count_zero(endpoint);
+         * we make sure that we've released the client's lock before proceeding...
+         */
+        aws_s3_endpoint_destroy(endpoint);
     }
 }
 
-static void s_s3_endpoint_ref_count_zero(struct aws_s3_endpoint *endpoint) {
+void aws_s3_endpoint_destroy(struct aws_s3_endpoint *endpoint) {
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(endpoint->http_connection_manager);
+
+    AWS_FATAL_ASSERT(endpoint->client_synced_data.ref_count == 0);
 
     struct aws_http_connection_manager *http_connection_manager = endpoint->http_connection_manager;
     endpoint->http_connection_manager = NULL;

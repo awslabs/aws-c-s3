@@ -424,7 +424,9 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
     else:
         RETRY_REQUEST_COUNT = 0
 
-    if parsed_path.path == "/get_object_invalid_response_missing_content_range" or parsed_path.path == "/get_object_invalid_response_missing_etags":
+    if (parsed_path.path == "/get_object_invalid_response_missing_content_range" or 
+        parsed_path.path == "/get_object_invalid_response_missing_etags" or 
+        parsed_path.path == "/get_object_long_error"):
         # Don't generate the body for those requests
         return response_config
 

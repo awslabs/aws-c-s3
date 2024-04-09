@@ -87,6 +87,10 @@ static const uint32_t s_default_throughput_failure_interval_seconds = 30;
 /* Amount of time spent idling before trimming buffer. */
 static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 
+/* Interval for scheduling endpoints cleanup task. This is to trim endpoints with a zero reference
+ * count. S3 closes the idle connections in ~5 seconds. */
+static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -97,6 +101,8 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
 
 static void s_s3_client_create_connection_for_request(struct aws_s3_client *client, struct aws_s3_request *request);
+
+static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
 /* Callback which handles the HTTP connection retrieved by acquire_http_connection. */
 static void s_s3_client_on_acquire_http_connection(
@@ -563,6 +569,8 @@ struct aws_s3_client *aws_s3_client_new(
         aws_hash_callback_string_eq,
         aws_hash_callback_string_destroy,
         NULL);
+    aws_task_init(
+        &client->synced_data.endpoints_cleanup_task, s_s3_endpoints_cleanup_task, client, "s3_endpoints_cleanup_task");
 
     /* Initialize shutdown options and tracking. */
     client->shutdown_callback = client_config->shutdown_callback;
@@ -629,7 +637,11 @@ static void s_s3_client_start_destroy(void *user_data) {
         aws_s3_client_lock_synced_data(client);
 
         client->synced_data.active = false;
-
+        if (!client->synced_data.endpoints_cleanup_task_scheduled) {
+            client->synced_data.endpoints_cleanup_task_scheduled = true;
+            aws_event_loop_schedule_task_now(
+                client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+        }
         /* Prevent the client from cleaning up in between the mutex unlock/re-lock below.*/
         client->synced_data.start_destroy_executing = true;
 
@@ -1129,14 +1141,35 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     if (options->send_filepath.len > 0) {
         ++body_source_count;
     }
+    if (options->send_using_async_writes == true) {
+        if (options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
+            /* TODO: we could support async-writes for DEFAULT type too, just takes work & testing */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create meta request."
+                "send-using-data-writes can only be used with auto-ranged-put.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+        if (content_length_found) {
+            /* TODO: we could support async-writes with content-length, just takes work & testing */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create meta request."
+                "send-using-data-writes can only be used when Content-Length is unknown.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+        ++body_source_count;
+    }
     if (options->send_async_stream != NULL) {
         ++body_source_count;
     }
     if (body_source_count > 1) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "Could not create auto-ranged-put meta request."
-            " More than one data source is set (filepath, async stream, body stream).");
+            "Could not create meta request."
+            " More than one data source is set (filepath, async stream, body stream, data writes).");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -1390,6 +1423,59 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
     client->threaded_data.trim_buffer_pool_task_scheduled = true;
 }
 
+static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    (void)task_status;
+
+    struct aws_s3_client *client = arg;
+    struct aws_array_list endpoints_to_release;
+    aws_array_list_init_dynamic(&endpoints_to_release, client->allocator, 5, sizeof(struct aws_s3_endpoint *));
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_client_lock_synced_data(client);
+    client->synced_data.endpoints_cleanup_task_scheduled = false;
+
+    for (struct aws_hash_iter iter = aws_hash_iter_begin(&client->synced_data.endpoints); !aws_hash_iter_done(&iter);
+         aws_hash_iter_next(&iter)) {
+        struct aws_s3_endpoint *endpoint = (struct aws_s3_endpoint *)iter.element.value;
+        if (endpoint->client_synced_data.ref_count == 0) {
+            aws_array_list_push_back(&endpoints_to_release, &endpoint);
+            aws_hash_iter_delete(&iter, true);
+        }
+    }
+
+    /* END CRITICAL SECTION */
+    aws_s3_client_unlock_synced_data(client);
+
+    /* now destroy all endpoints without holding the lock */
+    size_t list_size = aws_array_list_length(&endpoints_to_release);
+    for (size_t i = 0; i < list_size; ++i) {
+        struct aws_s3_endpoint *endpoint;
+        aws_array_list_get_at(&endpoints_to_release, &endpoint, i);
+        aws_s3_endpoint_destroy(endpoint);
+    }
+
+    /* Clean up the array list */
+    aws_array_list_clean_up(&endpoints_to_release);
+
+    aws_s3_client_schedule_process_work(client);
+}
+
+static void s_s3_client_schedule_endpoints_cleanup_synced(struct aws_s3_client *client) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(client);
+    if (client->synced_data.endpoints_cleanup_task_scheduled) {
+        return;
+    }
+    client->synced_data.endpoints_cleanup_task_scheduled = true;
+    uint64_t now_ns = 0;
+    aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
+    aws_event_loop_schedule_task_future(
+        client->process_work_event_loop,
+        &client->synced_data.endpoints_cleanup_task,
+        now_ns +
+            aws_timestamp_convert(s_endpoints_cleanup_time_offset_in_s, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
+}
+
 void aws_s3_client_schedule_process_work(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
@@ -1440,7 +1526,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_request_work_list);
 
     /*******************/
-    /* Step 1: Move relevant data into thread local memory. */
+    /* Step 1: Move relevant data into thread local memory and schedule cleanups */
     /*******************/
     AWS_LOGF_DEBUG(
         AWS_LS_S3_CLIENT,
@@ -1455,6 +1541,13 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
 
     if (client->synced_data.active) {
         s_s3_client_schedule_buffer_pool_trim_synced(client);
+        s_s3_client_schedule_endpoints_cleanup_synced(client);
+    } else if (client->synced_data.endpoints_cleanup_task_scheduled) {
+        client->synced_data.endpoints_cleanup_task_scheduled = false;
+        /* Cancel the task to run it sync */
+        aws_s3_client_unlock_synced_data(client);
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.endpoints_cleanup_task);
+        aws_s3_client_lock_synced_data(client);
     }
 
     aws_linked_list_swap_contents(&meta_request_work_list, &client->synced_data.pending_meta_request_work);
@@ -1643,13 +1736,6 @@ static bool s_s3_client_should_update_meta_request(
         if (aws_string_eq_c_str(meta_request_default->operation_name, "CreateSession")) {
             return true;
         }
-    }
-
-    /* If maximize_async_stream_reads, let this meta-request ignore max_requests_prepare & max_requests_in_flight.
-     * We need to maximize the number of async-streams being read from, because the user has no idea
-     * when data will arrive to any of them. */
-    if (meta_request->request_body_async_stream != NULL && meta_request->maximize_async_stream_reads) {
-        return true;
     }
 
     /**
