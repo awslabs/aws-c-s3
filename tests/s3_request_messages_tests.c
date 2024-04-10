@@ -675,7 +675,7 @@ static int s_test_s3_create_multipart_upload_message_new(struct aws_allocator *a
     ASSERT_TRUE(original_message != NULL);
 
     struct aws_http_message *create_multipart_upload_message =
-        aws_s3_create_multipart_upload_message_new(allocator, original_message, AWS_SCA_NONE);
+        aws_s3_create_multipart_upload_message_new(allocator, original_message, NULL);
     ASSERT_TRUE(create_multipart_upload_message != NULL);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(create_multipart_upload_message, "POST"));
@@ -872,8 +872,8 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     struct aws_byte_buf body_buffer;
     aws_byte_buf_init(&body_buffer, allocator, 64);
 
-    struct aws_http_message *complete_multipart_message = aws_s3_complete_multipart_message_new(
-        allocator, original_message, &body_buffer, upload_id, &parts, AWS_SCA_NONE);
+    struct aws_http_message *complete_multipart_message =
+        aws_s3_complete_multipart_message_new(allocator, original_message, &body_buffer, upload_id, &parts, NULL);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(complete_multipart_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(complete_multipart_message, &expected_create_path));
