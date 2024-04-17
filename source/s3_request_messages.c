@@ -249,7 +249,7 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    enum aws_s3_checksum_algorithm algorithm) {
+    const struct checksum_config *checksum_config) {
     AWS_PRECONDITION(allocator);
 
     /* For multipart upload, some headers should ONLY be in the initial create-multipart request.
@@ -282,11 +282,11 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
             goto error_clean_up;
         }
     }
-    if (algorithm) {
+    if (checksum_config && checksum_config->checksum_algorithm && checksum_config->location != AWS_SCL_NONE) {
         if (aws_http_headers_set(
                 headers,
                 g_create_mpu_checksum_header_name,
-                *aws_get_create_mpu_header_name_from_algorithm(algorithm))) {
+                *aws_get_create_mpu_header_name_from_algorithm(checksum_config->checksum_algorithm))) {
             goto error_clean_up;
         }
     }
@@ -553,17 +553,25 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *parts,
-    enum aws_s3_checksum_algorithm algorithm) {
+    const struct checksum_config *checksum_config) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(parts);
 
-    const struct aws_byte_cursor *mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(algorithm);
-
+    const struct aws_byte_cursor *mpu_algorithm_checksum_name = NULL;
     struct aws_http_message *message = NULL;
-    if (algorithm == AWS_SCA_NONE) {
+
+    if (checksum_config && checksum_config->location != AWS_SCL_NONE) {
+        mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(checksum_config->checksum_algorithm);
+        message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+            allocator,
+            base_message,
+            g_s3_complete_multipart_upload_with_checksum_excluded_headers,
+            AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_with_checksum_excluded_headers),
+            true /*exclude_x_amz_meta*/);
+    } else {
         /* We don't need to worry about the pre-calculated checksum from user as for multipart upload, only way to
          * calculate checksum is from client. */
         message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
@@ -571,13 +579,6 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             base_message,
             g_s3_complete_multipart_upload_excluded_headers,
             AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
-            true /*exclude_x_amz_meta*/);
-    } else {
-        message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-            allocator,
-            base_message,
-            g_s3_complete_multipart_upload_with_checksum_excluded_headers,
-            AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_with_checksum_excluded_headers),
             true /*exclude_x_amz_meta*/);
     }
 
@@ -806,6 +807,25 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             }
             aws_input_stream_release(input_stream);
             input_stream = chunk_stream;
+        } else if (
+            checksum_config->checksum_algorithm != AWS_SCA_NONE && checksum_config->location == AWS_SCL_NONE &&
+            out_checksum != NULL) {
+            /* The checksum won't be uploaded, but we still need it for the upload review callback */
+            size_t checksum_len = aws_get_digest_size_from_algorithm(checksum_config->checksum_algorithm);
+            size_t encoded_checksum_len = 0;
+            if (aws_base64_compute_encoded_len(checksum_len, &encoded_checksum_len)) {
+                goto error_clean_up;
+            }
+            if (aws_byte_buf_init(out_checksum, allocator, encoded_checksum_len)) {
+                goto error_clean_up;
+            }
+            struct aws_input_stream *checksum_stream =
+                aws_checksum_stream_new(allocator, input_stream, checksum_config->checksum_algorithm, out_checksum);
+            if (!checksum_stream) {
+                goto error_clean_up;
+            }
+            aws_input_stream_release(input_stream);
+            input_stream = checksum_stream;
         }
     }
     int64_t stream_length = 0;

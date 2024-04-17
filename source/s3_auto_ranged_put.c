@@ -909,9 +909,7 @@ struct aws_future_http_message *s_s3_prepare_create_multipart_upload(struct aws_
 
     /* Create the message to create a new multipart upload. */
     struct aws_http_message *message = aws_s3_create_multipart_upload_message_new(
-        meta_request->allocator,
-        meta_request->initial_request_message,
-        meta_request->checksum_config.checksum_algorithm);
+        meta_request->allocator, meta_request->initial_request_message, &meta_request->checksum_config);
 
     struct aws_future_http_message *future = aws_future_http_message_new(request->allocator);
     if (message != NULL) {
@@ -1236,7 +1234,7 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
         &request->request_body,
         auto_ranged_put->upload_id,
         &auto_ranged_put->synced_data.part_list,
-        meta_request->checksum_config.checksum_algorithm);
+        &meta_request->checksum_config);
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */

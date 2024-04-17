@@ -1440,10 +1440,12 @@ int aws_s3_tester_send_meta_request_with_options(
         aws_s3_client_acquire(client);
     }
 
+    bool disable_trailing_checksum =
+        options->checksum_algorithm == AWS_SCA_NONE || options->disable_put_trailing_checksum;
     struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = options->checksum_algorithm,
         .validate_response_checksum = options->validate_get_response_checksum,
-        .location = options->checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
+        .location = disable_trailing_checksum ? AWS_SCL_NONE : AWS_SCL_TRAILER,
         .validate_checksum_algorithms = options->validate_checksum_algorithms,
     };
 

@@ -414,9 +414,7 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
 
             /* Create the message to create a new multipart upload. */
             message = aws_s3_create_multipart_upload_message_new(
-                meta_request->allocator,
-                meta_request->initial_request_message,
-                meta_request->checksum_config.checksum_algorithm);
+                meta_request->allocator, meta_request->initial_request_message, &meta_request->checksum_config);
 
             break;
         }
@@ -476,7 +474,7 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
                 &request->request_body,
                 copy_object->upload_id,
                 &copy_object->synced_data.part_list,
-                AWS_SCA_NONE);
+                NULL);
 
             break;
         }
