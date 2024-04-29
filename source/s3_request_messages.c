@@ -245,7 +245,7 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
     return message;
 }
 
-/* Creates a create-multipart-upload request from a given put objet request. */
+/* Creates a create-multipart-upload request from a given put object request. */
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
@@ -289,6 +289,11 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
                 *aws_get_create_mpu_header_name_from_algorithm(checksum_config->checksum_algorithm))) {
             goto error_clean_up;
         }
+    }
+
+    struct aws_byte_cursor content_length_cursor = aws_byte_cursor_from_c_str("0");
+    if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
+        goto error_clean_up;
     }
 
     aws_http_message_set_request_method(message, g_post_method);
