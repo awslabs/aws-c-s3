@@ -285,7 +285,6 @@ int aws_s3_meta_request_init_base(
 
     } else if (options->send_using_async_writes == true) {
         meta_request->request_body_using_async_writes = true;
-        aws_byte_buf_init(&meta_request->synced_data.async_write.buffered_data, allocator, 0);
     }
 
     meta_request->synced_data.next_streaming_part = 1;
@@ -501,6 +500,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_string_destroy(meta_request->s3express_session_host);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    aws_s3_buffer_pool_release_ticket(
+        meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
@@ -518,8 +519,6 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
-
-    aws_byte_buf_clean_up(&meta_request->synced_data.async_write.buffered_data);
 
     if (meta_request->vtable != NULL) {
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p Calling virtual meta request destroy function.", log_id);
@@ -2232,6 +2231,41 @@ struct aws_future_void *aws_s3_meta_request_write(
             AWS_LS_S3_META_REQUEST, "id=%p: Illegal call to write(). EOF already set.", (void *)meta_request);
         illegal_usage_terminate_meta_request = true;
 
+#if 0 // 1 means eagerly buffer
+    } else {
+        /* This write call is good */
+
+        if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
+            // TODO: smarter about size? but capacity used in other places to see whether or not ticket was used...
+            meta_request->synced_data.async_write.buffered_data_ticket =
+                aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+            // TODO: force_reserve()
+            AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
+
+            meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_buffer(
+                meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+        }
+
+        aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
+
+        if (eof || meta_request->synced_data.async_write.buffered_data.len == meta_request->part_size) {
+            /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
+            meta_request->synced_data.async_write.unbuffered_cursor = data;
+            meta_request->synced_data.async_write.eof = eof;
+            meta_request->synced_data.async_write.future = aws_future_void_acquire(write_future);
+            ready_to_send = true;
+        } else {
+            /* Can't send yet. Complete write-future, so we can get more data */
+            AWS_ASSERT(data.len == 0); /* all data should be copied into buffer */
+
+            /* TODO: does a future that completes immediately risk stack overflow?
+             * If a user does tiny writes, and registers callbacks on the write-future,
+             * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
+            aws_future_void_set_result(write_future);
+        }
+    }
+#else
     } else if (eof || (meta_request->synced_data.async_write.buffered_data.len + data.len >= meta_request->part_size)) {
         /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
         AWS_LOGF_TRACE(
@@ -2257,15 +2291,26 @@ struct aws_future_void *aws_s3_meta_request_write(
             eof,
             meta_request->synced_data.async_write.buffered_data.len);
 
-        /* TODO: something smarter with this buffer: like get it from buffer-pool,
-         * or reserve exactly part-size, or reserve exactly how much we need */
-        aws_byte_buf_append_dynamic(&meta_request->synced_data.async_write.buffered_data, &data);
+        if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
+            meta_request->synced_data.async_write.buffered_data_ticket =
+                aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+            // TODO: force_reserve()
+            AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
+
+            meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_buffer(
+                meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+        }
+
+        aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
+        AWS_FATAL_ASSERT(data.len == 0);
 
         /* TODO: does a future that completes immediately risk stack overflow?
          * If a user does tiny writes, and registers callbacks on the write-future,
          * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
         aws_future_void_set_result(write_future);
     }
+#endif
 
     if (illegal_usage_terminate_meta_request) {
         aws_future_void_set_error(write_future, AWS_ERROR_INVALID_STATE);
@@ -2305,12 +2350,12 @@ static int s_s3_meta_request_read_from_pending_async_writes(
         goto unlock;
     }
 
-    /* Buffered data should not exceed part-size */
-    AWS_FATAL_ASSERT(dest->capacity - dest->len >= meta_request->synced_data.async_write.buffered_data.len);
-
-    /* Copy all buffered data */
-    aws_byte_buf_write_from_whole_buffer(dest, meta_request->synced_data.async_write.buffered_data);
-    meta_request->synced_data.async_write.buffered_data.len = 0;
+    // OYE this is all confusing
+    AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket == NULL);
+    AWS_FATAL_ASSERT(
+        meta_request->synced_data.async_write.buffered_data.buffer == NULL ||
+        meta_request->synced_data.async_write.buffered_data.buffer == dest->buffer);
+    AWS_ZERO_STRUCT(meta_request->synced_data.async_write.buffered_data);
 
     /* Copy as much unbuffered data as possible */
     aws_byte_buf_write_to_capacity(dest, &meta_request->synced_data.async_write.unbuffered_cursor);
@@ -2323,10 +2368,20 @@ static int s_s3_meta_request_read_from_pending_async_writes(
     if (!meta_request->synced_data.async_write.eof &&
         meta_request->synced_data.async_write.unbuffered_cursor.len < meta_request->part_size) {
 
-        aws_byte_buf_append_dynamic(
+        meta_request->synced_data.async_write.buffered_data_ticket =
+            aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+        // TODO: force_reserve()
+        AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
+
+        meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_buffer(
+            meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+
+        aws_byte_buf_write_to_capacity(
             &meta_request->synced_data.async_write.buffered_data,
             &meta_request->synced_data.async_write.unbuffered_cursor);
-        meta_request->synced_data.async_write.unbuffered_cursor.len = 0;
+
+        AWS_FATAL_ASSERT(meta_request->synced_data.async_write.unbuffered_cursor.len == 0);
     }
 
     /* If all unbuffered data is consumed (we sent it, or buffered it) then complete the write's future */

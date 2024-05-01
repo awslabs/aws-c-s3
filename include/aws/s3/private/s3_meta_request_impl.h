@@ -249,6 +249,8 @@ struct aws_s3_meta_request {
             /* True once user passes `eof` to their final write() call */
             bool eof;
 
+            struct aws_s3_buffer_pool_ticket *buffered_data_ticket;
+
             /* Holds buffered data we can't immediately send.
              * The length will always be less than part-size */
             struct aws_byte_buf buffered_data;
