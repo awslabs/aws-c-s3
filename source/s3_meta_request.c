@@ -2231,7 +2231,8 @@ struct aws_future_void *aws_s3_meta_request_write(
             AWS_LS_S3_META_REQUEST, "id=%p: Illegal call to write(). EOF already set.", (void *)meta_request);
         illegal_usage_terminate_meta_request = true;
 
-#if 0 // 1 means eagerly buffer
+#if 1 // pool-eager, copy-eager
+
     } else {
         /* This write call is good */
 
@@ -2251,12 +2252,28 @@ struct aws_future_void *aws_s3_meta_request_write(
 
         if (eof || meta_request->synced_data.async_write.buffered_data.len == meta_request->part_size) {
             /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
+
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: write(data=%zu, eof=%d) ARGLBARGL=%zu. Ready to upload part...",
+                (void *)meta_request,
+                data.len,
+                eof,
+                meta_request->synced_data.async_write.buffered_data.len);
+
             meta_request->synced_data.async_write.unbuffered_cursor = data;
             meta_request->synced_data.async_write.eof = eof;
             meta_request->synced_data.async_write.future = aws_future_void_acquire(write_future);
             ready_to_send = true;
         } else {
             /* Can't send yet. Complete write-future, so we can get more data */
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: write(data=%zu, eof=%d) ARGLBARGL=%zu. Buffering data, not enough to upload.",
+                (void *)meta_request,
+                data.len,
+                eof,
+                meta_request->synced_data.async_write.buffered_data.len);
             AWS_ASSERT(data.len == 0); /* all data should be copied into buffer */
 
             /* TODO: does a future that completes immediately risk stack overflow?
@@ -2265,7 +2282,9 @@ struct aws_future_void *aws_s3_meta_request_write(
             aws_future_void_set_result(write_future);
         }
     }
-#else
+
+#elif 0 // pool-late, copy-late
+
     } else if (eof || (meta_request->synced_data.async_write.buffered_data.len + data.len >= meta_request->part_size)) {
         /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
         AWS_LOGF_TRACE(
@@ -2310,6 +2329,65 @@ struct aws_future_void *aws_s3_meta_request_write(
          * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
         aws_future_void_set_result(write_future);
     }
+
+#else // pool-late, copy-eager
+
+    } else {
+        /* the write call is good */
+
+        /* If we MUST buffer this data, get buffer from pool */
+        if (meta_request->synced_data.async_write.buffered_data_ticket == NULL && data.len < meta_request->part_size) {
+            meta_request->synced_data.async_write.buffered_data_ticket =
+                aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+            // TODO: force_reserve()
+            AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
+
+            meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_buffer(
+                meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+        }
+
+        /* If we already have a buffer, write as much as we can into it */
+        if (meta_request->synced_data.async_write.buffered_data_ticket != NULL) {
+            aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
+        }
+
+        /* This write makes us ready to send (EOF, or we have at least 1 part to send (buffered or unbuffered) */
+        if (eof || (meta_request->synced_data.async_write.buffered_data.len == meta_request->part_size) ||
+            (data.len != 0)) {
+
+            /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: write(data=%zu, eof=%d) TODO INACCURATE =%zu. Ready to upload part...",
+                (void *)meta_request,
+                data.len,
+                eof,
+                meta_request->synced_data.async_write.buffered_data.len);
+
+            meta_request->synced_data.async_write.unbuffered_cursor = data;
+            meta_request->synced_data.async_write.eof = eof;
+            meta_request->synced_data.async_write.future = aws_future_void_acquire(write_future);
+            ready_to_send = true;
+        } else {
+            /* Can't send yet. The data is buffered. Complete the write-future, so we can get more data */
+            AWS_FATAL_ASSERT(data.len == 0);
+
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: write(data=%zu, eof=%d) TODO INACCURATE=%zu. Buffering data, not enough to upload.",
+                (void *)meta_request,
+                data.len,
+                eof,
+                meta_request->synced_data.async_write.buffered_data.len);
+
+            /* TODO: does a future that completes immediately risk stack overflow?
+             * If a user does tiny writes, and registers callbacks on the write-future,
+             * they'll fire synchronously. If the user repeats, the stack will just grow and grow. */
+            aws_future_void_set_result(write_future);
+        }
+    }
+
 #endif
 
     if (illegal_usage_terminate_meta_request) {
