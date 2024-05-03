@@ -834,6 +834,24 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
 
+struct aws_s3_meta_request_poll_write_options {
+    struct aws_byte_cursor data; // TODO: advancing cursor?
+    bool eof;
+    aws_simple_completion_callback *waker_fn;
+    void *user_data;
+};
+
+struct aws_s3_meta_request_poll_write_result {
+    bool is_pending;
+    int error_code;
+    size_t bytes_processed;
+};
+
+AWS_S3_API
+struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_poll_write_options *options);
+
 /**
  * Write the next chunk of data.
  *

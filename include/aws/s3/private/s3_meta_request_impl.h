@@ -238,26 +238,22 @@ struct aws_s3_meta_request {
          * In that case, we copy the data to a buffer and immediately mark the write complete,
          * so the user can write more data, so we finally get enough to send. */
         struct {
-            /* The future for whatever async-write is pending.
-             * If this is NULL, there isn't enough data to send another part.
-             *
-             * If this is non-NULL, 1+ part requests can be sent.
-             * When all the data has been processed, this future is completed
-             * and cleared, and we can accept another write() call. */
-            struct aws_future_void *future;
+            /* Whether a part request can be sent (we have 1 part's worth of data, or EOF) */
+            // TODO: need separate variable? it's equivalent to: buffer.len == part_size || EOF
+            bool ready_to_send;
 
             /* True once user passes `eof` to their final write() call */
             bool eof;
+
+            struct aws_s3_buffer_pool_ticket *buffered_data_ticket;
 
             /* Holds buffered data we can't immediately send.
              * The length will always be less than part-size */
             struct aws_byte_buf buffered_data;
 
-            /* Cursor/pointer to data from the most-recent write() call, which
-             * provides enough data (combined with any buffered_data) to send 1+ parts.
-             * If there's data leftover in unbuffered_cursor after these parts are sent,
-             * it's copied into buffered_data, and we wait for more writes... */
-            struct aws_byte_cursor unbuffered_cursor;
+            /* TODO: comments */
+            aws_simple_completion_callback *waker_fn;
+            void *waker_user_data;
         } async_write;
 
     } synced_data;

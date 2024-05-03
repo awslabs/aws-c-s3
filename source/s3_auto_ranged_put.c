@@ -421,7 +421,7 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     /* If doing async-writes, only allow a new part if there's a pending write-future,
      * and no pending-reads yet to copy that data. */
     if (auto_ranged_put->base.request_body_using_async_writes == true) {
-        return (auto_ranged_put->base.synced_data.async_write.future == NULL) ||
+        return (auto_ranged_put->base.synced_data.async_write.ready_to_send == false) ||
                (auto_ranged_put->synced_data.num_parts_pending_read > 0);
     }
 
@@ -548,8 +548,13 @@ static bool s_s3_auto_ranged_put_update(
 
             if (should_create_next_part_request) {
 
-                struct aws_s3_buffer_pool_ticket *ticket =
-                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                struct aws_s3_buffer_pool_ticket *ticket = NULL;
+                if (meta_request->synced_data.async_write.buffered_data_ticket != NULL) {
+                    ticket = meta_request->synced_data.async_write.buffered_data_ticket;
+                    meta_request->synced_data.async_write.buffered_data_ticket = NULL;
+                } else {
+                    ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                }
 
                 if (ticket != NULL) {
                     /* Allocate a request for another part. */
@@ -567,6 +572,7 @@ static bool s_s3_auto_ranged_put_update(
                     request->was_previously_uploaded = request_previously_uploaded;
 
                     request->ticket = ticket;
+                    request->request_body = meta_request->synced_data.async_write.buffered_data;
 
                     ++auto_ranged_put->threaded_update_data.next_part_number;
                     ++auto_ranged_put->synced_data.num_parts_started;
