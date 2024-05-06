@@ -239,12 +239,12 @@ struct aws_s3_meta_request {
          * so the user can write more data, so we finally get enough to send. */
         struct {
             /* Whether a part request can be sent (we have 1 part's worth of data, or EOF) */
-            // TODO: need separate variable? it's equivalent to: buffer.len == part_size || EOF
             bool ready_to_send;
 
             /* True once user passes `eof` to their final write() call */
             bool eof;
 
+            /* TODO: comments */
             struct aws_s3_buffer_pool_ticket *buffered_data_ticket;
 
             /* Holds buffered data we can't immediately send.
@@ -252,7 +252,7 @@ struct aws_s3_meta_request {
             struct aws_byte_buf buffered_data;
 
             /* TODO: comments */
-            aws_simple_completion_callback *waker_fn;
+            aws_simple_completion_callback *waker;
             void *waker_user_data;
         } async_write;
 
@@ -396,6 +396,8 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
 
 /* Cancel the requests with cancellable HTTP stream for the meta request */
 void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
+
+bool aws_s3_meta_request_is_async_write_data_ready_to_send_synced(const struct aws_s3_meta_request *meta_request);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
  * as reading from the stream could cause user code to call back into aws-c-s3.
