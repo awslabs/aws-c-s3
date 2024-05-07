@@ -680,14 +680,18 @@ static int s_test_s3_create_multipart_upload_message_new(struct aws_allocator *a
 
     ASSERT_SUCCESS(s_test_http_message_request_method(create_multipart_upload_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(create_multipart_upload_message, &expected_create_path));
+
+    const struct aws_byte_cursor header_exclude_exceptions[] = {
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    };
     ASSERT_SUCCESS(s_test_http_headers_match(
         allocator,
         original_message,
         create_multipart_upload_message,
         g_s3_create_multipart_upload_excluded_headers,
         g_s3_create_multipart_upload_excluded_headers_count,
-        NULL,
-        0));
+        header_exclude_exceptions,
+        AWS_ARRAY_SIZE(header_exclude_exceptions)));
 
     aws_http_message_release(create_multipart_upload_message);
     aws_http_message_release(original_message);
