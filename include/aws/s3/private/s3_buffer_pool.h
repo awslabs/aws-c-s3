@@ -41,21 +41,28 @@ struct aws_s3_buffer_pool_usage_stats {
     /* Max size of buffer to be allocated from primary. */
     size_t primary_cutoff;
 
-    /* How much mem is used in primary storage. includes memory used by blocks
-     * that are waiting on all allocs to release before being put back in circulation. */
-    size_t primary_used;
     /* Overall memory allocated for blocks. */
     size_t primary_allocated;
-    /* Reserved memory. Does not account for how that memory will map into
-     * blocks and in practice can be lower than used memory. */
-    size_t primary_reserved;
     /* Number of blocks allocated in primary. */
     size_t primary_num_blocks;
+    /* Memory used in primary storage.
+     * Does not account for wasted space if memory doesn't map perfectly into chunks.
+     * This is always <= primary_allocated */
+    size_t primary_used;
+    /* How much memory is reserved, but not yet used, in primary storage.
+     * Does not account for wasted space if memory doesn't map perfectly into chunks. */
+    size_t primary_reserved;
 
-    /* Secondary mem used. Accurate, maps directly to base allocator. */
+    /* Secondary memory used. Accurate, maps directly to base allocator. */
     size_t secondary_used;
-    /* Secondary mem reserved. Accurate, maps directly to base allocator. */
+    /* Secondary memory reserved, but not yet used. Accurate, maps directly to base allocator. */
     size_t secondary_reserved;
+
+    /* Forced memory used. This is the amount of primary and secondary storage
+     * that doesn't count against the memory limit. This is for buffers that
+     * might cause deadlock if they waited for a normal ticket reservation.
+     * This is always <= primary_used + secondary_used */
+    size_t forced_used;
 };
 
 /*
@@ -86,6 +93,9 @@ AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_poo
  * On failure NULL is returned, error is raised and reservation hold is placed
  * on the buffer. Any further reservations while hold is active will fail.
  * Remove reservation hold to unblock reservations.
+ *
+ * If you MUST acquire a buffer now (waiting to reserve a ticket would risk deadlock),
+ * use aws_s3_buffer_pool_acquire_forced_buffer() instead.
  */
 AWS_S3_API struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(
     struct aws_s3_buffer_pool *buffer_pool,
@@ -110,6 +120,17 @@ AWS_S3_API void aws_s3_buffer_pool_remove_reservation_hold(struct aws_s3_buffer_
 AWS_S3_API struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_ticket *ticket);
+
+/*
+ * Force immediate acquisition of a buffer from the pool.
+ * This should only be used if waiting to reserve a ticket would risk deadlock.
+ * This cannot fail, not even if the pool has a reservation hold,
+ * not even if the memory limit has been exceeded.
+ */
+AWS_S3_API struct aws_byte_buf aws_s3_buffer_pool_acquire_forced_buffer(
+    struct aws_s3_buffer_pool *buffer_pool,
+    size_t size,
+    struct aws_s3_buffer_pool_ticket **out_new_ticket);
 
 /*
  * Releases the ticket.

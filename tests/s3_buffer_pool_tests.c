@@ -217,3 +217,143 @@ static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void
     return 0;
 };
 AWS_TEST_CASE(test_s3_buffer_pool_too_small, s_test_s3_buffer_pool_too_small)
+
+/* Sanity check that forced-buffer allocation works at all */
+static int s_test_s3_buffer_pool_forced_buffer(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    const size_t chunk_size = MB_TO_BYTES(8);
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, chunk_size, GB_TO_BYTES(1));
+
+    { /* Acquire forced buffer from primary storage */
+        size_t acquire_size = chunk_size;
+        struct aws_s3_buffer_pool_ticket *forced_ticket = NULL;
+        struct aws_byte_buf forced_buf =
+            aws_s3_buffer_pool_acquire_forced_buffer(buffer_pool, acquire_size, &forced_ticket);
+        ASSERT_NOT_NULL(forced_ticket);
+        ASSERT_UINT_EQUALS(acquire_size, forced_buf.capacity);
+        ASSERT_UINT_EQUALS(0, forced_buf.len);
+
+        struct aws_s3_buffer_pool_usage_stats stats = aws_s3_buffer_pool_get_usage(buffer_pool);
+        ASSERT_UINT_EQUALS(acquire_size, stats.forced_used);
+        ASSERT_UINT_EQUALS(acquire_size, stats.primary_used);
+        ASSERT_UINT_EQUALS(0, stats.primary_reserved);
+        aws_s3_buffer_pool_release_ticket(buffer_pool, forced_ticket);
+    }
+
+    { /* Acquire forced buffer from secondary storage */
+        size_t acquire_size = aws_s3_buffer_pool_get_usage(buffer_pool).primary_cutoff + 1;
+        struct aws_s3_buffer_pool_ticket *forced_ticket = NULL;
+        struct aws_byte_buf forced_buf =
+            aws_s3_buffer_pool_acquire_forced_buffer(buffer_pool, acquire_size, &forced_ticket);
+        ASSERT_NOT_NULL(forced_ticket);
+        ASSERT_UINT_EQUALS(acquire_size, forced_buf.capacity);
+        ASSERT_UINT_EQUALS(0, forced_buf.len);
+
+        struct aws_s3_buffer_pool_usage_stats stats = aws_s3_buffer_pool_get_usage(buffer_pool);
+        ASSERT_UINT_EQUALS(acquire_size, stats.forced_used);
+        ASSERT_UINT_EQUALS(acquire_size, stats.secondary_used);
+        ASSERT_UINT_EQUALS(0, stats.secondary_reserved);
+        aws_s3_buffer_pool_release_ticket(buffer_pool, forced_ticket);
+    }
+
+    /* Assert stats go back down after tickets released */
+    struct aws_s3_buffer_pool_usage_stats stats = aws_s3_buffer_pool_get_usage(buffer_pool);
+    ASSERT_UINT_EQUALS(0, stats.forced_used);
+    ASSERT_UINT_EQUALS(0, stats.primary_used);
+    ASSERT_UINT_EQUALS(0, stats.secondary_used);
+
+    aws_s3_buffer_pool_destroy(buffer_pool);
+    return 0;
+}
+AWS_TEST_CASE(test_s3_buffer_pool_forced_buffer, s_test_s3_buffer_pool_forced_buffer)
+
+/* Test that we can still acquire forced buffers, even after pool has a reservation-hold */
+static int s_test_s3_buffer_pool_forced_buffer_after_reservation_hold(struct aws_allocator *allocator, void *ctx) {
+    const size_t chunk_size = MB_TO_BYTES(8);
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, chunk_size, GB_TO_BYTES(1));
+
+    /* Reserve normal tickets until pool has reservation-hold */
+    struct aws_array_list normal_tickets;
+    aws_array_list_init_dynamic(&normal_tickets, allocator, 1, sizeof(struct aws_s3_buffer_pool_ticket *));
+    while (aws_s3_buffer_pool_has_reservation_hold(buffer_pool) == false) {
+        struct aws_s3_buffer_pool_ticket *normal_ticket = aws_s3_buffer_pool_reserve(buffer_pool, chunk_size);
+        if (normal_ticket != NULL) {
+            aws_array_list_push_back(&normal_tickets, &normal_ticket);
+        }
+    }
+
+    /* Assert we can still get a forced-buffer */
+    struct aws_s3_buffer_pool_ticket *forced_ticket_1 = NULL;
+    struct aws_byte_buf forced_buf_1 =
+        aws_s3_buffer_pool_acquire_forced_buffer(buffer_pool, chunk_size, &forced_ticket_1);
+    ASSERT_NOT_NULL(forced_ticket_1);
+    ASSERT_UINT_EQUALS(chunk_size, forced_buf_1.capacity);
+
+    /* Assert we can still acquire buffers for all those normal reservations */
+    for (size_t i = 0; i < aws_array_list_length(&normal_tickets); ++i) {
+        struct aws_s3_buffer_pool_ticket *normal_ticket;
+        aws_array_list_get_at(&normal_tickets, &normal_ticket, i);
+        struct aws_byte_buf normal_buf = aws_s3_buffer_pool_acquire_buffer(buffer_pool, normal_ticket);
+        ASSERT_UINT_EQUALS(chunk_size, normal_buf.capacity);
+    }
+
+    /* Assert we can still get a forced-buffer */
+    struct aws_s3_buffer_pool_ticket *forced_ticket_2 = NULL;
+    struct aws_byte_buf forced_buf_2 =
+        aws_s3_buffer_pool_acquire_forced_buffer(buffer_pool, chunk_size, &forced_ticket_2);
+    ASSERT_NOT_NULL(forced_ticket_2);
+    ASSERT_UINT_EQUALS(chunk_size, forced_buf_2.capacity);
+
+    /* Cleanup */
+    for (size_t i = 0; i < aws_array_list_length(&normal_tickets); ++i) {
+        struct aws_s3_buffer_pool_ticket *normal_ticket;
+        aws_array_list_get_at(&normal_tickets, &normal_ticket, i);
+        aws_s3_buffer_pool_release_ticket(buffer_pool, normal_ticket);
+    }
+    aws_array_list_clean_up(&normal_tickets);
+
+    aws_s3_buffer_pool_release_ticket(buffer_pool, forced_ticket_1);
+    aws_s3_buffer_pool_release_ticket(buffer_pool, forced_ticket_2);
+    aws_s3_buffer_pool_destroy(buffer_pool);
+    return 0;
+}
+AWS_TEST_CASE(
+    test_s3_buffer_pool_forced_buffer_after_reservation_hold,
+    s_test_s3_buffer_pool_forced_buffer_after_reservation_hold)
+
+/* Test that normal tickets can still be reserved, even if forced-buffer usage is huge.
+ * This is important because, if either system can stop the other from working, we risk deadlock. */
+static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws_allocator *allocator, void *ctx) {
+    const size_t chunk_size = MB_TO_BYTES(8);
+    const size_t mem_limit = GB_TO_BYTES(1);
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, chunk_size, mem_limit);
+
+    /* Skip test if this machine can't do enormous allocations */
+    void *try_large_alloc = malloc(mem_limit);
+    if (try_large_alloc == NULL) {
+        aws_s3_buffer_pool_destroy(buffer_pool);
+        return AWS_OP_SKIP;
+    }
+    free(try_large_alloc);
+
+    /* Allocate enormous forced buffer */
+    struct aws_s3_buffer_pool_ticket *forced_ticket = NULL;
+    struct aws_byte_buf forced_buf = aws_s3_buffer_pool_acquire_forced_buffer(buffer_pool, mem_limit, &forced_ticket);
+    ASSERT_NOT_NULL(forced_ticket);
+    ASSERT_UINT_EQUALS(mem_limit, forced_buf.capacity);
+
+    /* Assert we can still reserve a normal ticket & allocate a normal buffer */
+    struct aws_s3_buffer_pool_ticket *normal_ticket = aws_s3_buffer_pool_reserve(buffer_pool, chunk_size);
+    ASSERT_NOT_NULL(normal_ticket);
+    struct aws_byte_buf normal_buffer = aws_s3_buffer_pool_acquire_buffer(buffer_pool, normal_ticket);
+    ASSERT_UINT_EQUALS(chunk_size, normal_buffer.capacity);
+    aws_s3_buffer_pool_release_ticket(buffer_pool, normal_ticket);
+
+    /* Cleanup */
+    aws_s3_buffer_pool_release_ticket(buffer_pool, forced_ticket);
+    aws_s3_buffer_pool_destroy(buffer_pool);
+    return 0;
+}
+AWS_TEST_CASE(
+    test_s3_buffer_pool_forced_buffer_wont_stop_reservations,
+    s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations)
