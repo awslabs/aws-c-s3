@@ -278,7 +278,7 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
 
     /* Don't let forced buffers account for 100% of the memory limit */
     const size_t max_impact_of_forced_on_limit =
-        buffer_pool->mem_limit * (s_max_impact_of_forced_buffers_on_memory_limit_as_percentage / 100.0);
+        (size_t)(buffer_pool->mem_limit * (s_max_impact_of_forced_buffers_on_memory_limit_as_percentage / 100.0));
     if (buffer_pool->forced_used > max_impact_of_forced_on_limit) {
         overall_taken -= buffer_pool->forced_used - max_impact_of_forced_on_limit;
     }
