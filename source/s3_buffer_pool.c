@@ -34,8 +34,8 @@
  * Secondary storage delegates directly to system allocator.
  *
  * One complication is "forced" buffers. A forced buffer is one that
- * comes from primary or secondary storage as usual, but it doesn't count
- * against the memory limit. This is only used when we want to use memory from
+ * comes from primary or secondary storage as usual, but it is allowed to exceed
+ * the memory limit. This is only used when we want to use memory from
  * the pool, but waiting for a normal ticket reservation could cause deadlock.
  */
 
@@ -68,6 +68,11 @@ static const size_t s_chunks_per_block = 16;
  * directly using allocator.
  */
 static const size_t s_max_chunk_size_for_buffer_reuse = MB_TO_BYTES(64);
+
+/* Forced buffers only count against the memory limit up to a certain percent.
+ * For example: if mem_limit is 10GiB, and forced_use is 11GiB, and THIS number is 90(%),
+ * we still consider 1GiB available for normal buffer usage. */
+static const size_t s_max_impact_of_forced_buffers_on_memory_limit_as_percentage = 80;
 
 struct aws_s3_buffer_pool {
     struct aws_allocator *base_allocator;
@@ -271,8 +276,12 @@ struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffe
                         buffer_pool->secondary_reserved;
     }
 
-    /* Forced memory doesn't count against the memory limit */
-    overall_taken -= buffer_pool->forced_used;
+    /* Don't let forced buffers account for 100% of the memory limit */
+    const size_t max_impact_of_forced_on_limit =
+        buffer_pool->mem_limit * (s_max_impact_of_forced_buffers_on_memory_limit_as_percentage / 100.0);
+    if (buffer_pool->forced_used > max_impact_of_forced_on_limit) {
+        overall_taken -= buffer_pool->forced_used - max_impact_of_forced_on_limit;
+    }
 
     if ((size + overall_taken) <= buffer_pool->mem_limit) {
         ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool_ticket));

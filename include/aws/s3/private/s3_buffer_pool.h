@@ -58,9 +58,7 @@ struct aws_s3_buffer_pool_usage_stats {
     /* Secondary memory reserved, but not yet used. Accurate, maps directly to base allocator. */
     size_t secondary_reserved;
 
-    /* Forced memory used. This is the amount of primary and secondary storage
-     * that doesn't count against the memory limit. This is for buffers that
-     * might cause deadlock if they waited for a normal ticket reservation.
+    /* Bytes used in "forced" buffers (created even if they exceed memory limits).
      * This is always <= primary_used + secondary_used */
     size_t forced_used;
 };

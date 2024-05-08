@@ -322,7 +322,7 @@ AWS_TEST_CASE(
     test_s3_buffer_pool_forced_buffer_after_reservation_hold,
     s_test_s3_buffer_pool_forced_buffer_after_reservation_hold)
 
-/* Test that normal tickets can still be reserved, even if forced-buffer usage is huge.
+/* Test that some normal tickets can still be reserved, even if forced-buffer usage is huge.
  * This is important because, if either system can stop the other from working, we risk deadlock. */
 static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
