@@ -2232,17 +2232,15 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
     } else {
         /* write call is OK */
 
-        /* If we don't already have a buffer, grab one from the pool */
+        /* If we don't already have a buffer, grab one from the pool. */
         if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
-            // TODO: smarter about size? but capacity used in other places to see whether or not ticket was used...
-            meta_request->synced_data.async_write.buffered_data_ticket =
-                aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
-
-            // TODO: force_reserve()
-            AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
-
-            meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_buffer(
-                meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+            /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
+             * waited for a normal ticket reservation, respecting the pool's memory limit.
+             * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
+            meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_forced_buffer(
+                meta_request->client->buffer_pool,
+                meta_request->part_size,
+                &meta_request->synced_data.async_write.buffered_data_ticket /*out_new_ticket*/);
         }
 
         /* Copy as much data as we can into the buffer */
@@ -2279,7 +2277,11 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
     }
 
     /* Assert only 1 result field is set (byte_processed could be 0 if data.len is zero) */
-    AWS_ASSERT(result.is_pending ^ (result.error_code != 0) ^ (result.bytes_processed != 0) ^ (data.len == 0));
+    AWS_ASSERT(
+        (result.is_pending && !result.error_code && !result.bytes_processed) ^
+        (!result.is_pending && result.error_code && !result.bytes_processed) ^
+        (!result.is_pending && !result.error_code && result.bytes_processed) ^
+        (!result.is_pending && !result.error_code && !result.bytes_processed && !data.len));
 
     return result;
 }
