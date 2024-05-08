@@ -269,6 +269,7 @@ AWS_TEST_CASE(test_s3_buffer_pool_forced_buffer, s_test_s3_buffer_pool_forced_bu
 
 /* Test that we can still acquire forced buffers, even after pool has a reservation-hold */
 static int s_test_s3_buffer_pool_forced_buffer_after_reservation_hold(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
     const size_t chunk_size = MB_TO_BYTES(8);
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, chunk_size, GB_TO_BYTES(1));
 
@@ -324,6 +325,7 @@ AWS_TEST_CASE(
 /* Test that normal tickets can still be reserved, even if forced-buffer usage is huge.
  * This is important because, if either system can stop the other from working, we risk deadlock. */
 static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
     const size_t chunk_size = MB_TO_BYTES(8);
     const size_t mem_limit = GB_TO_BYTES(1);
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_buffer_pool_new(allocator, chunk_size, mem_limit);
