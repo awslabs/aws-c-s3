@@ -51,6 +51,12 @@ only, and supports acquiring several chunks (up to 4) at once.
 Blocks are kept around while there are ongoing requests and are released async,
 when there is low pressure on memory.
 
+One complication is "forced" buffers. A forced buffer is one that
+comes from primary or secondary storage as usual, but it is allowed to exceed
+the memory limit. Forced buffers are only used when waiting for a normal ticket
+reservation could cause deadlock. (At time of writing, they're only used for
+async-writes)
+
 ### Scheduling
 Running out of memory is a terminal condition within CRT and in general its not
 practical to try to set overall memory limit on all allocations, since it
