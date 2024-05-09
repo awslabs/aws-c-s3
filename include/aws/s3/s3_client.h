@@ -838,10 +838,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
 /**
  * The result of an `aws_s3_meta_request_poll_write()` call.
  * Think of this like Rust's `Poll<Result<size_t, int>>`, or C++'s `optional<expected<size_t, int>>`.
- *
- * If `is_pending == true`, then no work was done, and no other values are set.
- * Else if `error_code != 0`, then an error occurred, and no other values are set.
- * Else `bytes_processed` indicates how much work was done.
  */
 struct aws_s3_meta_request_poll_write_result {
     bool is_pending;
@@ -857,11 +853,12 @@ struct aws_s3_meta_request_poll_write_result {
  * This is a non-blocking poll-style async function, similar to Rust's:
  * https://docs.rs/futures/latest/futures/io/trait.AsyncWrite.html#tymethod.poll_write
  * If you prefer completion-style async functions, and your data can outlive
- * the callstack, you should use aws_s3_meta_request_write() instead.
+ * the callstack, use aws_s3_meta_request_write() instead.
  *
  * Check the returned `result` struct to see what happened:
  * 1)   If `result.is_pending == true` then no work was done.
  *      The waker callback will be invoked when you can call poll_write() again.
+ *      Do not call poll_write() again before the waker is invoked.
  *
  * 2)   Else if `result.error_code != 0` then poll_write() did not succeed
  *      and you should not call it again. The meta request is guaranteed to finish soon
@@ -870,19 +867,18 @@ struct aws_s3_meta_request_poll_write_result {
  *      the meta request completed for reasons unrelated to the poll_write() call
  *      (e.g. CreateMultipartUpload received a 403 Forbidden response).
  *      AWS_ERROR_INVALID_STATE usually indicates that you're calling poll_write()
- *      incorrectly (e.g. not waiting for previous write to complete).
+ *      incorrectly (e.g. not waiting for waker callback from previous poll_write() call).
  *
  * 3)   Else `result.bytes_processed` tells you how much data was processed.
- *      `bytes_processed` may be less than the `data.len` you passed in, but it
- *      won't be 0 unless you passed in `data.len` of 0.
- *
- * You can wait any length of time between calls to poll_write().
+ *      `bytes_processed` may be less than the `data.len` you passed in.
+ *      Continue calling poll_write() with the remaining data until everything is processed.
+ *      `result.bytes_processed` won't be 0 unless you passed in `data.len` of 0.
  *
  * @param meta_request  Meta request
  *
  * @param data          The data to send. The data can be any size.
- *                      result.bytes_processed indicates how many bytes were
- *                      actually processed.
+ *                      `result.bytes_processed` indicates how many bytes were
+ *                      processed by this call.
  *
  * @param eof           Pass true to signal EOF (end of file).
  *                      If poll_write() doesn't process all your data

@@ -2350,8 +2350,9 @@ struct aws_future_void *aws_s3_meta_request_write(
     return write_future;
 }
 
-/* Copy pending async-write data into the buffer.
- * This is only called when there's enough data for the next part. */
+/* For async-writes this is only called after aws_s3_meta_request_poll_write()
+ * already filled a buffer with enough data for the next part.
+ * In fact, the dest buffer being passed in is the same one we already filled. */
 static bool s_s3_meta_request_read_from_pending_async_writes(
     struct aws_s3_meta_request *meta_request,
     struct aws_byte_buf *dest) {
@@ -2359,14 +2360,19 @@ static bool s_s3_meta_request_read_from_pending_async_writes(
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    /* We should have filled the dest buffer, unless this is the final write */
-    AWS_FATAL_ASSERT(dest->len == dest->capacity || meta_request->synced_data.async_write.eof);
-
-    AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket == NULL);
-    AWS_FATAL_ASSERT(
-        meta_request->synced_data.async_write.buffered_data.buffer == NULL ||
+    /* Assert that dest buffer is in fact the same one we already filled */
+    AWS_ASSERT(
+        meta_request->synced_data.async_write.buffered_data.len == dest->len &&
         meta_request->synced_data.async_write.buffered_data.buffer == dest->buffer);
 
+    /* Assert that ticket for this buffer is no longer owned by the aws_s3_meta_request
+     * (ownership was moved to aws_s3_request) */
+    AWS_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket == NULL);
+
+    /* Assert we filled the dest buffer, unless this is the final write */
+    AWS_ASSERT(dest->len == dest->capacity || meta_request->synced_data.async_write.eof);
+
+    /* Reset things so we're ready to receive the next aws_s3_meta_request_poll_write() */
     meta_request->synced_data.async_write.ready_to_send = false;
     AWS_ZERO_STRUCT(meta_request->synced_data.async_write.buffered_data);
 
@@ -2382,6 +2388,7 @@ static bool s_s3_meta_request_read_from_pending_async_writes(
     /* END CRITICAL SECTION */
 
     /* Don't hold locks while triggering the user's waker callback */
+    /* TODO: deliver this via aws_s3_meta_request_add_event_for_delivery_synced() */
     if (waker != NULL) {
         waker(waker_user_data);
     }
