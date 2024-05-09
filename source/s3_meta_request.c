@@ -486,12 +486,17 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_string_destroy(meta_request->s3express_session_host);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
-    aws_s3_buffer_pool_release_ticket(
-        meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
-    meta_request->client = aws_s3_client_release(meta_request->client);
+
+    /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
+    if (meta_request->client != NULL) {
+        aws_s3_buffer_pool_release_ticket(
+            meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+
+        meta_request->client = aws_s3_client_release(meta_request->client);
+    }
 
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
