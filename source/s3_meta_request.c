@@ -2364,6 +2364,7 @@ static bool s_s3_meta_request_read_from_pending_async_writes(
     AWS_ASSERT(
         meta_request->synced_data.async_write.buffered_data.len == dest->len &&
         meta_request->synced_data.async_write.buffered_data.buffer == dest->buffer);
+    (void)dest;
 
     /* Assert that ticket for this buffer is no longer owned by the aws_s3_meta_request
      * (ownership was moved to aws_s3_request) */
