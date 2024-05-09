@@ -2298,13 +2298,16 @@ struct aws_s3_meta_request_async_write_job {
     bool eof;
 };
 
+/* Do async job where, under the hood, aws_s3_meta_request_write()
+ * calls aws_s3_meta_request_poll_write() in a loop until all data is written */
 static void s_s3_meta_request_async_write_job_loop(void *user_data) {
 
     struct aws_s3_meta_request_async_write_job *job = user_data;
 
     int error_code = 0;
 
-    /* call poll_write() until we can't anymore */
+    /* Call poll_write() until we can't anymore.
+     * It MUST be called at least once, hence the do-while */
     do {
         struct aws_s3_meta_request_poll_write_result poll_result = aws_s3_meta_request_poll_write(
             job->meta_request,
@@ -2314,7 +2317,7 @@ static void s_s3_meta_request_async_write_job_loop(void *user_data) {
             job /*user_data*/);
 
         if (poll_result.is_pending) {
-            /* we'll resume this loop when waker fires */
+            /* We'll resume this loop when waker fires */
             return;
 
         } else if (poll_result.error_code) {
