@@ -2340,7 +2340,7 @@ struct aws_future_void *aws_s3_meta_request_write(
 
     struct aws_s3_meta_request_async_write_job *job =
         aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_meta_request_async_write_job));
-    job->meta_request = meta_request; // TODO: acquire/release?
+    job->meta_request = meta_request;
     job->write_future = aws_future_void_acquire(write_future);
     job->data = data;
     job->eof = eof;
