@@ -2039,7 +2039,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (pending_async_write_waker != NULL) {
         AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Firing poll_write() waker due to meta request's early finish",
+            "id=%p: Invoking write waker, due to meta request's early finish",
             (void *)meta_request);
         pending_async_write_waker(pending_async_write_waker_user_data);
     }
@@ -2265,6 +2265,18 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
             ready_to_send = true;
         }
 
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: write(data=%zu, eof=%d) processed=%zu remainder:%zu previously-buffered=%zu. %s"
+            "part...",
+            (void *)meta_request,
+            data.len + processed_data.len /*original data.len*/,
+            eof /*eof*/,
+            processed_data.len /*processed*/,
+            data.len /*remainder*/,
+            meta_request->synced_data.async_write.buffered_data.len - processed_data.len /*previously-buffered*/,
+            ready_to_send ? "Ready to upload part..." : "Not enough data to upload." /*msg*/);
+
         result.bytes_processed = processed_data.len;
     }
 
@@ -2397,8 +2409,9 @@ static bool s_s3_meta_request_read_from_pending_async_writes(
     /* END CRITICAL SECTION */
 
     /* Don't hold locks while triggering the user's waker callback */
-    /* TODO: deliver this via aws_s3_meta_request_add_event_for_delivery_synced() */
     if (waker != NULL) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST, "id=%p: Invoking write waker. Ready for more data", (void *)meta_request);
         waker(waker_user_data);
     }
 

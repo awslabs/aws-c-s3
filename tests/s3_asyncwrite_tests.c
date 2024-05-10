@@ -258,18 +258,8 @@ static int s_test_s3_asyncwrite_1_part_then_eof(struct aws_allocator *allocator,
     return s_basic_asyncwrite(allocator, ctx, &options);
 }
 
-/* Send 1 write, with enough data for 2 full parts.
- * This stresses the case where a single write-future must persist while multiple parts are copied. */
-AWS_TEST_CASE(test_s3_asyncwrite_2_parts_1_write, s_test_s3_asyncwrite_2_parts_1_write)
-static int s_test_s3_asyncwrite_2_parts_1_write(struct aws_allocator *allocator, void *ctx) {
-    struct basic_asyncwrite_options options = {
-        .object_size = PART_SIZE * 2,
-    };
-    return s_basic_asyncwrite(allocator, ctx, &options);
-}
-
 /* Send 2 part-sized writes.
- * In this case, neither write needed to be buffered. */
+ * This stresses sending multiple parts. */
 AWS_TEST_CASE(test_s3_asyncwrite_2_parts_2_partsize_writes, s_test_s3_asyncwrite_2_parts_2_partsize_writes)
 static int s_test_s3_asyncwrite_2_parts_2_partsize_writes(struct aws_allocator *allocator, void *ctx) {
     struct basic_asyncwrite_options options = {
@@ -279,9 +269,22 @@ static int s_test_s3_asyncwrite_2_parts_2_partsize_writes(struct aws_allocator *
     return s_basic_asyncwrite(allocator, ctx, &options);
 }
 
+
+/* Send 1 write, with enough data for 2 full parts.
+ * This stresses the case where a single write-future must persist while multiple
+ * calls to poll_write() are made under the hood */
+AWS_TEST_CASE(test_s3_asyncwrite_2_parts_1_write, s_test_s3_asyncwrite_2_parts_1_write)
+static int s_test_s3_asyncwrite_2_parts_1_write(struct aws_allocator *allocator, void *ctx) {
+    struct basic_asyncwrite_options options = {
+        .object_size = PART_SIZE * 2,
+    };
+    return s_basic_asyncwrite(allocator, ctx, &options);
+}
+
+
 /* Send 2 full parts, but the first write is larger than part-size.
- * This tests the case where the remainder of that first write needs to be buffered
- * and then sent along with the data from the second write. */
+ * This tests the case where poll_write() can't handle all the data at once,
+ * and poll() needs to send the remainder in further calls to poll_write(). */
 AWS_TEST_CASE(
     test_s3_asyncwrite_2_parts_first_write_over_partsize,
     s_test_s3_asyncwrite_2_parts_first_write_over_partsize)
@@ -294,7 +297,7 @@ static int s_test_s3_asyncwrite_2_parts_first_write_over_partsize(struct aws_all
 }
 
 /* Send 2 full parts, but the first write is less than part-size.
- * This tests the case where a part (the first one) is a combination of buffered and unbuffered data. */
+ * This tests the case where both parts contain data from multiple poll_write() calls */
 AWS_TEST_CASE(
     test_s3_asyncwrite_2_parts_first_write_under_partsize,
     s_test_s3_asyncwrite_2_parts_first_write_under_partsize)
