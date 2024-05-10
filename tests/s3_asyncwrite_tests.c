@@ -269,7 +269,6 @@ static int s_test_s3_asyncwrite_2_parts_2_partsize_writes(struct aws_allocator *
     return s_basic_asyncwrite(allocator, ctx, &options);
 }
 
-
 /* Send 1 write, with enough data for 2 full parts.
  * This stresses the case where a single write-future must persist while multiple
  * calls to poll_write() are made under the hood */
@@ -280,7 +279,6 @@ static int s_test_s3_asyncwrite_2_parts_1_write(struct aws_allocator *allocator,
     };
     return s_basic_asyncwrite(allocator, ctx, &options);
 }
-
 
 /* Send 2 full parts, but the first write is larger than part-size.
  * This tests the case where poll_write() can't handle all the data at once,
