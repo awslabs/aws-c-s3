@@ -2293,13 +2293,10 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
         aws_s3_client_schedule_process_work(meta_request->client);
     }
 
-    /* Assert only 1 result field is set (byte_processed could be 0 if data.len is zero) */
+    /* Assert that exactly 1 result field is set (OR they're all zero because data.len was zero) */
     AWS_ASSERT(
-        (result.is_pending && !result.error_code && !result.bytes_processed) ^
-        (!result.is_pending && result.error_code && !result.bytes_processed) ^
-        (!result.is_pending && !result.error_code && result.bytes_processed) ^
+        (result.is_pending ^ result.error_code ^ result.bytes_processed) ||
         (!result.is_pending && !result.error_code && !result.bytes_processed && !data.len));
-
     return result;
 }
 

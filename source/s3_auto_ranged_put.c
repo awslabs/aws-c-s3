@@ -551,7 +551,7 @@ static bool s_s3_auto_ranged_put_update(
                 struct aws_s3_buffer_pool_ticket *ticket = NULL;
                 if (meta_request->synced_data.async_write.ready_to_send) {
                     /* Async-write already has a ticket, take ownership */
-                    AWS_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
+                    AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
                     ticket = meta_request->synced_data.async_write.buffered_data_ticket;
                     meta_request->synced_data.async_write.buffered_data_ticket = NULL;
                 } else {
