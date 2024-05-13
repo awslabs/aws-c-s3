@@ -231,20 +231,10 @@ struct aws_s3_meta_request {
         /* To track aws_s3_requests with cancellable HTTP streams */
         struct aws_linked_list cancellable_http_streams_list;
 
-        /* Data for async-writes.
-         * Currently, for a given meta request, only 1 async-write is allowed at a time.
-         *
-         * When the user calls write(), they may not provide enough data for us to send an UploadPart.
-         * In that case, we copy the data to a buffer and immediately mark the write complete,
-         * so the user can write more data, so we finally get enough to send. */
+        /* Data for async-writes. */
         struct {
-            /* The future for whatever async-write is pending.
-             * If this is NULL, there isn't enough data to send another part.
-             *
-             * If this is non-NULL, 1+ part requests can be sent.
-             * When all the data has been processed, this future is completed
-             * and cleared, and we can accept another write() call. */
-            struct aws_future_void *future;
+            /* Whether a part request can be sent (we have 1 part's worth of data, or EOF) */
+            bool ready_to_send;
 
             /* True once user passes `eof` to their final write() call */
             bool eof;
@@ -252,12 +242,14 @@ struct aws_s3_meta_request {
             /* Holds buffered data we can't immediately send.
              * The length will always be less than part-size */
             struct aws_byte_buf buffered_data;
+            struct aws_s3_buffer_pool_ticket *buffered_data_ticket;
 
-            /* Cursor/pointer to data from the most-recent write() call, which
-             * provides enough data (combined with any buffered_data) to send 1+ parts.
-             * If there's data leftover in unbuffered_cursor after these parts are sent,
-             * it's copied into buffered_data, and we wait for more writes... */
-            struct aws_byte_cursor unbuffered_cursor;
+            /* Waker callback.
+             * Stored if a poll_write() call returns result.is_pending
+             * because we already had 1 part's worth of data.
+             * Invoked when we're ready to accept another poll_write() call. */
+            aws_simple_completion_callback *waker;
+            void *waker_user_data;
         } async_write;
 
     } synced_data;

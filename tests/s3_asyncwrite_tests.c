@@ -258,18 +258,8 @@ static int s_test_s3_asyncwrite_1_part_then_eof(struct aws_allocator *allocator,
     return s_basic_asyncwrite(allocator, ctx, &options);
 }
 
-/* Send 1 write, with enough data for 2 full parts.
- * This stresses the case where a single write-future must persist while multiple parts are copied. */
-AWS_TEST_CASE(test_s3_asyncwrite_2_parts_1_write, s_test_s3_asyncwrite_2_parts_1_write)
-static int s_test_s3_asyncwrite_2_parts_1_write(struct aws_allocator *allocator, void *ctx) {
-    struct basic_asyncwrite_options options = {
-        .object_size = PART_SIZE * 2,
-    };
-    return s_basic_asyncwrite(allocator, ctx, &options);
-}
-
 /* Send 2 part-sized writes.
- * In this case, neither write needed to be buffered. */
+ * This stresses sending multiple parts. */
 AWS_TEST_CASE(test_s3_asyncwrite_2_parts_2_partsize_writes, s_test_s3_asyncwrite_2_parts_2_partsize_writes)
 static int s_test_s3_asyncwrite_2_parts_2_partsize_writes(struct aws_allocator *allocator, void *ctx) {
     struct basic_asyncwrite_options options = {
@@ -279,9 +269,20 @@ static int s_test_s3_asyncwrite_2_parts_2_partsize_writes(struct aws_allocator *
     return s_basic_asyncwrite(allocator, ctx, &options);
 }
 
+/* Send 1 write, with enough data for 2 full parts.
+ * This stresses the case where a single write-future must persist while multiple
+ * calls to poll_write() are made under the hood */
+AWS_TEST_CASE(test_s3_asyncwrite_2_parts_1_write, s_test_s3_asyncwrite_2_parts_1_write)
+static int s_test_s3_asyncwrite_2_parts_1_write(struct aws_allocator *allocator, void *ctx) {
+    struct basic_asyncwrite_options options = {
+        .object_size = PART_SIZE * 2,
+    };
+    return s_basic_asyncwrite(allocator, ctx, &options);
+}
+
 /* Send 2 full parts, but the first write is larger than part-size.
- * This tests the case where the remainder of that first write needs to be buffered
- * and then sent along with the data from the second write. */
+ * This tests the case where poll_write() can't handle all the data at once,
+ * and poll() needs to send the remainder in further calls to poll_write(). */
 AWS_TEST_CASE(
     test_s3_asyncwrite_2_parts_first_write_over_partsize,
     s_test_s3_asyncwrite_2_parts_first_write_over_partsize)
@@ -294,7 +295,7 @@ static int s_test_s3_asyncwrite_2_parts_first_write_over_partsize(struct aws_all
 }
 
 /* Send 2 full parts, but the first write is less than part-size.
- * This tests the case where a part (the first one) is a combination of buffered and unbuffered data. */
+ * This tests the case where both parts contain data from multiple poll_write() calls */
 AWS_TEST_CASE(
     test_s3_asyncwrite_2_parts_first_write_under_partsize,
     s_test_s3_asyncwrite_2_parts_first_write_under_partsize)
@@ -498,81 +499,6 @@ static int s_test_s3_asyncwrite_fails_if_writes_overlap(struct aws_allocator *al
     ASSERT_INT_EQUALS(AWS_ERROR_INVALID_STATE, tester.test_results.finished_error_code);
 
     ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
-    return 0;
-}
-
-struct cancel_forces_completion_ctx {
-    aws_thread_id_t thread_id;
-    struct aws_mutex mutex;
-    struct aws_atomic_var write_completed_during_cancel;
-};
-
-static void s_write_callback_for_cancel_forces_completion_test(void *user_data) {
-    struct cancel_forces_completion_ctx *cancellation_ctx = user_data;
-
-    /* Check if this callback is firing synchronously from within aws_s3_meta_request_cancel()
-     * (same thread we called cancel() on, and can't get the lock we held while calling cancel()) */
-    if (aws_thread_current_thread_id() == cancellation_ctx->thread_id) {
-        if (aws_mutex_try_lock(&cancellation_ctx->mutex) == AWS_OP_ERR) {
-            aws_atomic_store_int(&cancellation_ctx->write_completed_during_cancel, 1);
-        }
-    }
-}
-
-/* Test that aws_s3_meta_request_cancel() will synchronously complete any pending write-futures.
- * This behavior is important for any Rust Future that wraps our write() call.
- * The Rust future could be dropped without waiting for the aws-c-s3's write() to complete.
- * Rust wants an easy way to guarantee memory won't be touched anymore, so we gave cancel() this power. */
-AWS_TEST_CASE(test_s3_asyncwrite_cancel_forces_completion, s_test_s3_asyncwrite_cancel_forces_completion)
-static int s_test_s3_asyncwrite_cancel_forces_completion(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct cancel_forces_completion_ctx cancellation_ctx;
-    cancellation_ctx.thread_id = aws_thread_current_thread_id();
-    aws_mutex_init(&cancellation_ctx.mutex);
-    aws_atomic_init_int(&cancellation_ctx.write_completed_during_cancel, 0);
-
-    /* It's possible (but unlikely) that the write completes before cancel() is called,
-     * so we'll try this a bunch of times  */
-    bool write_completed_during_cancel = false;
-    for (size_t try_i = 0; try_i < 100 && !write_completed_during_cancel; ++try_i) {
-        /* Init loop */
-        struct asyncwrite_tester tester;
-        ASSERT_SUCCESS(s_asyncwrite_tester_init(&tester, allocator, PART_SIZE * 3 /*object_size*/));
-
-        /* Kick off write (large, so write takes a while to complete,
-         * and EOF=false so the cancel() is sure to kill the meta request */
-        struct aws_future_void *write_future =
-            aws_s3_meta_request_write(tester.meta_request, aws_byte_cursor_from_buf(&tester.source_buf), false /*eof*/);
-        aws_future_void_register_callback(
-            write_future, s_write_callback_for_cancel_forces_completion_test, &cancellation_ctx);
-
-        /* Call cancel() while holding a lock */
-        aws_mutex_lock(&cancellation_ctx.mutex);
-        aws_s3_meta_request_cancel(tester.meta_request);
-
-        /* We should be free to clean up the underlying memory after cancel() returns */
-        aws_byte_buf_clean_up(&tester.source_buf);
-
-        aws_mutex_unlock(&cancellation_ctx.mutex);
-
-        aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
-
-        write_completed_during_cancel = aws_atomic_load_int(&cancellation_ctx.write_completed_during_cancel) != 0;
-
-        if (write_completed_during_cancel || aws_future_void_get_error(write_future) != 0) {
-            /* Any write failures are unrelated to the write() call itself, so get this particular error */
-            ASSERT_INT_EQUALS(AWS_ERROR_S3_REQUEST_HAS_COMPLETED, aws_future_void_get_error(write_future));
-        }
-
-        ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, tester.test_results.finished_error_code);
-
-        aws_future_void_release(write_future);
-
-        ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
-    }
-
-    ASSERT_TRUE(write_completed_during_cancel);
     return 0;
 }
 

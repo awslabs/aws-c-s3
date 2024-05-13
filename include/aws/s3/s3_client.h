@@ -628,7 +628,8 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE
-     * Set this to send request body data using the async aws_s3_meta_request_write() function.
+     * Set this to send request body data using the async aws_s3_meta_request_poll_write()
+     * or aws_s3_meta_request_write() functions.
      * Use this when outgoing data will be produced in asynchronous chunks,
      * and you're not sure when (if ever) each chunk will be ready.
      *
@@ -835,6 +836,74 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     const struct aws_s3_meta_request_options *options);
 
 /**
+ * The result of an `aws_s3_meta_request_poll_write()` call.
+ * Think of this like Rust's `Poll<Result<size_t, int>>`, or C++'s `optional<expected<size_t, int>>`.
+ */
+struct aws_s3_meta_request_poll_write_result {
+    bool is_pending;
+    int error_code;
+    size_t bytes_processed;
+};
+
+/**
+ * Attempt to write data.
+ *
+ * You must set `aws_s3_meta_request_options.send_using_async_writes` to use this function.
+ *
+ * This is a non-blocking poll-style async function, similar to Rust's:
+ * https://docs.rs/futures/latest/futures/io/trait.AsyncWrite.html#tymethod.poll_write
+ * If you prefer completion-style async functions, and your data can outlive
+ * the callstack, use aws_s3_meta_request_write() instead.
+ *
+ * Check the returned `result` struct to see what happened:
+ * 1)   If `result.is_pending == true` then no work was done.
+ *      The waker callback will be invoked when you can call poll_write() again.
+ *      Do not call poll_write() again before the waker is invoked.
+ *
+ * 2)   Else if `result.error_code != 0` then poll_write() did not succeed
+ *      and you should not call it again. The meta request is guaranteed to finish soon
+ *      (you don't need to worry about canceling the meta request yourself after a failed write).
+ *      A common error code is AWS_ERROR_S3_REQUEST_HAS_COMPLETED, indicating
+ *      the meta request completed for reasons unrelated to the poll_write() call
+ *      (e.g. CreateMultipartUpload received a 403 Forbidden response).
+ *      AWS_ERROR_INVALID_STATE usually indicates that you're calling poll_write()
+ *      incorrectly (e.g. not waiting for waker callback from previous poll_write() call).
+ *
+ * 3)   Else `result.bytes_processed` tells you how much data was processed.
+ *      `bytes_processed` may be less than the `data.len` you passed in.
+ *      Continue calling poll_write() with the remaining data until everything is processed.
+ *      `result.bytes_processed` won't be 0 unless you passed in `data.len` of 0.
+ *
+ * @param meta_request  Meta request
+ *
+ * @param data          The data to send. The data can be any size.
+ *                      `result.bytes_processed` indicates how many bytes were
+ *                      processed by this call.
+ *
+ * @param eof           Pass true to signal EOF (end of file).
+ *                      If poll_write() doesn't process all your data
+ *                      (`result.is_pending` or `result.byte_processed < data.len`)
+ *                      then EOF was ignored, and you need to pass it again
+ *                      to subsequent poll_write() calls.
+ *
+ * @param waker         Waker callback.
+ *                      If `result.is_pending == true`, then the waker will be called
+ *                      exactly once when it's a good time to call poll_write() again.
+ *                      If `result.is_pending == false`, the waker will never be called.
+ *
+ * @param user_data     Pointer to be passed to the waker callback.
+ *
+ * WARNING: This feature is experimental.
+ */
+AWS_S3_API
+struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_cursor data,
+    bool eof,
+    aws_simple_completion_callback *waker,
+    void *user_data);
+
+/**
  * Write the next chunk of data.
  *
  * You must set `aws_s3_meta_request_options.send_using_async_writes` to use this function.
@@ -853,9 +922,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
  * incorrectly (e.g. not waiting for previous write to complete).
  *
  * You MUST keep the data in memory until the future completes.
- * If you need to free the memory early, call aws_s3_meta_request_cancel().
- * cancel() will synchronously complete the future from any pending write with
- * error code AWS_ERROR_S3_REQUEST_HAS_COMPLETED.
+ * If you cannot do this, use aws_s3_meta_request_poll_write() instead.
  *
  * You can wait any length of time between calls to write().
  * If there's not enough data to upload a part, the data will be copied
