@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+import json
 import sys
+from time import perf_counter
 
 ARG_PARSER = ArgumentParser(description="Scrape logs from CRT S3Client")
-ARG_PARSER.add_argument(
-    'log', help="Path to log file (captured at TRACE|DEBUG level)")
-ARG_PARSER.add_argument(
-    '--plot', choices=('http'), help="Show a plot")
+ARG_PARSER.add_argument('--log-in', required=True,
+                        help="Log file to read (captured at TRACE|DEBUG level)")
+ARG_PARSER.add_argument('--json-out', required=True,
+                        help="JSON file to write")
+
 
 
 class LogPattern:
@@ -78,8 +79,8 @@ class LogLine:
 
 @dataclass
 class EventLoopThread:
-    thread: str
-    id: str
+    thread_id: str
+    event_loop_id: str
     # filled in later...
     visual_size: int = None
     connections: list['HttpConnection'] = field(default_factory=list)
@@ -143,15 +144,34 @@ class S3RequestAttempt:
     http_status: int = None
 
 
-def warn(msg: str):
+@dataclass
+class S3Run:
+    meta_requests: list[S3MetaRequest] = field(default_factory=list)
+    threads: dict[str, EventLoopThread] = field(default_factory=dict)
+    max_time: float = 0
+
+
+def log(msg: str):
     print(msg, file=sys.stderr)
 
 
-class Scraper:
+class PerfTimer:
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.start = perf_counter()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is None:
+            end = perf_counter()
+            log(f"{self.name}: {end - self.start:.3f} sec")
+
+
+class _Scraper:
     def __init__(self, log_filename: str):
         # these are the top-level datastructures, nothing is ever removed from them
-        self.all_meta_requests: list[S3MetaRequest] = []
-        self.event_loop_threads: dict[str, EventLoopThread] = {}
+        self.s3_run = S3Run()
 
         # These datastructures are keyed on ID, which is usually a memory address.
         # Any entry may be replaced if that same ID (memory address) is used again later by something else.
@@ -160,7 +180,7 @@ class Scraper:
         self._s3_requests: dict[str, S3Request] = {}
         self._meta_requests: dict[str, S3MetaRequest] = {}
 
-        last_line = None
+        self._last_line = None
 
         with open(log_filename) as log_file:
             # Batch up all lines that occur in the same second and process them together.
@@ -185,7 +205,7 @@ class Scraper:
                     msg=m.group('msg'),
                 )
 
-                self.last_line = line
+                self._last_line = line
 
                 if lines_same_second and lines_same_second[0].date_str != line.date_str:
                     self._process_lines_same_second(lines_same_second)
@@ -218,7 +238,7 @@ class Scraper:
         if m := EVENT_LOOP_THREAD_START.match(line):
             id = m.group('id')
             el_thread = EventLoopThread(line.thread, id)
-            self.event_loop_threads[line.thread] = el_thread
+            self.s3_run.threads[line.thread] = el_thread
 
         # S3MetaRequest
         elif m := S3_META_REQUEST_START.match(line):
@@ -226,7 +246,7 @@ class Scraper:
             meta = S3MetaRequest(id=id,
                                  start_time=self._line_time(line))
             self._meta_requests[id] = meta
-            self.all_meta_requests.append(meta)
+            self.s3_run.meta_requests.append(meta)
 
         elif m := S3_META_REQUEST_END_OK.match(line):
             id = m.group('id')
@@ -278,7 +298,7 @@ class Scraper:
                                   start_time=self._line_time(line))
             self._http_connections[conn.id] = conn
             # add to EventLoopThread
-            self.event_loop_threads[line.thread].connections.append(conn)
+            self.s3_run.threads[line.thread].connections.append(conn)
 
         elif m := HTTP_CONNECTION_END.match(line):
             id = m.group('id')
@@ -310,25 +330,28 @@ class Scraper:
             stream.end_time = self._line_time(line)
 
     def _post_processing(self):
+        self.s3_run.max_time = self._line_time(self._last_line)
+
         # filter out threads that didn't host any HttpConnections
-        self.event_loop_threads = {
-            k: v for k, v in self.event_loop_threads.items() if len(v.connections) > 0}
+        self.s3_run.threads = {
+            k: v for k, v in self.s3_run.threads.items() if len(v.connections) > 0}
 
         # for anything where we didn't find the end: snip it off
-        snip_time = self._line_time(self.last_line)
+        snip_time = self.s3_run.max_time
         snip_error = '???'
         snip_error_num = -1
 
-        for event_loop in self.event_loop_threads.values():
+
+        for event_loop in self.s3_run.threads.values():
             for http_conn in event_loop.connections:
                 if http_conn.end_time is None:
-                    warn(f"No end found for HttpConnection {http_conn.id}")
+                    log(f"No end found for HttpConnection {http_conn.id}")
                     http_conn.end_time = snip_time
                     http_conn.error = snip_error
 
                 for stream_idx, http_stream in enumerate(http_conn.streams):
                     if http_stream.end_time is None:
-                        warn(f"No end found for HttpStream {http_stream.id}")
+                        log(f"No end found for HttpStream {http_stream.id}")
                         assert stream_idx + 1 == len(http_conn.streams)
                         http_stream.end_time = snip_time
                         http_stream.error = snip_error
@@ -337,9 +360,9 @@ class Scraper:
             event_loop.visual_size = max(
                 [conn.visual_idx for conn in event_loop.connections])
 
-        for s3_meta in self.all_meta_requests:
+        for s3_meta in self.s3_run.meta_requests:
             if s3_meta.end_time is None:
-                warn(f"No end found for S3MetaRequest {s3_meta.id}")
+                log(f"No end found for S3MetaRequest {s3_meta.id}")
                 s3_meta.end_time = snip_time
                 s3_meta.error_num = snip_error_num
 
@@ -365,6 +388,8 @@ class Scraper:
                 s3_meta.s3_requests_by_part_num.values())
 
     def _determine_visual_indices(self, events: list):
+        # find index for each event, such that we can use as few indices
+        # as possible, without any any events overlapping each other
         indices = []
         for new_event in events:
             for idx, event in enumerate(indices):
@@ -381,55 +406,14 @@ class Scraper:
         delta = line.date() - self.start_date
         return delta.total_seconds()
 
-    def plot_http(self):
-        fig, ax = plt.subplots(figsize=(50, 10))
-
-        threads: list[EventLoopThread] = [
-            i for i in self.event_loop_threads.values()]
-        thread = threads[0]
-
-        thread_height = max(i.visual_size for i in threads)
-        ylim = thread_height  # len(threads) * thread_height
-        xlim = self._line_time(self.last_line)
-
-        ax.set_xlabel('Time (s)')
-        ax.set_ylabel('EventLoopGroups')
-        ax.set_xlim(0, xlim)
-        ax.set_ylim(0, ylim)
-
-        for conn_idx, conn in enumerate(thread.connections):
-            conn_y = conn.visual_idx
-            ax.add_patch(patches.Rectangle(xy=(conn.start_time, conn_y + 0.2),
-                                           width=conn.end_time - conn.start_time,
-                                           height=0.6,
-                                           edgecolor='gray',
-                                           facecolor='lightgray'))
-
-            for stream_idx, stream in enumerate(conn.streams):
-                # stream_y = conn_y + 0.5
-                # ax.plot([stream.start_time, stream.end_time], # x
-                #         [stream_y, stream_y], # y
-                #         color='red' if stream.error else 'green')
-                ax.add_patch(patches.Rectangle(xy=(stream.start_time, conn_y + 0.4),
-                                               width=stream.end_time - stream.start_time,
-                                               height=0.2,
-                                               edgecolor='red' if stream.error else 'green',
-                                               facecolor='lightcoral' if stream.error else 'aquamarine'))
-
-        plt.show()
-
 
 if __name__ == '__main__':
     args = ARG_PARSER.parse_args()
-    scraper = Scraper(args.log)
 
-    print([scraper.event_loop_threads.values()])
+    with PerfTimer('scrape'):
+        scraper = _Scraper(args.log_in)
 
-    if args.plot == 'http':
-        scraper.plot_http()
-
-    # el: EventLoopThread = scraper.event_loop_threads.values()[0]
-    # print('ID,START,END,VISUAL_IDX,HEIGHT')
-    # print(f"EventLoopThread,{el.start_time},{el.end_time},,{el.visual_size}")
-    # for conn in el.connections:
-    #     print(f'HttpConnection,{conn.start_time},{conn.end_time},{conn.visual_idx},')
+    with PerfTimer('to-json'):
+        json_data = asdict(scraper.s3_run)
+        with open(args.json_out, 'w') as json_file:
+            json.dump(json_data, json_file)
