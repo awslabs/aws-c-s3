@@ -702,7 +702,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string) {
+int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_byte_cursor error_code_string) {
     if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "SlowDown")) {
         return AWS_ERROR_S3_SLOW_DOWN;
     }

@@ -1504,6 +1504,13 @@ static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request 
     return true;
 }
 
+/**
+ * Check the response detail, returns:
+ * - AWS_ERROR_SUCCESS for successfully response
+ * - AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR 200 response with error in the body that is non-recoverable
+ * - AWS_ERROR_S3_INVALID_RESPONSE_STATUS for all other non-recoverable response.
+ * - Specific error code for recoverable response.
+ */
 static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
 
@@ -1520,8 +1527,9 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
             struct aws_byte_cursor error_code_string = {0};
             const char *xml_path[] = {"Error", "Code", NULL};
             if (aws_xml_get_body_at_path(request->allocator, xml_doc, xml_path, &error_code_string) == AWS_OP_SUCCESS) {
-                /* Found an <Error><Code> string! Map it to CRT error code. */
-                error_code_from_xml = aws_s3_crt_error_code_from_server_error_code_string(error_code_string);
+                /* Found an <Error><Code> string! Map it to CRT error code if retry-able. */
+                error_code_from_xml =
+                    aws_s3_crt_error_code_from_recoverable_server_error_code_string(error_code_string);
             }
         }
     }
