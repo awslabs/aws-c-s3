@@ -401,9 +401,7 @@ void aws_s3_meta_request_set_fail_synced(
 
     meta_request->synced_data.finish_result_set = true;
 
-    if ((error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS || error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
-         error_code == AWS_ERROR_S3_OBJECT_MODIFIED) &&
-        failed_request != NULL) {
+    if (failed_request != NULL) {
         aws_s3_meta_request_result_setup(
             meta_request,
             &meta_request->synced_data.finish_result,
@@ -411,7 +409,8 @@ void aws_s3_meta_request_set_fail_synced(
             failed_request->send_data.response_status,
             error_code);
     } else {
-        AWS_ASSERT(error_code != AWS_ERROR_S3_INVALID_RESPONSE_STATUS);
+        /* Request must be present for all server-side failures */
+        AWS_ASSERT(error_code == AWS_ERROR_S3_CANCELED || error_code == AWS_ERROR_S3_PAUSED || error_code == AWS_ERROR_INVALID_STATE);
 
         aws_s3_meta_request_result_setup(meta_request, &meta_request->synced_data.finish_result, NULL, 0, error_code);
     }

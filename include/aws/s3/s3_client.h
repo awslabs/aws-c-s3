@@ -759,10 +759,8 @@ struct aws_s3_meta_request_options {
  * If error_code is AWS_ERROR_SUCCESS, then response_status will match the response_status passed earlier by the header
  * callback and error_response_headers and error_response_body will be NULL.
  *
- * If error_code is equal to AWS_ERROR_S3_INVALID_RESPONSE_STATUS, then error_response_headers, error_response_body, and
- * response_status will be populated by the failed request.
- *
- * For all other error codes, response_status will be 0, and the error_response variables will be NULL.
+ * Fields error_response_headers, error_response_body, response_status will be provided for all server-side failures, i.e.
+ * when error_code is not in {AWS_ERROR_S3_CANCELED, AWS_ERROR_S3_PAUSED, AWS_ERROR_INVALID_STATE}.
  */
 struct aws_s3_meta_request_result {
 
