@@ -34,6 +34,11 @@ parser.add_argument(
     'bucket_name',
     nargs='?',
     help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
+parser.add_argument(
+    '-l', '--large_objects',
+    action='store_true',
+    help='enable helper to create pre-existing large objects.')
+
 
 args = parser.parse_args()
 
@@ -141,19 +146,20 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
             put_pre_existing_objects(
                 10*MB, 'pre-existing-10MB-kms', sse='kms', bucket=bucket_name)
             put_pre_existing_objects(
-                256*MB, 'pre-existing-256MB', bucket=bucket_name)
-            put_pre_existing_objects(
-                256*MB, 'pre-existing-256MB-@', bucket=bucket_name)
-            put_pre_existing_objects(
-                2*GB, 'pre-existing-2GB', bucket=bucket_name)
-            put_pre_existing_objects(
-                2*GB, 'pre-existing-2GB-@', bucket=bucket_name)
-            put_pre_existing_objects(
                 1*MB, 'pre-existing-1MB', bucket=bucket_name)
             put_pre_existing_objects(
                 1*MB, 'pre-existing-1MB-@', bucket=bucket_name)
             put_pre_existing_objects(
                 0, 'pre-existing-empty', bucket=bucket_name)
+            if args.large_objects:
+                put_pre_existing_objects(
+                    256*MB, 'pre-existing-256MB', bucket=bucket_name)
+                put_pre_existing_objects(
+                    256*MB, 'pre-existing-256MB-@', bucket=bucket_name)
+                put_pre_existing_objects(
+                    2*GB, 'pre-existing-2GB', bucket=bucket_name)
+                put_pre_existing_objects(
+                    2*GB, 'pre-existing-2GB-@', bucket=bucket_name)
 
     except botocore.exceptions.ClientError as e:
         # The bucket already exists. That's fine.

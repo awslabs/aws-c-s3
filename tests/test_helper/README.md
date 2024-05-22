@@ -32,6 +32,11 @@ python3 test_helper.py clean
   + `pre-existing-10MB`
   + `pre-existing-1MB`
   + `pre-existing-empty`
+  + with `-l` or `--large_objects` enable, serval large objects will also be uploaded, which will be needed for the copy multi-part objects:
+    - `pre-existing-256MB`
+    - `pre-existing-256MB-@`
+    - `pre-existing-2GB`
+    - `pre-existing-2GB-@`
 
 * Create `<BUCKET_NAME>-public` in us-west-2
 * Upload files:
