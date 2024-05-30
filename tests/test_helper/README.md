@@ -32,7 +32,7 @@ python3 test_helper.py clean
   + `pre-existing-10MB`
   + `pre-existing-1MB`
   + `pre-existing-empty`
-  + with `-l` or `--large_objects` enable, serval large objects will also be uploaded, which will be needed for the copy multi-part objects:
+  + with `--large_objects` enabled, several large objects will also be uploaded. Currently, only aws-c-s3's tests require these files, the aws-crt-*** repos do not:
     - `pre-existing-256MB`
     - `pre-existing-256MB-@`
     - `pre-existing-2GB`

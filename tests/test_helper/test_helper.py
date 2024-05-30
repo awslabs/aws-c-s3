@@ -35,7 +35,7 @@ parser.add_argument(
     nargs='?',
     help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
 parser.add_argument(
-    '-l', '--large_objects',
+    '--large_objects',
     action='store_true',
     help='enable helper to create pre-existing large objects.')
 
