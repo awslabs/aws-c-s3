@@ -562,7 +562,7 @@ static bool s_check_empty_file_download_error(struct aws_s3_request *failed_requ
                 /* XML response */
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&failed_body);
                 const char *path_to_size[] = {"Error", "ActualObjectSize", NULL};
-                struct aws_byte_cursor size = {0};
+                struct aws_byte_cursor size = {0, 0};
                 aws_xml_get_body_at_path(failed_request->allocator, xml_doc, path_to_size, &size);
                 if (aws_byte_cursor_eq_c_str(&size, "0")) {
                     return true;
