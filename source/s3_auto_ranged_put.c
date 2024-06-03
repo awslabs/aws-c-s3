@@ -771,7 +771,7 @@ static int s_verify_part_matches_checksum(
         return AWS_OP_ERR;
     }
 
-    struct aws_byte_buf encoded_checksum = {0, 0};
+    struct aws_byte_buf encoded_checksum = {0, 0, 0, 0};
 
     int return_status = AWS_OP_SUCCESS;
 
