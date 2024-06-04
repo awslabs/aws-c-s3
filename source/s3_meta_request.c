@@ -1524,7 +1524,7 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
         if (request->send_data.response_body.len > 0) {
             /* Attempt to read as XML, it's fine if this fails. */
             struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
-            struct aws_byte_cursor error_code_string = {0};
+            struct aws_byte_cursor error_code_string = {0, 0};
             const char *xml_path[] = {"Error", "Code", NULL};
             if (aws_xml_get_body_at_path(request->allocator, xml_doc, xml_path, &error_code_string) == AWS_OP_SUCCESS) {
                 /* Found an <Error><Code> string! Map it to CRT error code if retry-able. */
