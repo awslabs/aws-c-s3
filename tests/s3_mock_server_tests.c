@@ -16,7 +16,10 @@
     static int s_test_##NAME(struct aws_allocator *allocator, void *ctx)
 
 #define DEFINE_HEADER(NAME, VALUE)                                                                                     \
-    { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
+    {                                                                                                                  \
+        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME),                                                           \
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE),                                                         \
+    }
 
 static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list) {
     /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
