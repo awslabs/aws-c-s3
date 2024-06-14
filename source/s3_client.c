@@ -1733,7 +1733,7 @@ static bool s_s3_client_should_update_meta_request(
     /* CreateSession has high priority to bypass the checks. */
     if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
-        if (aws_string_eq_c_str(meta_request_default->operation_name, "CreateSession")) {
+        if (aws_string_eq_c_str_ignore_case(meta_request_default->operation_name, "CreateSession")) {
             return true;
         }
     }

@@ -1496,11 +1496,33 @@ static void s_s3_meta_request_send_request_finish(
 /* Return whether the response to this request might contain an error, even though we got 200 OK.
  * see: https://repost.aws/knowledge-center/s3-resolve-200-internalerror */
 static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request *request) {
-    /* We handle async error for every request BUT get object. */
+    /* We handle async error for every request EXCEPT GetObject,
+     * because the body of a GetObject response could be ANYTHING,
+     * and it might look like an error message (we've seen this happen) */
     struct aws_s3_meta_request *meta_request = request->meta_request;
     if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
         return false;
     }
+
+    /* We've seen users send GetObject as an AWS_S3_META_REQUEST_TYPE_DEFAULT
+     * (to force it to send as a single HTTP request). So let's do more checks... */
+
+    /* Check operation_name (it's an optional field, but hopefully the user set it) */
+    if (request->operation_name != NULL && aws_string_eq_c_str_ignore_case(request->operation_name, "GetObject")) {
+        return false;
+    }
+
+    /* Errors always have the "content-type: application/xml" header */
+    struct aws_byte_cursor content_type_value;
+    if (aws_http_headers_get(
+            request->send_data.response_headers, aws_byte_cursor_from_c_str("content-type"), &content_type_value) ==
+        AWS_OP_SUCCESS) {
+
+        if (!aws_byte_cursor_eq_c_str_ignore_case(&content_type_value, "application/xml")) {
+            return false;
+        }
+    }
+
     return true;
 }
 
