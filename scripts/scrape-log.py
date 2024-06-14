@@ -14,7 +14,6 @@ ARG_PARSER.add_argument('--json-out', required=True,
                         help="JSON file to write")
 
 
-
 class LogPattern:
     def __init__(self, topic: str, pattern: str):
         self._topic = topic
@@ -59,6 +58,17 @@ HTTP_STREAM_END_OK = LogPattern(
     'http-stream', r'id=(?P<id>[^:]+): Client request complete, response status: (?P<http_status>[0-9]+).*')
 HTTP_STREAM_END_ERR = LogPattern(
     'http-stream', r'id=(?P<id>[^:]+): Stream completed with error code (?P<err_num>[^ ]+) \((?P<err_name>[A-Z_]+).*')
+
+S3_CLIENT_STATS = LogPattern(
+    'S3ClientStats',
+    (r'id=(?P<id>[^ ]+) '
+     r'Requests-in-flight\(approx/exact\):(?P<approx>\d+)/(?P<exact>\d+)  '
+     r'Requests-preparing:(?P<preparing>\d+)  '
+     r'Requests-queued:(?P<queued>\d+)  '
+     r'Requests-network\(get/put/default/total\):(?P<net_get>\d+)/(?P<net_put>\d+)/(?P<net_default>\d+)/(?P<net_total>\d+)  '
+     r'Requests-streaming-waiting:(?P<streaming_waiting>\d+)  '
+     r'Requests-streaming-response:(?P<streaming_response>\d+)  '
+     r'Endpoints\(in-table/allocated\):(?P<endpoints_in_table>\d+)/(?P<endpoints_allocated>\d+)'))
 
 BOTO_LOG = re.compile(
     r'(?P<date>\d{4}-\d{2}-\d{2}) (?P<time>\d{2}:\d{2}:\d{2},\d+) - (?P<thread>.+) - (?P<topic>.*) - (?P<level>.*) - (?P<msg>.*)')
@@ -143,11 +153,25 @@ class S3RequestAttempt:
     error: str = None
     http_status: int = None
 
+@dataclass
+class S3ClientStat:
+    in_flight_total: int
+    preparing: int
+    queued: int
+    net_get: int
+    net_put: int
+    net_default: int
+    net_total: int
+    streaming_waiting: int
+    streaming_response: int
+    time: float
+
 
 @dataclass
 class S3Run:
     meta_requests: list[S3MetaRequest] = field(default_factory=list)
     threads: dict[str, EventLoopThread] = field(default_factory=dict)
+    stats: list[S3ClientStat] = field(default_factory=list)
     max_time: float = 0
 
 
@@ -329,6 +353,20 @@ class _Scraper:
             stream.error = m.group('err_name')
             stream.end_time = self._line_time(line)
 
+        elif m:= S3_CLIENT_STATS.match(line):
+            self.s3_run.stats.append(S3ClientStat(
+                in_flight_total=int(m.group('exact')),
+                preparing=int(m.group('preparing')),
+                queued=int(m.group('queued')),
+                net_get=int(m.group('net_get')),
+                net_put=int(m.group('net_put')),
+                net_default=int(m.group('net_default')),
+                net_total=int(m.group('net_total')),
+                streaming_waiting=int(m.group('streaming_waiting')),
+                streaming_response=int(m.group('streaming_response')),
+                time=self._line_time(line),
+            ))
+
     def _post_processing(self):
         self.s3_run.max_time = self._line_time(self._last_line)
 
@@ -340,7 +378,6 @@ class _Scraper:
         snip_time = self.s3_run.max_time
         snip_error = '???'
         snip_error_num = -1
-
 
         for event_loop in self.s3_run.threads.values():
             for http_conn in event_loop.connections:
