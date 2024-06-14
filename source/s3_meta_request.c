@@ -1511,8 +1511,8 @@ static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request 
     if (request->operation_name != NULL && aws_string_eq_c_str_ignore_case(request->operation_name, "GetObject")) {
         return false;
     }
-
-    /* Errors always have the "content-type: application/xml" header */
+    /* Errors SHOULD have the "content-type: application/xml" header
+     * if content-type is anything else, then it's not an error. */
     struct aws_byte_cursor content_type_value;
     if (aws_http_headers_get(
             request->send_data.response_headers, aws_byte_cursor_from_c_str("content-type"), &content_type_value) ==
