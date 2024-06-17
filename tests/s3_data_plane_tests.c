@@ -4345,6 +4345,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     /* Pass the request through as a default request so that it goes through as-is. */
     options.type = AWS_S3_META_REQUEST_TYPE_DEFAULT;
+    options.operation_name = aws_byte_cursor_from_c_str("GetObject");
     options.message = message;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;

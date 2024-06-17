@@ -27,6 +27,7 @@ enum operation_state {
 struct aws_s3_paginated_operation {
     struct aws_allocator *allocator;
 
+    struct aws_string *operation_name;
     struct aws_string *result_xml_node_name;
     struct aws_string *continuation_xml_node_name;
 
@@ -71,6 +72,10 @@ static void s_operation_ref_count_zero_callback(void *arg) {
 
     if (operation->on_paginated_operation_cleanup) {
         operation->on_paginated_operation_cleanup(operation->user_data);
+    }
+
+    if (operation->operation_name) {
+        aws_string_destroy(operation->operation_name);
     }
 
     if (operation->result_xml_node_name) {
@@ -158,6 +163,7 @@ struct aws_s3_paginated_operation *aws_s3_paginated_operation_new(
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_paginated_operation));
     operation->allocator = allocator;
 
+    operation->operation_name = aws_string_new_from_cursor(allocator, &params->operation_name);
     operation->result_xml_node_name = aws_string_new_from_cursor(allocator, &params->result_xml_node_name);
     operation->continuation_xml_node_name =
         aws_string_new_from_cursor(allocator, &params->continuation_token_node_name);
@@ -433,6 +439,7 @@ int aws_s3_paginator_continue(struct aws_s3_paginator *paginator, const struct a
         .user_data = paginator,
         .signing_config = (struct aws_signing_config_aws *)signing_config,
         .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_string(paginator->operation->operation_name),
         .body_callback = s_receive_body_callback,
         .finish_callback = s_on_request_finished,
         .message = paginated_request_message,
