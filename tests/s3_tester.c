@@ -1501,6 +1501,8 @@ int aws_s3_tester_send_meta_request_with_options(
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET)) {
 
+            meta_request_options.operation_name = aws_byte_cursor_from_c_str("GetObject");
+
             struct aws_http_message *message = aws_s3_test_get_object_request_new(
                 allocator, aws_byte_cursor_from_string(host_name), options->get_options.object_path);
             ASSERT_SUCCESS(aws_s3_message_util_set_multipart_request_path(

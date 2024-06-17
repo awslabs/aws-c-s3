@@ -116,6 +116,7 @@ enum aws_s3_request_type {
     AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
     AWS_S3_REQUEST_TYPE_COPY_OBJECT,
     AWS_S3_REQUEST_TYPE_PUT_OBJECT,
+    AWS_S3_REQUEST_TYPE_CREATE_SESSION,
 
     /* Max enum value */
     AWS_S3_REQUEST_TYPE_MAX,
@@ -574,11 +575,12 @@ struct aws_s3_meta_request_options {
     enum aws_s3_meta_request_type type;
 
     /**
-     * Optional.
      * The S3 operation name (e.g. "CreateBucket").
-     * This will only be used when type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
+     * This must be set if type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
      * it is automatically populated for other meta-request types.
      * This name is used to fill out details in metrics and error reports.
+     * It's also used to check for niche behavior specific to some operations
+     * (e.g. "CompleteMultipartUpload" may return an error, even though the status-code was 200 OK).
      */
     struct aws_byte_cursor operation_name;
 
@@ -780,7 +782,7 @@ struct aws_s3_meta_request_result {
      * "PutObject, "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", or others.
      * For AWS_S3_META_REQUEST_TYPE_DEFAULT, this is the same value passed to
      * aws_s3_meta_request_options.operation_name.
-     * NULL if the meta request failed for another reason, or the operation name is not known. */
+     * NULL if the meta request failed for another reason. */
     struct aws_string *error_response_operation_name;
 
     /* Response status of the failed request or of the entire meta request. */

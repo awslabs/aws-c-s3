@@ -2176,10 +2176,8 @@ void aws_s3_meta_request_result_setup(
                 result->error_response_body, meta_request->allocator, &failed_request->send_data.response_body);
         }
 
-        if (failed_request->operation_name != NULL) {
-            result->error_response_operation_name =
-                aws_string_new_from_string(meta_request->allocator, failed_request->operation_name);
-        }
+        result->error_response_operation_name =
+            aws_string_new_from_string(meta_request->allocator, failed_request->operation_name);
     }
 
     result->response_status = response_status;

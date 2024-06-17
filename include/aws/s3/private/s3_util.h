@@ -10,7 +10,7 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/byte_buf.h>
-#include <aws/s3/s3.h>
+#include <aws/s3/s3_client.h>
 
 #if ASSERT_LOCK_HELD
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)                                                                       \
@@ -174,6 +174,12 @@ extern const struct aws_byte_cursor g_delete_method;
 
 AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
+
+/**
+ * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
+ */
+AWS_S3_API
+enum aws_s3_request_type aws_s3_request_type_from_operation_name(struct aws_byte_cursor name);
 
 /**
  * Cache and initial the signing config based on the client.
