@@ -1765,6 +1765,8 @@ int aws_s3_tester_send_meta_request_with_options(
         if (!options->dont_wait_for_shutdown) {
             aws_s3_tester_wait_for_meta_request_shutdown(tester);
         }
+    } else {
+        ASSERT_INT_EQUALS(0,tester->synced_data.meta_request_shutdown_count);
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
