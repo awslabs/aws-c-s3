@@ -24,7 +24,6 @@ s3_control_client = boto3.client('s3control')
 MB = 1024*1024
 GB = 1024*1024*1024
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument(
     'action',
@@ -52,18 +51,35 @@ else:
 
 PUBLIC_BUCKET_NAME = BUCKET_NAME_BASE + "-public"
 
+# upload an object whose body is identical to an "async error" aka "200 error"
+ASYNC_ERROR_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<Error>'
+    '<Code>InternalError</Code>'
+    '<Message>We encountered an internal error. Please try again.</Message>'
+    '<RequestId>656c76696e6727732072657175657374</RequestId>'
+    '<HostId>Uuag1LuByRx9e6j5Onimru9pO4ZVKnJ2Qz7/C1NPcfTWAtRPfTaOFg==</HostId>'
+    '</Error>'
+)
+
 
 def create_bytes(size):
     return bytearray([1] * size)
 
 
-def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME_BASE, sse=None, public_read=False, client=s3_client):
-    if size == 0:
+def put_pre_existing_objects(size_or_body, keyname, bucket=BUCKET_NAME_BASE,
+                             sse=None, public_read=False, content_type=None,
+                             client=s3_client):
+    if size_or_body == 0:
         client.put_object(Bucket=bucket, Key=keyname)
         print(f"Object {keyname} uploaded")
         return
 
-    body = create_bytes(size)
+    if isinstance(size_or_body, int):
+        body = create_bytes(size_or_body)
+    else:
+        body = size_or_body
+
     args = {'Bucket': bucket, 'Key': keyname, 'Body': body}
     if sse == 'aes256':
         args['ServerSideEncryption'] = 'AES256'
@@ -77,6 +93,10 @@ def put_pre_existing_objects(size, keyname, bucket=BUCKET_NAME_BASE, sse=None, p
 
     if public_read:
         args['ACL'] = 'public-read'
+
+    if content_type:
+        args['ContentType'] = content_type
+
     try:
         client.put_object(**args)
     except botocore.exceptions.ClientError as e:
@@ -151,6 +171,8 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
                 1*MB, 'pre-existing-1MB-@', bucket=bucket_name)
             put_pre_existing_objects(
                 0, 'pre-existing-empty', bucket=bucket_name)
+            put_pre_existing_objects(
+                ASYNC_ERROR_XML, 'pre-existing-async-error-xml', bucket=bucket_name, content_type='application/xml')
             if args.large_objects:
                 put_pre_existing_objects(
                     256*MB, 'pre-existing-256MB', bucket=bucket_name)
