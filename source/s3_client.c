@@ -1090,6 +1090,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         meta_request = aws_s3_meta_request_release(meta_request);
     } else {
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
+        /**
+         * shutdown_callback must be the last thing that gets set on the meta_request so that we don’t return NULL and
+         * trigger the shutdown_callback.
+         */
+        meta_request->shutdown_callback = options->shutdown_callback;
     }
 
     return meta_request;
