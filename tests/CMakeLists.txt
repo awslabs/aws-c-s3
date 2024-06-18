@@ -208,6 +208,7 @@ add_net_test_case(test_s3_bad_endpoint)
 add_net_test_case(test_s3_different_endpoints)
 
 add_test_case(test_s3_request_type_operation_name)
+add_test_case(test_s3_request_type_from_operation_name)
 add_test_case(test_s3_replace_quote_entities)
 add_test_case(test_s3_strip_quotes)
 add_test_case(test_s3_parse_request_range_header)
