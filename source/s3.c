@@ -4,6 +4,7 @@
  */
 
 #include <aws/s3/private/s3_platform_info.h>
+#include <aws/s3/private/s3_util.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_client.h>
 
