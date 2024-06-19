@@ -1425,6 +1425,7 @@ int aws_s3_tester_send_meta_request_with_options(
     }
 
     struct aws_s3_client *client = options->client;
+
     struct aws_uri mock_server;
     ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
     if (client == NULL) {
