@@ -1324,6 +1324,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
         }
         case AWS_S3_META_REQUEST_TYPE_DEFAULT:
+            if (options->operation_name.len == 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST, "Could not create Default Meta Request; operation name is required");
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+
             return aws_s3_meta_request_default_new(
                 client->allocator,
                 client,
@@ -1738,7 +1745,7 @@ static bool s_s3_client_should_update_meta_request(
     /* CreateSession has high priority to bypass the checks. */
     if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
-        if (aws_string_eq_c_str(meta_request_default->operation_name, "CreateSession")) {
+        if (meta_request_default->request_type == AWS_S3_REQUEST_TYPE_CREATE_SESSION) {
             return true;
         }
     }

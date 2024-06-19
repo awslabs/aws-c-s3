@@ -1495,9 +1495,11 @@ static void s_s3_meta_request_send_request_finish(
 /* Return whether the response to this request might contain an error, even though we got 200 OK.
  * see: https://repost.aws/knowledge-center/s3-resolve-200-internalerror */
 static bool s_should_check_for_error_despite_200_OK(const struct aws_s3_request *request) {
-    /* We handle async error for every request BUT get object. */
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+    /* We handle async error for every thing EXCEPT GetObject.
+     *
+     * Note that we check the aws_s3_request_type (not the aws_s3_meta_request_type),
+     * in case someone is using a DEFAULT meta-request to send GetObject */
+    if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
         return false;
     }
     return true;
@@ -2175,10 +2177,8 @@ void aws_s3_meta_request_result_setup(
                 result->error_response_body, meta_request->allocator, &failed_request->send_data.response_body);
         }
 
-        if (failed_request->operation_name != NULL) {
-            result->error_response_operation_name =
-                aws_string_new_from_string(meta_request->allocator, failed_request->operation_name);
-        }
+        result->error_response_operation_name =
+            aws_string_new_from_string(meta_request->allocator, failed_request->operation_name);
     }
 
     result->response_status = response_status;

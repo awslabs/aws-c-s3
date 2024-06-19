@@ -238,6 +238,7 @@ TEST_CASE(multipart_download_checksum_with_retry_mock_server) {
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
         .mock_server = true,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
