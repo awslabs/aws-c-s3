@@ -1430,6 +1430,47 @@ static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void
         allocator, AWS_S3_TLS_ENABLED, AWS_S3_TESTER_SEND_META_REQUEST_SSE_AES256, g_pre_existing_object_aes256_10MB);
 }
 
+/* Assert that GetObject can download an object whose body is XML identical to an "async error" aka "200 error":
+ * <?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>InternalError</Code>... */
+AWS_TEST_CASE(test_s3_get_object_looks_like_async_error_xml, s_test_s3_get_object_looks_like_async_error_xml)
+static int s_test_s3_get_object_looks_like_async_error_xml(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    return s_test_s3_get_object_helper(
+        allocator, AWS_S3_TLS_ENABLED, 0 /*extra_meta_request_flag*/, g_pre_existing_object_async_error_xml);
+}
+
+/* Same as above, but send the "GetObject" via AWS_S3_META_REQUEST_TYPE_DEFAULT
+ * (instead of the typical AWS_S3_META_REQUEST_TYPE_GET_OBJECT) */
+AWS_TEST_CASE(
+    test_s3_default_get_object_looks_like_async_error_xml,
+    s_test_s3_default_get_object_looks_like_async_error_xml)
+static int s_test_s3_default_get_object_looks_like_async_error_xml(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+            },
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_async_error_xml,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    return 0;
+}
+
 /**
  * Test read-backpressure functionality by repeatedly:
  * - letting the download stall
@@ -3425,6 +3466,7 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
     };
 
@@ -4130,6 +4172,7 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
         .finish_callback = s_s3_test_no_validate_checksum,
         .headers_callback = s_s3_validate_headers_checksum_unset,
@@ -4345,6 +4388,7 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     /* Pass the request through as a default request so that it goes through as-is. */
     options.type = AWS_S3_META_REQUEST_TYPE_DEFAULT;
+    options.operation_name = aws_byte_cursor_from_c_str("GetObject");
     options.message = message;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
@@ -4738,6 +4782,7 @@ static int s_test_s3_default_fail_headers_callback(struct aws_allocator *allocat
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
         .get_options =
             {
@@ -4807,6 +4852,7 @@ static int s_test_s3_default_invoke_headers_callback_on_error(struct aws_allocat
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
         .get_options =
             {
@@ -4843,6 +4889,7 @@ static int s_test_s3_default_invoke_headers_callback_cancels_on_error(struct aws
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
         .get_options =
             {
@@ -4969,6 +5016,7 @@ static int s_test_s3_default_fail_body_callback(struct aws_allocator *allocator,
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
         .get_options =
             {
@@ -5535,6 +5583,7 @@ static int s_test_s3_default_sending_meta_request_user_agent(struct aws_allocato
             .default_type_options =
                 {
                     .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                    .operation_name = aws_byte_cursor_from_c_str("GetObject"),
                 },
             .get_options =
                 {
@@ -5723,6 +5772,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 .default_type_options =
                     {
                         .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                        .operation_name = aws_byte_cursor_from_c_str("GetObject"),
                     },
                 .get_options =
                     {

@@ -116,6 +116,7 @@ enum aws_s3_request_type {
     AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY,
     AWS_S3_REQUEST_TYPE_COPY_OBJECT,
     AWS_S3_REQUEST_TYPE_PUT_OBJECT,
+    AWS_S3_REQUEST_TYPE_CREATE_SESSION,
 
     /* Max enum value */
     AWS_S3_REQUEST_TYPE_MAX,
@@ -574,11 +575,23 @@ struct aws_s3_meta_request_options {
     enum aws_s3_meta_request_type type;
 
     /**
-     * Optional.
      * The S3 operation name (e.g. "CreateBucket").
-     * This will only be used when type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
+     * This MUST be set if type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
      * it is automatically populated for other meta-request types.
+     * The canonical operation names are listed here:
+     * https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
+     *
      * This name is used to fill out details in metrics and error reports.
+     * It also drives some operation-specific behavior.
+     * If you pass the wrong name, you risk getting the wrong behavior.
+     *
+     * For example, every operation except "GetObject" has its response checked
+     * for error, even if the HTTP status-code was 200 OK
+     * (see https://repost.aws/knowledge-center/s3-resolve-200-internalerror).
+     * If you used AWS_S3_META_REQUEST_TYPE_DEFAULT to do GetObject, but mis-named
+     * it "Download", and the object looked like XML with an error code,
+     * then the meta-request would fail. You may log the full response body,
+     * and leak sensitive data.
      */
     struct aws_byte_cursor operation_name;
 
@@ -780,7 +793,7 @@ struct aws_s3_meta_request_result {
      * "PutObject, "CreateMultipartUpload", "UploadPart", "CompleteMultipartUpload", or others.
      * For AWS_S3_META_REQUEST_TYPE_DEFAULT, this is the same value passed to
      * aws_s3_meta_request_options.operation_name.
-     * NULL if the meta request failed for another reason, or the operation name is not known. */
+     * NULL if the meta request failed for another reason. */
     struct aws_string *error_response_operation_name;
 
     /* Response status of the failed request or of the entire meta request. */
