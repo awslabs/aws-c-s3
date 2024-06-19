@@ -929,7 +929,7 @@ TEST_CASE(endpoint_override_mock_server) {
         .client = client,
         .put_options =
             {
-                .object_size_mb = 5, /* Make sure we have exactly 4 parts */
+                .object_size_mb = 5,
                 .object_path_override = object_path,
             },
         .mock_server = true,
