@@ -771,7 +771,7 @@ static int s_verify_part_matches_checksum(
         return AWS_OP_ERR;
     }
 
-    struct aws_byte_buf encoded_checksum = {0};
+    struct aws_byte_buf encoded_checksum = {0, 0, 0, 0};
 
     int return_status = AWS_OP_SUCCESS;
 
@@ -1457,7 +1457,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 /* Find the upload id for this multipart upload. */
-                struct aws_byte_cursor upload_id = {0};
+                struct aws_byte_cursor upload_id = {0, 0};
                 const char *xml_path[] = {"InitiateMultipartUploadResult", "UploadId", NULL};
                 aws_xml_get_body_at_path(meta_request->allocator, xml_doc, xml_path, &upload_id);
 
@@ -1588,7 +1588,7 @@ static void s_s3_auto_ranged_put_request_finished(
                  */
 
                 /* Grab the ETag for the entire object, and set it as a header. */
-                struct aws_byte_cursor etag_header_value = {0};
+                struct aws_byte_cursor etag_header_value = {0, 0};
                 const char *xml_path[] = {"CompleteMultipartUploadResult", "ETag", NULL};
                 aws_xml_get_body_at_path(meta_request->allocator, xml_doc, xml_path, &etag_header_value);
 

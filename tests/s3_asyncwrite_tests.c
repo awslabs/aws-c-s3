@@ -318,7 +318,7 @@ static int s_test_s3_asyncwrite_tolerate_empty_writes(struct aws_allocator *allo
     struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester.source_buf);
 
     /* empty write at start */
-    struct aws_byte_cursor empty_data = {0};
+    struct aws_byte_cursor empty_data = {0, 0};
     ASSERT_SUCCESS(s_write(&tester, empty_data, false /*eof*/));
 
     /* write half the data */
@@ -454,7 +454,7 @@ static int s_test_s3_asyncwrite_fails_if_write_after_eof(struct aws_allocator *a
     ASSERT_SUCCESS(s_write(&tester, aws_byte_cursor_from_buf(&tester.source_buf), true /*eof*/));
 
     /* Any more writes should fail with INVALID_STATE error */
-    struct aws_byte_cursor empty_cursor = {0};
+    struct aws_byte_cursor empty_cursor = {0, 0};
     struct aws_future_void *write_future = aws_s3_meta_request_write(tester.meta_request, empty_cursor, true /*eof*/);
     ASSERT_TRUE(aws_future_void_wait(write_future, TIMEOUT_NANOS));
     ASSERT_INT_EQUALS(AWS_ERROR_INVALID_STATE, aws_future_void_get_error(write_future));

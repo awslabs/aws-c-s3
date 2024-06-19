@@ -731,7 +731,7 @@ static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, v
 
     /* Ensure we can successfully look up <Error><Code> */
     {
-        struct aws_byte_cursor error_code = {0};
+        struct aws_byte_cursor error_code = {0, 0};
         const char *xml_path[] = {"Error", "Code", NULL};
 
         ASSERT_SUCCESS(aws_xml_get_body_at_path(allocator, example_error_body, xml_path, &error_code));
@@ -740,7 +740,7 @@ static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, v
 
     /* Ensure we fail if the beginning of the path doesn't match */
     {
-        struct aws_byte_cursor error_code = {0};
+        struct aws_byte_cursor error_code = {0, 0};
         const char *xml_path[] = {"ObviouslyInvalidName", "Code", NULL};
         ASSERT_ERROR(
             AWS_ERROR_STRING_MATCH_NOT_FOUND,
@@ -749,7 +749,7 @@ static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, v
 
     /* Ensure we fail if the end of the path doesn't match */
     {
-        struct aws_byte_cursor error_code = {0};
+        struct aws_byte_cursor error_code = {0, 0};
         const char *xml_path[] = {"Error", "ObviouslyInvalidName", NULL};
         ASSERT_ERROR(
             AWS_ERROR_STRING_MATCH_NOT_FOUND,
@@ -758,7 +758,7 @@ static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, v
 
     /* Ensure we fail if the document isn't valid XML */
     {
-        struct aws_byte_cursor error_code = {0};
+        struct aws_byte_cursor error_code = {0, 0};
         const char *xml_path[] = {"Error", "Code", NULL};
         ASSERT_ERROR(
             AWS_ERROR_INVALID_XML,

@@ -502,7 +502,7 @@ int aws_s3_parse_request_range_header(
     }
 
     aws_byte_cursor_advance(&range_header_value, range_header_start.len);
-    struct aws_byte_cursor substr = {0};
+    struct aws_byte_cursor substr = {0, 0};
     /* parse start range */
     if (!aws_byte_cursor_next_split(&range_header_value, '-', &substr)) {
         return aws_raise_error(AWS_ERROR_S3_INVALID_RANGE_HEADER);
