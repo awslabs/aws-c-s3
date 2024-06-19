@@ -1687,7 +1687,7 @@ int aws_s3_tester_send_meta_request_with_options(
             if (mystery_stream != NULL) {
                 ASSERT_SUCCESS(aws_input_stream_get_length(mystery_stream, (int64_t *)&mystery_stream_length));
             }
-            upload_size_bytes = (size_t) mystery_stream_length;
+            upload_size_bytes = (size_t)mystery_stream_length;
         }
     }
 
