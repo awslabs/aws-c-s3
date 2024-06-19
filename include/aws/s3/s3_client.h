@@ -576,8 +576,11 @@ struct aws_s3_meta_request_options {
 
     /**
      * The S3 operation name (e.g. "CreateBucket").
-     * This must be set if type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
+     * This MUST be set if type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
      * it is automatically populated for other meta-request types.
+     * The canonical names for all S3 operations are listed here:
+     * https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
+     *
      * This name is used to fill out details in metrics and error reports.
      * It's also used to check for niche behavior specific to some operations
      * (e.g. "CompleteMultipartUpload" may return an error, even though the status-code was 200 OK).

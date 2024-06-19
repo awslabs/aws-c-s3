@@ -99,9 +99,9 @@ static struct aws_s3_request_type_operation_name_pair s_s3_request_type_operatio
     DEFINE_REQUEST_TYPE_OPERATION_NAME_PAIR(AWS_S3_REQUEST_TYPE_CREATE_SESSION, "CreateSession"),
 };
 
-/* Hash-table for case-insensitive lookup from operation-name -> request-type.
- * key is `struct aws_byte_cursor *`, pointing into array above.
- * value is `enum aws_s3_request_type *`, pointing into array above. */
+/* Hash-table for case-insensitive lookup, from operation-name -> request-type.
+ * key is operation-name (stored as `struct aws_byte_cursor*`, pointing into array above).
+ * value is request-type (stored as `enum aws_s3_request_type *`, pointing into array above). */
 static struct aws_hash_table s_s3_operation_name_to_request_type_table;
 
 const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type) {

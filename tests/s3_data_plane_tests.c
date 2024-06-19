@@ -1432,8 +1432,8 @@ static int s_test_s3_get_object_sse_aes256(struct aws_allocator *allocator, void
 
 /* Assert that GetObject can download an object whose body is XML identical to an "async error" aka "200 error":
  * <?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>InternalError</Code>... */
-AWS_TEST_CASE(test_s3_get_object_async_error_xml, s_test_s3_get_object_async_error_xml)
-static int s_test_s3_get_object_async_error_xml(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_get_object_looks_like_async_error_xml, s_test_s3_get_object_looks_like_async_error_xml)
+static int s_test_s3_get_object_looks_like_async_error_xml(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     return s_test_s3_get_object_helper(
@@ -1442,8 +1442,10 @@ static int s_test_s3_get_object_async_error_xml(struct aws_allocator *allocator,
 
 /* Same as above, but send the "GetObject" via AWS_S3_META_REQUEST_TYPE_DEFAULT
  * (instead of the typical AWS_S3_META_REQUEST_TYPE_GET_OBJECT) */
-AWS_TEST_CASE(test_s3_default_get_object_async_error_xml, s_test_s3_default_get_object_async_error_xml)
-static int s_test_s3_default_get_object_async_error_xml(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(
+    test_s3_default_get_object_looks_like_async_error_xml,
+    s_test_s3_default_get_object_looks_like_async_error_xml)
+static int s_test_s3_default_get_object_looks_like_async_error_xml(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
