@@ -160,7 +160,7 @@ const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type) {
         return aws_string_c_str(name_string);
     }
 
-    return NULL;
+    return "";
 }
 
 enum aws_s3_request_type aws_s3_request_type_from_operation_name(struct aws_byte_cursor name) {
