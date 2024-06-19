@@ -182,6 +182,17 @@ AWS_S3_API
 enum aws_s3_request_type aws_s3_request_type_from_operation_name(struct aws_byte_cursor name);
 
 /**
+ * Return operation name for aws_s3_request_type as static-lifetime aws_string*
+ * or NULL if the type doesn't map to an actual operation.
+ * For example:
+ * AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> static aws_string "HeadObject"
+ * AWS_S3_REQUEST_TYPE_UNKNOWN -> NULL
+ * AWS_S3_REQUEST_TYPE_MAX -> NULL
+ */
+AWS_S3_API
+struct aws_string *aws_s3_request_type_to_operation_name_static_string(enum aws_s3_request_type type);
+
+/**
  * Cache and initial the signing config based on the client.
  *
  * @param client

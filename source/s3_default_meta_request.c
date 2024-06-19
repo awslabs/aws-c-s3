@@ -107,16 +107,20 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
 
     meta_request_default->content_length = (size_t)content_length;
 
-    if (request_type == AWS_S3_REQUEST_TYPE_UNKNOWN) {
-        /* use name to get type */
-        meta_request_default->operation_name = aws_string_new_from_cursor(allocator, &options->operation_name);
-        meta_request_default->request_type = aws_s3_request_type_from_operation_name(options->operation_name);
-    } else {
-        /* use type to get name */
+    /* If request_type is unknown, look it up from operation name */
+    if (request_type != AWS_S3_REQUEST_TYPE_UNKNOWN) {
         meta_request_default->request_type = request_type;
-        meta_request_default->operation_name =
-            aws_string_new_from_c_str(allocator, aws_s3_request_type_operation_name(request_type));
-        AWS_ASSERT(meta_request_default->operation_name->len != 0);
+    } else {
+        meta_request_default->request_type = aws_s3_request_type_from_operation_name(options->operation_name);
+    }
+
+    /* If we have a static string for this operation name, use that.
+     * Otherwise, copy the operation_name passed in by user. */
+    struct aws_string *static_operation_name = aws_s3_request_type_to_operation_name_static_string(request_type);
+    if (static_operation_name != NULL) {
+        meta_request_default->operation_name = static_operation_name;
+    } else {
+        meta_request_default->operation_name = aws_string_new_from_cursor(allocator, &options->operation_name);
     }
 
     AWS_LOGF_DEBUG(
