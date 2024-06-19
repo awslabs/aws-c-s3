@@ -5910,7 +5910,7 @@ static int s_test_s3_invalid_start_range_greator_than_end_range(struct aws_alloc
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
     ASSERT_INT_EQUALS(results.finished_error_code, AWS_ERROR_S3_INVALID_RANGE_HEADER);
-
+    ASSERT_INT_EQUALS(0, tester.synced_data.meta_request_finish_count);
     aws_s3_meta_request_test_results_clean_up(&results);
 
     aws_s3_client_release(client);
