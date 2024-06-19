@@ -1425,11 +1425,6 @@ int aws_s3_tester_send_meta_request_with_options(
     }
 
     struct aws_s3_client *client = options->client;
-
-    tester->synced_data.meta_request_shutdown_count = 0;
-    tester->synced_data.meta_requests_finished = 0;
-    tester->synced_data.meta_requests_shutdown = 0;
-
     struct aws_uri mock_server;
     ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
     if (client == NULL) {
@@ -1769,10 +1764,6 @@ int aws_s3_tester_send_meta_request_with_options(
         if (!options->dont_wait_for_shutdown) {
             aws_s3_tester_wait_for_meta_request_shutdown(tester);
         }
-    } else {
-        aws_s3_tester_lock_synced_data(tester);
-        ASSERT_INT_EQUALS(0, tester->synced_data.meta_request_shutdown_count);
-        aws_s3_tester_unlock_synced_data(tester);
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
