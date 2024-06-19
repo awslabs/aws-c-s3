@@ -955,7 +955,7 @@ TEST_CASE(endpoint_override_mock_server) {
     put_options.message = message;
     put_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
-
+    ASSERT_INT_EQUALS(1, tester.synced_data.meta_request_shutdown_count);
     /* Clean up */
     aws_http_message_destroy(message);
     aws_input_stream_release(input_stream);
