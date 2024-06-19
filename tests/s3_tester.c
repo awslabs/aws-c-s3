@@ -55,6 +55,8 @@ const struct aws_byte_cursor g_pre_existing_object_kms_10MB =
 const struct aws_byte_cursor g_pre_existing_object_aes256_10MB =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-10MB-aes256");
 const struct aws_byte_cursor g_pre_existing_empty_object = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-empty");
+const struct aws_byte_cursor g_pre_existing_object_async_error_xml =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-async-error-xml");
 
 const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/put-object-test");
 const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
@@ -1500,8 +1502,6 @@ int aws_s3_tester_send_meta_request_with_options(
         if (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
              options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET)) {
-
-            meta_request_options.operation_name = aws_byte_cursor_from_c_str("GetObject");
 
             struct aws_http_message *message = aws_s3_test_get_object_request_new(
                 allocator, aws_byte_cursor_from_string(host_name), options->get_options.object_path);

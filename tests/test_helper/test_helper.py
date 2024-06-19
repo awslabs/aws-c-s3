@@ -64,7 +64,7 @@ ASYNC_ERROR_XML = (
 
 
 def create_bytes(size):
-    return bytearray([1] * size)
+    return bytes(size)
 
 
 def put_pre_existing_objects(size_or_body, keyname, bucket=BUCKET_NAME_BASE,
