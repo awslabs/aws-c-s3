@@ -1427,6 +1427,9 @@ int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_client *client = options->client;
 
     tester->synced_data.meta_request_shutdown_count = 0;
+    tester->synced_data.meta_requests_finished = 0;
+    tester->synced_data.meta_requests_shutdown = 0;
+
     struct aws_uri mock_server;
     ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
     if (client == NULL) {
