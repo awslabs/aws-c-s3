@@ -578,12 +578,20 @@ struct aws_s3_meta_request_options {
      * The S3 operation name (e.g. "CreateBucket").
      * This MUST be set if type is AWS_S3_META_REQUEST_TYPE_DEFAULT;
      * it is automatically populated for other meta-request types.
-     * The canonical names for all S3 operations are listed here:
+     * The canonical operation names are listed here:
      * https://docs.aws.amazon.com/AmazonS3/latest/API/API_Operations_Amazon_Simple_Storage_Service.html
      *
      * This name is used to fill out details in metrics and error reports.
-     * It's also used to check for niche behavior specific to some operations
-     * (e.g. "CompleteMultipartUpload" may return an error, even though the status-code was 200 OK).
+     * It also drives some operation-specific behavior.
+     * If you pass the wrong name, you risk getting the wrong behavior.
+     *
+     * For example, every operation except "GetObject" has its response checked
+     * for error, even if the HTTP status-code was 200 OK
+     * (see https://repost.aws/knowledge-center/s3-resolve-200-internalerror).
+     * If you used AWS_S3_META_REQUEST_TYPE_DEFAULT to do GetObject, but mis-named
+     * it "Download", and the object looked like XML with an error code,
+     * then the meta-request would fail. You may log the full response body,
+     * and leak sensitive data.
      */
     struct aws_byte_cursor operation_name;
 
