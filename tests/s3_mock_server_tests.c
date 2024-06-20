@@ -930,7 +930,7 @@ TEST_CASE(endpoint_override_mock_server) {
         .client = client,
         .put_options =
             {
-                .object_size_mb = 5, /* Make sure we have exactly 4 parts */
+                .object_size_mb = 5,
                 .object_path_override = object_path,
             },
         .mock_server = true,
@@ -956,6 +956,7 @@ TEST_CASE(endpoint_override_mock_server) {
     put_options.message = message;
     put_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    ASSERT_INT_EQUALS(2, tester.synced_data.meta_request_shutdown_count);
 
     /* Clean up */
     aws_http_message_destroy(message);
