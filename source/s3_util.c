@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_request.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/clock.h>
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
@@ -72,33 +73,6 @@ const struct aws_byte_cursor g_user_agent_header_unknown = AWS_BYTE_CUR_INIT_FRO
 
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
-
-const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type) {
-    switch (type) {
-        case AWS_S3_REQUEST_TYPE_HEAD_OBJECT:
-            return "HeadObject";
-        case AWS_S3_REQUEST_TYPE_GET_OBJECT:
-            return "GetObject";
-        case AWS_S3_REQUEST_TYPE_LIST_PARTS:
-            return "ListParts";
-        case AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD:
-            return "CreateMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_UPLOAD_PART:
-            return "UploadPart";
-        case AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD:
-            return "AbortMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD:
-            return "CompleteMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY:
-            return "UploadPartCopy";
-        case AWS_S3_REQUEST_TYPE_COPY_OBJECT:
-            return "CopyObject";
-        case AWS_S3_REQUEST_TYPE_PUT_OBJECT:
-            return "PutObject";
-        default:
-            return "";
-    }
-}
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
@@ -735,4 +709,41 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
         }
         request->send_data.metrics = aws_s3_request_metrics_release(metrics);
     }
+}
+
+struct aws_s3_checksum *aws_s3_check_headers_for_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    struct aws_byte_buf *checksum_buffer,
+    bool meta_request_level) {
+    if(!headers || aws_http_headers_count(headers) == 0) {
+        return NULL;
+    }
+    if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
+        /* g_mp_parts_count_header_name indicates it's a object was uploaded as a
+         * multipart upload. So, the checksum should not be applied to the meta request level.
+         * But we we want to check it for the request level. */
+        return NULL;
+    }
+
+    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
+            /* If user doesn't select this algorithm, skip */
+            continue;
+        }
+        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        if (aws_http_headers_has(headers, *algorithm_header_name)) {
+            struct aws_byte_cursor checksum_value;
+            aws_http_headers_get(headers, *algorithm_header_name, &checksum_value);
+            size_t encoded_len = 0;
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+            if (checksum_value.len == encoded_len - 1) {
+                /* encoded_len includes the nullptr length. -1 is the expected length. */
+                aws_byte_buf_init_copy_from_cursor(checksum_buffer, meta_request->allocator, checksum_value);
+                return aws_checksum_new(meta_request->allocator, i);
+            }
+            break;
+        }
+    }
+    return NULL;
 }

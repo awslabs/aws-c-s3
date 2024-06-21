@@ -10,7 +10,7 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/byte_buf.h>
-#include <aws/s3/s3.h>
+#include <aws/s3/s3_client.h>
 
 #if ASSERT_LOCK_HELD
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)                                                                       \
@@ -176,6 +176,23 @@ AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
 
 /**
+ * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
+ */
+AWS_S3_API
+enum aws_s3_request_type aws_s3_request_type_from_operation_name(struct aws_byte_cursor name);
+
+/**
+ * Return operation name for aws_s3_request_type as static-lifetime aws_string*
+ * or NULL if the type doesn't map to an actual operation.
+ * For example:
+ * AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> static aws_string "HeadObject"
+ * AWS_S3_REQUEST_TYPE_UNKNOWN -> NULL
+ * AWS_S3_REQUEST_TYPE_MAX -> NULL
+ */
+AWS_S3_API
+struct aws_string *aws_s3_request_type_to_operation_name_static_string(enum aws_s3_request_type type);
+
+/**
  * Cache and initial the signing config based on the client.
  *
  * @param client
@@ -305,6 +322,15 @@ int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_b
 
 AWS_S3_API
 void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
+
+/* Check the response headers for checksum to verify, return a running checksum based on the algorithm found. If no
+ * checksum found from header, return null. */
+AWS_S3_API
+struct aws_s3_checksum *aws_s3_check_headers_for_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    struct aws_byte_buf *checksum_buffer,
+    bool meta_request_level);
 
 AWS_EXTERN_C_END
 

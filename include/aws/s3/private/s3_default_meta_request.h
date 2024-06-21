@@ -18,7 +18,7 @@ struct aws_s3_meta_request_default {
     /* Actual type for the single request (may be AWS_S3_REQUEST_TYPE_UNKNOWN) */
     enum aws_s3_request_type request_type;
 
-    /* S3 operation name for the single request (NULL if unknown) */
+    /* S3 operation name for the single request */
     struct aws_string *operation_name;
 
     /* Members to only be used when the mutex in the base type is locked. */
