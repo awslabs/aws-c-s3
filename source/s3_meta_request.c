@@ -94,6 +94,7 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
+/* True if the checksum validated and matched, false otherwise. */
 static bool s_validate_checksum(
     struct aws_s3_checksum *checksum_to_validate,
     struct aws_byte_buf *expected_encoded_checksum) {

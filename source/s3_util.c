@@ -716,7 +716,7 @@ struct aws_s3_checksum *aws_s3_check_headers_for_checksum(
     const struct aws_http_headers *headers,
     struct aws_byte_buf *checksum_buffer,
     bool meta_request_level) {
-    if(!headers || aws_http_headers_count(headers) == 0) {
+    if (!headers || aws_http_headers_count(headers) == 0) {
         return NULL;
     }
     if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
