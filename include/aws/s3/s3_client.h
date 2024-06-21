@@ -606,6 +606,13 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
+     * If set, the received data will be written into this file and the `body_callback` will not be invoked.
+     * This gives a better performance when receiving data to write to a file.
+     */
+    struct aws_byte_cursor receive_filepath;
+
+    /**
+     * Optional.
      * If set, this file is sent as the request body.
      * This gives the best performance when sending data from a file.
      * Do not set if the body is being passed by other means (see note above).

@@ -18,6 +18,7 @@
 #include <aws/auth/signing_result.h>
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
+#include <aws/common/file.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/io/async_stream.h>
@@ -25,6 +26,7 @@
 #include <aws/io/retry_strategy.h>
 #include <aws/io/socket.h>
 #include <aws/io/stream.h>
+#include <errno.h>
 #include <inttypes.h>
 
 static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
@@ -122,26 +124,8 @@ static int s_meta_request_get_response_headers_checksum_callback(
     }
     if (meta_request->headers_user_callback_after_checksum) {
         return meta_request->headers_user_callback_after_checksum(meta_request, headers, response_status, user_data);
-    } else {
-        return AWS_OP_SUCCESS;
     }
-}
-
-/* warning this might get screwed up with retries/restarts */
-static int s_meta_request_get_response_body_checksum_callback(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_byte_cursor *body,
-    uint64_t range_start,
-    void *user_data) {
-    if (meta_request->meta_request_level_running_response_sum) {
-        aws_checksum_update(meta_request->meta_request_level_running_response_sum, body);
-    }
-
-    if (meta_request->body_user_callback_after_checksum) {
-        return meta_request->body_user_callback_after_checksum(meta_request, body, range_start, user_data);
-    } else {
-        return AWS_OP_SUCCESS;
-    }
+    return AWS_OP_SUCCESS;
 }
 
 static void s_meta_request_get_response_finish_checksum_callback(
@@ -298,11 +282,9 @@ int aws_s3_meta_request_init_base(
     if (meta_request->checksum_config.validate_response_checksum) {
         /* TODO: the validate for auto range get should happen for each response received. */
         meta_request->headers_user_callback_after_checksum = options->headers_callback;
-        meta_request->body_user_callback_after_checksum = options->body_callback;
         meta_request->finish_user_callback_after_checksum = options->finish_callback;
 
         meta_request->headers_callback = s_meta_request_get_response_headers_checksum_callback;
-        meta_request->body_callback = s_meta_request_get_response_body_checksum_callback;
         meta_request->finish_callback = s_meta_request_get_response_finish_checksum_callback;
     } else {
         meta_request->headers_callback = options->headers_callback;
@@ -1854,8 +1836,26 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
                 AWS_ASSERT(request->part_number >= 1);
 
-                if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0 && meta_request->body_callback != NULL) {
-                    if (meta_request->body_callback(
+                if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
+                    if (meta_request->meta_request_level_running_response_sum) {
+                        aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body);
+                    }
+                    if (meta_request->recv_file) {
+                        /* Write the data directly to the file. No need to seek, since the event will always be
+                         * delivered with the right order. */
+                        if (fwrite((void *)response_body.ptr, response_body.len, 1, meta_request->recv_file) < 1) {
+                            int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno  */
+                            error_code = aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p Failed writing to file. errno:%d. aws-error:%s",
+                                (void *)meta_request,
+                                errno_value,
+                                aws_error_name(aws_last_error()));
+                        }
+                    } else if (
+                        meta_request->body_callback != NULL &&
+                        meta_request->body_callback(
                             meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
 
                         error_code = aws_last_error_or_unknown();
