@@ -323,6 +323,15 @@ int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_b
 AWS_S3_API
 void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
+/* Check the response headers for checksum to verify, return a running checksum based on the algorithm found. If no
+ * checksum found from header, return null. */
+AWS_S3_API
+struct aws_s3_checksum *aws_s3_check_headers_for_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    struct aws_byte_buf *checksum_buffer,
+    bool meta_request_level);
+
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_UTIL_H */

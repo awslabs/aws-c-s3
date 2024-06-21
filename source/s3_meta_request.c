@@ -94,38 +94,6 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-static int s_meta_request_get_response_headers_checksum_callback(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_http_headers *headers,
-    int response_status,
-    void *user_data) {
-    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
-        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
-            /* If user doesn't select this algorithm, skip */
-            continue;
-        }
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
-        if (aws_http_headers_has(headers, *algorithm_header_name) &&
-            !aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
-            struct aws_byte_cursor header_sum;
-            aws_http_headers_get(headers, *algorithm_header_name, &header_sum);
-            size_t encoded_len = 0;
-            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
-            if (header_sum.len == encoded_len - 1) {
-                /* encoded_len includes the nullptr length. -1 is the expected length. */
-                aws_byte_buf_init_copy_from_cursor(
-                    &meta_request->meta_request_level_response_header_checksum, meta_request->allocator, header_sum);
-                meta_request->meta_request_level_running_response_sum = aws_checksum_new(meta_request->allocator, i);
-            }
-            break;
-        }
-    }
-    if (meta_request->headers_user_callback_after_checksum) {
-        return meta_request->headers_user_callback_after_checksum(meta_request, headers, response_status, user_data);
-    }
-    return AWS_OP_SUCCESS;
-}
-
 static bool s_validate_checksum(
     struct aws_s3_checksum *checksum_to_validate,
     struct aws_byte_buf *expected_encoded_checksum) {
@@ -288,15 +256,9 @@ int aws_s3_meta_request_init_base(
     meta_request->telemetry_callback = options->telemetry_callback;
     meta_request->upload_review_callback = options->upload_review_callback;
 
-    if (meta_request->checksum_config.validate_response_checksum) {
-        meta_request->headers_user_callback_after_checksum = options->headers_callback;
-
-        meta_request->headers_callback = s_meta_request_get_response_headers_checksum_callback;
-    } else {
-        meta_request->headers_callback = options->headers_callback;
-        meta_request->body_callback = options->body_callback;
-        meta_request->finish_callback = options->finish_callback;
-    }
+    meta_request->headers_callback = options->headers_callback;
+    meta_request->body_callback = options->body_callback;
+    meta_request->finish_callback = options->finish_callback;
 
     /* Nothing can fail after here. Leave the impl not affected by failure of initializing base. */
     meta_request->impl = impl;
@@ -1241,6 +1203,7 @@ static int s_s3_meta_request_incoming_headers(
 
     if (successful_response && meta_request->checksum_config.validate_response_checksum &&
         request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
+        /* We have `struct aws_http_header *` array instead of `struct aws_http_headers *` :) */
         s_get_part_response_headers_checksum_helper(connection, meta_request, headers, headers_count);
     }
 

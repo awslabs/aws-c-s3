@@ -809,6 +809,15 @@ static void s_s3_auto_ranged_get_request_finished(
         error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
 
+        /* Check for checksums if requested to */
+        if (meta_request->checksum_config.validate_response_checksum) {
+            meta_request->meta_request_level_running_response_sum = aws_s3_check_headers_for_checksum(
+                meta_request,
+                request->send_data.response_headers,
+                &meta_request->meta_request_level_response_header_checksum,
+                true);
+        }
+
         if (!empty_file_error && meta_request->headers_callback != NULL) {
             /* Modify the header received to fake the header for the whole meta request. */
             if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE ||
