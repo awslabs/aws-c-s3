@@ -178,7 +178,6 @@ struct aws_s3_meta_request {
 
     /* Customer specified callbacks to be called by our specialized callback to calculate the response checksum. */
     aws_s3_meta_request_headers_callback_fn *headers_user_callback_after_checksum;
-    aws_s3_meta_request_receive_body_callback_fn *body_user_callback_after_checksum;
     aws_s3_meta_request_finish_fn *finish_user_callback_after_checksum;
 
     enum aws_s3_meta_request_type type;
