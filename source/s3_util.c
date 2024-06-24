@@ -745,6 +745,12 @@ int aws_s3_check_headers_for_checksum(
                 aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
                 out_checksum = aws_checksum_new(meta_request->allocator, i);
                 if (!out_checksum) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "Could not create checksum for algorithm: %d, due to error code %d (%s)",
+                        i,
+                        aws_last_error_or_unknown(),
+                        aws_error_str(aws_last_error_or_unknown()));
                     return AWS_OP_ERR;
                 }
                 return AWS_OP_SUCCESS;
