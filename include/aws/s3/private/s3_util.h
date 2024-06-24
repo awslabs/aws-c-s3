@@ -36,6 +36,7 @@ struct aws_http_message;
 struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
+struct aws_s3_checksum;
 
 struct aws_cached_signing_config_aws {
     struct aws_allocator *allocator;
@@ -326,10 +327,11 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
 /* Check the response headers for checksum to verify, return a running checksum based on the algorithm found. If no
  * checksum found from header, return null. */
 AWS_S3_API
-struct aws_s3_checksum *aws_s3_check_headers_for_checksum(
+int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
-    struct aws_byte_buf *checksum_buffer,
+    struct aws_s3_checksum *out_checksum,
+    struct aws_byte_buf *out_checksum_buffer,
     bool meta_request_level);
 
 AWS_EXTERN_C_END

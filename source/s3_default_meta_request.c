@@ -386,14 +386,17 @@ static void s_s3_meta_request_default_request_finished(
 
     if (error_code == AWS_ERROR_SUCCESS && request->send_data.response_headers != NULL) {
         if (meta_request->checksum_config.validate_response_checksum) {
-            meta_request->meta_request_level_running_response_sum = aws_s3_check_headers_for_checksum(
-                meta_request,
-                request->send_data.response_headers,
-                &meta_request->meta_request_level_response_header_checksum,
-                true);
+            if (aws_s3_check_headers_for_checksum(
+                    meta_request,
+                    request->send_data.response_headers,
+                    meta_request->meta_request_level_running_response_sum,
+                    &meta_request->meta_request_level_response_header_checksum,
+                    true) != AWS_OP_SUCCESS) {
+                error_code = aws_last_error_or_unknown();
+            }
         }
 
-        if (meta_request->headers_callback != NULL) {
+        if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL) {
             if (meta_request->headers_callback(
                     meta_request,
                     request->send_data.response_headers,

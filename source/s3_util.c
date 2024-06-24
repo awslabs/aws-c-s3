@@ -711,19 +711,22 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
     }
 }
 
-struct aws_s3_checksum *aws_s3_check_headers_for_checksum(
+int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
-    struct aws_byte_buf *checksum_buffer,
+    struct aws_s3_checksum *out_checksum,
+    struct aws_byte_buf *out_checksum_buffer,
     bool meta_request_level) {
-    if(!headers || aws_http_headers_count(headers) == 0) {
-        return NULL;
+    if (!headers || aws_http_headers_count(headers) == 0) {
+        out_checksum = NULL;
+        return AWS_OP_SUCCESS;
     }
     if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
         /* g_mp_parts_count_header_name indicates it's a object was uploaded as a
          * multipart upload. So, the checksum should not be applied to the meta request level.
          * But we we want to check it for the request level. */
-        return NULL;
+        out_checksum = NULL;
+        return AWS_OP_SUCCESS;
     }
 
     for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
@@ -739,11 +742,16 @@ struct aws_s3_checksum *aws_s3_check_headers_for_checksum(
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
             if (checksum_value.len == encoded_len - 1) {
                 /* encoded_len includes the nullptr length. -1 is the expected length. */
-                aws_byte_buf_init_copy_from_cursor(checksum_buffer, meta_request->allocator, checksum_value);
-                return aws_checksum_new(meta_request->allocator, i);
+                aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
+                out_checksum = aws_checksum_new(meta_request->allocator, i);
+                if (!out_checksum) {
+                    return AWS_OP_ERR;
+                }
+                return AWS_OP_SUCCESS;
             }
             break;
         }
     }
-    return NULL;
+    out_checksum = NULL;
+    return AWS_OP_SUCCESS;
 }
