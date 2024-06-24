@@ -714,18 +714,22 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
 int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
-    struct aws_s3_checksum *out_checksum,
+    struct aws_s3_checksum **out_checksum,
     struct aws_byte_buf *out_checksum_buffer,
     bool meta_request_level) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_checksum);
+    AWS_PRECONDITION(out_checksum_buffer);
+
     if (!headers || aws_http_headers_count(headers) == 0) {
-        out_checksum = NULL;
+        *out_checksum = NULL;
         return AWS_OP_SUCCESS;
     }
     if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
         /* g_mp_parts_count_header_name indicates it's a object was uploaded as a
          * multipart upload. So, the checksum should not be applied to the meta request level.
          * But we we want to check it for the request level. */
-        out_checksum = NULL;
+        *out_checksum = NULL;
         return AWS_OP_SUCCESS;
     }
 
@@ -743,8 +747,8 @@ int aws_s3_check_headers_for_checksum(
             if (checksum_value.len == encoded_len - 1) {
                 /* encoded_len includes the nullptr length. -1 is the expected length. */
                 aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
-                out_checksum = aws_checksum_new(meta_request->allocator, i);
-                if (!out_checksum) {
+                *out_checksum = aws_checksum_new(meta_request->allocator, i);
+                if (!*out_checksum) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "Could not create checksum for algorithm: %d, due to error code %d (%s)",
@@ -758,6 +762,6 @@ int aws_s3_check_headers_for_checksum(
             break;
         }
     }
-    out_checksum = NULL;
+    *out_checksum = NULL;
     return AWS_OP_SUCCESS;
 }

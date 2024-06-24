@@ -330,7 +330,7 @@ AWS_S3_API
 int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
-    struct aws_s3_checksum *out_checksum,
+    struct aws_s3_checksum **out_checksum,
     struct aws_byte_buf *out_checksum_buffer,
     bool meta_request_level);
 
