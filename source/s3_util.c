@@ -739,9 +739,9 @@ int aws_s3_check_headers_for_checksum(
             continue;
         }
         const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
-        if (aws_http_headers_has(headers, *algorithm_header_name)) {
-            struct aws_byte_cursor checksum_value;
-            aws_http_headers_get(headers, *algorithm_header_name, &checksum_value);
+        struct aws_byte_cursor checksum_value;
+        if (aws_http_headers_get(headers, *algorithm_header_name, &checksum_value) == AWS_OP_SUCCESS) {
+            /* Found the checksum header, keep the header value and initialize the running checksum */
             size_t encoded_len = 0;
             aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
             if (checksum_value.len == encoded_len - 1) {
