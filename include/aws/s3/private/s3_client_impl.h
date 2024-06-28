@@ -94,6 +94,12 @@ struct aws_s3_endpoint_options {
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
+
+    /**
+     * (Optional)
+     * An `aws_array_list<struct aws_byte_cursor>` of network interface names to distribute the connections.
+     */
+    const struct aws_array_list *network_interface_names_list;
 };
 
 /* global vtable, only used when mocking for tests */

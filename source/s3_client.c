@@ -1048,6 +1048,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .connect_timeout_ms = client->connect_timeout_ms,
                 .tcp_keep_alive_options = client->tcp_keep_alive_options,
                 .monitoring_options = &client->monitoring_options,
+                .network_interface_names_list = options->network_interface_names_list,
             };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
