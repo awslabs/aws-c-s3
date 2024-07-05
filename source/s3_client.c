@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/common/allocator.h"
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_buffer_pool.h"
@@ -584,13 +583,13 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->num_network_interface_names > 0) {
         aws_array_list_init_dynamic(
                 &client->network_interface_names,
-                allocator,
+                client->allocator,
                 client_config->num_network_interface_names,
                 sizeof(struct aws_string *));
-        client->network_interface_names_cursor_array = aws_mem_calloc(allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
+        client->network_interface_names_cursor_array = aws_mem_calloc(client->allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
         for (size_t i = 0; i < client_config->num_network_interface_names; i++) {
             struct aws_byte_cursor interface_name = client_config->network_interface_names_array[i];
-            struct aws_string *interface_name_str = aws_string_new_from_cursor(allocator, &interface_name);
+            struct aws_string *interface_name_str = aws_string_new_from_cursor(client->allocator, &interface_name);
             aws_array_list_push_back(&client->network_interface_names, &interface_name_str);
             client->network_interface_names_cursor_array[i] = aws_byte_cursor_from_string(interface_name_str);
         }
@@ -732,13 +731,13 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_s3_buffer_pool_destroy(client->buffer_pool);
 
-    for (size_t i = 0; i < aws_array_list_length(&client->network_interface_names); i++) {
+    aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
+    for (size_t i = 0; i < client->num_network_interface_names; i++) {
         struct aws_string *interface_name = NULL;
         aws_array_list_get_at(&client->network_interface_names, &interface_name, i);
         aws_string_destroy(interface_name);
     }
     aws_array_list_clean_up(&client->network_interface_names);
-    aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
 
     aws_mem_release(client->allocator, client);
     client = NULL;
@@ -1075,7 +1074,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .connect_timeout_ms = client->connect_timeout_ms,
                 .tcp_keep_alive_options = client->tcp_keep_alive_options,
                 .monitoring_options = &client->monitoring_options,
-                .network_interface_names = client->network_interface_names_cursor_array,
+                .network_interface_names_array = client->network_interface_names_cursor_array,
                 .num_network_interface_names = client->num_network_interface_names,
             };
 

@@ -95,7 +95,7 @@ struct aws_s3_endpoint_options {
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
 
-    const struct aws_byte_cursor *network_interface_names;
+    const struct aws_byte_cursor *network_interface_names_array;
     size_t num_network_interface_names;
 
 };

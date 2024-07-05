@@ -40,7 +40,6 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
-// test
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_TRUE(client != NULL);
