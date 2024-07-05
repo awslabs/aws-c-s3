@@ -95,6 +95,7 @@ struct aws_s3_endpoint_options {
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
 
+    /* An array of `struct aws_byte_cursor *` of network interface names. */
     const struct aws_byte_cursor *network_interface_names_array;
     size_t num_network_interface_names;
 };
@@ -317,11 +318,15 @@ struct aws_s3_client {
     struct aws_atomic_var upload_timeout_ms;
 
     /*
-     * An aws_array_list<struct aws_string *> of network interface names to distribute the connections using the
-     * round-robin algorithm. We picked round-robin because it is trivial to implement and good enough. We can later
-     * update to a more complex distribution algorithm if required.
+     * An aws_array_list<struct aws_string *> of network interface names.
      */
     struct aws_array_list network_interface_names;
+    /*
+     * An array of `struct aws_byte_cursor *` of network interface names. The cursors are over the strings in
+     * `network_interface_names` so that we can easily pass it to the connection manager without any processing. We need
+     * to create both `struct aws_array_list<struct aws_string *>` and the array of `struct aws_byte_cursor` since byte
+     * cursors are non-owning and we need to ensure that they live as long as the client lives.
+     */
     struct aws_byte_cursor *network_interface_names_cursor_array;
     size_t num_network_interface_names;
 

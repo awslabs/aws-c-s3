@@ -517,13 +517,13 @@ struct aws_s3_client_config {
 
     /**
      * (Optional)
-     * An array of network interface names. The manager will distribute the
+     * An array of network interface names. The client will distribute the
      * connections across network interface names provided in this array. If any interface name is invalid, goes down,
-     * or has any issues like network access, you will see connection failures. If
-     * `socket_options.network_interface_name` is also set, an `AWS_ERROR_INVALID_ARGUMENT` error will be raised.
+     * or has any issues like network access, you will see connection failures.
      *
      * This option is only supported on Linux, MacOS, and platforms that have either SO_BINDTODEVICE or IP_BOUND_IF. It
-     * is not supported on Windows. `AWS_ERROR_PLATFORM_NOT_SUPPORTED` will be raised on unsupported platforms.
+     * is not supported on Windows. `AWS_ERROR_PLATFORM_NOT_SUPPORTED` will be raised on unsupported platforms. On
+     * Linux, SO_BINDTODEVICE is used and requires kernel version >= 5.7 or root privileges.
      */
     const struct aws_byte_cursor *network_interface_names_array;
     size_t num_network_interface_names;
