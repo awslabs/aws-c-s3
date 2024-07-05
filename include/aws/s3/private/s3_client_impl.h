@@ -325,7 +325,7 @@ struct aws_s3_client {
      * An array of `struct aws_byte_cursor *` of network interface names. The cursors are over the strings in
      * `network_interface_names` so that we can easily pass it to the connection manager without any processing. We need
      * to create both `struct aws_array_list<struct aws_string *>` and the array of `struct aws_byte_cursor` since byte
-     * cursors are non-owning and we need to ensure that they live as long as the client lives.
+     * cursors are non-owning and we need to ensure that the underlying memory is valid as long as the client lives.
      */
     struct aws_byte_cursor *network_interface_names_cursor_array;
     size_t num_network_interface_names;
