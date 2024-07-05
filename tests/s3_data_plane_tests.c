@@ -67,6 +67,7 @@ static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *
         .port = 8899,
     };
     client_config.proxy_options = &proxy_options;
+
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_TRUE(client == NULL);
