@@ -578,15 +578,16 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
-    
+
     client->num_network_interface_names = client_config->num_network_interface_names;
     if (client_config->num_network_interface_names > 0) {
         aws_array_list_init_dynamic(
-                &client->network_interface_names,
-                client->allocator,
-                client_config->num_network_interface_names,
-                sizeof(struct aws_string *));
-        client->network_interface_names_cursor_array = aws_mem_calloc(client->allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
+            &client->network_interface_names,
+            client->allocator,
+            client_config->num_network_interface_names,
+            sizeof(struct aws_string *));
+        client->network_interface_names_cursor_array = aws_mem_calloc(
+            client->allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
         for (size_t i = 0; i < client_config->num_network_interface_names; i++) {
             struct aws_byte_cursor interface_name = client_config->network_interface_names_array[i];
             struct aws_string *interface_name_str = aws_string_new_from_cursor(client->allocator, &interface_name);
@@ -594,7 +595,6 @@ struct aws_s3_client *aws_s3_client_new(
             client->network_interface_names_cursor_array[i] = aws_byte_cursor_from_string(interface_name_str);
         }
     }
-
 
     return client;
 

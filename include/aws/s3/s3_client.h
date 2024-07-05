@@ -514,7 +514,7 @@ struct aws_s3_client_config {
      */
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
     void *factory_user_data;
-    
+
     /**
      * (Optional)
      * An array of network interface names. The manager will distribute the

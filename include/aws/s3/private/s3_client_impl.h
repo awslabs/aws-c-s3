@@ -97,7 +97,6 @@ struct aws_s3_endpoint_options {
 
     const struct aws_byte_cursor *network_interface_names_array;
     size_t num_network_interface_names;
-
 };
 
 /* global vtable, only used when mocking for tests */
@@ -325,7 +324,6 @@ struct aws_s3_client {
     struct aws_array_list network_interface_names;
     struct aws_byte_cursor *network_interface_names_cursor_array;
     size_t num_network_interface_names;
-
 
     struct {
         /* Number of overall requests currently being processed by the client. */
