@@ -514,6 +514,19 @@ struct aws_s3_client_config {
      */
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
     void *factory_user_data;
+    
+    /**
+     * (Optional)
+     * An array of network interface names. The manager will distribute the
+     * connections across network interface names provided in this array. If any interface name is invalid, goes down,
+     * or has any issues like network access, you will see connection failures. If
+     * `socket_options.network_interface_name` is also set, an `AWS_ERROR_INVALID_ARGUMENT` error will be raised.
+     *
+     * This option is only supported on Linux, MacOS, and platforms that have either SO_BINDTODEVICE or IP_BOUND_IF. It
+     * is not supported on Windows. `AWS_ERROR_PLATFORM_NOT_SUPPORTED` will be raised on unsupported platforms.
+     */
+    const struct aws_byte_cursor *network_interface_names_array;
+    size_t num_network_interface_names;
 };
 
 struct aws_s3_checksum_config {
@@ -765,16 +778,6 @@ struct aws_s3_meta_request_options {
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
      */
     uint64_t *object_size_hint;
-
-    /**
-     * (Optional)
-     * An `aws_array_list<struct aws_byte_cursor>` of network interface names. The client will distribute the
-     * connections across network interface names provided in this list. If any interface name is invalid, goes down, or
-     * has any issues like network access, you will see connection failures. If `socket_options.network_interface_name`
-     * is set, this list will be ignored and all the connections will go to that network interface. This option is only
-     * supported on Linux and macOS and will be ignored on other platforms.
-     */
-    struct aws_array_list *network_interface_names_list;
 };
 
 /* Result details of a meta request.

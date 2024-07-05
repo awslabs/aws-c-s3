@@ -95,11 +95,9 @@ struct aws_s3_endpoint_options {
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
 
-    /**
-     * (Optional)
-     * An `aws_array_list<struct aws_byte_cursor>` of network interface names to distribute the connections.
-     */
-    const struct aws_array_list *network_interface_names_list;
+    const struct aws_byte_cursor *network_interface_names;
+    size_t num_network_interface_names;
+
 };
 
 /* global vtable, only used when mocking for tests */
@@ -318,6 +316,16 @@ struct aws_s3_client {
      * Timeout in ms for upload request for request after sending to the response first byte received.
      */
     struct aws_atomic_var upload_timeout_ms;
+
+    /*
+     * An aws_array_list<struct aws_string *> of network interface names to distribute the connections using the
+     * round-robin algorithm. We picked round-robin because it is trivial to implement and good enough. We can later
+     * update to a more complex distribution algorithm if required.
+     */
+    struct aws_array_list network_interface_names;
+    struct aws_byte_cursor *network_interface_names_cursor_array;
+    size_t num_network_interface_names;
+
 
     struct {
         /* Number of overall requests currently being processed by the client. */

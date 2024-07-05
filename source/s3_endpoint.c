@@ -45,7 +45,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     uint32_t connect_timeout_ms,
     const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
     const struct aws_http_connection_monitoring_options *monitoring_options,
-    const struct aws_array_list *network_interface_names_list);
+    const struct aws_byte_cursor *network_interface_names,
+    size_t num_network_interface_names);
 
 static void s_s3_endpoint_http_connection_manager_shutdown_callback(void *user_data);
 
@@ -111,7 +112,8 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         options->connect_timeout_ms,
         options->tcp_keep_alive_options,
         options->monitoring_options,
-        options->network_interface_names_list);
+        options->network_interface_names,
+        options->num_network_interface_names);
 
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
@@ -140,7 +142,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     uint32_t connect_timeout_ms,
     const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options,
     const struct aws_http_connection_monitoring_options *monitoring_options,
-    const struct aws_array_list *network_interface_names_list) {
+    const struct aws_byte_cursor *network_interface_names,
+    size_t num_network_interface_names) {
 
     AWS_PRECONDITION(endpoint);
     AWS_PRECONDITION(client_bootstrap);
@@ -178,7 +181,8 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     manager_options.shutdown_complete_callback = s_s3_endpoint_http_connection_manager_shutdown_callback;
     manager_options.shutdown_complete_user_data = endpoint;
     manager_options.proxy_ev_settings = proxy_ev_settings;
-    manager_options.network_interface_names_list = network_interface_names_list;
+    manager_options.network_interface_names_array = network_interface_names;
+    manager_options.num_network_interface_names = num_network_interface_names;
     if (monitoring_options != NULL) {
         manager_options.monitoring_options = monitoring_options;
     }
