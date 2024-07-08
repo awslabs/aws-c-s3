@@ -1619,7 +1619,9 @@ void aws_s3_meta_request_send_request_finish_default(
          * has a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
             error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
-            error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED || error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
+            error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED || 
+            error_code == AWS_IO_SOCKET_INVALID_OPTIONS || 
+            error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
             meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
             if (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
