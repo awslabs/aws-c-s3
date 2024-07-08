@@ -1348,9 +1348,9 @@ int aws_s3_tester_client_new(
     if (options->use_proxy) {
         client_config.proxy_options = &proxy_options;
     }
-    if(options->num_network_interface_names){
-           client_config.network_interface_names_array = options->network_interface_names_array;
-           client_config.num_network_interface_names = options->num_network_interface_names;
+    if (options->num_network_interface_names) {
+        client_config.network_interface_names_array = options->network_interface_names_array;
+        client_config.num_network_interface_names = options->num_network_interface_names;
     }
 
     struct aws_tls_connection_options tls_connection_options;
