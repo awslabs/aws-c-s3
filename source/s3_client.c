@@ -581,6 +581,11 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->num_network_interface_names = client_config->num_network_interface_names;
     if (client_config->num_network_interface_names > 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client received network interface names array with length %lu.",
+            (void *)client,
+            client->num_network_interface_names);
         aws_array_list_init_dynamic(
             &client->network_interface_names,
             client->allocator,
@@ -593,6 +598,12 @@ struct aws_s3_client *aws_s3_client_new(
             struct aws_string *interface_name_str = aws_string_new_from_cursor(client->allocator, &interface_name);
             aws_array_list_push_back(&client->network_interface_names, &interface_name_str);
             client->network_interface_names_cursor_array[i] = aws_byte_cursor_from_string(interface_name_str);
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p network_interface_names_array[%lu]=" PRInSTR "",
+                (void *)client,
+                i,
+                AWS_BYTE_CURSOR_PRI(client->network_interface_names_cursor_array[i]));
         }
     }
 
