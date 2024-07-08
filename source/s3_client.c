@@ -2132,7 +2132,8 @@ static void s_s3_client_on_acquire_http_connection(
             error_code,
             aws_error_str(error_code));
 
-        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE) {
+        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE ||
+            error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED || error_code == AWS_IO_SOCKET_INVALID_OPTIONS) {
             /**
              * Fall fast without retry
              * - Invalid DNS name will not change after retry.
