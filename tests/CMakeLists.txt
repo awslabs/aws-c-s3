@@ -298,6 +298,7 @@ add_net_test_case(test_s3_list_bucket_valid)
 # Tests against local mock server
 if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(multipart_upload_mock_server)
+    add_net_test_case(multipart_upload_with_network_interface_names_mock_server)
     add_net_test_case(multipart_upload_checksum_with_retry_mock_server)
     add_net_test_case(multipart_download_checksum_with_retry_mock_server)
     add_net_test_case(async_internal_error_from_complete_multipart_mock_server)
