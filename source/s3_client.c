@@ -2139,6 +2139,13 @@ static void s_s3_client_on_acquire_http_connection(
              * - Invalid DNS name will not change after retry.
              * - TLS negotiation is expensive and retry will not help in most case.
              */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Meta request cannot recover from error %d (%s). (request=%p)",
+                (void *)meta_request,
+                error_code,
+                aws_error_str(error_code),
+                (void *)request);
             goto error_fail;
         }
 
