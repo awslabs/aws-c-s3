@@ -209,14 +209,7 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     };
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    if (aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results)) {
-#if !defined(AWS_OS_APPLE) && !defined(AWS_OS_LINUX)
-        if (aws_last_error() == AWS_ERROR_PLATFORM_NOT_SUPPORTED) {
-            return AWS_OP_SKIP;
-        }
-#endif
-        ASSERT_TRUE(false, "aws_s3_tester_send_meta_request_with_options(() failed");
-    }
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
