@@ -2152,7 +2152,7 @@ static void s_s3_client_on_acquire_http_connection(
              */
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p Meta request cannot recover from error %d (%s). (request=%p)",
+                "id=%p Meta request cannot recover from error %d (%s) while acquiring HTTP connection. (request=%p)",
                 (void *)meta_request,
                 error_code,
                 aws_error_str(error_code),
