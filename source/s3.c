@@ -83,7 +83,7 @@ struct aws_s3_request_type_info {
     struct aws_byte_cursor name_cursor;
 };
 
-static struct aws_s3_request_type_info s_s3_request_type_info_array[AWS_S3_REQUEST_TYPE_MAX] = {0};
+static struct aws_s3_request_type_info s_s3_request_type_info_array[AWS_S3_REQUEST_TYPE_MAX];
 
 /* Hash-table for case-insensitive lookup, from operation-name -> request-type.
  * key is operation-name (stored as `struct aws_byte_cursor*`, pointing into array above).
