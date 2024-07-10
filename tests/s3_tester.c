@@ -475,7 +475,7 @@ int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client
         config->region = g_test_s3_region;
     } else {
         if (config->signing_config) {
-            (struct aws_signing_config_aws *)(config->signing_config)->region = config->region;
+            ((struct aws_signing_config_aws *)config->signing_config)->region = config->region;
         }
     }
     if (!config->signing_config) {
