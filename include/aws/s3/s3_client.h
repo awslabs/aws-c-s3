@@ -756,7 +756,7 @@ struct aws_s3_meta_request_options {
      * Note: If PutObject request specifies a checksum algorithm, client will calculate checksums while skipping parts
      * from the buffer and compare them them to previously uploaded part checksums.
      */
-    const struct aws_s3_meta_request_resume_token *resume_token;
+    struct aws_s3_meta_request_resume_token *resume_token;
 
     /*
      * Optional.
