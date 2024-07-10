@@ -83,7 +83,7 @@ struct aws_s3_request_type_info {
     struct aws_byte_cursor name_cursor;
 };
 
-static struct aws_s3_request_type_info s_s3_request_type_info_array[AWS_S3_REQUEST_TYPE_MAX];
+static struct aws_s3_request_type_info s_s3_request_type_info_array[AWS_S3_REQUEST_TYPE_MAX] = {0};
 
 /* Hash-table for case-insensitive lookup, from operation-name -> request-type.
  * key is operation-name (stored as `struct aws_byte_cursor*`, pointing into array above).
@@ -142,6 +142,7 @@ static void s_s3_request_type_info_init(struct aws_allocator *allocator) {
 
 static void s_s3_request_type_info_clean_up(void) {
     aws_hash_table_clean_up(&s_s3_operation_name_to_request_type_table);
+    AWS_ZERO_ARRAY(s_s3_request_type_info_array);
 }
 
 struct aws_string *aws_s3_request_type_to_operation_name_static_string(enum aws_s3_request_type type) {
