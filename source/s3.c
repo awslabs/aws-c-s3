@@ -142,6 +142,7 @@ static void s_s3_request_type_info_init(struct aws_allocator *allocator) {
 
 static void s_s3_request_type_info_clean_up(void) {
     aws_hash_table_clean_up(&s_s3_operation_name_to_request_type_table);
+    AWS_ZERO_ARRAY(s_s3_request_type_info_array);
 }
 
 struct aws_string *aws_s3_request_type_to_operation_name_static_string(enum aws_s3_request_type type) {

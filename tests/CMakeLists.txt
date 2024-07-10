@@ -14,6 +14,7 @@ file(GLOB TEST_SRC "*.c")
 file(GLOB TEST_HDRS "*.h")
 file(GLOB TESTS ${TEST_HDRS} ${TEST_SRC})
 
+add_test_case(test_s3_library_init_cleanup_init_cleanup)
 add_test_case(test_s3_copy_http_message)
 add_test_case(test_s3_message_util_assign_body)
 add_test_case(test_s3_ranged_get_object_message_new)
