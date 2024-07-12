@@ -516,6 +516,7 @@ struct aws_s3_client_config {
     void *factory_user_data;
 
     /**
+     * THIS IS AN EXPERIMENTAL AND UNSTABLE API
      * (Optional)
      * An array of network interface names. The client will distribute the
      * connections across network interface names provided in this array. If any interface name is invalid, goes down,
