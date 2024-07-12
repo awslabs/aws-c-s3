@@ -37,27 +37,15 @@ with PerfTimer('read json'):
 
 with PerfTimer('prep data'):
     raw_stats = S3_RUN['stats']
-    # times = [stat['time'] for stat in raw_stats]
-    # stats = {
-    #     'preparing': [stat['preparing'] for stat in raw_stats],
-    #     'queued': [stat['queued'] for stat in raw_stats],
-    #     'net_get': [stat['net_get'] for stat in raw_stats],
-    #     'net_put': [stat['net_put'] for stat in raw_stats],
-    #     'net_default': [stat['net_default'] for stat in raw_stats],
-    #     'streaming_waiting': [stat['streaming_waiting'] for stat in raw_stats],
-    #     'streaming_response': [stat['streaming_response'] for stat in raw_stats],
-    # }
-
     plot_times = [i['time'] for i in raw_stats]
     plot_stats = {}
     for stat_name in ('preparing', 'queued', 'net_get', 'net_put', 'net_default', 'streaming_waiting', 'streaming_response'):
         plot_stats[stat_name] = [i[stat_name] for i in raw_stats]
 
 with PerfTimer('plot'):
-    # see https://matplotlib.org/stable/gallery/lines_bars_and_markers/stackplot_demo.html
     fig, ax = plt.subplots(layout='constrained')
     ax.stackplot(plot_times, plot_stats.values(), labels=plot_stats.keys())
-    ax.legend(loc='upper left')
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
     ax.set_title('S3ClientStats')
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Num Requests')
@@ -68,3 +56,4 @@ if args.img_out:
         plt.savefig(args.img_out, format=img_fmt)
 else:
     plt.show()
+
