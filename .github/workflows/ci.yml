@@ -6,7 +6,7 @@ on:
       - 'main'
 
 env:
-  BUILDER_VERSION: v0.9.59
+  BUILDER_VERSION: v0.9.62
   BUILDER_SOURCE: releases
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
@@ -133,8 +133,21 @@ jobs:
       run: |
         python .\aws-c-s3\build\deps\aws-c-common\scripts\appverifier_ctest.py --build_directory .\aws-c-s3\build\aws-c-s3
 
-  osx:
-    runs-on: macos-13 # latest
+  macos:
+    runs-on: macos-14 # latest
+    steps:
+    - name: Checkout Sources
+      uses: actions/checkout@v4
+    - name: Build ${{ env.PACKAGE_NAME }} + consumers
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
+        chmod a+x builder
+        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
+
+  macos-x64:
+    runs-on: macos-14-large # latest
     steps:
     - name: Checkout Sources
       uses: actions/checkout@v4

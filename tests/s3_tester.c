@@ -475,7 +475,7 @@ int aws_s3_tester_bind_client(struct aws_s3_tester *tester, struct aws_s3_client
         config->region = g_test_s3_region;
     } else {
         if (config->signing_config) {
-            config->signing_config->region = config->region;
+            ((struct aws_signing_config_aws *)config->signing_config)->region = config->region;
         }
     }
     if (!config->signing_config) {
@@ -1347,6 +1347,10 @@ int aws_s3_tester_client_new(
     };
     if (options->use_proxy) {
         client_config.proxy_options = &proxy_options;
+    }
+    if (options->num_network_interface_names) {
+        client_config.network_interface_names_array = options->network_interface_names_array;
+        client_config.num_network_interface_names = options->num_network_interface_names;
     }
 
     struct aws_tls_connection_options tls_connection_options;

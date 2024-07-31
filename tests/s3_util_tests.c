@@ -22,6 +22,20 @@
 #include <inttypes.h>
 #include <stdio.h>
 
+/* Ensure the library can go through the init/cleanup cycle multiple times */
+AWS_TEST_CASE(test_s3_library_init_cleanup_init_cleanup, s_test_s3_library_init_cleanup_init_cleanup)
+static int s_test_s3_library_init_cleanup_init_cleanup(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    aws_s3_library_init(allocator);
+    aws_s3_library_clean_up();
+
+    aws_s3_library_init(allocator);
+    aws_s3_library_clean_up();
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_request_type_operation_name, s_test_s3_request_type_operation_name)
 static int s_test_s3_request_type_operation_name(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

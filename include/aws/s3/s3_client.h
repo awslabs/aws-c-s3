@@ -369,8 +369,9 @@ struct aws_s3_client_config {
     enum aws_s3_meta_request_tls_mode tls_mode;
 
     /* TLS Options to be used for each connection, if tls_mode is ENABLED. When compiling with BYO_CRYPTO, and tls_mode
-     * is ENABLED, this is required. Otherwise, this is optional. */
-    struct aws_tls_connection_options *tls_connection_options;
+     * is ENABLED, this is required. Otherwise, this is optional.
+     */
+    const struct aws_tls_connection_options *tls_connection_options;
 
     /**
      * Required.
@@ -387,7 +388,7 @@ struct aws_s3_client_config {
      *
      * TODO: deprecate this structure from auth, introduce a new S3 specific one.
      */
-    struct aws_signing_config_aws *signing_config;
+    const struct aws_signing_config_aws *signing_config;
 
     /**
      * Optional.
@@ -445,7 +446,7 @@ struct aws_s3_client_config {
      * If the connection_type is AWS_HPCT_HTTP_LEGACY, it will be converted to AWS_HPCT_HTTP_TUNNEL if tls_mode is
      * ENABLED. Otherwise, it will be converted to AWS_HPCT_HTTP_FORWARD.
      */
-    struct aws_http_proxy_options *proxy_options;
+    const struct aws_http_proxy_options *proxy_options;
 
     /**
      * Optional.
@@ -454,7 +455,7 @@ struct aws_s3_client_config {
      * configuration from environment.
      * Only works when proxy_options is not set. If both are set, configuration from proxy_options is used.
      */
-    struct proxy_env_var_settings *proxy_ev_settings;
+    const struct proxy_env_var_settings *proxy_ev_settings;
 
     /**
      * Optional.
@@ -466,7 +467,7 @@ struct aws_s3_client_config {
      * Optional.
      * Set keepalive to periodically transmit messages for detecting a disconnected peer.
      */
-    struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
+    const struct aws_s3_tcp_keep_alive_options *tcp_keep_alive_options;
 
     /**
      * Optional.
@@ -474,7 +475,7 @@ struct aws_s3_client_config {
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
      * If set to NULL, default values are used.
      */
-    struct aws_http_connection_monitoring_options *monitoring_options;
+    const struct aws_http_connection_monitoring_options *monitoring_options;
 
     /**
      * Enable backpressure and prevent response data from downloading faster than you can handle it.
@@ -514,6 +515,20 @@ struct aws_s3_client_config {
      */
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
     void *factory_user_data;
+
+    /**
+     * THIS IS AN EXPERIMENTAL AND UNSTABLE API
+     * (Optional)
+     * An array of network interface names. The client will distribute the
+     * connections across network interface names provided in this array. If any interface name is invalid, goes down,
+     * or has any issues like network access, you will see connection failures.
+     *
+     * This option is only supported on Linux, MacOS, and platforms that have either SO_BINDTODEVICE or IP_BOUND_IF. It
+     * is not supported on Windows. `AWS_ERROR_PLATFORM_NOT_SUPPORTED` will be raised on unsupported platforms. On
+     * Linux, SO_BINDTODEVICE is used and requires kernel version >= 5.7 or root privileges.
+     */
+    const struct aws_byte_cursor *network_interface_names_array;
+    size_t num_network_interface_names;
 };
 
 struct aws_s3_checksum_config {
@@ -558,7 +573,7 @@ struct aws_s3_checksum_config {
      *
      * If the response checksum was validated by client, the result will indicate which algorithm was picked.
      */
-    struct aws_array_list *validate_checksum_algorithms;
+    const struct aws_array_list *validate_checksum_algorithms;
 };
 
 /**
@@ -746,7 +761,7 @@ struct aws_s3_meta_request_options {
      * - Both Host and Endpoint is set - Host header must match Authority of
      *   Endpoint uri. Port and Scheme from endpoint is used.
      */
-    struct aws_uri *endpoint;
+    const struct aws_uri *endpoint;
 
     /**
      * Optional.
@@ -764,7 +779,7 @@ struct aws_s3_meta_request_options {
      * Set this hint to help the S3 client choose the best strategy for this particular file.
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
      */
-    uint64_t *object_size_hint;
+    const uint64_t *object_size_hint;
 };
 
 /* Result details of a meta request.
