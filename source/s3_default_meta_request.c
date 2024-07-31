@@ -384,18 +384,29 @@ static void s_s3_meta_request_default_request_finished(
     struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
     AWS_PRECONDITION(meta_request_default);
 
-    if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL &&
-        request->send_data.response_headers != NULL) {
-
-        if (meta_request->headers_callback(
-                meta_request,
-                request->send_data.response_headers,
-                request->send_data.response_status,
-                meta_request->user_data)) {
-            error_code = aws_last_error_or_unknown();
+    if (error_code == AWS_ERROR_SUCCESS && request->send_data.response_headers != NULL) {
+        if (meta_request->checksum_config.validate_response_checksum) {
+            if (aws_s3_check_headers_for_checksum(
+                    meta_request,
+                    request->send_data.response_headers,
+                    &meta_request->meta_request_level_running_response_sum,
+                    &meta_request->meta_request_level_response_header_checksum,
+                    true) != AWS_OP_SUCCESS) {
+                error_code = aws_last_error_or_unknown();
+            }
         }
 
-        meta_request->headers_callback = NULL;
+        if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL) {
+            if (meta_request->headers_callback(
+                    meta_request,
+                    request->send_data.response_headers,
+                    request->send_data.response_status,
+                    meta_request->user_data)) {
+                error_code = aws_last_error_or_unknown();
+            }
+
+            meta_request->headers_callback = NULL;
+        }
     }
 
     /* BEGIN CRITICAL SECTION */

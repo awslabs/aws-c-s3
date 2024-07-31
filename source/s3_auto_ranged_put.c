@@ -1568,15 +1568,11 @@ static void s_s3_auto_ranged_put_request_finished(
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
             if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL) {
-                struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
-
-                /* Copy all the response headers from this request. */
-                copy_http_headers(request->send_data.response_headers, final_response_headers);
-
                 /* Copy over any response headers that we've previously determined are needed for this final
                  * response.
                  */
-                copy_http_headers(auto_ranged_put->synced_data.needed_response_headers, final_response_headers);
+                copy_http_headers(
+                    auto_ranged_put->synced_data.needed_response_headers, request->send_data.response_headers);
 
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
@@ -1597,7 +1593,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         aws_replace_quote_entities(meta_request->allocator, etag_header_value);
 
                     aws_http_headers_set(
-                        final_response_headers,
+                        request->send_data.response_headers,
                         g_etag_header_name,
                         aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
 
@@ -1609,7 +1605,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 /* Notify the user of the headers. */
                 if (meta_request->headers_callback(
                         meta_request,
-                        final_response_headers,
+                        request->send_data.response_headers,
                         request->send_data.response_status,
                         meta_request->user_data)) {
 
@@ -1618,8 +1614,6 @@ static void s_s3_auto_ranged_put_request_finished(
                 meta_request->headers_callback = NULL;
                 /* Grab the lock again after the callback */
                 aws_s3_meta_request_lock_synced_data(meta_request);
-
-                aws_http_headers_release(final_response_headers);
             }
 
             auto_ranged_put->synced_data.complete_multipart_upload_completed = true;
