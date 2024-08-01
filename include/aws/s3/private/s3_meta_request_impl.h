@@ -80,6 +80,13 @@ struct aws_s3_meta_request_event {
     } u;
 };
 
+struct aws_s3_meta_request_body_streaming_args {
+    struct aws_allocator *allocator;
+    struct aws_task task;
+    struct aws_s3_meta_request_event event;
+    struct aws_s3_meta_request *meta_request;
+};
+
 struct aws_s3_meta_request_vtable {
     /* Update the meta request.  out_request is required to be non-null. Returns true if there is any work in
      * progress, false if there is not. */

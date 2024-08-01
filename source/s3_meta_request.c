@@ -1701,6 +1701,7 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     struct aws_s3_meta_request *meta_request);
 
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+static void s3_meta_request_streaming_body_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
@@ -1723,9 +1724,14 @@ void aws_s3_meta_request_stream_response_body_synced(
     uint32_t num_streaming_requests = 0;
     struct aws_s3_request *next_streaming_request;
     while ((next_streaming_request = s_s3_meta_request_body_streaming_pop_next_synced(meta_request)) != NULL) {
-        struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY};
-        event.u.response_body.completed_request = next_streaming_request;
-        aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+        struct aws_s3_meta_request_body_streaming_args *streaming_args = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_meta_request_body_streaming_args));
+        streaming_args->allocator = meta_request->allocator;
+        streaming_args->meta_request = aws_s3_meta_request_acquire(meta_request);
+        streaming_args->event.type = AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY;
+        streaming_args->event.u.response_body.completed_request = next_streaming_request;
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        aws_task_init(&streaming_args->task, s3_meta_request_streaming_body_task, streaming_args, "s3_meta_request_streaming_body");
+        aws_event_loop_schedule_task_now(loop, &streaming_args->task);
 
         ++num_streaming_requests;
     }
@@ -1802,6 +1808,48 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
         aws_s3_request_metrics_release(metrics);
     }
     return NULL;
+}
+
+static void s3_meta_request_streaming_body_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    (void)task_status;
+    struct aws_s3_meta_request_body_streaming_args *streaming_args = arg;
+    struct aws_s3_meta_request *meta_request = streaming_args->meta_request;
+    struct aws_s3_client *client = meta_request->client;
+    struct aws_s3_request *request = streaming_args->event.u.response_body.completed_request;
+    AWS_ASSERT(meta_request == request->meta_request);
+    struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
+
+    AWS_ASSERT(request->part_number >= 1);
+
+    if (response_body.len > 0 && meta_request->body_callback != NULL) {
+        if (meta_request->body_callback(
+                meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
+            int error_code = aws_last_error_or_unknown();
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Response body callback raised error %d (%s).",
+                (void *)meta_request,
+                error_code,
+                aws_error_str(error_code));
+        }
+    }
+    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
+
+    request->send_data.metrics =
+        s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
+
+    aws_s3_request_release(request);
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        meta_request->synced_data.num_parts_delivery_completed += 1;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
+    aws_mem_release(streaming_args->allocator, streaming_args);
+    aws_s3_meta_request_release(meta_request);
 }
 
 /* Deliver events in event_delivery_array.
@@ -1972,9 +2020,9 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
 
     AWS_FATAL_ASSERT(*top_request);
 
-    if ((*top_request)->part_number != meta_request->synced_data.next_streaming_part) {
-        return NULL;
-    }
+    // if ((*top_request)->part_number != meta_request->synced_data.next_streaming_part) {
+    //     return NULL;
+    // }
 
     struct aws_s3_request *request = NULL;
     aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
