@@ -7525,6 +7525,74 @@ static int s_test_s3_upload_review_checksum_location_none(struct aws_allocator *
     return 0;
 }
 
+/* Test that an MPU can be done with checksum location = NONE as long as an upload review callback
+ * is used, and the resulting object doesn't have checksums uploaded. */
+AWS_TEST_CASE(test_s3_upload_review_checksum_location_none_crc32c, s_test_s3_upload_review_checksum_location_none_crc32c)
+static int s_test_s3_upload_review_checksum_location_none_crc32c(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_1024MB_no_CRC32C.txt");
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(16),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32C,
+        .disable_put_trailing_checksum = true,
+        .put_options =
+            {
+                .object_size_mb = 1024,
+                .object_path_override = object_path,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
+
+    /* The tester always registers an upload_review_callback.
+     * Check that it got what we expect */
+    ASSERT_UINT_EQUALS(1, test_results.upload_review.invoked_count);
+    ASSERT_UINT_EQUALS(2, test_results.upload_review.part_count);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(5), test_results.upload_review.part_sizes_array[0]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(5), test_results.upload_review.part_sizes_array[1]);
+    ASSERT_INT_EQUALS(AWS_SCA_CRC32, test_results.upload_review.checksum_algorithm);
+    ASSERT_STR_EQUALS("7/xUXw==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
+    ASSERT_STR_EQUALS("PCOjcw==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
+
+    /* Get the file, which should not have checksums present to validate */
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .finish_callback = s_s3_test_no_validate_checksum,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_upload_review_checksum_location_none_async, s_test_s3_upload_review_checksum_location_none_async)
 static int s_test_s3_upload_review_checksum_location_none_async(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
