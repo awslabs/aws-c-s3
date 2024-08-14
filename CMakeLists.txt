@@ -2,10 +2,6 @@
 cmake_minimum_required(VERSION 3.1)
 project(aws-c-s3 C)
 
-if (POLICY CMP0069)
-    cmake_policy(SET CMP0069 NEW) # Enable LTO/IPO if available in the compiler, see AwsCFlags
-endif()
-
 option(ASSERT_LOCK_HELD "Enable ASSERT_SYNCED_DATA_LOCK_HELD for checking thread issue" OFF)
 option(ENABLE_MOCK_SERVER_TESTS "Whether to run the integration tests that rely on pre-configured mock server" OFF)
 option(ENABLE_MRAP_TESTS "Whether to run the integration tests that rely on pre-configured multi-region access point" OFF)
@@ -77,6 +73,7 @@ if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     list(APPEND S3_SRC ${AWS_S3_ENDPOINT_RESOLVER_SRC})
 endif()
 
+aws_set_common_policies()
 add_library(${PROJECT_NAME} ${S3_HEADERS} ${S3_SRC})
 aws_set_common_properties(${PROJECT_NAME})
 aws_prepare_symbol_visibility_args(${PROJECT_NAME} "AWS_S3")
