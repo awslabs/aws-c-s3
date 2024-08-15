@@ -236,6 +236,15 @@ int aws_s3_meta_request_init_base(
 
     /* If the request's body is being passed in some other way, set that up.
      * (we checked earlier that the request body is not being passed multiple ways) */
+    if (options->receive_filepath.len > 0) {
+        struct aws_string *file_path = aws_string_new_from_cursor(allocator, &options->receive_filepath);
+        meta_request->recv_file = aws_fopen(aws_string_c_str(file_path), "wb");
+        aws_string_destroy(file_path);
+        if (!meta_request->recv_file) {
+            aws_translate_and_raise_io_error(errno);
+            goto error;
+        }
+    }
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
@@ -442,6 +451,10 @@ static void s_s3_meta_request_destroy(void *user_data) {
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
+    if (meta_request->recv_file) {
+        fclose(meta_request->recv_file);
+        meta_request->recv_file = NULL;
+    }
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
@@ -1993,6 +2006,11 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             "id=%p: Invoking write waker, due to meta request's early finish",
             (void *)meta_request);
         pending_async_write_waker(pending_async_write_waker_user_data);
+    }
+
+    if (meta_request->recv_file) {
+        fclose(meta_request->recv_file);
+        meta_request->recv_file = NULL;
     }
 
     while (!aws_linked_list_empty(&release_request_list)) {
