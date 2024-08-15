@@ -389,7 +389,7 @@ static void s_s3_meta_request_default_request_finished(
             if (aws_s3_check_headers_for_checksum(
                     meta_request,
                     request->send_data.response_headers,
-                    meta_request->meta_request_level_running_response_sum,
+                    &meta_request->meta_request_level_running_response_sum,
                     &meta_request->meta_request_level_response_header_checksum,
                     true) != AWS_OP_SUCCESS) {
                 error_code = aws_last_error_or_unknown();

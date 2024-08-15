@@ -130,6 +130,8 @@ struct aws_s3_tester_client_options {
     enum aws_s3_client_tls_usage tls_usage;
     uint64_t part_size;
     size_t max_part_size;
+    const struct aws_byte_cursor *network_interface_names_array;
+    size_t num_network_interface_names;
     uint32_t setup_region : 1;
     uint32_t use_proxy : 1;
 };

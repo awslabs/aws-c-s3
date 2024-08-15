@@ -94,6 +94,10 @@ struct aws_s3_endpoint_options {
      * If the transfer speed falls below the specified minimum_throughput_bytes_per_second, the operation is aborted.
      */
     struct aws_http_connection_monitoring_options *monitoring_options;
+
+    /* An array of `struct aws_byte_cursor` of network interface names. */
+    const struct aws_byte_cursor *network_interface_names_array;
+    size_t num_network_interface_names;
 };
 
 /* global vtable, only used when mocking for tests */
@@ -312,6 +316,19 @@ struct aws_s3_client {
      * Timeout in ms for upload request for request after sending to the response first byte received.
      */
     struct aws_atomic_var upload_timeout_ms;
+
+    /*
+     * An aws_array_list<struct aws_string *> of network interface names.
+     */
+    struct aws_array_list network_interface_names;
+    /*
+     * An array of `struct aws_byte_cursor` of network interface names. The cursors are over the strings in
+     * `network_interface_names` so that we can easily pass it to the connection manager without any processing. We need
+     * to create both `struct aws_array_list<struct aws_string *>` and the array of `struct aws_byte_cursor` since byte
+     * cursors are non-owning and we need to ensure that the underlying memory is valid as long as the client lives.
+     */
+    struct aws_byte_cursor *network_interface_names_cursor_array;
+    size_t num_network_interface_names;
 
     struct {
         /* Number of overall requests currently being processed by the client. */
