@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_request.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/clock.h>
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
@@ -708,4 +709,59 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
         }
         request->send_data.metrics = aws_s3_request_metrics_release(metrics);
     }
+}
+
+int aws_s3_check_headers_for_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    struct aws_s3_checksum **out_checksum,
+    struct aws_byte_buf *out_checksum_buffer,
+    bool meta_request_level) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_checksum);
+    AWS_PRECONDITION(out_checksum_buffer);
+
+    if (!headers || aws_http_headers_count(headers) == 0) {
+        *out_checksum = NULL;
+        return AWS_OP_SUCCESS;
+    }
+    if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
+        /* g_mp_parts_count_header_name indicates it's a object was uploaded as a
+         * multipart upload. So, the checksum should not be applied to the meta request level.
+         * But we we want to check it for the request level. */
+        *out_checksum = NULL;
+        return AWS_OP_SUCCESS;
+    }
+
+    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
+            /* If user doesn't select this algorithm, skip */
+            continue;
+        }
+        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        struct aws_byte_cursor checksum_value;
+        if (aws_http_headers_get(headers, *algorithm_header_name, &checksum_value) == AWS_OP_SUCCESS) {
+            /* Found the checksum header, keep the header value and initialize the running checksum */
+            size_t encoded_len = 0;
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+            if (checksum_value.len == encoded_len - 1) {
+                /* encoded_len includes the nullptr length. -1 is the expected length. */
+                aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
+                *out_checksum = aws_checksum_new(meta_request->allocator, i);
+                if (!*out_checksum) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "Could not create checksum for algorithm: %d, due to error code %d (%s)",
+                        i,
+                        aws_last_error_or_unknown(),
+                        aws_error_str(aws_last_error_or_unknown()));
+                    return AWS_OP_ERR;
+                }
+                return AWS_OP_SUCCESS;
+            }
+            break;
+        }
+    }
+    *out_checksum = NULL;
+    return AWS_OP_SUCCESS;
 }
