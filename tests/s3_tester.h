@@ -188,6 +188,7 @@ struct aws_s3_tester_meta_request_options {
         struct aws_byte_cursor object_range;
         /* Get the part from S3, starts from 1. 0 means not set. */
         int part_number;
+        bool file_on_disk;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -249,6 +250,8 @@ struct aws_s3_meta_request_test_results {
     int finished_response_status;
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
+
+    struct aws_s3_checksum *get_object_checksum_crc32c;
 
     /* Record data from progress_callback() */
     struct {

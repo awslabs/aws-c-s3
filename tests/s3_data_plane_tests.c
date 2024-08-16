@@ -4228,10 +4228,10 @@ static int s_test_s3_round_trip_with_filepath_helper(
             },
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
+    aws_s3_meta_request_test_results_clean_up(&test_results);
 
     /*** GET FILE ***/
-    aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
     struct aws_s3_tester_meta_request_options get_options = {
@@ -4242,6 +4242,7 @@ static int s_test_s3_round_trip_with_filepath_helper(
         .get_options =
             {
                 .object_path = object_path,
+                .file_on_disk = true,
             },
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
