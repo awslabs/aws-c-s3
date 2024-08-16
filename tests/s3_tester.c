@@ -1776,7 +1776,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_SUCCESS(aws_file_get_length(file, &file_length));
                 struct aws_byte_buf buf;
                 aws_byte_buf_init(&buf, allocator, (size_t)file_length);
-                size_t read_length = fread(buf.buffer, 1, file_length, file);
+                size_t read_length = fread(buf.buffer, 1, (size_t)file_length, file);
                 ASSERT_INT_EQUALS(file_length, (int64_t)read_length);
                 buf.len = read_length;
                 struct aws_byte_cursor file_cursor = aws_byte_cursor_from_buf(&buf);
