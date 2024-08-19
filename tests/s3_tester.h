@@ -256,8 +256,6 @@ struct aws_s3_meta_request_test_results {
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
 
-    struct aws_s3_checksum *get_object_checksum_crc32c;
-
     /* Record data from progress_callback() */
     struct {
         uint64_t content_length;          /* Remember progress->content_length */

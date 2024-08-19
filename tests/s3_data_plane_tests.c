@@ -1525,7 +1525,7 @@ static int s_test_s3_get_object_file_path_append(struct aws_allocator *allocator
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
     ASSERT_UINT_EQUALS(pre_exist_file_length + MB_TO_BYTES(1), meta_request_test_results.received_file_size);
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(1), meta_request_test_results.received_body_size);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(1), meta_request_test_results.progress.total_bytes_transferred);
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     client = aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -1582,7 +1582,7 @@ static int s_test_s3_get_object_file_path_to_position(struct aws_allocator *allo
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
     ASSERT_UINT_EQUALS(
         get_options.get_options.recv_file_position + MB_TO_BYTES(1), meta_request_test_results.received_file_size);
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(1), meta_request_test_results.received_body_size);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(1), meta_request_test_results.progress.total_bytes_transferred);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     client = aws_s3_client_release(client);
@@ -4432,7 +4432,8 @@ static int s_test_s3_round_trip_with_filepath_helper(
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
 
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(put_options.put_options.object_size_mb), test_results.received_body_size);
+    ASSERT_UINT_EQUALS(
+        MB_TO_BYTES(put_options.put_options.object_size_mb), test_results.progress.total_bytes_transferred);
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_byte_buf_clean_up(&path_buf);

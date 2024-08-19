@@ -1850,8 +1850,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                 errno_value,
                                 aws_error_name(aws_last_error()));
                         }
-                    }
-                    if (meta_request->body_callback != NULL &&
+                    } else if (
+                        meta_request->body_callback != NULL &&
                         meta_request->body_callback(
                             meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
 

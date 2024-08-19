@@ -127,8 +127,6 @@ static int s_s3_test_meta_request_body_callback(
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
-    aws_checksum_update(meta_request_test_results->get_object_checksum_crc32c, body);
-
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
         "Received range %" PRIu64 "-%" PRIu64 ". Expected range start: %" PRIu64,
@@ -541,14 +539,12 @@ void aws_s3_meta_request_test_results_init(
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
-    test_meta_request->get_object_checksum_crc32c = aws_checksum_new(allocator, AWS_SCA_CRC32C);
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
     if (test_meta_request == NULL) {
         return;
     }
-    aws_checksum_destroy(test_meta_request->get_object_checksum_crc32c);
     aws_http_headers_release(test_meta_request->error_response_headers);
     aws_byte_buf_clean_up(&test_meta_request->error_response_body);
     aws_string_destroy(test_meta_request->error_response_operation_name);
@@ -1781,27 +1777,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_NOT_NULL(file);
                 ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
                 if (options->get_options.recv_file_options == AWS_RECV_FILE_CREATE_OR_REPLACE) {
-                    /* Only check the checksum when we create or replace the old file. */
-                    uint8_t output_from_stream[4] = {0};
-                    struct aws_byte_buf output_from_stream_buf =
-                        aws_byte_buf_from_array(output_from_stream, sizeof(output_from_stream));
-                    output_from_stream_buf.len = 0;
-                    ASSERT_SUCCESS(
-                        aws_checksum_finalize(out_results->get_object_checksum_crc32c, &output_from_stream_buf, 0));
-                    struct aws_byte_buf buf;
-                    aws_byte_buf_init(&buf, allocator, (size_t)out_results->received_file_size);
-                    size_t read_length = fread(buf.buffer, 1, (size_t)out_results->received_file_size, file);
-                    ASSERT_INT_EQUALS(out_results->received_file_size, (int64_t)read_length);
-                    buf.len = read_length;
-                    struct aws_byte_cursor file_cursor = aws_byte_cursor_from_buf(&buf);
-                    uint8_t output_from_file[4] = {0};
-                    struct aws_byte_buf output_from_file_buf =
-                        aws_byte_buf_from_array(output_from_file, sizeof(output_from_file));
-                    output_from_file_buf.len = 0;
-                    ASSERT_SUCCESS(
-                        aws_checksum_compute(allocator, AWS_SCA_CRC32C, &file_cursor, &output_from_file_buf, 0));
-                    ASSERT_TRUE(aws_byte_buf_eq(&output_from_stream_buf, &output_from_file_buf));
-                    aws_byte_buf_clean_up(&buf);
+                    ASSERT_UINT_EQUALS(out_results->progress.total_bytes_transferred, out_results->received_file_size);
                 }
                 fclose(file);
             }
@@ -1842,7 +1818,7 @@ int aws_s3_tester_send_meta_request_with_options(
     aws_uri_clean_up(&mock_server);
 
     if (filepath_str) {
-        // aws_file_delete(filepath_str);
+        aws_file_delete(filepath_str);
         aws_string_destroy(filepath_str);
     }
 
@@ -1988,9 +1964,9 @@ int aws_s3_tester_validate_get_object_results(
         AWS_LS_S3_GENERAL,
         "Content length in header is %" PRIu64 " and received body size is %" PRIu64,
         content_length,
-        meta_request_test_results->received_body_size);
+        meta_request_test_results->progress.total_bytes_transferred);
 
-    ASSERT_TRUE(content_length == meta_request_test_results->received_body_size);
+    ASSERT_TRUE(content_length == meta_request_test_results->progress.total_bytes_transferred);
     ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.total_bytes_transferred);
     ASSERT_UINT_EQUALS(content_length, meta_request_test_results->progress.content_length);
 
