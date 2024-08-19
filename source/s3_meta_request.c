@@ -241,7 +241,6 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_file = aws_fopen(aws_string_c_str(file_path), "wb");
         aws_string_destroy(file_path);
         if (!meta_request->recv_file) {
-            aws_translate_and_raise_io_error(errno);
             goto error;
         }
     }
