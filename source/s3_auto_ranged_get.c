@@ -809,11 +809,21 @@ static void s_s3_auto_ranged_get_request_finished(
         error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
 
+        /* Check for checksums if requested to */
+        if (meta_request->checksum_config.validate_response_checksum) {
+            if (aws_s3_check_headers_for_checksum(
+                    meta_request,
+                    request->send_data.response_headers,
+                    &meta_request->meta_request_level_running_response_sum,
+                    &meta_request->meta_request_level_response_header_checksum,
+                    true) != AWS_OP_SUCCESS) {
+                error_code = aws_last_error_or_unknown();
+                goto update_synced_data;
+            }
+        }
+
         if (!empty_file_error && meta_request->headers_callback != NULL) {
-            struct aws_http_headers *response_headers = aws_http_headers_new(meta_request->allocator);
-
-            copy_http_headers(request->send_data.response_headers, response_headers);
-
+            /* Modify the header received to fake the header for the whole meta request. */
             if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE ||
                 request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
 
@@ -828,12 +838,12 @@ static void s_s3_auto_ranged_get_request_finished(
                         object_range_end,
                         object_size);
                     aws_http_headers_set(
-                        response_headers,
+                        request->send_data.response_headers,
                         g_content_range_header_name,
                         aws_byte_cursor_from_c_str(content_range_buffer));
                 } else {
                     /* content range isn't applicable. */
-                    aws_http_headers_erase(response_headers, g_content_range_header_name);
+                    aws_http_headers_erase(request->send_data.response_headers, g_content_range_header_name);
                 }
             }
 
@@ -841,19 +851,19 @@ static void s_s3_auto_ranged_get_request_finished(
             char content_length_buffer[64] = "";
             snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, content_length);
             aws_http_headers_set(
-                response_headers, g_content_length_header_name, aws_byte_cursor_from_c_str(content_length_buffer));
+                request->send_data.response_headers,
+                g_content_length_header_name,
+                aws_byte_cursor_from_c_str(content_length_buffer));
 
             if (meta_request->headers_callback(
                     meta_request,
-                    response_headers,
+                    request->send_data.response_headers,
                     s_s3_auto_ranged_get_success_status(meta_request),
                     meta_request->user_data)) {
 
                 error_code = aws_last_error_or_unknown();
             }
             meta_request->headers_callback = NULL;
-
-            aws_http_headers_release(response_headers);
         }
     }
 
