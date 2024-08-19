@@ -1526,8 +1526,9 @@ int aws_s3_tester_send_meta_request_with_options(
 
             if (options->get_options.file_on_disk) {
                 if (options->get_options.pre_exist_file_length > 0) {
-                    char *buffer = aws_mem_calloc(allocator, options->get_options.pre_exist_file_length, 1);
+                    char *buffer = aws_mem_calloc(allocator, options->get_options.pre_exist_file_length + 1, 1);
                     memset(buffer, 'a', options->get_options.pre_exist_file_length);
+                    buffer[options->get_options.pre_exist_file_length] = '\0';
                     struct aws_byte_cursor cursor = aws_byte_cursor_from_c_str(buffer);
                     struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &cursor);
                     filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, input_stream);
