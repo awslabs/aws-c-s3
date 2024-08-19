@@ -249,6 +249,28 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
+enum aws_s3_recv_file_options {
+    /**
+     * Create a new file if it doesn't exist, otherwise replace the existing file.
+     */
+    AWS_RECV_FILE_CREATE_OR_REPLACE = 0,
+    /**
+     * Always create a new file. If the file already exists, AWS_ERROR_S3_RECV_FILE_EXISTS will be raised.
+     */
+    AWS_RECV_FILE_CREATE_NEW,
+    /**
+     * Create a new file if it doesn't exist, otherwise append to the existing file.
+     */
+    AWS_RECV_FILE_CREATE_OR_APPEND,
+
+    /**
+     * Write to an existing file at the specified position, defined by the `recv_file_position`.
+     * If the file does not exist, AWS_ERROR_S3_RECV_FILE_NOT_EXISTS will be raised.
+     * If `recv_file_position` is not configured, start overwriting data at the beginning of the
+     * file (byte 0).
+     */
+    AWS_RECV_FILE_WRITE_TO_POSITION,
+};
 /**
  * Info about a single part, for you to review before the upload completes.
  */
@@ -639,6 +661,15 @@ struct aws_s3_meta_request_options {
      * This gives a better performance when receiving data to write to a file.
      */
     struct aws_byte_cursor receive_filepath;
+
+    /**
+     * Optional.
+     * Default to AWS_RECV_FILE_CREATE_OR_REPLACE.
+     * This only works with receive_filepath set.
+     * See `aws_s3_recv_file_options`.
+     */
+    enum aws_s3_recv_file_options recv_file_options;
+    uint64_t recv_file_position;
 
     /**
      * Optional.

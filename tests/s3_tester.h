@@ -189,6 +189,10 @@ struct aws_s3_tester_meta_request_options {
         /* Get the part from S3, starts from 1. 0 means not set. */
         int part_number;
         bool file_on_disk;
+        enum aws_s3_recv_file_options recv_file_options;
+        uint64_t recv_file_position;
+        /* If larger than 0, create a pre-exist file with the length */
+        uint64_t pre_exist_file_length;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -245,6 +249,7 @@ struct aws_s3_meta_request_test_results {
     struct aws_http_headers *response_headers;
     uint64_t expected_range_start;
     uint64_t received_body_size;
+    int64_t received_file_size;
     /* an atomic for tests that want to check from the main thread whether data is still arriving */
     struct aws_atomic_var received_body_size_delta;
     int finished_response_status;

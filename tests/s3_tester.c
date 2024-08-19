@@ -13,6 +13,7 @@
 #include <aws/common/environment.h>
 #include <aws/common/system_info.h>
 #include <aws/common/uri.h>
+#include <aws/common/uuid.h>
 #include <aws/http/request_response.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
@@ -1528,8 +1529,20 @@ int aws_s3_tester_send_meta_request_with_options(
             }
 
             if (options->get_options.file_on_disk) {
-                filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, NULL);
+                if (options->get_options.pre_exist_file_length > 0) {
+                    char *buffer = aws_mem_calloc(allocator, options->get_options.pre_exist_file_length, 1);
+                    memset(buffer, 'a', options->get_options.pre_exist_file_length);
+                    struct aws_byte_cursor cursor = aws_byte_cursor_from_c_str(buffer);
+                    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &cursor);
+                    filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, input_stream);
+                    aws_input_stream_release(input_stream);
+                    aws_mem_release(allocator, buffer);
+                } else {
+                    filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, NULL);
+                }
                 meta_request_options.receive_filepath = aws_byte_cursor_from_string(filepath_str);
+                meta_request_options.recv_file_options = options->get_options.recv_file_options;
+                meta_request_options.recv_file_position = options->get_options.recv_file_position;
             }
             meta_request_options.message = message;
 
@@ -1764,29 +1777,33 @@ int aws_s3_tester_send_meta_request_with_options(
             if (options->get_options.file_on_disk) {
                 /* Validate the checksum from the file match the checksum we calculate on stream. */
                 ASSERT_NOT_NULL(filepath_str);
-                uint8_t output_from_stream[4] = {0};
-                struct aws_byte_buf output_from_stream_buf =
-                    aws_byte_buf_from_array(output_from_stream, sizeof(output_from_stream));
-                output_from_stream_buf.len = 0;
-                ASSERT_SUCCESS(
-                    aws_checksum_finalize(out_results->get_object_checksum_crc32c, &output_from_stream_buf, 0));
                 FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
                 ASSERT_NOT_NULL(file);
-                int64_t file_length = 0;
-                ASSERT_SUCCESS(aws_file_get_length(file, &file_length));
-                struct aws_byte_buf buf;
-                aws_byte_buf_init(&buf, allocator, (size_t)file_length);
-                size_t read_length = fread(buf.buffer, 1, (size_t)file_length, file);
-                ASSERT_INT_EQUALS(file_length, (int64_t)read_length);
-                buf.len = read_length;
-                struct aws_byte_cursor file_cursor = aws_byte_cursor_from_buf(&buf);
-                uint8_t output_from_file[4] = {0};
-                struct aws_byte_buf output_from_file_buf =
-                    aws_byte_buf_from_array(output_from_file, sizeof(output_from_file));
-                output_from_file_buf.len = 0;
-                ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_SCA_CRC32C, &file_cursor, &output_from_file_buf, 0));
-                ASSERT_TRUE(aws_byte_buf_eq(&output_from_stream_buf, &output_from_file_buf));
-                aws_byte_buf_clean_up(&buf);
+                ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
+                if (options->get_options.recv_file_options == AWS_RECV_FILE_CREATE_OR_REPLACE) {
+                    /* Only check the checksum when we create or replace the old file. */
+                    uint8_t output_from_stream[4] = {0};
+                    struct aws_byte_buf output_from_stream_buf =
+                        aws_byte_buf_from_array(output_from_stream, sizeof(output_from_stream));
+                    output_from_stream_buf.len = 0;
+                    ASSERT_SUCCESS(
+                        aws_checksum_finalize(out_results->get_object_checksum_crc32c, &output_from_stream_buf, 0));
+                    struct aws_byte_buf buf;
+                    aws_byte_buf_init(&buf, allocator, (size_t)out_results->received_file_size);
+                    size_t read_length = fread(buf.buffer, 1, (size_t)out_results->received_file_size, file);
+                    ASSERT_INT_EQUALS(out_results->received_file_size, (int64_t)read_length);
+                    buf.len = read_length;
+                    struct aws_byte_cursor file_cursor = aws_byte_cursor_from_buf(&buf);
+                    uint8_t output_from_file[4] = {0};
+                    struct aws_byte_buf output_from_file_buf =
+                        aws_byte_buf_from_array(output_from_file, sizeof(output_from_file));
+                    output_from_file_buf.len = 0;
+                    ASSERT_SUCCESS(
+                        aws_checksum_compute(allocator, AWS_SCA_CRC32C, &file_cursor, &output_from_file_buf, 0));
+                    ASSERT_TRUE(aws_byte_buf_eq(&output_from_stream_buf, &output_from_file_buf));
+                    aws_byte_buf_clean_up(&buf);
+                }
+                fclose(file);
             }
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:
@@ -1825,7 +1842,7 @@ int aws_s3_tester_send_meta_request_with_options(
     aws_uri_clean_up(&mock_server);
 
     if (filepath_str) {
-        aws_file_delete(filepath_str);
+        // aws_file_delete(filepath_str);
         aws_string_destroy(filepath_str);
     }
 
@@ -2173,21 +2190,31 @@ struct aws_string *aws_s3_tester_create_file(
 
     struct aws_byte_buf filepath_buf;
     aws_byte_buf_init(&filepath_buf, allocator, 128);
+
     struct aws_byte_cursor filepath_prefix = aws_byte_cursor_from_c_str("tmp");
     aws_byte_buf_append_dynamic(&filepath_buf, &filepath_prefix);
     aws_byte_buf_append_dynamic(&filepath_buf, &test_object_path);
+    struct aws_uuid uuid;
+    aws_uuid_init(&uuid);
+    uint8_t uuid_array[AWS_UUID_STR_LEN] = {0};
+    struct aws_byte_buf uuid_buf = aws_byte_buf_from_array(uuid_array, sizeof(uuid_array));
+    uuid_buf.len = 0;
+    aws_uuid_to_str(&uuid, &uuid_buf);
+    struct aws_byte_cursor uuid_cursor = aws_byte_cursor_from_buf(&uuid_buf);
+    aws_byte_buf_append_dynamic(&filepath_buf, &uuid_cursor);
+
     for (size_t i = 0; i < filepath_buf.len; ++i) {
         if (!isalnum(filepath_buf.buffer[i])) {
             filepath_buf.buffer[i] = '_'; /* sanitize filename */
         }
     }
+
     struct aws_string *filepath_str = aws_string_new_from_buf(allocator, &filepath_buf);
     aws_byte_buf_clean_up(&filepath_buf);
 
-    FILE *file = aws_fopen(aws_string_c_str(filepath_str), "wb");
-    AWS_FATAL_ASSERT(file != NULL);
-
     if (input_stream) {
+        FILE *file = aws_fopen(aws_string_c_str(filepath_str), "wb");
+        AWS_FATAL_ASSERT(file != NULL);
         int64_t stream_length = 0;
         AWS_FATAL_ASSERT(aws_input_stream_get_length(input_stream, &stream_length) == AWS_OP_SUCCESS);
 
@@ -2198,9 +2225,6 @@ struct aws_string *aws_s3_tester_create_file(
         AWS_FATAL_ASSERT(data_buf.len == fwrite(data_buf.buffer, 1, data_buf.len, file));
         fclose(file);
         aws_byte_buf_clean_up(&data_buf);
-    } else {
-        /* Create an empty file */
-        fclose(file);
     }
 
     return filepath_str;
