@@ -234,8 +234,6 @@ int aws_s3_meta_request_init_base(
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
 
-    /* If the request's body is being passed in some other way, set that up.
-     * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->receive_filepath.len > 0) {
 
         struct aws_string *file_path = aws_string_new_from_cursor(allocator, &options->receive_filepath);
@@ -285,6 +283,9 @@ int aws_s3_meta_request_init_base(
             goto error;
         }
     }
+
+    /* If the request's body is being passed in some other way, set that up.
+     * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
