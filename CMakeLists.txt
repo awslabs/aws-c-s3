@@ -1,5 +1,5 @@
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.13)
 project(aws-c-s3 C)
 
 option(ASSERT_LOCK_HELD "Enable ASSERT_SYNCED_DATA_LOCK_HELD for checking thread issue" OFF)
@@ -73,7 +73,6 @@ if (AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     list(APPEND S3_SRC ${AWS_S3_ENDPOINT_RESOLVER_SRC})
 endif()
 
-aws_set_common_policies()
 add_library(${PROJECT_NAME} ${S3_HEADERS} ${S3_SRC})
 aws_set_common_properties(${PROJECT_NAME})
 aws_prepare_symbol_visibility_args(${PROJECT_NAME} "AWS_S3")
