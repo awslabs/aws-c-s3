@@ -282,6 +282,8 @@ struct aws_s3_meta_request {
 
     /* The receiving file handler */
     FILE *recv_file;
+    struct aws_string *recv_filepath;
+    bool recv_file_delete_on_failure;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */

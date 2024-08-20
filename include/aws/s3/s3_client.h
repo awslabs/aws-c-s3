@@ -659,6 +659,7 @@ struct aws_s3_meta_request_options {
      * If set, the received data will be written into this file.
      * the `body_callback` will NOT be invoked.
      * This gives a better performance when receiving data to write to a file.
+     * See `aws_s3_recv_file_options` for the configuration on the receive file.
      */
     struct aws_byte_cursor receive_filepath;
 
@@ -670,6 +671,11 @@ struct aws_s3_meta_request_options {
      */
     enum aws_s3_recv_file_options recv_file_options;
     uint64_t recv_file_position;
+    /**
+     * Set it to be true to delete the receive file on failure, otherwise, the file will be left as-is.
+     * This only works with receive_filepath set.
+     */
+    bool recv_file_delete_on_failure;
 
     /**
      * Optional.

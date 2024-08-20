@@ -1773,7 +1773,7 @@ int aws_s3_tester_send_meta_request_with_options(
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_streaming_response));
             ASSERT_SUCCESS(s_tester_check_client_thread_data(client));
             if (options->get_options.file_on_disk) {
-                /* Validate the checksum from the file match the checksum we calculate on stream. */
+                /* Validate the size match. */
                 ASSERT_NOT_NULL(filepath_str);
                 FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
                 ASSERT_NOT_NULL(file);
@@ -1800,6 +1800,14 @@ int aws_s3_tester_send_meta_request_with_options(
 
         if (!options->dont_wait_for_shutdown) {
             aws_s3_tester_wait_for_meta_request_shutdown(tester);
+        }
+        if (filepath_str && out_results->finished_error_code != AWS_ERROR_SUCCESS) {
+            if (options->get_options.recv_file_delete_on_failure) {
+                /* Check the file already gone on failure */
+                ASSERT_FALSE(aws_path_exists(filepath_str));
+            } else {
+                ASSERT_TRUE(aws_path_exists(filepath_str));
+            }
         }
     }
 

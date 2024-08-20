@@ -236,14 +236,14 @@ int aws_s3_meta_request_init_base(
 
     if (options->receive_filepath.len > 0) {
 
-        struct aws_string *file_path = aws_string_new_from_cursor(allocator, &options->receive_filepath);
+        meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->receive_filepath);
         switch (options->recv_file_options) {
             case AWS_RECV_FILE_CREATE_OR_REPLACE:
-                meta_request->recv_file = aws_fopen(aws_string_c_str(file_path), "wb");
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                 break;
 
             case AWS_RECV_FILE_CREATE_NEW:
-                if (aws_path_exists(file_path)) {
+                if (aws_path_exists(meta_request->recv_filepath)) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p The receive file already exists, but required to be not.",
@@ -251,14 +251,14 @@ int aws_s3_meta_request_init_base(
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_EXISTS);
                     break;
                 } else {
-                    meta_request->recv_file = aws_fopen(aws_string_c_str(file_path), "wb");
+                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                     break;
                 }
             case AWS_RECV_FILE_CREATE_OR_APPEND:
-                meta_request->recv_file = aws_fopen(aws_string_c_str(file_path), "ab");
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
                 break;
             case AWS_RECV_FILE_WRITE_TO_POSITION:
-                if (!aws_path_exists(file_path)) {
+                if (!aws_path_exists(meta_request->recv_filepath)) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p The receive file doesn't exist, but required to be.",
@@ -266,11 +266,10 @@ int aws_s3_meta_request_init_base(
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_EXISTS);
                     break;
                 } else {
-                    meta_request->recv_file = aws_fopen(aws_string_c_str(file_path), "r+");
+                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
                     if (aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
-                        /* Failed to seek to the designed position, close the file and error out. */
-                        fclose(meta_request->recv_file);
-                        meta_request->recv_file = NULL;
+                        /* error out. */
+                        goto error;
                     }
                     break;
                 }
@@ -278,7 +277,6 @@ int aws_s3_meta_request_init_base(
                 AWS_ASSERT(false);
                 break;
         }
-        aws_string_destroy(file_path);
         if (!meta_request->recv_file) {
             goto error;
         }
@@ -495,7 +493,12 @@ static void s_s3_meta_request_destroy(void *user_data) {
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
+        if (meta_request->recv_file_delete_on_failure) {
+            /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
+            aws_file_delete(meta_request->recv_filepath);
+        }
     }
+    aws_string_destroy(meta_request->recv_filepath);
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
@@ -2052,6 +2055,10 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
+        if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
+            /* Ignore the failure. Attempt to delete */
+            aws_file_delete(meta_request->recv_filepath);
+        }
     }
 
     while (!aws_linked_list_empty(&release_request_list)) {

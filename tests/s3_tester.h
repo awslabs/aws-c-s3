@@ -191,6 +191,7 @@ struct aws_s3_tester_meta_request_options {
         bool file_on_disk;
         enum aws_s3_recv_file_options recv_file_options;
         uint64_t recv_file_position;
+        bool recv_file_delete_on_failure;
         /* If larger than 0, create a pre-exist file with the length */
         uint64_t pre_exist_file_length;
     } get_options;

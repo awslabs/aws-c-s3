@@ -1467,6 +1467,7 @@ static int s_test_s3_get_object_file_path_create_new(struct aws_allocator *alloc
                 .file_on_disk = true,
                 .recv_file_options = AWS_RECV_FILE_CREATE_NEW,
                 .pre_exist_file_length = 10,
+                .recv_file_delete_on_failure = true,
             },
     };
 
