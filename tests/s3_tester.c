@@ -1530,9 +1530,10 @@ int aws_s3_tester_send_meta_request_with_options(
                     memset(buffer, 'a', (size_t)options->get_options.pre_exist_file_length);
                     buffer[(size_t)options->get_options.pre_exist_file_length] = '\0';
                     struct aws_byte_cursor cursor = aws_byte_cursor_from_c_str(buffer);
-                    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &cursor);
-                    filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, input_stream);
-                    aws_input_stream_release(input_stream);
+                    struct aws_input_stream *buffer_input_stream = aws_input_stream_new_from_cursor(allocator, &cursor);
+                    filepath_str =
+                        aws_s3_tester_create_file(allocator, options->get_options.object_path, buffer_input_stream);
+                    aws_input_stream_release(buffer_input_stream);
                     aws_mem_release(allocator, buffer);
                 } else {
                     filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, NULL);
