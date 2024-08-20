@@ -1538,8 +1538,8 @@ int aws_s3_tester_send_meta_request_with_options(
                 } else {
                     filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, NULL);
                 }
-                meta_request_options.receive_filepath = aws_byte_cursor_from_string(filepath_str);
-                meta_request_options.recv_file_options = options->get_options.recv_file_options;
+                meta_request_options.recv_filepath = aws_byte_cursor_from_string(filepath_str);
+                meta_request_options.recv_file_option = options->get_options.recv_file_option;
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
             }
             meta_request_options.message = message;
@@ -1778,7 +1778,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
                 ASSERT_NOT_NULL(file);
                 ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
-                if (options->get_options.recv_file_options == AWS_RECV_FILE_CREATE_OR_REPLACE) {
+                if (options->get_options.recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE) {
                     ASSERT_UINT_EQUALS(out_results->progress.total_bytes_transferred, out_results->received_file_size);
                 }
                 fclose(file);

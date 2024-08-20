@@ -1465,14 +1465,14 @@ static int s_test_s3_get_object_file_path_create_new(struct aws_allocator *alloc
             {
                 .object_path = object_path,
                 .file_on_disk = true,
-                .recv_file_options = AWS_RECV_FILE_CREATE_NEW,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_NEW,
                 .pre_exist_file_length = 10,
                 .recv_file_delete_on_failure = true,
             },
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
-    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RECV_FILE_EXISTS, aws_last_error());
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS, aws_last_error());
 
     /* The request failed without invoking the finish callback. Reset the finish and shutdown count */
     aws_s3_tester_lock_synced_data(&tester);
@@ -1519,7 +1519,7 @@ static int s_test_s3_get_object_file_path_append(struct aws_allocator *allocator
             {
                 .object_path = object_path,
                 .file_on_disk = true,
-                .recv_file_options = AWS_RECV_FILE_CREATE_OR_APPEND,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND,
                 .pre_exist_file_length = pre_exist_file_length,
             },
     };
@@ -1561,13 +1561,13 @@ static int s_test_s3_get_object_file_path_to_position(struct aws_allocator *allo
             {
                 .object_path = object_path,
                 .file_on_disk = true,
-                .recv_file_options = AWS_RECV_FILE_WRITE_TO_POSITION,
+                .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
                 .pre_exist_file_length = 0,
             },
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
-    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RECV_FILE_NOT_EXISTS, aws_last_error());
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RECV_FILE_NOT_FOUND, aws_last_error());
 
     /* The request failed without invoking the finish callback. Reset the finish and shutdown count */
     aws_s3_tester_lock_synced_data(&tester);

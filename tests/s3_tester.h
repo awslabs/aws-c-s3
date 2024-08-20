@@ -189,7 +189,7 @@ struct aws_s3_tester_meta_request_options {
         /* Get the part from S3, starts from 1. 0 means not set. */
         int part_number;
         bool file_on_disk;
-        enum aws_s3_recv_file_options recv_file_options;
+        enum aws_s3_recv_file_option recv_file_option;
         uint64_t recv_file_position;
         bool recv_file_delete_on_failure;
         /* If larger than 0, create a pre-exist file with the length */

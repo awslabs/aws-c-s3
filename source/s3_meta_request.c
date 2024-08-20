@@ -234,47 +234,50 @@ int aws_s3_meta_request_init_base(
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
 
-    if (options->receive_filepath.len > 0) {
+    if (options->recv_filepath.len > 0) {
 
-        meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->receive_filepath);
-        switch (options->recv_file_options) {
-            case AWS_RECV_FILE_CREATE_OR_REPLACE:
+        meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
+        switch (options->recv_file_option) {
+            case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
                 meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                 break;
 
-            case AWS_RECV_FILE_CREATE_NEW:
+            case AWS_S3_RECV_FILE_CREATE_NEW:
                 if (aws_path_exists(meta_request->recv_filepath)) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
-                        "id=%p The receive file already exists, but required to be not.",
+                        "id=%p Cannot receive file via CREATE_NEW: file already exists",
                         (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_EXISTS);
+                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
                     break;
                 } else {
                     meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                     break;
                 }
-            case AWS_RECV_FILE_CREATE_OR_APPEND:
+            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
                 meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
                 break;
-            case AWS_RECV_FILE_WRITE_TO_POSITION:
+            case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
                 if (!aws_path_exists(meta_request->recv_filepath)) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
-                        "id=%p The receive file doesn't exist, but required to be.",
+                        "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
                         (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_EXISTS);
+                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
                     break;
                 } else {
                     meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
-                    if (aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
+                    if (meta_request->recv_file &&
+                        aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
                         /* error out. */
                         goto error;
                     }
                     break;
                 }
+
             default:
                 AWS_ASSERT(false);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 break;
         }
         if (!meta_request->recv_file) {
