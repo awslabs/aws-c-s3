@@ -1841,33 +1841,47 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
                     if (meta_request->meta_request_level_running_response_sum) {
-                        aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body);
-                    }
-                    if (meta_request->recv_file) {
-                        /* Write the data directly to the file. No need to seek, since the event will always be
-                         * delivered with the right order. */
-                        if (fwrite((void *)response_body.ptr, response_body.len, 1, meta_request->recv_file) < 1) {
-                            int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno  */
-                            error_code = aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+                        if (aws_checksum_update(
+                                meta_request->meta_request_level_running_response_sum, &response_body)) {
+                            error_code = aws_last_error();
                             AWS_LOGF_ERROR(
                                 AWS_LS_S3_META_REQUEST,
-                                "id=%p Failed writing to file. errno:%d. aws-error:%s",
+                                "id=%p Failed to update checksum. last error:%s",
                                 (void *)meta_request,
-                                errno_value,
-                                aws_error_name(aws_last_error()));
+                                aws_error_name(error_code));
                         }
-                    } else if (
-                        meta_request->body_callback != NULL &&
-                        meta_request->body_callback(
-                            meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
+                    }
+                    if (error_code == AWS_ERROR_SUCCESS) {
+                        if (meta_request->recv_file) {
+                            /* Write the data directly to the file. No need to seek, since the event will always be
+                             * delivered with the right order. */
+                            if (fwrite((void *)response_body.ptr, response_body.len, 1, meta_request->recv_file) < 1) {
+                                int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno  */
+                                aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+                                error_code = aws_last_error();
+                                AWS_LOGF_ERROR(
+                                    AWS_LS_S3_META_REQUEST,
+                                    "id=%p Failed writing to file. errno:%d. aws-error:%s",
+                                    (void *)meta_request,
+                                    errno_value,
+                                    aws_error_name(error_code));
+                            }
+                            if (meta_request->client->enable_read_backpressure) {
+                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                            }
+                        } else if (
+                            meta_request->body_callback != NULL &&
+                            meta_request->body_callback(
+                                meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
 
-                        error_code = aws_last_error_or_unknown();
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "id=%p Response body callback raised error %d (%s).",
-                            (void *)meta_request,
-                            error_code,
-                            aws_error_str(error_code));
+                            error_code = aws_last_error_or_unknown();
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p Response body callback raised error %d (%s).",
+                                (void *)meta_request,
+                                error_code,
+                                aws_error_str(error_code));
+                        }
                     }
                 }
                 aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
@@ -2059,7 +2073,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
         if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
-            /* Ignore the failure. Attempt to delete */
             aws_file_delete(meta_request->recv_filepath);
         }
     }
