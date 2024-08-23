@@ -76,6 +76,7 @@ static const size_t s_max_impact_of_forced_buffers_on_memory_limit_as_percentage
 
 struct aws_s3_buffer_pool {
     struct aws_allocator *base_allocator;
+    struct aws_allocator *aligned_allocator;
     struct aws_mutex mutex;
 
     size_t block_size;
@@ -190,6 +191,7 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
     AWS_FATAL_ASSERT(buffer_pool != NULL);
 
     buffer_pool->base_allocator = allocator;
+    buffer_pool->aligned_allocator = aws_aligned_allocator();
     buffer_pool->chunk_size = chunk_size;
     buffer_pool->block_size = s_chunks_per_block * chunk_size;
     /* Somewhat arbitrary number.
@@ -216,7 +218,7 @@ void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
         AWS_FATAL_ASSERT(block->alloc_bit_mask == 0 && "Allocator still has outstanding blocks");
-        aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
+        aws_mem_release(buffer_pool->aligned_allocator, block->block_ptr);
     }
 
     aws_array_list_clean_up(&buffer_pool->blocks);
@@ -232,7 +234,7 @@ void s_buffer_pool_trim_synced(struct aws_s3_buffer_pool *buffer_pool) {
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
         if (block->alloc_bit_mask == 0) {
-            aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
+            aws_mem_release(buffer_pool->aligned_allocator, block->block_ptr);
             aws_array_list_erase(&buffer_pool->blocks, i);
             /* do not increment since we just released element */
         } else {
@@ -348,7 +350,7 @@ static uint8_t *s_primary_acquire_synced(
     /* No space available. Allocate new block. */
     struct s3_buffer_pool_block block;
     block.alloc_bit_mask = s_set_bits(0, 0, chunks_needed);
-    block.block_ptr = aws_mem_acquire(buffer_pool->base_allocator, buffer_pool->block_size);
+    block.block_ptr = aws_mem_acquire(buffer_pool->aligned_allocator, buffer_pool->block_size);
     block.block_size = buffer_pool->block_size;
     aws_array_list_push_back(&buffer_pool->blocks, &block);
     alloc_ptr = block.block_ptr;
@@ -397,7 +399,7 @@ static struct aws_byte_buf s_acquire_buffer_synced(
     if (ticket->size <= buffer_pool->primary_size_cutoff) {
         ticket->ptr = s_primary_acquire_synced(buffer_pool, ticket);
     } else {
-        ticket->ptr = aws_mem_acquire(buffer_pool->base_allocator, ticket->size);
+        ticket->ptr = aws_mem_acquire(buffer_pool->aligned_allocator, ticket->size);
         buffer_pool->secondary_used += ticket->size;
 
         /* forced buffers acquire immediately, without reserving first */
@@ -483,7 +485,7 @@ void aws_s3_buffer_pool_release_ticket(
 
         AWS_FATAL_ASSERT(found);
     } else {
-        aws_mem_release(buffer_pool->base_allocator, ticket->ptr);
+        aws_mem_release(buffer_pool->aligned_allocator, ticket->ptr);
         buffer_pool->secondary_used -= ticket->size;
     }
 
