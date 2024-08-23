@@ -29,6 +29,12 @@
 #include <errno.h>
 #include <inttypes.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+#ifndef O_DIRECT
+    #define O_DIRECT 040000 // 040000 is the typical value for O_DIRECT on Linux systems
+#endif
+
 static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
@@ -239,48 +245,49 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
         switch (options->recv_file_option) {
             case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
-                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
+                meta_request->recv_file_fd = open(aws_string_c_str(meta_request->recv_filepath), O_RDWR | O_NONBLOCK | O_DIRECT | O_CREAT, 0666);
+                //  aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                 break;
 
-            case AWS_S3_RECV_FILE_CREATE_NEW:
-                if (aws_path_exists(meta_request->recv_filepath)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Cannot receive file via CREATE_NEW: file already exists",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
-                    break;
-                } else {
-                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
-                    break;
-                }
-            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
-                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
-                break;
-            case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
-                if (!aws_path_exists(meta_request->recv_filepath)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
-                    break;
-                } else {
-                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
-                    if (meta_request->recv_file &&
-                        aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
-                        /* error out. */
-                        goto error;
-                    }
-                    break;
-                }
+            // case AWS_S3_RECV_FILE_CREATE_NEW:
+            //     if (aws_path_exists(meta_request->recv_filepath)) {
+            //         AWS_LOGF_ERROR(
+            //             AWS_LS_S3_META_REQUEST,
+            //             "id=%p Cannot receive file via CREATE_NEW: file already exists",
+            //             (void *)meta_request);
+            //         aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
+            //         break;
+            //     } else {
+            //         meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
+            //         break;
+            //     }
+            // case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
+            //     meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
+            //     break;
+            // case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
+            //     if (!aws_path_exists(meta_request->recv_filepath)) {
+            //         AWS_LOGF_ERROR(
+            //             AWS_LS_S3_META_REQUEST,
+            //             "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
+            //             (void *)meta_request);
+            //         aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
+            //         break;
+            //     } else {
+            //         meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+            //         if (meta_request->recv_file &&
+            //             aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
+            //             /* error out. */
+            //             goto error;
+            //         }
+            //         break;
+            //     }
 
             default:
                 AWS_ASSERT(false);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 break;
         }
-        if (!meta_request->recv_file) {
+        if (meta_request->recv_file_fd == -1) {
             goto error;
         }
     }
@@ -493,13 +500,13 @@ static void s_s3_meta_request_destroy(void *user_data) {
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
-    if (meta_request->recv_file) {
-        fclose(meta_request->recv_file);
-        meta_request->recv_file = NULL;
-        if (meta_request->recv_file_delete_on_failure) {
-            /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
-            aws_file_delete(meta_request->recv_filepath);
-        }
+    if (meta_request->recv_file_fd) {
+        close(meta_request->recv_file_fd);
+        // meta_request->recv_file = NULL;
+        // if (meta_request->recv_file_delete_on_failure) {
+        //     /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
+        //     aws_file_delete(meta_request->recv_filepath);
+        // }
     }
     aws_string_destroy(meta_request->recv_filepath);
 
@@ -1843,11 +1850,11 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     if (meta_request->meta_request_level_running_response_sum) {
                         aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body);
                     }
-                    if (meta_request->recv_file) {
+                    if (meta_request->recv_file_fd) {
                         /* Write the data directly to the file. No need to seek, since the event will always be
                          * delivered with the right order. */
-                        if (fwrite((void *)response_body.ptr, response_body.len, 1, meta_request->recv_file) < 1) {
-                            int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno  */
+                        if (write(meta_request->recv_file_fd, (void *)response_body.ptr, response_body.len) < 1){
+                            int errno_value = errno; /* Always cache errno  */
                             error_code = aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
                             AWS_LOGF_ERROR(
                                 AWS_LS_S3_META_REQUEST,
@@ -2055,9 +2062,9 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         pending_async_write_waker(pending_async_write_waker_user_data);
     }
 
-    if (meta_request->recv_file) {
-        fclose(meta_request->recv_file);
-        meta_request->recv_file = NULL;
+    if (meta_request->recv_file_fd) {
+        close(meta_request->recv_file_fd);
+        meta_request->recv_file_fd = 0;
         if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
             /* Ignore the failure. Attempt to delete */
             aws_file_delete(meta_request->recv_filepath);

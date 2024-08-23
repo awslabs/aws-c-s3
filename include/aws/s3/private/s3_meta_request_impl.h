@@ -281,7 +281,7 @@ struct aws_s3_meta_request {
     struct aws_s3_checksum *meta_request_level_running_response_sum;
 
     /* The receiving file handler */
-    FILE *recv_file;
+    int recv_file_fd;
     struct aws_string *recv_filepath;
     bool recv_file_delete_on_failure;
 };
