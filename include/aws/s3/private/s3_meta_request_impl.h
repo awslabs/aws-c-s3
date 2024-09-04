@@ -279,6 +279,11 @@ struct aws_s3_meta_request {
 
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
+
+    /* The receiving file handler */
+    FILE *recv_file;
+    struct aws_string *recv_filepath;
+    bool recv_file_delete_on_failure;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */

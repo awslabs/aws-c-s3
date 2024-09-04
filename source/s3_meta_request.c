@@ -18,6 +18,7 @@
 #include <aws/auth/signing_result.h>
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
+#include <aws/common/file.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/io/async_stream.h>
@@ -25,6 +26,7 @@
 #include <aws/io/retry_strategy.h>
 #include <aws/io/socket.h>
 #include <aws/io/stream.h>
+#include <errno.h>
 #include <inttypes.h>
 
 static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
@@ -231,6 +233,57 @@ int aws_s3_meta_request_init_base(
 
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
+
+    if (options->recv_filepath.len > 0) {
+
+        meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
+        switch (options->recv_file_option) {
+            case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
+                break;
+
+            case AWS_S3_RECV_FILE_CREATE_NEW:
+                if (aws_path_exists(meta_request->recv_filepath)) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p Cannot receive file via CREATE_NEW: file already exists",
+                        (void *)meta_request);
+                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
+                    break;
+                } else {
+                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
+                    break;
+                }
+            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
+                break;
+            case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
+                if (!aws_path_exists(meta_request->recv_filepath)) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
+                        (void *)meta_request);
+                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
+                    break;
+                } else {
+                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+                    if (meta_request->recv_file &&
+                        aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
+                        /* error out. */
+                        goto error;
+                    }
+                    break;
+                }
+
+            default:
+                AWS_ASSERT(false);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                break;
+        }
+        if (!meta_request->recv_file) {
+            goto error;
+        }
+    }
 
     /* If the request's body is being passed in some other way, set that up.
      * (we checked earlier that the request body is not being passed multiple ways) */
@@ -440,6 +493,15 @@ static void s_s3_meta_request_destroy(void *user_data) {
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
+    if (meta_request->recv_file) {
+        fclose(meta_request->recv_file);
+        meta_request->recv_file = NULL;
+        if (meta_request->recv_file_delete_on_failure) {
+            /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
+            aws_file_delete(meta_request->recv_filepath);
+        }
+    }
+    aws_string_destroy(meta_request->recv_filepath);
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
@@ -1779,19 +1841,47 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
                     if (meta_request->meta_request_level_running_response_sum) {
-                        aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body);
+                        if (aws_checksum_update(
+                                meta_request->meta_request_level_running_response_sum, &response_body)) {
+                            error_code = aws_last_error();
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p Failed to update checksum. last error:%s",
+                                (void *)meta_request,
+                                aws_error_name(error_code));
+                        }
                     }
-                    if (meta_request->body_callback != NULL &&
-                        meta_request->body_callback(
-                            meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
+                    if (error_code == AWS_ERROR_SUCCESS) {
+                        if (meta_request->recv_file) {
+                            /* Write the data directly to the file. No need to seek, since the event will always be
+                             * delivered with the right order. */
+                            if (fwrite((void *)response_body.ptr, response_body.len, 1, meta_request->recv_file) < 1) {
+                                int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno  */
+                                aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+                                error_code = aws_last_error();
+                                AWS_LOGF_ERROR(
+                                    AWS_LS_S3_META_REQUEST,
+                                    "id=%p Failed writing to file. errno:%d. aws-error:%s",
+                                    (void *)meta_request,
+                                    errno_value,
+                                    aws_error_name(error_code));
+                            }
+                            if (meta_request->client->enable_read_backpressure) {
+                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                            }
+                        } else if (
+                            meta_request->body_callback != NULL &&
+                            meta_request->body_callback(
+                                meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
 
-                        error_code = aws_last_error_or_unknown();
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "id=%p Response body callback raised error %d (%s).",
-                            (void *)meta_request,
-                            error_code,
-                            aws_error_str(error_code));
+                            error_code = aws_last_error_or_unknown();
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p Response body callback raised error %d (%s).",
+                                (void *)meta_request,
+                                error_code,
+                                aws_error_str(error_code));
+                        }
                     }
                 }
                 aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
@@ -1977,6 +2067,14 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             "id=%p: Invoking write waker, due to meta request's early finish",
             (void *)meta_request);
         pending_async_write_waker(pending_async_write_waker_user_data);
+    }
+
+    if (meta_request->recv_file) {
+        fclose(meta_request->recv_file);
+        meta_request->recv_file = NULL;
+        if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
+            aws_file_delete(meta_request->recv_filepath);
+        }
     }
 
     while (!aws_linked_list_empty(&release_request_list)) {

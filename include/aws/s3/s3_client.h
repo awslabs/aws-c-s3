@@ -249,6 +249,28 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
+enum aws_s3_recv_file_option {
+    /**
+     * Create a new file if it doesn't exist, otherwise replace the existing file.
+     */
+    AWS_S3_RECV_FILE_CREATE_OR_REPLACE = 0,
+    /**
+     * Always create a new file. If the file already exists, AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS will be raised.
+     */
+    AWS_S3_RECV_FILE_CREATE_NEW,
+    /**
+     * Create a new file if it doesn't exist, otherwise append to the existing file.
+     */
+    AWS_S3_RECV_FILE_CREATE_OR_APPEND,
+
+    /**
+     * Write to an existing file at the specified position, defined by the `recv_file_position`.
+     * If the file does not exist, AWS_ERROR_S3_RECV_FILE_NOT_FOUND will be raised.
+     * If `recv_file_position` is not configured, start overwriting data at the beginning of the
+     * file (byte 0).
+     */
+    AWS_S3_RECV_FILE_WRITE_TO_POSITION,
+};
 /**
  * Info about a single part, for you to review before the upload completes.
  */
@@ -631,6 +653,34 @@ struct aws_s3_meta_request_options {
     /* Initial HTTP message that defines what operation we are doing.
      * Do not set the message's body-stream if the body is being passed by other means (see note above) */
     struct aws_http_message *message;
+
+    /**
+     * Optional.
+     * If set, the received data will be written into this file.
+     * the `body_callback` will NOT be invoked.
+     * This gives a better performance when receiving data to write to a file.
+     * See `aws_s3_recv_file_option` for the configuration on the receive file.
+     */
+    struct aws_byte_cursor recv_filepath;
+
+    /**
+     * Optional.
+     * Default to AWS_S3_RECV_FILE_CREATE_OR_REPLACE.
+     * This only works with recv_filepath set.
+     * See `aws_s3_recv_file_option`.
+     */
+    enum aws_s3_recv_file_option recv_file_option;
+    /**
+     * Optional.
+     * The specified position to start writing at for the recv file when `recv_file_option` is set to
+     * AWS_S3_RECV_FILE_WRITE_TO_POSITION, ignored otherwise.
+     */
+    uint64_t recv_file_position;
+    /**
+     * Set it to be true to delete the receive file on failure, otherwise, the file will be left as-is.
+     * This only works with recv_filepath set.
+     */
+    bool recv_file_delete_on_failure;
 
     /**
      * Optional.
