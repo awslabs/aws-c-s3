@@ -2379,8 +2379,8 @@ void aws_s3_client_notify_connection_finished(
 
             goto reset_connection;
         }
+        return;
     }
-    return;
 reset_connection:
 
     if (connection->retry_token != NULL) {
