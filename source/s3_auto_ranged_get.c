@@ -550,6 +550,7 @@ finish:;
 /* Check the finish result of meta request.
  * Return true if the request failed because it downloaded an empty file.
  * Return false if the request failed for any other reason */
+// waahm7
 static bool s_check_empty_file_download_error(struct aws_s3_request *failed_request) {
     struct aws_http_headers *failed_headers = failed_request->send_data.response_headers;
     struct aws_byte_buf failed_body = failed_request->send_data.response_body;

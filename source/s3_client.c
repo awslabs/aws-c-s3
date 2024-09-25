@@ -2180,6 +2180,57 @@ error_fail:
     aws_s3_client_release(client); /* kept since this callback was registered */
 }
 
+int s_create_s3_endpoint_synced(
+    struct aws_string *endpoint_host_name,
+    struct aws_s3_client *client,
+    bool is_https,
+    uint32_t port,
+    struct aws_s3_endpoint **out_endpoint) {
+    struct aws_s3_endpoint *endpoint = NULL;
+    struct aws_hash_element *endpoint_hash_element = NULL;
+
+    int was_created = 0;
+    if (aws_hash_table_create(
+            &client->synced_data.endpoints, endpoint_host_name, &endpoint_hash_element, &was_created)) {
+        return AWS_OP_ERR;
+    }
+
+    if (was_created) {
+        struct aws_s3_endpoint_options endpoint_options = {
+            .host_name = endpoint_host_name,
+            .client_bootstrap = client->client_bootstrap,
+            .tls_connection_options = is_https ? client->tls_connection_options : NULL,
+            .dns_host_address_ttl_seconds = s_dns_host_address_ttl_seconds,
+            .client = client,
+            .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
+            .port = port,
+            .proxy_config = client->proxy_config,
+            .proxy_ev_settings = client->proxy_ev_settings,
+            .connect_timeout_ms = client->connect_timeout_ms,
+            .tcp_keep_alive_options = client->tcp_keep_alive_options,
+            .monitoring_options = &client->monitoring_options,
+            .network_interface_names_array = client->network_interface_names_cursor_array,
+            .num_network_interface_names = client->num_network_interface_names,
+        };
+
+        endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
+
+        if (endpoint == NULL) {
+            aws_hash_table_remove(&client->synced_data.endpoints, endpoint_host_name, NULL, NULL);
+            return AWS_OP_ERR;
+        }
+        endpoint_hash_element->value = endpoint;
+        ++client->synced_data.num_endpoints_allocated;
+    } else {
+        endpoint = endpoint_hash_element->value;
+
+        aws_s3_endpoint_acquire(endpoint, true /*already_holding_lock*/);
+    }
+
+    *out_endpoint = endpoint;
+    return AWS_OP_SUCCESS;
+}
+
 /* Called by aws_s3_meta_request when it has finished using this connection for a single request. */
 void aws_s3_client_notify_connection_finished(
     struct aws_s3_client *client,
@@ -2260,6 +2311,57 @@ void aws_s3_client_notify_connection_finished(
 
             connection->http_connection = NULL;
         }
+        if (error_code == AWS_ERROR_S3_PERMANENT_REDIRECT) {
+            // TODO: waahm7 do the redirect
+            // TODO: Only do this for createMPU, discovery request or default request once.
+
+            struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
+            struct aws_byte_cursor endpoint_cursor = {0};
+            const char *xml_path[] = {"Error", "Endpoint", NULL};
+            if (aws_xml_get_body_at_path(request->allocator, xml_doc, xml_path, &endpoint_cursor) != AWS_OP_SUCCESS) {
+                goto reset_connection;
+            }
+            struct aws_byte_cursor region_cursor;
+            aws_http_headers_get(request->send_data.response_headers, g_bucket_region_header_name, &region_cursor);
+
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "waahm7: endpoint: " PRInSTR ", region: " PRInSTR "",
+                AWS_BYTE_CURSOR_PRI(endpoint_cursor),
+                AWS_BYTE_CURSOR_PRI(region_cursor));
+
+            // Update the region
+            // TODO: Do I need any locks or things around this?
+            // TODO: What is this and where to set the region?
+            // aws_string_destroy(meta_request->cached_signing_config->region);
+            // meta_request->cached_signing_config->region = aws_string_new_from_cursor(request->allocator,
+            // &region_cursor);
+
+            // Update the endpoint
+            // TODO: Do we need to care about S3Express?
+            // TODO: Make sure we don't hold the client lock
+            aws_s3_endpoint_release(meta_request->endpoint);
+            aws_s3_endpoint_release(connection->endpoint);
+            // TODO: Do we need to parse?
+            struct aws_uri host_uri;
+            if (aws_uri_init_parse(&host_uri, client->allocator, &endpoint_cursor)) {
+                goto reset_connection;
+            }
+            struct aws_string *endpoint_host_name =
+                aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
+            aws_uri_clean_up(&host_uri);
+
+            aws_s3_client_lock_synced_data(client);
+
+            struct aws_s3_endpoint *endpoint = NULL;
+            // TODO: fix https and port
+            if (s_create_s3_endpoint_synced(endpoint_host_name, client, true, 0, &endpoint)) {
+                // TODO: error handling
+            }
+            meta_request->endpoint = endpoint;
+            connection->endpoint = aws_s3_endpoint_acquire(endpoint, true);
+            aws_s3_client_unlock_synced_data(client);
+        }
 
         /* Ask the retry strategy to schedule a retry of the request. */
         if (aws_retry_strategy_schedule_retry(
@@ -2277,10 +2379,8 @@ void aws_s3_client_notify_connection_finished(
 
             goto reset_connection;
         }
-
-        return;
     }
-
+    return;
 reset_connection:
 
     if (connection->retry_token != NULL) {

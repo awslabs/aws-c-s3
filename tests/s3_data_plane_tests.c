@@ -1105,6 +1105,16 @@ static int s_test_s3_get_object_tls_default(struct aws_allocator *allocator, voi
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_region_redirect, s_test_s3_get_object_region_redirect)
+static int s_test_s3_get_object_region_redirect(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor region = aws_byte_cursor_from_c_str("us-west-2");
+    ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, g_pre_existing_object_1MB));
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_no_signing, s_test_s3_no_signing)
 static int s_test_s3_no_signing(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

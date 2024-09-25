@@ -1545,7 +1545,6 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
         /* Return error based on status-code, unless we got something more specific from XML */
         switch (error_code_from_xml) {
             case AWS_ERROR_SUCCESS:
-                return error_code_from_status;
             case AWS_ERROR_UNKNOWN:
                 return error_code_from_status;
             default:
@@ -1603,6 +1602,7 @@ void aws_s3_meta_request_send_request_finish_default(
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
             error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
+            // error_code == AWS_ERROR_S3_PERMANENT_REDIRECT ||
             error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
             if (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
@@ -1616,6 +1616,7 @@ void aws_s3_meta_request_send_request_finish_default(
                     (void *)request,
                     response_status);
             } else {
+                // TODO: waahm7 fix log
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
