@@ -1083,6 +1083,7 @@ void aws_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester) {
     tester->synced_data.client_shutdown = false;
     aws_s3_tester_unlock_synced_data(tester);
 }
+
 struct aws_http_message *aws_s3_test_get_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host,
@@ -1101,6 +1102,43 @@ struct aws_http_message *aws_s3_test_get_object_request_new(
     }
 
     if (aws_http_message_set_request_method(message, aws_http_method_get)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_path(message, key)) {
+        goto error_clean_up_message;
+    }
+
+    return message;
+
+error_clean_up_message:
+
+    if (message != NULL) {
+        aws_http_message_release(message);
+        message = NULL;
+    }
+
+    return NULL;
+}
+
+struct aws_http_message *aws_s3_test_delete_object_request_new(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor host,
+    struct aws_byte_cursor key) {
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    struct aws_http_header host_header = {.name = g_host_header_name, .value = host};
+
+    if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    if (aws_http_message_set_request_method(message, aws_http_method_delete)) {
         goto error_clean_up_message;
     }
 
@@ -1890,8 +1928,8 @@ int aws_s3_tester_send_get_object_meta_request(
     uint32_t flags,
     struct aws_s3_meta_request_test_results *out_results) {
 
-    struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor region = aws_byte_cursor_from_c_str("us-east-1");
+    struct aws_string *host_name = aws_s3_tester_build_endpoint_string(tester->allocator, &g_test_bucket_name, &region);
 
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
@@ -2000,9 +2038,9 @@ int aws_s3_tester_send_put_object_meta_request(
 
     struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
     struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+    struct aws_byte_cursor region = aws_byte_cursor_from_c_str("us-east-1");
 
-    struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_string *host_name = aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &region);
 
     char object_path_buffer[128] = "";
 

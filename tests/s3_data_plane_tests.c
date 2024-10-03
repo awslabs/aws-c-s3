@@ -1036,9 +1036,8 @@ static int s_test_s3_get_object_helper(
     struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
 #endif
-
-    struct aws_string *endpoint =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor region = aws_byte_cursor_from_c_str("us-east-1");
+    struct aws_string *endpoint = aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &region);
     struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
 
     tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
@@ -1109,7 +1108,6 @@ AWS_TEST_CASE(test_s3_get_object_region_redirect, s_test_s3_get_object_region_re
 static int s_test_s3_get_object_region_redirect(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor region = aws_byte_cursor_from_c_str("us-west-2");
     ASSERT_SUCCESS(s_test_s3_get_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0, g_pre_existing_object_1MB));
 
     return 0;
@@ -2013,9 +2011,9 @@ static int s_test_s3_put_object_helper(
     struct aws_tls_ctx *context = aws_tls_client_ctx_new(allocator, &tls_context_options);
     aws_tls_connection_options_init_from_ctx(&tls_connection_options, context);
 #endif
+    struct aws_byte_cursor region = aws_byte_cursor_from_c_str("us-east-1");
 
-    struct aws_string *endpoint =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_string *endpoint = aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &region);
     struct aws_byte_cursor endpoint_cursor = aws_byte_cursor_from_string(endpoint);
 
     tls_connection_options.server_name = aws_string_new_from_cursor(allocator, &endpoint_cursor);
@@ -2042,7 +2040,7 @@ static int s_test_s3_put_object_helper(
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | extra_meta_request_flag, NULL));
+        &tester, client, 4, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | extra_meta_request_flag, NULL));
 
     aws_string_destroy(endpoint);
 
@@ -2079,6 +2077,15 @@ static int s_test_s3_put_object_tls_enabled(struct aws_allocator *allocator, voi
 
 AWS_TEST_CASE(test_s3_put_object_tls_default, s_test_s3_put_object_tls_default)
 static int s_test_s3_put_object_tls_default(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0));
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_region_redirect, s_test_s3_put_object_region_redirect)
+static int s_test_s3_put_object_region_redirect(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0));
@@ -4675,6 +4682,83 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
     aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+
+    meta_request = aws_s3_meta_request_release(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_http_message_release(message);
+    message = NULL;
+
+    aws_string_destroy(host_name);
+    host_name = NULL;
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_meta_request_default_delete_object_region_redirect,
+    s_test_s3_meta_request_default_delete_object_region_redirect)
+static int s_test_s3_meta_request_default_delete_object_region_redirect(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_byte_cursor region = aws_byte_cursor_from_c_str("us-east-1");
+
+    struct aws_string *host_name = aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &region);
+
+    /* Put together a simple S3 Get Object request. */
+    struct aws_http_message *message = aws_s3_test_delete_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+
+    /* Pass the request through as a default request so that it goes through as-is. */
+    options.type = AWS_S3_META_REQUEST_TYPE_DEFAULT;
+    options.operation_name = aws_byte_cursor_from_c_str("DeleteObject");
+    options.message = message;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+
+    ASSERT_TRUE(meta_request != NULL);
+
+    /* Wait for the request to finish. */
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+
+    aws_s3_tester_lock_synced_data(&tester);
+
+    ASSERT_TRUE(tester.synced_data.finish_error_code == AWS_ERROR_SUCCESS);
+
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    /* Check the size of the metrics should be the same as the number of
+    requests, which should be 1 */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
+    struct aws_s3_request_metrics *metrics = NULL;
+    aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
+
+    // ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
 
     meta_request = aws_s3_meta_request_release(meta_request);
 

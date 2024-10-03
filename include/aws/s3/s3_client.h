@@ -830,6 +830,17 @@ struct aws_s3_meta_request_options {
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
      */
     const uint64_t *object_size_hint;
+
+    /*
+     * @Deprecated
+     * THIS IS AN EXPERIMENTAL AND UNSTABLE API
+     *
+     * This option can be used to redirect the request to the correct endpoint if we receive a 301 PermanentRedirect
+     * error from S3. It will only redirect the default request, CreateMultipartUpload, or the first request of
+     * GetObject one time to the correct endpoint and region. This option has a performance penalty and thus is not recommended to
+     * enable; instead, you should specify the correct endpoint and region for your request.
+     */
+    bool enable_region_redirect;
 };
 
 /* Result details of a meta request.

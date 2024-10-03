@@ -1602,7 +1602,7 @@ void aws_s3_meta_request_send_request_finish_default(
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
             error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
-            // error_code == AWS_ERROR_S3_PERMANENT_REDIRECT ||
+            error_code == AWS_ERROR_S3_PERMANENT_REDIRECT ||
             error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
             if (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
