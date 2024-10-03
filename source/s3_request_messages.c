@@ -285,8 +285,8 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     if (checksum_config && checksum_config->checksum_algorithm && checksum_config->location != AWS_SCL_NONE) {
         if (aws_http_headers_set(
                 headers,
-                g_create_mpu_checksum_header_name,
-                *aws_get_create_mpu_header_name_from_algorithm(checksum_config->checksum_algorithm))) {
+                g_checksum_algorithm_header_name,
+                *aws_get_algorithm_value_from_algorithm(checksum_config->checksum_algorithm))) {
             goto error_clean_up;
         }
     }
@@ -569,7 +569,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *message = NULL;
 
     if (checksum_config && checksum_config->location != AWS_SCL_NONE) {
-        mpu_algorithm_checksum_name = aws_get_complete_mpu_name_from_algorithm(checksum_config->checksum_algorithm);
+        mpu_algorithm_checksum_name = aws_get_completed_part_name_from_algorithm(checksum_config->checksum_algorithm);
         message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
             allocator,
             base_message,

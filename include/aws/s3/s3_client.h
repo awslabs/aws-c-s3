@@ -236,7 +236,8 @@ enum aws_s3_meta_request_compute_content_md5 {
 enum aws_s3_checksum_algorithm {
     AWS_SCA_NONE = 0,
     AWS_SCA_INIT,
-    AWS_SCA_CRC32C = AWS_SCA_INIT,
+    AWS_SCA_CRC64NVME = AWS_SCA_INIT,
+    AWS_SCA_CRC32C,
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
@@ -592,7 +593,7 @@ struct aws_s3_checksum_config {
      *
      * The list of algorithms for user to pick up when validate the checksum. Client will pick up the algorithm from the
      * list with the priority based on performance, and the algorithm sent by server. The priority based on performance
-     * is [CRC32C, CRC32, SHA1, SHA256].
+     * is [CRC64NVME, CRC32C, CRC32, SHA1, SHA256].
      *
      * If the response checksum was validated by client, the result will indicate which algorithm was picked.
      */
