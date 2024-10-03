@@ -2486,6 +2486,8 @@ bool aws_s3_meta_request_checksum_config_has_algorithm(
     AWS_PRECONDITION(meta_request);
 
     switch (algorithm) {
+        case AWS_SCA_CRC64NVME:
+            return meta_request->checksum_config.response_checksum_algorithms.crc64nvme;
         case AWS_SCA_CRC32C:
             return meta_request->checksum_config.response_checksum_algorithms.crc32c;
         case AWS_SCA_CRC32:

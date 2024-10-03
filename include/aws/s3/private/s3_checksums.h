@@ -31,6 +31,7 @@ struct checksum_config {
     enum aws_s3_checksum_algorithm checksum_algorithm;
     bool validate_response_checksum;
     struct {
+        bool crc64nvme;
         bool crc32c;
         bool crc32;
         bool sha1;
@@ -88,22 +89,23 @@ AWS_S3_API
 size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get the header name corresponding to the aws_s3_checksum_algorithm enum value.
+ * Get the checksum header name corresponding to the aws_s3_checksum_algorithm enum value. `x-amz-checksum-<algo>`
  */
 AWS_S3_API
 const struct aws_byte_cursor *aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get the multipart upload header name corresponding to the aws_s3_checksum_algorithm enum value.
+ * Get the cursor to be used as value of `*-checksum-algorithm` header.
  */
 AWS_S3_API
-const struct aws_byte_cursor *aws_get_create_mpu_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+const struct aws_byte_cursor *aws_get_algorithm_value_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get the complete multipart upload name corresponding to the aws_s3_checksum_algorithm enum value.
+ * Get the name of checksum algorithm to be used as the details of the parts were uploaded. Referring to
+ * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompletedPart.html#AmazonS3-Type-CompletedPart
  */
 AWS_S3_API
-const struct aws_byte_cursor *aws_get_complete_mpu_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+const struct aws_byte_cursor *aws_get_completed_part_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * create a new aws_checksum corresponding to the aws_s3_checksum_algorithm enum value.
