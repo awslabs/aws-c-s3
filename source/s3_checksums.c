@@ -85,16 +85,7 @@ int s3_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *outp
 typedef uint32_t (*crc_fn)(const uint8_t *, int, uint32_t);
 
 uint32_t aws_crc32_common(uint32_t previous, const struct aws_byte_cursor *buf, crc_fn checksum_fn) {
-
-    size_t length = buf->len;
-    uint8_t *buffer = buf->ptr;
-    uint32_t val = previous;
-    while (length > INT_MAX) {
-        val = checksum_fn(buffer, INT_MAX, val);
-        buffer += (size_t)INT_MAX;
-        length -= (size_t)INT_MAX;
-    }
-    return checksum_fn(buffer, (int)length, val);
+    return checksum_fn(buf->ptr, buf->len, previous);
 }
 
 int aws_crc_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to) {
@@ -122,7 +113,7 @@ int aws_crc32_checksum_update(struct aws_s3_checksum *checksum, const struct aws
     if (!checksum->good) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
-    *(uint32_t *)checksum->impl = aws_crc32_common(*(uint32_t *)checksum->impl, buf, aws_checksums_crc32);
+    *(uint32_t *)checksum->impl = aws_checksums_crc32_ex(buf->ptr, buf->len, *(uint32_t *)checksum->impl);
     return AWS_OP_SUCCESS;
 }
 
@@ -130,7 +121,7 @@ int aws_crc32c_checksum_update(struct aws_s3_checksum *checksum, const struct aw
     if (!checksum->good) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
-    *(uint32_t *)checksum->impl = aws_crc32_common(*(uint32_t *)checksum->impl, buf, aws_checksums_crc32c);
+    *(uint32_t *)checksum->impl = aws_checksums_crc32c_ex(buf->ptr, buf->len, *(uint32_t *)checksum->impl);
     return AWS_OP_SUCCESS;
 }
 
