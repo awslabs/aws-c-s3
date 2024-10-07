@@ -3775,8 +3775,7 @@ void s_s3_test_no_validate_checksum(
 }
 
 /* TODO: maybe refactor the fc -> flexible checksum tests to be less copy/paste */
-AWS_TEST_CASE(test_s3_round_trip_default_get_fc, s_test_s3_round_trip_default_get_fc)
-static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, void *ctx) {
+static int s_test_s3_round_trip_default_get_fc_helper(struct aws_allocator *allocator, void *ctx, bool via_header) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -3810,6 +3809,7 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
             .client = client,
             .checksum_algorithm = algorithm,
             .validate_get_response_checksum = false,
+            .checksum_via_header = via_header,
             .put_options =
                 {
                     .object_size_mb = 1,
@@ -3846,8 +3846,17 @@ static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, 
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_round_trip_multipart_get_fc, s_test_s3_round_trip_multipart_get_fc)
-static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_round_trip_default_get_fc, s_test_s3_round_trip_default_get_fc)
+static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_default_get_fc_helper(allocator, ctx, false);
+}
+
+AWS_TEST_CASE(test_s3_round_trip_default_get_fc_header, s_test_s3_round_trip_default_get_fc_header)
+static int s_test_s3_round_trip_default_get_fc_header(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_default_get_fc_helper(allocator, ctx, true);
+}
+
+static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *allocator, void *ctx, bool via_header) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -3873,6 +3882,7 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
         .client = client,
         .checksum_algorithm = AWS_SCA_CRC32,
         .validate_get_response_checksum = false,
+        .checksum_via_header = via_header,
         .put_options =
             {
                 .object_size_mb = 1,
@@ -3908,10 +3918,21 @@ static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_round_trip_multipart_get_fc, s_test_s3_round_trip_multipart_get_fc)
+static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_multipart_get_fc_helper(allocator, ctx, false);
+}
+AWS_TEST_CASE(test_s3_round_trip_multipart_get_fc_header, s_test_s3_round_trip_multipart_get_fc_header)
+static int s_test_s3_round_trip_multipart_get_fc_header(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_multipart_get_fc_helper(allocator, ctx, true);
+}
+
 /* Test the multipart uploaded object was downloaded with same part size, which will download the object matches all the
  * parts and validate the parts checksum. */
-AWS_TEST_CASE(test_s3_round_trip_mpu_multipart_get_fc, s_test_s3_round_trip_mpu_multipart_get_fc)
-static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
+static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
+    struct aws_allocator *allocator,
+    void *ctx,
+    bool via_header) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -3937,6 +3958,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
         .client = client,
         .checksum_algorithm = AWS_SCA_CRC32,
         .validate_get_response_checksum = false,
+        .checksum_via_header = via_header,
         .put_options =
             {
                 .object_size_mb = 10,
@@ -3971,8 +3993,20 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *alloc
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_download_empty_file_with_checksum, s_test_s3_download_empty_file_with_checksum)
-static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_round_trip_mpu_multipart_get_fc, s_test_s3_round_trip_mpu_multipart_get_fc)
+static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, false);
+}
+
+AWS_TEST_CASE(test_s3_round_trip_mpu_multipart_get_fc_header, s_test_s3_round_trip_mpu_multipart_get_fc_header)
+static int s_test_s3_round_trip_mpu_multipart_get_fc_header(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, true);
+}
+
+static int s_test_s3_download_empty_file_with_checksum_helper(
+    struct aws_allocator *allocator,
+    void *ctx,
+    bool via_header) {
     (void)ctx;
 
     /* Upload the file */
@@ -3998,6 +4032,7 @@ static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *all
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
         .checksum_algorithm = AWS_SCA_CRC32,
+        .checksum_via_header = via_header,
         .put_options =
             {
                 .object_size_mb = 0,
@@ -4035,6 +4070,15 @@ static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *all
     aws_s3_tester_clean_up(&tester);
 
     return 0;
+}
+
+AWS_TEST_CASE(test_s3_download_empty_file_with_checksum, s_test_s3_download_empty_file_with_checksum)
+static int s_test_s3_download_empty_file_with_checksum(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_download_empty_file_with_checksum_helper(allocator, ctx, false);
+}
+AWS_TEST_CASE(test_s3_download_empty_file_with_checksum_header, s_test_s3_download_empty_file_with_checksum_header)
+static int s_test_s3_download_empty_file_with_checksum_header(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_download_empty_file_with_checksum_helper(allocator, ctx, true);
 }
 
 AWS_TEST_CASE(test_s3_download_single_part_file_with_checksum, s_test_s3_download_single_part_file_with_checksum)
@@ -7094,7 +7138,7 @@ static int s_test_s3_put_pause_resume_helper(
 
     struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = checksum_algorithm,
-        .location = checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_HEADER,
+        .location = checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
     };
 
     struct aws_s3_meta_request_options meta_request_options = {
