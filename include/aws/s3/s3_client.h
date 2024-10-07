@@ -560,7 +560,8 @@ struct aws_s3_checksum_config {
      *
      * If AWS_SCL_NONE. No request payload checksum will be add and calculated.
      *
-     * If AWS_SCL_HEADER, the checksum will be calculated by client and added related header to the request sent.
+     * If AWS_SCL_HEADER, the checksum will be added related header to the request sent. If no checksum provided, it
+     * will be calculated the the client.
      *
      * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The checksum will be calculate while reading the
      * payload by client. Related header will be added to the trailer part of the encoded payload. Note the payload of

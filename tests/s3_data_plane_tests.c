@@ -7094,7 +7094,7 @@ static int s_test_s3_put_pause_resume_helper(
 
     struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = checksum_algorithm,
-        .location = checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_TRAILER,
+        .location = checksum_algorithm == AWS_SCA_NONE ? AWS_SCL_NONE : AWS_SCL_HEADER,
     };
 
     struct aws_s3_meta_request_options meta_request_options = {

@@ -1452,7 +1452,7 @@ int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = options->checksum_algorithm,
         .validate_response_checksum = options->validate_get_response_checksum,
-        .location = disable_trailing_checksum ? AWS_SCL_NONE : AWS_SCL_TRAILER,
+        .location = disable_trailing_checksum ? AWS_SCL_NONE : AWS_SCL_HEADER,
         .validate_checksum_algorithms = options->validate_checksum_algorithms,
     };
 
