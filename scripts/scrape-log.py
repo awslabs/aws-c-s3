@@ -43,9 +43,9 @@ S3_REQUEST_START = LogPattern(
 # S3_REQUEST_END = I'm not finding a simple way to do this with debug logs
 
 S3_REQUEST_ATTEMPT_START = LogPattern(
-    'S3MetaRequest', r'id=(?P<meta>[^:]+): Created request (?P<req>[^ ]+) for part (?P<part_num>\d+).*')
+    'S3MetaRequest', r'id=(?P<meta>[^:]+): (Prepared|Created) request (?P<req>[^ ]+) for part (?P<part_num>\d+).*')
 S3_REQUEST_ATTEMPT_END = LogPattern(
-    'S3MetaRequest', r'id=(?P<meta>[^:]+): Request (?P<req>[^ ]+) finished with error code (?P<err_num>\d+) \([^:]*: (?P<err_name>[A-Z_]+).*\) and response status (?P<http_status>[0-9]+)')
+    'S3MetaRequest', r'id=(?P<meta>[^:]+): Request (?P<req>[^ ]+) finished with error code (?P<err_num>\d+) \([^:]*: (?P<err_name>\w+).*\) and response status (?P<http_status>[0-9]+)')
 
 HTTP_CONNECTION_START = LogPattern(
     'http-connection', r'id=(?P<id>[^:]+): HTTP/1.1 client connection established.')
@@ -57,7 +57,7 @@ HTTP_STREAM_START = LogPattern(
 HTTP_STREAM_END_OK = LogPattern(
     'http-stream', r'id=(?P<id>[^:]+): Client request complete, response status: (?P<http_status>[0-9]+).*')
 HTTP_STREAM_END_ERR = LogPattern(
-    'http-stream', r'id=(?P<id>[^:]+): Stream completed with error code (?P<err_num>[^ ]+) \((?P<err_name>[A-Z_]+).*')
+    'http-stream', r'id=(?P<id>[^:]+): Stream completed with error code (?P<err_num>[^ ]+) \((?P<err_name>\w+).*')
 
 S3_CLIENT_STATS = LogPattern(
     'S3ClientStats',
@@ -152,6 +152,7 @@ class S3RequestAttempt:
     error_num: int = None
     error: str = None
     http_status: int = None
+
 
 @dataclass
 class S3ClientStat:
@@ -252,7 +253,11 @@ class _Scraper:
             microseconds = int(1000000.0 * (idx / len(lines)))
             line.date_str = f"{line.date_str[:-1]}.{microseconds:06}Z"
 
-            self._process_line(line)
+            try:
+                self._process_line(line)
+            except Exception as e:
+                print(f'FAILED processing line {line.num}: {line.msg}')
+                raise e
 
     def _process_line(self, line: LogLine):
         if not hasattr(self, 'start_date'):
@@ -288,23 +293,12 @@ class _Scraper:
 
         # S3Request
         elif m := S3_REQUEST_START.match(line):
-            s3_req = S3Request(id=m.group('req'),
-                               start_time=self._line_time(line),
-                               part_num=int(m.group('part_num')))
-            self._s3_requests[s3_req.id] = s3_req
-
-            # add to S3MetaRequest
-            meta_id = m.group('meta')
-            meta = self._meta_requests[meta_id]
-            meta.s3_requests_by_part_num[s3_req.part_num] = s3_req
-            num_parts = int(m.group('num_parts'))
-            if num_parts != 0:  # <num_parts> is 0 on the initial request before real size is discovered
-                meta.num_parts = num_parts
+            self._get_or_create_s3_request(line, m)
 
         # S3RequestAttempt
         elif m := S3_REQUEST_ATTEMPT_START.match(line):
             req_id = m.group('req')
-            req = self._s3_requests[req_id]
+            req = self._get_or_create_s3_request(line, m)
             attempt = S3RequestAttempt(start_time=self._line_time(line))
             req.attempts.append(attempt)
 
@@ -353,7 +347,7 @@ class _Scraper:
             stream.error = m.group('err_name')
             stream.end_time = self._line_time(line)
 
-        elif m:= S3_CLIENT_STATS.match(line):
+        elif m := S3_CLIENT_STATS.match(line):
             self.s3_run.stats.append(S3ClientStat(
                 in_flight_total=int(m.group('exact')),
                 preparing=int(m.group('preparing')),
@@ -366,6 +360,33 @@ class _Scraper:
                 streaming_response=int(m.group('streaming_response')),
                 time=self._line_time(line),
             ))
+
+    def _get_or_create_s3_request(self, line: LogLine, m: re.Match):
+        # Some requests don't log a creation line, so `m` may be S3_REQUEST_START or S3_REQUEST_ATTEMPT_START
+        req_id = m.group('req')
+
+        # if S3Request already exists, return it
+        if s3_req := self._s3_requests.get(req_id):
+            return s3_req
+
+        # otherwise, create it
+        s3_req = S3Request(id=req_id,
+                           start_time=self._line_time(line),
+                           part_num=int(m.group('part_num')))
+        self._s3_requests[s3_req.id] = s3_req
+
+        # add to S3MetaRequest
+        meta_id = m.group('meta')
+        meta = self._meta_requests[meta_id]
+        meta.s3_requests_by_part_num[s3_req.part_num] = s3_req
+
+        # S3_REQUEST_START has num_parts, but S3_REQUEST_ATTEMPT_START doesn't
+        if 'num_parts' in m.groups():
+            num_parts = int(m.group('num_parts'))
+            if num_parts != 0:  # <num_parts> is 0 on the initial request before real size is discovered
+                meta.num_parts = num_parts
+
+        return s3_req
 
     def _post_processing(self):
         self.s3_run.max_time = self._line_time(self._last_line)
@@ -407,7 +428,6 @@ class _Scraper:
                 for attempt_idx, attempt in enumerate(s3_req.attempts):
                     if attempt.end_time is None:
                         # don't warn, nothing is logged if the request is abandoned
-                        assert attempt_idx + 1 == len(s3_req.attempts)
                         attempt.end_time = snip_time
                         attempt.error = snip_error
 
