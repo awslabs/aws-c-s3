@@ -70,7 +70,7 @@ static int s_asyncwrite_tester_init(
 
     struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = AWS_SCA_CRC32,
-        .location = AWS_SCL_TRAILER,
+        .location = AWS_SCL_HEADER,
     };
 
     struct aws_s3_meta_request_options meta_request_options = {
