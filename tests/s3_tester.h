@@ -526,7 +526,8 @@ int aws_test_s3_copy_object_helper(
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status,
-    uint64_t expected_size);
+    uint64_t expected_size,
+    bool s3_express);
 
 /**
  * Take the source with x_amz_copy_source, and the destination_endpoint to help testing copy object.
@@ -538,6 +539,7 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status,
-    uint64_t expected_size);
+    uint64_t expected_size,
+    bool s3_express);
 
 #endif /* AWS_S3_TESTER_H */

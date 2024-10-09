@@ -6289,7 +6289,8 @@ static int s_test_s3_copy_object_helper(
         destination_key,
         expected_error_code,
         expected_response_status,
-        expected_size);
+        expected_size,
+        false);
 }
 
 AWS_TEST_CASE(test_s3_copy_small_object, s_test_s3_copy_small_object)
@@ -6392,7 +6393,8 @@ static int s_test_s3_copy_source_prefixed_by_slash(struct aws_allocator *allocat
         destination_key,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK,
-        MB_TO_BYTES(1));
+        MB_TO_BYTES(1),
+        false);
 }
 
 /**
@@ -6438,7 +6440,8 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
         destination_key,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK,
-        MB_TO_BYTES(256));
+        MB_TO_BYTES(256),
+        false);
 }
 
 static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {

@@ -2364,15 +2364,16 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status,
-    uint64_t expected_size) {
+    uint64_t expected_size,
+    bool s3express) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
-    client_config.enable_s3express = true;
-    struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-east-1");
+    client_config.enable_s3express = s3express;
+    struct aws_byte_cursor region_cursor = g_test_s3_region;
     client_config.region = region_cursor;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
@@ -2387,10 +2388,6 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
 
     test_data.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data.mutex);
-    struct aws_signing_config_aws s3express_signing_config = {
-        .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
-        .service = g_s3express_service_name,
-    };
 
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = &test_data,
@@ -2400,9 +2397,17 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
         .progress_callback = s_copy_object_meta_request_progress_callback,
         .message = message,
         .shutdown_callback = NULL,
-        .signing_config = &s3express_signing_config,
+        .signing_config = client_config.signing_config,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
     };
+
+    if (s3express) {
+        struct aws_signing_config_aws s3express_signing_config = {
+            .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
+            .service = g_s3express_service_name,
+        };
+        meta_request_options.signing_config = &s3express_signing_config;
+    }
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
     ASSERT_NOT_NULL(meta_request);
@@ -2443,7 +2448,8 @@ int aws_test_s3_copy_object_helper(
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status,
-    uint64_t expected_size) {
+    uint64_t expected_size,
+    bool s3_express) {
 
     char copy_source_value[1024];
     snprintf(
@@ -2464,5 +2470,6 @@ int aws_test_s3_copy_object_helper(
         destination_key,
         expected_error_code,
         expected_response_status,
-        expected_size);
+        expected_size,
+        s3_express);
 }

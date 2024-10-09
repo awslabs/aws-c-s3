@@ -231,13 +231,13 @@ def cleanup(bucket_name, availability_zone=None, client=s3_client):
 
 
 if args.action == 'init':
-    create_bucket_with_lifecycle("use1-az4", s3_client_east1)
+    # create_bucket_with_lifecycle("use1-az4", s3_client_east1)
     create_bucket_with_lifecycle("usw2-az1")
-    create_bucket_with_lifecycle()
-    create_bucket_with_public_object()
-    if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME_BASE:
-        print(
-            f"*** Set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME_BASE} before running the tests ***")
+    # create_bucket_with_lifecycle()
+    # create_bucket_with_public_object()
+    # if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME_BASE:
+    #     print(
+    #         f"*** Set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME_BASE} before running the tests ***")
 
 elif args.action == 'clean':
     if "CRT_S3_TEST_BUCKET_NAME" not in os.environ and args.bucket_name is None:
