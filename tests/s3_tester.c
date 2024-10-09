@@ -2386,6 +2386,10 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct copy_object_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
 
+    struct aws_signing_config_aws s3express_signing_config = {
+        .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
+        .service = g_s3express_service_name,
+    };
     test_data.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data.mutex);
 
@@ -2402,10 +2406,6 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     };
 
     if (s3express) {
-        struct aws_signing_config_aws s3express_signing_config = {
-            .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
-            .service = g_s3express_service_name,
-        };
         meta_request_options.signing_config = &s3express_signing_config;
     }
 
