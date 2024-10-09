@@ -46,10 +46,14 @@ python3 test_helper.py clean
 * Create directory bucket `<BUCKET_NAME>--usw2-az1--x-s3` in us-west-2
 * Upload files:
   + `pre-existing-10MB` 10MB file.
+  + with `--large_objects` enabled
+    - `pre-existing-2GB`
 
 * Create directory bucket `<BUCKET_NAME>--use1-az4--x-s3` in us-east-1
 * Upload files:
   + `pre-existing-10MB` 10MB file.
+  + with `--large_objects` enabled
+    - `pre-existing-2GB`
 
 ### `clean` action
 

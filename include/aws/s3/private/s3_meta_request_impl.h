@@ -351,6 +351,14 @@ void aws_s3_meta_request_init_signing_date_time_default(
     struct aws_date_time *date_time);
 
 AWS_S3_API
+void aws_s3_meta_request_sign_request_default_impl(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data,
+    bool force_regular_signing);
+
+AWS_S3_API
 void aws_s3_meta_request_sign_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,

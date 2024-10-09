@@ -16,9 +16,6 @@ s3_client = boto3.client('s3', region_name=REGION)
 s3_client_east1 = boto3.client('s3', region_name=REGION_EAST_1)
 
 
-s3_control_client = boto3.client('s3control')
-
-
 MB = 1024*1024
 GB = 1024*1024*1024
 
@@ -166,6 +163,10 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
     put_pre_existing_objects(
         10*MB, 'pre-existing-10MB', bucket=bucket_name, client=client)
 
+    if args.large_objects:
+        put_pre_existing_objects(
+            2*GB, 'pre-existing-2GB', bucket=bucket_name, client=client)
+
     if availability_zone is None:
         put_pre_existing_objects(
             10*MB, 'pre-existing-10MB-aes256-c', sse='aes256-c', bucket=bucket_name)
@@ -186,8 +187,6 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
                 256*MB, 'pre-existing-256MB', bucket=bucket_name)
             put_pre_existing_objects(
                 256*MB, 'pre-existing-256MB-@', bucket=bucket_name)
-            put_pre_existing_objects(
-                2*GB, 'pre-existing-2GB', bucket=bucket_name)
             put_pre_existing_objects(
                 2*GB, 'pre-existing-2GB-@', bucket=bucket_name)
         else:

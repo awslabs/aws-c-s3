@@ -900,12 +900,12 @@ static int s_meta_request_resolve_signing_config(
     return AWS_OP_SUCCESS;
 }
 
-/* Handles signing a message for the caller. */
-void aws_s3_meta_request_sign_request_default(
+void aws_s3_meta_request_sign_request_default_impl(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     aws_signing_complete_fn *on_signing_complete,
-    void *user_data) {
+    void *user_data,
+    bool force_regular_signing) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(on_signing_complete);
@@ -947,7 +947,7 @@ void aws_s3_meta_request_sign_request_default(
         return;
     }
 
-    if (signing_config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS) {
+    if (signing_config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS && !force_regular_signing) {
         /* Fetch credentials from S3 Express provider. */
         struct aws_get_s3express_credentials_user_data *context =
             aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_get_s3express_credentials_user_data));
@@ -998,6 +998,9 @@ void aws_s3_meta_request_sign_request_default(
         }
     } else {
         /* Regular signing. */
+        if (force_regular_signing) {
+            signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4;
+        }
         s_s3_meta_request_init_signing_date_time(meta_request, &signing_config.date);
         if (aws_sign_request_aws(
                 meta_request->allocator,
@@ -1013,6 +1016,15 @@ void aws_s3_meta_request_sign_request_default(
             return;
         }
     }
+}
+
+/* Handles signing a message for the caller. */
+void aws_s3_meta_request_sign_request_default(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
+    aws_s3_meta_request_sign_request_default_impl(meta_request, request, on_signing_complete, user_data, false);
 }
 
 /* Handle the signing result */
