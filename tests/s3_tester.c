@@ -2444,8 +2444,6 @@ int aws_test_s3_copy_object_helper(
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size) {
-    struct aws_byte_cursor source_bucket =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket--use1-az4--x-s3");
 
     char copy_source_value[1024];
     snprintf(
