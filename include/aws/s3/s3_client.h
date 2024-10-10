@@ -558,20 +558,19 @@ struct aws_s3_checksum_config {
     /**
      * The location of client added checksum header.
      *
-     * If AWS_SCL_NONE. No request payload checksum will be add and calculated.
+     * If AWS_SCL_NONE. No request payload checksum will be calculated or added.
      *
-     * If AWS_SCL_HEADER, the checksum will be added related header to the request sent. If no checksum provided, it
-     * will be calculated the the client.
+     * If AWS_SCL_HEADER, the client will calculate the checksum and add it to the headers.
      *
-     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The checksum will be calculate while reading the
-     * payload by client. Related header will be added to the trailer part of the encoded payload. Note the payload of
-     * the original request cannot be aws-chunked encoded already. Otherwise, error will be raised.
+     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The client will calculate the checksum and add it to
+     * the trailer. Note the payload of the original request cannot be aws-chunked encoded already, this will cause an
+     * error.
      */
     enum aws_s3_checksum_location location;
 
     /**
      * The checksum algorithm used.
-     * Must be set if location is not AWS_SCL_NONE. Must be AWS_SCA_NONE if location is AWS_SCL_NONE.
+     * Must be set if location is not AWS_SCL_NONE.
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
