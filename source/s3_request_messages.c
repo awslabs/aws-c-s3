@@ -790,7 +790,7 @@ static int s_calculate_and_add_checksum_to_header_helper(
         local_encoded_checksum = out_checksum;
     }
 
-    if (s_calculate_in_memory_checksum_helper(allocator, data, checksum_config, out_checksum)) {
+    if (s_calculate_in_memory_checksum_helper(allocator, data, checksum_config, local_encoded_checksum)) {
         goto done;
     }
 
