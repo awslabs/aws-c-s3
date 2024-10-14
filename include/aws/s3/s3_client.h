@@ -82,7 +82,7 @@ enum aws_s3_meta_request_type {
      * - only {bucket}/{key} format is supported for source and passing arn as
      *   source will not work
      * - source bucket is assumed to be in the same region as dest
-     * - source bucket and dest needs both be directory bucket or regular bucket.
+     * - source bucket and dest bucket must both be either directory buckets or regular buckets.
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
