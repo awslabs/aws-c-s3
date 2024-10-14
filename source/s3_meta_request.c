@@ -905,7 +905,7 @@ void aws_s3_meta_request_sign_request_default_impl(
     struct aws_s3_request *request,
     aws_signing_complete_fn *on_signing_complete,
     void *user_data,
-    bool force_regular_signing) {
+    bool disable_s3_express_signing) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(on_signing_complete);
@@ -947,7 +947,7 @@ void aws_s3_meta_request_sign_request_default_impl(
         return;
     }
 
-    if (signing_config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS && !force_regular_signing) {
+    if (signing_config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS && !disable_s3_express_signing) {
         /* Fetch credentials from S3 Express provider. */
         struct aws_get_s3express_credentials_user_data *context =
             aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_get_s3express_credentials_user_data));
@@ -998,7 +998,7 @@ void aws_s3_meta_request_sign_request_default_impl(
         }
     } else {
         /* Regular signing. */
-        if (force_regular_signing) {
+        if (disable_s3_express_signing) {
             signing_config.algorithm = AWS_SIGNING_ALGORITHM_V4;
         }
         s_s3_meta_request_init_signing_date_time(meta_request, &signing_config.date);

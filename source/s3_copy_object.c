@@ -812,10 +812,11 @@ void s_s3_copy_object_sign_request(
     /**
      * https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html
      * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html
-     * For CopyObject and UploadPartCopy, the request has to be signed with regular SigV4 for directory buckets.
+     * For CopyObject and UploadPartCopy, the request has to be signed with IAM credentials for directory buckets.
+     * Disable S3 express signing for those types.
      */
-    bool force_regular_signing = request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS ||
-                                 request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY;
+    bool disable_s3_express_signing = request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS ||
+                                      request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY;
     aws_s3_meta_request_sign_request_default_impl(
-        meta_request, request, on_signing_complete, user_data, force_regular_signing);
+        meta_request, request, on_signing_complete, user_data, disable_s3_express_signing);
 }
