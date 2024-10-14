@@ -306,6 +306,65 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .pause = s_s3_auto_ranged_put_pause,
 };
 
+static int s_init_and_verify_checksum_config_from_headers(
+    struct checksum_config_impl *checksum_config,
+    struct aws_http_message *message,
+    void *log_id) {
+    /* Check if the checksum header was set from the message */
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    enum aws_s3_checksum_algorithm header_algo = AWS_SCA_NONE;
+    struct aws_byte_cursor header_value;
+    AWS_ZERO_STRUCT(header_value);
+
+    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
+        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
+        if (aws_http_headers_get(headers, *algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
+            if (header_algo == AWS_SCA_NONE) {
+                header_algo = algorithm;
+            } else {
+                /* If there are multiple checksum headers set, it's malformed request */
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Could not create auto-ranged-put meta request; multiple checksum headers has been set",
+                    log_id);
+                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            }
+        }
+    }
+    if (header_algo == AWS_SCA_NONE) {
+        /* No checksum header found, done */
+        return AWS_OP_SUCCESS;
+    }
+
+    /* Found the full object checksum from the header, check if it matches the explicit setting from config */
+    if (checksum_config->checksum_algorithm != AWS_SCA_NONE && checksum_config->checksum_algorithm != header_algo) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not create auto-ranged-put meta request; checksum config mismatch the checksum from header.",
+            log_id);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+    AWS_ASSERT(checksum_config->full_object_checksum == NULL);
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
+        log_id,
+        AWS_BYTE_CURSOR_PRI(*aws_get_algorithm_value_from_algorithm(header_algo)),
+        AWS_BYTE_CURSOR_PRI(header_value));
+    /* Set algo */
+    checksum_config->checksum_algorithm = header_algo;
+    if (checksum_config->location == AWS_SCL_NONE) {
+        /* Set the checksum location to trailer. */
+        checksum_config->location = AWS_SCL_TRAILER;
+    }
+
+    /* Set full object checksum from the header value. */
+    aws_mem_calloc(checksum_config->allocator, 1, sizeof(struct aws_byte_buf));
+    aws_byte_buf_init_copy_from_cursor(checksum_config->full_object_checksum, checksum_config->allocator, header_value);
+    return AWS_OP_SUCCESS;
+}
+
 /* Allocate a new auto-ranged put meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
@@ -360,6 +419,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         &auto_ranged_put->synced_data.part_list, allocator, initial_num_parts, sizeof(struct aws_s3_mpu_part_info *));
 
     if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
+        goto error_clean_up;
+    }
+
+    if (s_init_and_verify_checksum_config_from_headers(
+            &auto_ranged_put->base.checksum_config, options->message, (void *)&auto_ranged_put->base)) {
         goto error_clean_up;
     }
 

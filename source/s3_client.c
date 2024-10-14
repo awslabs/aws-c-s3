@@ -1324,19 +1324,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                             !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                         options);
-                } else {
-                    if (aws_s3_message_util_check_checksum_header(options->message)) {
-                        /* The checksum header has been set and the request will be split. We fail the request */
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "Could not create auto-ranged-put meta request; checksum headers has been set for "
-                            "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
-                            "single part upload.");
-                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                        return NULL;
-                    }
                 }
-
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length_found, content_length, num_parts, options);
             } else { /* else using resume token */

@@ -37,7 +37,7 @@ const struct aws_byte_cursor g_test_mrap_endpoint =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("moujmk3izc19y.mrap.accesspoint.s3-global.amazonaws.com");
 
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
-const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
+const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-east-2");
 
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
 const struct aws_byte_cursor g_s3_sse_c_alg_header =
@@ -1455,7 +1455,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .validate_checksum_algorithms = options->validate_checksum_algorithms,
     };
     if (!disable_trailing_checksum) {
-        checksum_config.location = options->checksum_via_header ? AWS_SCL_HEADER : AWS_SCL_TRAILER;
+        checksum_config.location = options->checksum_via_header ? AWS_SCL_HEADER : AWS_SCL_HEADER;
     }
 
     struct aws_s3_meta_request_options meta_request_options = {

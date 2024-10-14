@@ -334,8 +334,14 @@ int aws_checksum_compute(
     }
 }
 
-void checksum_config_init(struct checksum_config *internal_config, const struct aws_s3_checksum_config *config) {
+void aws_checksum_config_impl_init(
+    struct aws_allocator *allocator,
+    struct checksum_config_impl *internal_config,
+    const struct aws_s3_checksum_config *config) {
     AWS_ZERO_STRUCT(*internal_config);
+    /* Zero out the struct and set the allocator regardless. */
+    internal_config->allocator = allocator;
+
     if (!config) {
         return;
     }
@@ -375,5 +381,12 @@ void checksum_config_init(struct checksum_config *internal_config, const struct 
         internal_config->response_checksum_algorithms.crc32c = true;
         internal_config->response_checksum_algorithms.sha1 = true;
         internal_config->response_checksum_algorithms.sha256 = true;
+    }
+}
+
+void aws_checksum_config_impl_cleanup(struct checksum_config_impl *internal_config) {
+    if (internal_config->full_object_checksum) {
+        aws_byte_buf_clean_up(internal_config->full_object_checksum);
+        aws_mem_release(internal_config->allocator, internal_config->full_object_checksum);
     }
 }

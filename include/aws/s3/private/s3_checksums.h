@@ -26,7 +26,10 @@ struct aws_s3_checksum {
     bool good;
 };
 
-struct checksum_config {
+struct checksum_config_impl {
+    struct aws_allocator *allocator;
+    struct aws_byte_buf *full_object_checksum;
+
     enum aws_s3_checksum_location location;
     enum aws_s3_checksum_algorithm checksum_algorithm;
     bool validate_response_checksum;
@@ -146,6 +149,12 @@ AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
 
 AWS_S3_API
-void checksum_config_init(struct checksum_config *internal_config, const struct aws_s3_checksum_config *config);
+void aws_checksum_config_impl_init(
+    struct aws_allocator *allocator,
+    struct checksum_config_impl *internal_config,
+    const struct aws_s3_checksum_config *config);
+
+AWS_S3_API
+void aws_checksum_config_impl_cleanup(struct checksum_config_impl *internal_config);
 
 #endif /* AWS_S3_CHECKSUMS_H */

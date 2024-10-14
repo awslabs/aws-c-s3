@@ -176,6 +176,10 @@ static const struct aws_http_header s_put_object_test_headers[] = {
         .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-expected-bucket-owner"),
         .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ExpectedBucketOwnerValue"),
     },
+    {
+        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32"),
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("AAAAAA=="),
+    },
 };
 
 static int s_fill_byte_buf(struct aws_byte_buf *buffer, struct aws_allocator *allocator, size_t buffer_size) {

@@ -3880,7 +3880,7 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .validate_get_response_checksum = false,
         .checksum_via_header = via_header,
         .put_options =
@@ -3900,7 +3900,7 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
         .validate_get_response_checksum = true,
-        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC64NVME,
         .get_options =
             {
                 .object_path = object_path,
@@ -3956,7 +3956,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .validate_get_response_checksum = false,
         .checksum_via_header = via_header,
         .put_options =
@@ -3975,7 +3975,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC64NVME,
         .validate_get_response_checksum = true,
         .get_options =
             {
