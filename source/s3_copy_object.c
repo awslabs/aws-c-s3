@@ -803,7 +803,7 @@ static void s_s3_copy_object_request_finished(
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
-void s_s3_copy_object_sign_request(
+static void s_s3_copy_object_sign_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     aws_signing_complete_fn *on_signing_complete,
