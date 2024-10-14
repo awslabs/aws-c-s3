@@ -21,7 +21,10 @@
     static int s_test_##NAME(struct aws_allocator *allocator, void *ctx)
 
 #define DEFINE_HEADER(NAME, VALUE)                                                                                     \
-    { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
+    {                                                                                                                  \
+        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME),                                                           \
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE),                                                         \
+    }
 
 struct aws_s3express_client_tester {
     struct aws_allocator *allocator;
@@ -644,4 +647,48 @@ TEST_CASE(s3express_client_get_object_create_session_error) {
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;
+}
+
+/**
+ * Test copy object within the same directory bucket.
+ */
+TEST_CASE(s3express_client_copy_object) {
+    (void)ctx;
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-10MB");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_10MB");
+    struct aws_byte_cursor source_bucket =
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket--usw2-az1--x-s3");
+    return aws_test_s3_copy_object_helper(
+        allocator,
+        source_bucket,
+        source_key,
+        g_test_s3express_bucket_usw2_az1_endpoint,
+        destination_key,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK,
+        MB_TO_BYTES(10),
+        true);
+}
+
+/**
+ * Test multipart copy object within the same directory bucket.
+ */
+TEST_CASE(s3express_client_copy_object_multipart) {
+    (void)ctx;
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-2GB");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_2GB");
+    struct aws_byte_cursor source_bucket =
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket--usw2-az1--x-s3");
+    return aws_test_s3_copy_object_helper(
+        allocator,
+        source_bucket,
+        source_key,
+        g_test_s3express_bucket_usw2_az1_endpoint,
+        destination_key,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK,
+        GB_TO_BYTES(2),
+        true);
 }

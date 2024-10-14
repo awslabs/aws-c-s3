@@ -176,11 +176,6 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
     aws_s3_meta_request_upload_review_fn *upload_review_callback;
 
-    /* Customer specified callbacks to be called by our specialized callback to calculate the response checksum. */
-    aws_s3_meta_request_headers_callback_fn *headers_user_callback_after_checksum;
-    aws_s3_meta_request_receive_body_callback_fn *body_user_callback_after_checksum;
-    aws_s3_meta_request_finish_fn *finish_user_callback_after_checksum;
-
     enum aws_s3_meta_request_type type;
     struct aws_string *s3express_session_host;
 
@@ -284,6 +279,11 @@ struct aws_s3_meta_request {
 
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
+
+    /* The receiving file handler */
+    FILE *recv_file;
+    struct aws_string *recv_filepath;
+    bool recv_file_delete_on_failure;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */
@@ -349,6 +349,14 @@ AWS_S3_API
 void aws_s3_meta_request_init_signing_date_time_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_date_time *date_time);
+
+AWS_S3_API
+void aws_s3_meta_request_sign_request_default_impl(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data,
+    bool disable_s3_express_signing);
 
 AWS_S3_API
 void aws_s3_meta_request_sign_request_default(

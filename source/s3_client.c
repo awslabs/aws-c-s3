@@ -579,6 +579,34 @@ struct aws_s3_client *aws_s3_client_new(
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
 
+    client->num_network_interface_names = client_config->num_network_interface_names;
+    if (client_config->num_network_interface_names > 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client received network interface names array with length %zu.",
+            (void *)client,
+            client->num_network_interface_names);
+        aws_array_list_init_dynamic(
+            &client->network_interface_names,
+            client->allocator,
+            client_config->num_network_interface_names,
+            sizeof(struct aws_string *));
+        client->network_interface_names_cursor_array = aws_mem_calloc(
+            client->allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
+        for (size_t i = 0; i < client_config->num_network_interface_names; i++) {
+            struct aws_byte_cursor interface_name = client_config->network_interface_names_array[i];
+            struct aws_string *interface_name_str = aws_string_new_from_cursor(client->allocator, &interface_name);
+            aws_array_list_push_back(&client->network_interface_names, &interface_name_str);
+            client->network_interface_names_cursor_array[i] = aws_byte_cursor_from_string(interface_name_str);
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p network_interface_names_array[%zu]=" PRInSTR "",
+                (void *)client,
+                i,
+                AWS_BYTE_CURSOR_PRI(client->network_interface_names_cursor_array[i]));
+        }
+    }
+
     return client;
 
 on_error:
@@ -713,6 +741,15 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
     aws_s3_buffer_pool_destroy(client->buffer_pool);
+
+    aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
+    for (size_t i = 0; i < client->num_network_interface_names; i++) {
+        struct aws_string *interface_name = NULL;
+        aws_array_list_get_at(&client->network_interface_names, &interface_name, i);
+        aws_string_destroy(interface_name);
+    }
+    aws_array_list_clean_up(&client->network_interface_names);
+
     aws_mem_release(client->allocator, client);
     client = NULL;
 
@@ -1048,6 +1085,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .connect_timeout_ms = client->connect_timeout_ms,
                 .tcp_keep_alive_options = client->tcp_keep_alive_options,
                 .monitoring_options = &client->monitoring_options,
+                .network_interface_names_array = client->network_interface_names_cursor_array,
+                .num_network_interface_names = client->num_network_interface_names,
             };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
@@ -1090,6 +1129,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         meta_request = aws_s3_meta_request_release(meta_request);
     } else {
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
+        /**
+         * shutdown_callback must be the last thing that gets set on the meta_request so that we don’t return NULL and
+         * trigger the shutdown_callback.
+         */
+        meta_request->shutdown_callback = options->shutdown_callback;
     }
 
     return meta_request;
@@ -1319,6 +1363,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
         }
         case AWS_S3_META_REQUEST_TYPE_DEFAULT:
+            if (options->operation_name.len == 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST, "Could not create Default Meta Request; operation name is required");
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+
             return aws_s3_meta_request_default_new(
                 client->allocator,
                 client,
@@ -1733,7 +1784,7 @@ static bool s_s3_client_should_update_meta_request(
     /* CreateSession has high priority to bypass the checks. */
     if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
-        if (aws_string_eq_c_str(meta_request_default->operation_name, "CreateSession")) {
+        if (meta_request_default->request_type == AWS_S3_REQUEST_TYPE_CREATE_SESSION) {
             return true;
         }
     }
@@ -2092,12 +2143,20 @@ static void s_s3_client_on_acquire_http_connection(
             error_code,
             aws_error_str(error_code));
 
-        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE) {
+        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE ||
+            error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED || error_code == AWS_IO_SOCKET_INVALID_OPTIONS) {
             /**
              * Fall fast without retry
              * - Invalid DNS name will not change after retry.
              * - TLS negotiation is expensive and retry will not help in most case.
              */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Meta request cannot recover from error %d (%s) while acquiring HTTP connection. (request=%p)",
+                (void *)meta_request,
+                error_code,
+                aws_error_str(error_code),
+                (void *)request);
             goto error_fail;
         }
 

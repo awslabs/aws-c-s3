@@ -32,6 +32,12 @@ python3 test_helper.py clean
   + `pre-existing-10MB`
   + `pre-existing-1MB`
   + `pre-existing-empty`
+  + `pre-existing-error-xml`
+  + with `--large_objects` enabled, several large objects will also be uploaded. Currently, only aws-c-s3's tests require these files, the aws-crt-*** repos do not:
+    - `pre-existing-256MB`
+    - `pre-existing-256MB-@`
+    - `pre-existing-2GB`
+    - `pre-existing-2GB-@`
 
 * Create `<BUCKET_NAME>-public` in us-west-2
 * Upload files:
@@ -40,10 +46,14 @@ python3 test_helper.py clean
 * Create directory bucket `<BUCKET_NAME>--usw2-az1--x-s3` in us-west-2
 * Upload files:
   + `pre-existing-10MB` 10MB file.
+  + with `--large_objects` enabled
+    - `pre-existing-2GB`
 
 * Create directory bucket `<BUCKET_NAME>--use1-az4--x-s3` in us-east-1
 * Upload files:
   + `pre-existing-10MB` 10MB file.
+  + with `--large_objects` enabled
+    - `pre-existing-2GB`
 
 ### `clean` action
 

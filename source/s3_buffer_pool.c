@@ -232,6 +232,7 @@ void s_buffer_pool_trim_synced(struct aws_s3_buffer_pool *buffer_pool) {
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
 
         if (block->alloc_bit_mask == 0) {
+            buffer_pool->primary_allocated -= block->block_size;
             aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
             aws_array_list_erase(&buffer_pool->blocks, i);
             /* do not increment since we just released element */

@@ -10,7 +10,7 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/byte_buf.h>
-#include <aws/s3/s3.h>
+#include <aws/s3/s3_client.h>
 
 #if ASSERT_LOCK_HELD
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)                                                                       \
@@ -22,12 +22,12 @@
 #else
 #    define ASSERT_SYNCED_DATA_LOCK_HELD(object)
 #endif
-#define KB_TO_BYTES(kb) ((kb)*1024)
-#define MB_TO_BYTES(mb) ((mb)*1024 * 1024)
-#define GB_TO_BYTES(gb) ((gb)*1024 * 1024 * 1024ULL)
+#define KB_TO_BYTES(kb) ((kb) * 1024)
+#define MB_TO_BYTES(mb) ((mb) * 1024 * 1024)
+#define GB_TO_BYTES(gb) ((gb) * 1024 * 1024 * 1024ULL)
 
-#define MS_TO_NS(ms) ((uint64_t)(ms)*1000000)
-#define SEC_TO_NS(ms) ((uint64_t)(ms)*1000000000)
+#define MS_TO_NS(ms) ((uint64_t)(ms) * 1000000)
+#define SEC_TO_NS(ms) ((uint64_t)(ms) * 1000000000)
 
 struct aws_allocator;
 struct aws_http_stream;
@@ -36,6 +36,7 @@ struct aws_http_message;
 struct aws_s3_client;
 struct aws_s3_request;
 struct aws_s3_meta_request;
+struct aws_s3_checksum;
 
 struct aws_cached_signing_config_aws {
     struct aws_allocator *allocator;
@@ -176,6 +177,23 @@ AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
 
 /**
+ * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
+ */
+AWS_S3_API
+enum aws_s3_request_type aws_s3_request_type_from_operation_name(struct aws_byte_cursor name);
+
+/**
+ * Return operation name for aws_s3_request_type as static-lifetime aws_string*
+ * or NULL if the type doesn't map to an actual operation.
+ * For example:
+ * AWS_S3_REQUEST_TYPE_HEAD_OBJECT -> static aws_string "HeadObject"
+ * AWS_S3_REQUEST_TYPE_UNKNOWN -> NULL
+ * AWS_S3_REQUEST_TYPE_MAX -> NULL
+ */
+AWS_S3_API
+struct aws_string *aws_s3_request_type_to_operation_name_static_string(enum aws_s3_request_type type);
+
+/**
  * Cache and initial the signing config based on the client.
  *
  * @param client
@@ -299,12 +317,22 @@ void aws_s3_calculate_auto_ranged_get_part_range(
     uint64_t *out_part_range_start,
     uint64_t *out_part_range_end);
 
-/* Match the S3 error code to CRT error code, return AWS_ERROR_UNKNOWN when not matched */
+/* Match the retry-able S3 error code to CRT error code, return AWS_ERROR_UNKNOWN when not matched. */
 AWS_S3_API
-int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string);
+int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_byte_cursor error_code_string);
 
 AWS_S3_API
 void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
+
+/* Check the response headers for checksum to verify, return a running checksum based on the algorithm found. If no
+ * checksum found from header, return null. */
+AWS_S3_API
+int aws_s3_check_headers_for_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    struct aws_s3_checksum **out_checksum,
+    struct aws_byte_buf *out_checksum_buffer,
+    bool meta_request_level);
 
 AWS_EXTERN_C_END
 

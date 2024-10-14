@@ -16,7 +16,10 @@
     static int s_test_##NAME(struct aws_allocator *allocator, void *ctx)
 
 #define DEFINE_HEADER(NAME, VALUE)                                                                                     \
-    { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
+    {                                                                                                                  \
+        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME),                                                           \
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE),                                                         \
+    }
 
 static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list) {
     /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
@@ -164,6 +167,66 @@ TEST_CASE(multipart_upload_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_byte_cursor *interface_names_array = aws_mem_calloc(allocator, 2, sizeof(struct aws_byte_cursor));
+    char *localhost_interface = "\0";
+#if defined(AWS_OS_APPLE)
+    localhost_interface = "lo0";
+#else
+    localhost_interface = "lo";
+#endif
+    interface_names_array[0] = aws_byte_cursor_from_c_str(localhost_interface);
+    interface_names_array[1] = aws_byte_cursor_from_c_str(localhost_interface);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .network_interface_names_array = interface_names_array,
+        .num_network_interface_names = 2,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    if (out_results.finished_error_code != 0) {
+#if !defined(AWS_OS_APPLE) && !defined(AWS_OS_LINUX)
+        if (out_results.finished_error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED) {
+            return AWS_OP_SKIP;
+        }
+#endif
+        ASSERT_TRUE(false, "aws_s3_tester_send_meta_request_with_options(() failed");
+    }
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    aws_mem_release(allocator, interface_names_array);
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(multipart_upload_checksum_with_retry_mock_server) {
     (void)ctx;
     /**
@@ -235,6 +298,7 @@ TEST_CASE(multipart_download_checksum_with_retry_mock_server) {
         .default_type_options =
             {
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
             },
         .mock_server = true,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
@@ -926,7 +990,7 @@ TEST_CASE(endpoint_override_mock_server) {
         .client = client,
         .put_options =
             {
-                .object_size_mb = 5, /* Make sure we have exactly 4 parts */
+                .object_size_mb = 5,
                 .object_path_override = object_path,
             },
         .mock_server = true,
@@ -952,6 +1016,7 @@ TEST_CASE(endpoint_override_mock_server) {
     put_options.message = message;
     put_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    ASSERT_INT_EQUALS(2, tester.synced_data.meta_request_shutdown_count);
 
     /* Clean up */
     aws_http_message_destroy(message);
