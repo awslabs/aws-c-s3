@@ -169,10 +169,9 @@ TEST_CASE(multipart_upload_mock_server) {
 
 TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     (void)ctx;
-
 #if defined(AWS_OS_WINDOWS)
     return AWS_OP_SKIP;
-#endif
+#else
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_byte_cursor *interface_names_array = aws_mem_calloc(allocator, 2, sizeof(struct aws_byte_cursor));
@@ -228,6 +227,7 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     aws_mem_release(allocator, interface_names_array);
 
     return AWS_OP_SUCCESS;
+#endif
 }
 
 TEST_CASE(multipart_upload_checksum_with_retry_mock_server) {
