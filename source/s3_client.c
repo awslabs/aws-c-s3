@@ -343,6 +343,10 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
+    if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
+        goto on_early_fail;
+    }
+
     client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
 
     if (client->buffer_pool == NULL) {
@@ -352,6 +356,7 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
 
     if (client_config->max_part_size > pool_usage.mem_limit) {
+        aws_s3_buffer_pool_destroy(client->buffer_pool);
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; configured max part size should not exceed memory limit."
@@ -363,10 +368,6 @@ struct aws_s3_client *aws_s3_client_new(
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
-
-    if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
-        goto on_early_fail;
-    }
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
     aws_linked_list_init(&client->synced_data.prepared_requests);
@@ -488,6 +489,44 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
+    client->num_network_interface_names = client_config->num_network_interface_names;
+    if (client_config->num_network_interface_names > 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client received network interface names array with length %zu.",
+            (void *)client,
+            client->num_network_interface_names);
+        aws_array_list_init_dynamic(
+            &client->network_interface_names,
+            client->allocator,
+            client_config->num_network_interface_names,
+            sizeof(struct aws_string *));
+        client->network_interface_names_cursor_array = aws_mem_calloc(
+            client->allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
+        for (size_t i = 0; i < client_config->num_network_interface_names; i++) {
+            struct aws_byte_cursor interface_name = client_config->network_interface_names_array[i];
+            struct aws_string *interface_name_str = aws_string_new_from_cursor(client->allocator, &interface_name);
+            aws_array_list_push_back(&client->network_interface_names, &interface_name_str);
+            if (aws_is_network_interface_name_valid(aws_string_c_str(interface_name_str)) == false) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p network_interface_names_array[%zu]=" PRInSTR " is not valid.",
+                    (void *)client,
+                    i,
+                    AWS_BYTE_CURSOR_PRI(interface_name));
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                goto on_error;
+            }
+            client->network_interface_names_cursor_array[i] = aws_byte_cursor_from_string(interface_name_str);
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p network_interface_names_array[%zu]=" PRInSTR "",
+                (void *)client,
+                i,
+                AWS_BYTE_CURSOR_PRI(client->network_interface_names_cursor_array[i]));
+        }
+    }
+
     /* Set up body streaming ELG */
     {
         uint16_t num_event_loops =
@@ -579,34 +618,6 @@ struct aws_s3_client *aws_s3_client_new(
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
 
-    client->num_network_interface_names = client_config->num_network_interface_names;
-    if (client_config->num_network_interface_names > 0) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT,
-            "id=%p Client received network interface names array with length %zu.",
-            (void *)client,
-            client->num_network_interface_names);
-        aws_array_list_init_dynamic(
-            &client->network_interface_names,
-            client->allocator,
-            client_config->num_network_interface_names,
-            sizeof(struct aws_string *));
-        client->network_interface_names_cursor_array = aws_mem_calloc(
-            client->allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
-        for (size_t i = 0; i < client_config->num_network_interface_names; i++) {
-            struct aws_byte_cursor interface_name = client_config->network_interface_names_array[i];
-            struct aws_string *interface_name_str = aws_string_new_from_cursor(client->allocator, &interface_name);
-            aws_array_list_push_back(&client->network_interface_names, &interface_name_str);
-            client->network_interface_names_cursor_array[i] = aws_byte_cursor_from_string(interface_name_str);
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_CLIENT,
-                "id=%p network_interface_names_array[%zu]=" PRInSTR "",
-                (void *)client,
-                i,
-                AWS_BYTE_CURSOR_PRI(client->network_interface_names_cursor_array[i]));
-        }
-    }
-
     return client;
 
 on_error:
@@ -631,6 +642,17 @@ on_error:
     aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
+
+    aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
+    for (size_t i = 0; i < aws_array_list_length(&client->network_interface_names); i++) {
+        struct aws_string *interface_name = NULL;
+        aws_array_list_get_at(&client->network_interface_names, &interface_name, i);
+        aws_string_destroy(interface_name);
+    }
+
+    aws_array_list_clean_up(&client->network_interface_names);
+    aws_s3_buffer_pool_destroy(client->buffer_pool);
+
 on_early_fail:
     aws_mem_release(client->allocator, client);
     return NULL;
