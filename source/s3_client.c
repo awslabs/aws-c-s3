@@ -344,25 +344,24 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
-        goto on_early_fail;
+        goto on_error;
     }
 
     client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
 
     if (client->buffer_pool == NULL) {
-        goto on_early_fail;
+        goto on_error;
     }
 
     struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
 
     if (client_config->max_part_size > pool_usage.mem_limit) {
-        aws_s3_buffer_pool_destroy(client->buffer_pool);
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Cannot create client from client_config; configured max part size should not exceed memory limit."
             "size.");
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
-        goto on_early_fail;
+        goto on_error;
     }
 
     client->vtable = &s_s3_client_default_vtable;
@@ -639,7 +638,9 @@ on_error:
     aws_mem_release(client->allocator, client->proxy_ev_settings);
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
-    aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
+    if(client->client_bootstrap != NULL) {
+        aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
+    }
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
 
@@ -653,7 +654,6 @@ on_error:
     aws_array_list_clean_up(&client->network_interface_names);
     aws_s3_buffer_pool_destroy(client->buffer_pool);
 
-on_early_fail:
     aws_mem_release(client->allocator, client);
     return NULL;
 }
