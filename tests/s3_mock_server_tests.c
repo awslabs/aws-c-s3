@@ -170,7 +170,7 @@ TEST_CASE(multipart_upload_mock_server) {
 TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     (void)ctx;
 #if defined(AWS_OS_WINDOWS)
-    (void) allocator;
+    (void)allocator;
     return AWS_OP_SKIP;
 #else
     struct aws_s3_tester tester;
