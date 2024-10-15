@@ -638,7 +638,7 @@ on_error:
     aws_mem_release(client->allocator, client->proxy_ev_settings);
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
-    if(client->client_bootstrap != NULL) {
+    if (client->client_bootstrap != NULL) {
         aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
     }
     aws_client_bootstrap_release(client->client_bootstrap);
