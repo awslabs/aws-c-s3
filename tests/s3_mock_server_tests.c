@@ -176,11 +176,11 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_byte_cursor *interface_names_array = aws_mem_calloc(allocator, 2, sizeof(struct aws_byte_cursor));
     char *localhost_interface = "\0";
-#if defined(AWS_OS_APPLE)
+#    if defined(AWS_OS_APPLE)
     localhost_interface = "lo0";
-#else
+#    else
     localhost_interface = "lo";
-#endif
+#    endif
     interface_names_array[0] = aws_byte_cursor_from_c_str(localhost_interface);
     interface_names_array[1] = aws_byte_cursor_from_c_str(localhost_interface);
 
@@ -214,11 +214,11 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     if (out_results.finished_error_code != 0) {
-#if !defined(AWS_OS_APPLE) && !defined(AWS_OS_LINUX)
+#    if !defined(AWS_OS_APPLE) && !defined(AWS_OS_LINUX)
         if (out_results.finished_error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED) {
             return AWS_OP_SKIP;
         }
-#endif
+#    endif
         ASSERT_TRUE(false, "aws_s3_tester_send_meta_request_with_options(() failed");
     }
     aws_s3_meta_request_test_results_clean_up(&out_results);
