@@ -78,9 +78,9 @@ static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *
 }
 
 AWS_TEST_CASE(
-    test_s3_client_create_error_with_invalid_memory_config,
-    s_test_s3_client_create_error_with_invalid_memory_config)
-static int s_test_s3_client_create_error_with_invalid_memory_config(struct aws_allocator *allocator, void *ctx) {
+    test_s3_client_create_error_with_invalid_memory_limit_config,
+    s_test_s3_client_create_error_with_invalid_memory_limit_config)
+static int s_test_s3_client_create_error_with_invalid_memory_limit_config(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
