@@ -78,6 +78,33 @@ static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *
 }
 
 AWS_TEST_CASE(
+    test_s3_client_create_error_with_invalid_memory_config,
+    s_test_s3_client_create_error_with_invalid_memory_config)
+static int s_test_s3_client_create_error_with_invalid_memory_config(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
+
+    client_config.memory_limit_in_bytes = 100;
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client == NULL);
+    client_config.memory_limit_in_bytes = GB_TO_BYTES(1);
+    client_config.max_part_size = GB_TO_BYTES(2);
+    client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client == NULL);
+
+    tester.bound_to_client = false;
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(
     test_s3_client_create_error_with_invalid_network_interface,
     s_test_s3_client_create_error_with_invalid_network_interface)
 static int s_test_s3_client_create_error_with_invalid_network_interface(struct aws_allocator *allocator, void *ctx) {
