@@ -343,10 +343,6 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
-        goto on_error;
-    }
-
     client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
 
     if (client->buffer_pool == NULL) {
@@ -367,6 +363,10 @@ struct aws_s3_client *aws_s3_client_new(
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
+
+    if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
+        goto on_error;
+    }
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
     aws_linked_list_init(&client->synced_data.prepared_requests);
