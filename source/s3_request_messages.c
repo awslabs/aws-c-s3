@@ -741,7 +741,7 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_byte_buf *out_checksum) {
     AWS_ASSERT(checksum_config->checksum_algorithm != AWS_SCA_NONE);
     AWS_ASSERT(out_checksum != NULL);
-    AWS_ZERO_STRUCT(out_checksum);
+    AWS_ZERO_STRUCT(*out_checksum);
 
     int ret_code = AWS_OP_ERR;
     size_t digest_size = aws_get_digest_size_from_algorithm(checksum_config->checksum_algorithm);
