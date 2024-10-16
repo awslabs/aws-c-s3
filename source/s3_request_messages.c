@@ -306,7 +306,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
             if (aws_http_headers_set(
                     headers,
                     aws_byte_cursor_from_c_str("x-amz-checksum-type"),
-                    aws_byte_cursor_from_c_str("full-object"))) {
+                    aws_byte_cursor_from_c_str("full_object"))) {
                 goto error_clean_up;
             }
         }
@@ -358,6 +358,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         goto error_clean_up;
     }
 
+    // if (aws_s3_message_util_assign_body(allocator, buffer, message, NULL, encoded_checksum_output) ==
+    // NULL) {
     if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_config, encoded_checksum_output) == NULL) {
         goto error_clean_up;
     }
@@ -721,6 +723,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "XXX complete MPU body: " PRInSTR "\n", AWS_BYTE_BUF_PRI(*body_buffer));
         aws_s3_message_util_assign_body(
             allocator, body_buffer, message, NULL /* checksum_config */, NULL /* out_checksum */);
     }

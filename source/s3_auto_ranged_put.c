@@ -360,7 +360,7 @@ static int s_init_and_verify_checksum_config_from_headers(
     }
 
     /* Set full object checksum from the header value. */
-    aws_mem_calloc(checksum_config->allocator, 1, sizeof(struct aws_byte_buf));
+    checksum_config->full_object_checksum = aws_mem_calloc(checksum_config->allocator, 1, sizeof(struct aws_byte_buf));
     aws_byte_buf_init_copy_from_cursor(checksum_config->full_object_checksum, checksum_config->allocator, header_value);
     return AWS_OP_SUCCESS;
 }
