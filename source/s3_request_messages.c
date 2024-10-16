@@ -225,6 +225,10 @@ const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
 
 static const struct aws_byte_cursor s_x_amz_meta_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-meta-");
 
+static const struct aws_byte_cursor s_checksum_type_header =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-type");
+static const struct aws_byte_cursor s_checksum_type_full_object = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("full_object");
+
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
@@ -303,10 +307,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         }
         if (checksum_config->full_object_checksum != NULL) {
             /* Request S3 to store the full object checksum as it's set from user. */
-            if (aws_http_headers_set(
-                    headers,
-                    aws_byte_cursor_from_c_str("x-amz-checksum-type"),
-                    aws_byte_cursor_from_c_str("full_object"))) {
+            if (aws_http_headers_set(headers, s_checksum_type_header, s_checksum_type_full_object)) {
                 goto error_clean_up;
             }
         }
@@ -358,8 +359,6 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         goto error_clean_up;
     }
 
-    // if (aws_s3_message_util_assign_body(allocator, buffer, message, NULL, encoded_checksum_output) ==
-    // NULL) {
     if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_config, encoded_checksum_output) == NULL) {
         goto error_clean_up;
     }
@@ -636,6 +635,12 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 *aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm),
                 aws_byte_cursor_from_buf(checksum_config->full_object_checksum))) {
             goto error_clean_up;
+        }
+        if (checksum_config->full_object_checksum != NULL) {
+            /* Request S3 to store the full object checksum as it's set from user. */
+            if (aws_http_headers_set(headers, s_checksum_type_header, s_checksum_type_full_object)) {
+                goto error_clean_up;
+            }
         }
     }
     struct aws_byte_cursor content_length_cursor;

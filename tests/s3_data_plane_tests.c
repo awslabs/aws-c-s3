@@ -4011,6 +4011,14 @@ AWS_TEST_CASE(
 static int s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc(struct aws_allocator *allocator, void *ctx) {
     return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, false, true);
 }
+AWS_TEST_CASE(
+    test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header,
+    s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header)
+static int s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, true, true);
+}
 
 static int s_test_s3_download_empty_file_with_checksum_helper(
     struct aws_allocator *allocator,
