@@ -339,6 +339,7 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(s3express_client_sanity_test_mock_server)
     add_net_test_case(s3express_client_sanity_override_test_mock_server)
     add_net_test_case(request_time_too_skewed_mock_server)
+    add_net_test_case(request_timeout_error_mock_server)
 endif()
 
 add_net_test_case(s3express_provider_long_running_session_refresh)
