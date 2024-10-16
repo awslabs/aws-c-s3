@@ -9,7 +9,7 @@ env:
   BUILDER_VERSION: v0.9.64
   BUILDER_SOURCE: releases
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
-  PACKAGE_NAME: aws-c-s3
+  PACKAGE_NAME: aws-c-s3-staging
   LINUX_BASE_IMAGE: ubuntu-18-x64
   RUN: ${{ github.run_id }}-${{ github.run_number }}
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -17,6 +17,7 @@ env:
   AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
   AWS_REGION: us-east-1
   CTEST_PARALLEL_LEVEL: 2
+  ACCESS_TOKEN: ${{secrets.BOT_PAT}}
 
 jobs:
   linux-compat:
