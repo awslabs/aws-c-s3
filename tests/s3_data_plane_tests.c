@@ -77,6 +77,61 @@ static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *
     return 0;
 }
 
+AWS_TEST_CASE(
+    test_s3_client_create_error_with_invalid_memory_limit_config,
+    s_test_s3_client_create_error_with_invalid_memory_limit_config)
+static int s_test_s3_client_create_error_with_invalid_memory_limit_config(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
+
+    client_config.memory_limit_in_bytes = 100;
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client == NULL);
+    client_config.memory_limit_in_bytes = GB_TO_BYTES(1);
+    client_config.max_part_size = GB_TO_BYTES(2);
+    client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client == NULL);
+
+    tester.bound_to_client = false;
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_client_create_error_with_invalid_network_interface,
+    s_test_s3_client_create_error_with_invalid_network_interface)
+static int s_test_s3_client_create_error_with_invalid_network_interface(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
+
+    struct aws_byte_cursor *interface_names_array = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_cursor));
+    interface_names_array[0] = aws_byte_cursor_from_c_str("invalid-nic");
+    client_config.network_interface_names_array = interface_names_array;
+    client_config.num_network_interface_names = 1;
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_TRUE(client == NULL);
+    tester.bound_to_client = false;
+
+    aws_s3_tester_clean_up(&tester);
+    aws_mem_release(allocator, interface_names_array);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_client_monitoring_options_override, s_test_s3_client_monitoring_options_override)
 static int s_test_s3_client_monitoring_options_override(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
