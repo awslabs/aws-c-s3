@@ -64,10 +64,11 @@ const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING
 const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
-struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
+struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-730026");
 /* If `$CRT_S3_TEST_BUCKET_NAME` envrionment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
  * aws-c-s3-test-bucket-public */
-struct aws_byte_cursor g_test_public_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
+struct aws_byte_cursor g_test_public_bucket_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-730026-public");
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use
  * `$CRT_S3_TEST_BUCKET_NAME--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com`; otherwise, use
  * aws-c-s3-test-bucket--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com */
