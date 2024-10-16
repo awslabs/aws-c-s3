@@ -741,12 +741,13 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_byte_buf *out_checksum) {
     AWS_ASSERT(checksum_config->checksum_algorithm != AWS_SCA_NONE);
     AWS_ASSERT(out_checksum != NULL);
+    AWS_ZERO_STRUCT(out_checksum);
 
     int ret_code = AWS_OP_ERR;
     size_t digest_size = aws_get_digest_size_from_algorithm(checksum_config->checksum_algorithm);
     size_t encoded_checksum_len = 0;
     if (aws_base64_compute_encoded_len(digest_size, &encoded_checksum_len)) {
-        return ret_code;
+        return AWS_OP_ERR;
     }
 
     aws_byte_buf_init(out_checksum, allocator, encoded_checksum_len);
@@ -764,6 +765,9 @@ static int s_calculate_in_memory_checksum_helper(
 
     ret_code = AWS_OP_SUCCESS;
 done:
+    if (ret_code) {
+        aws_byte_buf_clean_up(out_checksum);
+    }
     aws_byte_buf_clean_up(&raw_checksum);
     return ret_code;
 }
@@ -783,13 +787,14 @@ static int s_calculate_and_add_checksum_to_header_helper(
     AWS_ASSERT(out_message != NULL);
     int ret_code = AWS_OP_ERR;
 
-    struct aws_byte_buf *local_encoded_checksum = NULL;
+    struct aws_byte_buf local_encoded_checksum_buf;
+    struct aws_byte_buf *local_encoded_checksum;
     if (out_checksum == NULL) {
-        local_encoded_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
+        local_encoded_checksum = &local_encoded_checksum_buf;
     } else {
         local_encoded_checksum = out_checksum;
     }
-
+    AWS_ZERO_STRUCT(*local_encoded_checksum);
     if (s_calculate_in_memory_checksum_helper(allocator, data, checksum_config, local_encoded_checksum)) {
         goto done;
     }
@@ -805,12 +810,10 @@ static int s_calculate_and_add_checksum_to_header_helper(
 
     ret_code = AWS_OP_SUCCESS;
 done:
-    if (out_checksum == NULL) {
-        /* In case out_checksum is not set. In this case, we need to clean up the local_encoded_checksum.
-         * Otherwise, the caller will own the out_checksum.
-         */
+    if (ret_code || out_checksum == NULL) {
+        /* In case of error happen or out_checksum is not set, clean up the encoded checksum. Otherwise, the caller will
+         * own the encoded checksum. */
         aws_byte_buf_clean_up(local_encoded_checksum);
-        aws_mem_release(allocator, local_encoded_checksum);
     }
     return ret_code;
 }
