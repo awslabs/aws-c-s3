@@ -2380,7 +2380,7 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
     client_config.enable_s3express = s3express;
-    struct aws_byte_cursor region_cursor = g_test_s3_region;
+    struct aws_byte_cursor region_cursor = aws_byte_cursor_from_c_str("us-west-2");
     client_config.region = region_cursor;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
