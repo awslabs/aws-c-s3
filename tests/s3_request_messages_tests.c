@@ -866,6 +866,7 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
 
     const struct aws_byte_cursor header_exclude_exceptions[] = {
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-mp-object-size"),
     };
 
     struct aws_byte_cursor path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(TEST_PATH);
