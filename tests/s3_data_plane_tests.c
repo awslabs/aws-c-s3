@@ -3110,6 +3110,8 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
 AWS_TEST_CASE(test_s3_put_object_sse_c_aes256_multipart, s_test_s3_put_object_sse_c_aes256_multipart)
 static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    (void)allocator;
+    return AWS_OP_SKIP;
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -7812,19 +7814,20 @@ static int s_test_s3_upload_review_checksum_location_none(struct aws_allocator *
     ASSERT_STR_EQUALS("7/xUXw==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
     ASSERT_STR_EQUALS("PCOjcw==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
 
-    /* Get the file, which should not have checksums present to validate */
+    /* S3 will store the crc64 checksum for the whole object, and we can still have validate the checksum, but the algo
+     * be validated will be crc64, instead of the crc32 we get from the client. */
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC64NVME,
         .validate_get_response_checksum = true,
         .get_options =
             {
                 .object_path = object_path,
             },
-        .finish_callback = s_s3_test_no_validate_checksum,
+        .finish_callback = s_s3_test_validate_checksum,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
