@@ -517,4 +517,31 @@ extern struct aws_byte_cursor g_test_s3express_bucket_usw2_az1_endpoint;
  * aws-c-s3-test-bucket--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com */
 extern struct aws_byte_cursor g_test_s3express_bucket_use1_az4_endpoint;
 
+/**
+ * Take the source with source_bucket and source_key, and the destination_endpoint to help testing copy object
+ */
+int aws_test_s3_copy_object_helper(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor source_bucket,
+    struct aws_byte_cursor source_key,
+    struct aws_byte_cursor destination_endpoint,
+    struct aws_byte_cursor destination_key,
+    int expected_error_code,
+    int expected_response_status,
+    uint64_t expected_size,
+    bool s3_express);
+
+/**
+ * Take the source with x_amz_copy_source, and the destination_endpoint to help testing copy object.
+ */
+int aws_test_s3_copy_object_from_x_amz_copy_source(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor x_amz_copy_source,
+    struct aws_byte_cursor destination_endpoint,
+    struct aws_byte_cursor destination_key,
+    int expected_error_code,
+    int expected_response_status,
+    uint64_t expected_size,
+    bool s3_express);
+
 #endif /* AWS_S3_TESTER_H */

@@ -677,6 +677,11 @@ int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_b
     if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "RequestTimeTooSkewed")) {
         return AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED;
     }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "RequestTimeout")) {
+        return AWS_ERROR_S3_REQUEST_TIMEOUT;
+    }
+
     return AWS_ERROR_UNKNOWN;
 }
 
