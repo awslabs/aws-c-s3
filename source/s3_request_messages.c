@@ -788,7 +788,6 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_allocator *allocator,
     struct aws_byte_cursor data,
     const struct checksum_config_impl *checksum_config,
-    struct aws_http_message *out_message,
     struct aws_byte_buf *out_checksum) {
     AWS_ASSERT(checksum_config->checksum_algorithm != AWS_SCA_NONE);
     AWS_ASSERT(out_checksum != NULL);
@@ -831,7 +830,7 @@ done:
 static int s_calculate_and_add_checksum_to_header_helper(
     struct aws_allocator *allocator,
     struct aws_byte_cursor data,
-    const struct checksum_config *checksum_config,
+    const struct checksum_config_impl *checksum_config,
     struct aws_http_message *out_message,
     struct aws_byte_buf *out_checksum) {
     AWS_ASSERT(checksum_config->checksum_algorithm != AWS_SCA_NONE);
