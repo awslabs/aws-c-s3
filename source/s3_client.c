@@ -963,12 +963,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             }
         }
 
-        if (options->checksum_config->location == AWS_SCL_HEADER) {
-            /* TODO: support calculate checksum to add to header */
-            aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
-            return NULL;
-        }
-
         if (options->checksum_config->location != AWS_SCL_NONE &&
             options->checksum_config->checksum_algorithm == AWS_SCA_NONE) {
             AWS_LOGF_ERROR(
