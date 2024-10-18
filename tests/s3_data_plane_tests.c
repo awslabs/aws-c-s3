@@ -4004,9 +4004,12 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
 
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
+    struct aws_byte_cursor object_path =
+        add_full_object_checksum_via_header
+            ? aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc_full_object.txt")
+            : aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt");
 
-    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt")));
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(allocator, &path_buf, object_path));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
