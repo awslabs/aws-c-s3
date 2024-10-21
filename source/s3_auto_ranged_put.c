@@ -355,7 +355,9 @@ static int s_init_and_verify_checksum_config_from_headers(
     /* Set algo */
     checksum_config->checksum_algorithm = header_algo;
     if (checksum_config->location == AWS_SCL_NONE) {
-        /* Set the checksum location to trailer. */
+        /* Set the checksum location to trailer for the parts, complete MPU will still have the checksum in the header.
+         * But to keep the data integrity for the parts, we need to set the checksum location to trailer to send the parts level checksums.
+         */
         checksum_config->location = AWS_SCL_TRAILER;
     }
 

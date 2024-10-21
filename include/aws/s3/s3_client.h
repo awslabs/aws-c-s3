@@ -560,7 +560,7 @@ struct aws_s3_checksum_config {
     /**
      * The location of client added checksum header.
      *
-     * If AWS_SCL_NONE. No request payload checksum will be calculated or added.
+     * If AWS_SCL_NONE. No request payload checksum will be added.
      *
      * If AWS_SCL_HEADER, the client will calculate the checksum and add it to the headers.
      *
