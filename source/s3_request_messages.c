@@ -286,7 +286,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         if (aws_http_headers_set(
                 headers,
                 g_checksum_algorithm_header_name,
-                *aws_get_algorithm_value_from_algorithm(checksum_config->checksum_algorithm))) {
+                aws_get_algorithm_value_from_algorithm(checksum_config->checksum_algorithm))) {
             goto error_clean_up;
         }
     }
@@ -565,7 +565,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(parts);
 
-    const struct aws_byte_cursor *mpu_algorithm_checksum_name = NULL;
+    struct aws_byte_cursor mpu_algorithm_checksum_name;
+    AWS_ZERO_STRUCT(mpu_algorithm_checksum_name);
     struct aws_http_message *message = NULL;
 
     if (checksum_config && checksum_config->location != AWS_SCL_NONE) {
@@ -647,13 +648,13 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 goto error_clean_up;
             }
 
-            if (mpu_algorithm_checksum_name) {
+            if (mpu_algorithm_checksum_name.len) {
                 struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(&part->checksum_base64);
 
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
                     goto error_clean_up;
                 }
-                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                if (aws_byte_buf_append_dynamic(body_buffer, &mpu_algorithm_checksum_name)) {
                     goto error_clean_up;
                 }
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket)) {
@@ -665,7 +666,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_end_bracket)) {
                     goto error_clean_up;
                 }
-                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                if (aws_byte_buf_append_dynamic(body_buffer, &mpu_algorithm_checksum_name)) {
                     goto error_clean_up;
                 }
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket_new_line)) {
@@ -800,11 +801,11 @@ static int s_calculate_and_add_checksum_to_header_helper(
     }
 
     /* Add the encoded checksum to header. */
-    const struct aws_byte_cursor *header_name =
+    const struct aws_byte_cursor header_name =
         aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm);
     struct aws_byte_cursor encoded_checksum_val = aws_byte_cursor_from_buf(local_encoded_checksum);
     struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
-    if (aws_http_headers_set(headers, *header_name, encoded_checksum_val)) {
+    if (aws_http_headers_set(headers, header_name, encoded_checksum_val)) {
         goto done;
     }
 
@@ -877,7 +878,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             if (aws_http_headers_set(
                     headers,
                     g_trailer_header_name,
-                    *aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm))) {
+                    aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm))) {
                 goto error_clean_up;
             }
             /* set x-amz-decoded-content-length header */
@@ -943,8 +944,8 @@ error_clean_up:
 bool aws_s3_message_util_check_checksum_header(struct aws_http_message *message) {
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
-        if (aws_http_headers_has(headers, *algorithm_header_name)) {
+        const struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
+        if (aws_http_headers_has(headers, algorithm_header_name)) {
             return true;
         }
     }

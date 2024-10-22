@@ -32,7 +32,7 @@ struct aws_chunk_stream {
     struct aws_byte_buf *checksum_result_output;
     struct aws_byte_buf pre_chunk_buffer;
     struct aws_byte_buf post_chunk_buffer;
-    const struct aws_byte_cursor *checksum_header_name;
+    struct aws_byte_cursor checksum_header_name;
     int64_t length;
     set_stream_fn *set_current_stream_fn;
 };
@@ -76,12 +76,12 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     if (aws_byte_buf_init(
             &parent_stream->post_chunk_buffer,
             parent_stream->allocator,
-            final_chunk_cursor.len + parent_stream->checksum_header_name->len + colon_cursor.len +
+            final_chunk_cursor.len + parent_stream->checksum_header_name.len + colon_cursor.len +
                 checksum_result_cursor.len + post_trailer_cursor.len)) {
         goto error;
     }
     if (aws_byte_buf_append(&parent_stream->post_chunk_buffer, &final_chunk_cursor) ||
-        aws_byte_buf_append(&parent_stream->post_chunk_buffer, parent_stream->checksum_header_name) ||
+        aws_byte_buf_append(&parent_stream->post_chunk_buffer, &parent_stream->checksum_header_name) ||
         aws_byte_buf_append(&parent_stream->post_chunk_buffer, &colon_cursor) ||
         aws_byte_buf_append(&parent_stream->post_chunk_buffer, &checksum_result_cursor) ||
         aws_byte_buf_append(&parent_stream->post_chunk_buffer, &post_trailer_cursor)) {
@@ -261,7 +261,7 @@ struct aws_input_stream *aws_chunk_stream_new(
     }
     /* we subtract one since aws_base64_compute_encoded_len accounts for the null terminator which won't show up in our
      * stream */
-    impl->length = prechunk_stream_len + stream_length + final_chunk_len + impl->checksum_header_name->len + colon_len +
+    impl->length = prechunk_stream_len + stream_length + final_chunk_len + impl->checksum_header_name.len + colon_len +
                    encoded_checksum_len + post_trailer_len - 1;
 
     AWS_ASSERT(impl->current_stream);

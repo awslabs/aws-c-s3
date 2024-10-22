@@ -7,25 +7,34 @@
 #define AWS_CRC32C_LEN sizeof(uint32_t)
 #define AWS_CRC64_LEN sizeof(uint64_t)
 
-const struct aws_byte_cursor s_crc64nvme_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC64NVME");
-const struct aws_byte_cursor s_crc32c_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32C");
-const struct aws_byte_cursor s_crc32_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32");
-const struct aws_byte_cursor s_sha1_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA1");
-const struct aws_byte_cursor s_sha256_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA256");
+static const struct aws_byte_cursor s_crc64nvme_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC64NVME");
+static const struct aws_byte_cursor s_crc32c_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32C");
+static const struct aws_byte_cursor s_crc32_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32");
+static const struct aws_byte_cursor s_sha1_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA1");
+static const struct aws_byte_cursor s_sha256_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA256");
 
-const struct aws_byte_cursor s_crc64nvme_header_name =
+static const struct aws_byte_cursor s_crc64nvme_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc64nvme");
-const struct aws_byte_cursor s_crc32c_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c");
-const struct aws_byte_cursor s_crc32_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32");
-const struct aws_byte_cursor s_sha1_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1");
-const struct aws_byte_cursor s_sha256_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256");
+static const struct aws_byte_cursor s_crc32c_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c");
+static const struct aws_byte_cursor s_crc32_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32");
+static const struct aws_byte_cursor s_sha1_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1");
+static const struct aws_byte_cursor s_sha256_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256");
 
-const struct aws_byte_cursor s_crc64nvme_completed_part_name =
+static const struct aws_byte_cursor s_crc64nvme_completed_part_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC64NVME");
-const struct aws_byte_cursor s_crc32c_completed_part_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32C");
-const struct aws_byte_cursor s_crc32_completed_part_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32");
-const struct aws_byte_cursor s_sha1_completed_part_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA1");
-const struct aws_byte_cursor s_sha256_completed_part_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
+static const struct aws_byte_cursor s_crc32c_completed_part_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32C");
+static const struct aws_byte_cursor s_crc32_completed_part_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32");
+static const struct aws_byte_cursor s_sha1_completed_part_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA1");
+static const struct aws_byte_cursor s_sha256_completed_part_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
+static const struct aws_byte_cursor s_empty_cursor = {
+    .len = 0,
+    .ptr = NULL,
+};
 
 size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
     switch (algorithm) {
@@ -44,54 +53,54 @@ size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorit
     }
 }
 
-const struct aws_byte_cursor *aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
+struct aws_byte_cursor aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
     switch (algorithm) {
         case AWS_SCA_CRC64NVME:
-            return &s_crc64nvme_header_name;
+            return s_crc64nvme_header_name;
         case AWS_SCA_CRC32C:
-            return &s_crc32c_header_name;
+            return s_crc32c_header_name;
         case AWS_SCA_CRC32:
-            return &s_crc32_header_name;
+            return s_crc32_header_name;
         case AWS_SCA_SHA1:
-            return &s_sha1_header_name;
+            return s_sha1_header_name;
         case AWS_SCA_SHA256:
-            return &s_sha256_header_name;
+            return s_sha256_header_name;
         default:
-            return NULL;
+            return s_empty_cursor;
     }
 }
 
-const struct aws_byte_cursor *aws_get_algorithm_value_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
+struct aws_byte_cursor aws_get_algorithm_value_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
     switch (algorithm) {
         case AWS_SCA_CRC64NVME:
-            return &s_crc64nvme_algorithm_value;
+            return s_crc64nvme_algorithm_value;
         case AWS_SCA_CRC32C:
-            return &s_crc32c_algorithm_value;
+            return s_crc32c_algorithm_value;
         case AWS_SCA_CRC32:
-            return &s_crc32_algorithm_value;
+            return s_crc32_algorithm_value;
         case AWS_SCA_SHA1:
-            return &s_sha1_algorithm_value;
+            return s_sha1_algorithm_value;
         case AWS_SCA_SHA256:
-            return &s_sha256_algorithm_value;
+            return s_sha256_algorithm_value;
         default:
-            return NULL;
+            return s_empty_cursor;
     }
 }
 
-const struct aws_byte_cursor *aws_get_completed_part_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
+struct aws_byte_cursor aws_get_completed_part_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm) {
     switch (algorithm) {
         case AWS_SCA_CRC64NVME:
-            return &s_crc64nvme_completed_part_name;
+            return s_crc64nvme_completed_part_name;
         case AWS_SCA_CRC32C:
-            return &s_crc32c_completed_part_name;
+            return s_crc32c_completed_part_name;
         case AWS_SCA_CRC32:
-            return &s_crc32_completed_part_name;
+            return s_crc32_completed_part_name;
         case AWS_SCA_SHA1:
-            return &s_sha1_completed_part_name;
+            return s_sha1_completed_part_name;
         case AWS_SCA_SHA256:
-            return &s_sha256_completed_part_name;
+            return s_sha256_completed_part_name;
         default:
-            return NULL;
+            return s_empty_cursor;
     }
 }
 
@@ -112,11 +121,7 @@ int s3_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *outp
     return aws_hash_finalize(hash, output, truncate_to);
 }
 
-static int s_crc_finalize_helper(
-    struct aws_s3_checksum *checksum,
-    struct aws_byte_buf *out,
-    size_t truncate_to,
-    bool is_32bit) {
+static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to) {
     AWS_PRECONDITION(aws_byte_buf_is_valid(out));
 
     if (!checksum->good) {
@@ -130,14 +135,12 @@ static int s_crc_finalize_helper(
     if (out->capacity - out->len < len) {
         return aws_raise_error(AWS_ERROR_SHORT_BUFFER);
     }
-    if (is_32bit) {
-        uint32_t tmp = aws_hton32(*(uint32_t *)checksum->impl);
-        if (aws_byte_buf_write(out, (uint8_t *)&tmp, len)) {
+    if (checksum->digest_size == AWS_CRC32_LEN) {
+        if (aws_byte_buf_write_be32(out, *(uint32_t *)checksum->impl)) {
             return AWS_OP_SUCCESS;
         }
     } else {
-        uint64_t tmp = aws_hton64(*(uint64_t *)checksum->impl);
-        if (aws_byte_buf_write(out, (uint8_t *)&tmp, len)) {
+        if (aws_byte_buf_write_be64(out, *(uint64_t *)checksum->impl)) {
             return AWS_OP_SUCCESS;
         }
     }
@@ -145,11 +148,11 @@ static int s_crc_finalize_helper(
 }
 
 int aws_crc32_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to) {
-    return s_crc_finalize_helper(checksum, out, truncate_to, true);
+    return s_crc_finalize_helper(checksum, out, truncate_to);
 }
 
 int aws_crc64_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to) {
-    return s_crc_finalize_helper(checksum, out, truncate_to, false);
+    return s_crc_finalize_helper(checksum, out, truncate_to);
 }
 
 int aws_crc32_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf) {

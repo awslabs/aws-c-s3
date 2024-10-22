@@ -1191,10 +1191,10 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
 static bool s_header_value_from_list(
     const struct aws_http_header *headers,
     size_t headers_count,
-    const struct aws_byte_cursor *name,
+    const struct aws_byte_cursor name,
     struct aws_byte_cursor *out_value) {
     for (size_t i = 0; i < headers_count; ++i) {
-        if (aws_byte_cursor_eq(&headers[i].name, name)) {
+        if (aws_byte_cursor_eq(&headers[i].name, &name)) {
             *out_value = headers[i].value;
             return true;
         }
@@ -1212,7 +1212,7 @@ static void s_get_part_response_headers_checksum_helper(
             /* If user doesn't select this algorithm, skip */
             continue;
         }
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        const struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
         struct aws_byte_cursor header_sum;
         if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {
             size_t encoded_len = 0;
