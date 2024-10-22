@@ -70,6 +70,12 @@ enum aws_s3_tester_default_type_mode {
     AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT,
 };
 
+enum aws_s3_tester_full_object_checksum {
+    AWS_TEST_FOC_NONE = 0,
+    AWS_TEST_FOC_HEADER,
+    AWS_TEST_FOC_CALLBACK,
+};
+
 struct aws_s3_client_vtable_patch {
     struct aws_s3_client_vtable *original_vtable;
     struct aws_s3_client_vtable patched_vtable;
@@ -219,7 +225,7 @@ struct aws_s3_tester_meta_request_options {
         size_t content_length;
         bool skip_content_length;
         struct aws_byte_cursor content_encoding;
-        bool add_full_object_checksum_via_header;
+        enum aws_s3_tester_full_object_checksum full_object_checksum;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;

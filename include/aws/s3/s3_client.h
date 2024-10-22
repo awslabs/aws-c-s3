@@ -224,6 +224,8 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
+typedef void(aws_full_object_checksum_callback_fn)(struct aws_byte_buf *checksum, void *user_data);
+
 enum aws_s3_meta_request_tls_mode {
     AWS_MR_TLS_ENABLED,
     AWS_MR_TLS_DISABLED,
@@ -575,7 +577,17 @@ struct aws_s3_checksum_config {
      * Must be set if location is not AWS_SCL_NONE.
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
+    /****************************** PUT Object specific *******************************/
 
+    /**
+     * Optional.
+     * Provide the full object checksum after the full object was read and sent to S3, but before the complete MPU was
+     * sent.
+     */
+    aws_full_object_checksum_callback_fn *full_object_checksum_cb;
+    void *user_data;
+
+    /****************************** GET Object specific *******************************/
     /**
      * Enable checksum mode header will be attached to GET requests, this will tell s3 to send back checksums headers if
      * they exist. Calculate the corresponding checksum on the response bodies. The meta request will finish with a did

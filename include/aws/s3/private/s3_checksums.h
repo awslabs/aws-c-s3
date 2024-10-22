@@ -30,6 +30,9 @@ struct checksum_config_impl {
     struct aws_allocator *allocator;
     struct aws_byte_buf *full_object_checksum;
 
+    aws_full_object_checksum_callback_fn *full_object_checksum_cb;
+    void *user_data;
+
     enum aws_s3_checksum_location location;
     enum aws_s3_checksum_algorithm checksum_algorithm;
     bool validate_response_checksum;

@@ -344,7 +344,14 @@ static int s_init_and_verify_checksum_config_from_headers(
             log_id);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
-    AWS_ASSERT(checksum_config->full_object_checksum == NULL);
+    if (checksum_config->full_object_checksum != NULL) {
+        /* If the full object checksum has been set, it's malformed request */
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not create auto-ranged-put meta request; full object checksum is set from multiple ways.",
+            log_id);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
@@ -356,7 +363,8 @@ static int s_init_and_verify_checksum_config_from_headers(
     checksum_config->checksum_algorithm = header_algo;
     if (checksum_config->location == AWS_SCL_NONE) {
         /* Set the checksum location to trailer for the parts, complete MPU will still have the checksum in the header.
-         * But to keep the data integrity for the parts, we need to set the checksum location to trailer to send the parts level checksums.
+         * But to keep the data integrity for the parts, we need to set the checksum location to trailer to send the
+         * parts level checksums.
          */
         checksum_config->location = AWS_SCL_TRAILER;
     }
@@ -1291,6 +1299,12 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
         if (s_s3_review_multipart_upload(request) != AWS_OP_SUCCESS) {
             aws_future_http_message_set_error(message_future, aws_last_error());
             goto on_done;
+        }
+        if (auto_ranged_put->base.checksum_config.full_object_checksum_cb) {
+            /* Invoke the callback to fill up the full object checksum. Let server side to verify the checksum. */
+            auto_ranged_put->base.checksum_config.full_object_checksum_cb(
+                auto_ranged_put->base.checksum_config.full_object_checksum,
+                auto_ranged_put->base.checksum_config.user_data);
         }
 
         /* Allocate request body */
