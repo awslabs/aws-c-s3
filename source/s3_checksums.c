@@ -107,7 +107,7 @@ struct aws_byte_cursor aws_get_completed_part_name_from_checksum_algorithm(enum 
 void s3_hash_destroy(struct aws_s3_checksum *checksum) {
     struct aws_hash *hash = checksum->checksum_impl.hash;
     aws_hash_destroy(hash);
-    aws_mem_release(checksum->allocator, hash);
+    aws_mem_release(checksum->allocator, checksum);
 }
 
 int s3_hash_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
