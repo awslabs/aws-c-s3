@@ -14,7 +14,7 @@ struct aws_s3_checksum;
 struct aws_checksum_vtable {
     void (*destroy)(struct aws_s3_checksum *checksum);
     int (*update)(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf);
-    int (*finalize)(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to);
+    int (*finalize)(struct aws_s3_checksum *checksum, struct aws_byte_buf *out);
 };
 
 struct aws_s3_checksum {
@@ -127,8 +127,7 @@ int aws_checksum_compute(
     struct aws_allocator *allocator,
     enum aws_s3_checksum_algorithm algorithm,
     const struct aws_byte_cursor *input,
-    struct aws_byte_buf *output,
-    size_t truncate_to);
+    struct aws_byte_buf *output);
 
 /**
  * Cleans up and deallocates checksum.
@@ -147,7 +146,7 @@ int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_
  * Allocation of output is the caller's responsibility.
  */
 AWS_S3_API
-int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
+int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output);
 
 AWS_S3_API
 void checksum_config_init(struct checksum_config *internal_config, const struct aws_s3_checksum_config *config);

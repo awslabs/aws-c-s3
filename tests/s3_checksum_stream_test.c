@@ -22,7 +22,7 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
         aws_byte_buf_init(&compute_checksum_output, allocator, aws_get_digest_size_from_checksum_algorithm(algorithm));
         aws_byte_buf_init(&stream_checksum_output, allocator, encoded_len);
         aws_byte_buf_init(&compute_encoded_checksum_output, allocator, encoded_len);
-        aws_checksum_compute(allocator, algorithm, input, &compute_checksum_output, 0);
+        aws_checksum_compute(allocator, algorithm, input, &compute_checksum_output);
         struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&compute_checksum_output);
         aws_base64_encode(&checksum_result_cursor, &compute_encoded_checksum_output);
         struct aws_input_stream *cursor_stream = aws_input_stream_new_from_cursor(allocator, input);
@@ -86,7 +86,7 @@ static int s_compute_chunk_stream(
     if (aws_byte_buf_append(output, &colon)) {
         return AWS_OP_ERR;
     }
-    if (aws_checksum_compute(allocator, algorithm, input, &checksum_result, 0)) {
+    if (aws_checksum_compute(allocator, algorithm, input, &checksum_result)) {
         return AWS_OP_ERR;
     }
     struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&checksum_result);

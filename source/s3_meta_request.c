@@ -114,7 +114,7 @@ static bool s_validate_checksum(
     aws_byte_buf_init(&encoded_response_body_sum, checksum_to_validate->allocator, encoded_checksum_len);
     aws_byte_buf_init(&response_body_sum, checksum_to_validate->allocator, checksum_to_validate->digest_size);
 
-    if (aws_checksum_finalize(checksum_to_validate, &response_body_sum, 0)) {
+    if (aws_checksum_finalize(checksum_to_validate, &response_body_sum)) {
         goto done;
     }
     struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);

@@ -6883,7 +6883,7 @@ static int s_pause_resume_upload_review_callback(
             struct aws_byte_buf checksum_buf;
             aws_byte_buf_init(&checksum_buf, allocator, 128);
             ASSERT_SUCCESS(
-                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf, 0));
+                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf));
             struct aws_byte_cursor checksum_cursor = aws_byte_cursor_from_buf(&checksum_buf);
 
             struct aws_byte_buf encoded_checksum_buf;

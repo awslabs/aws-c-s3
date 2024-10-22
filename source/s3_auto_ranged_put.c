@@ -783,7 +783,7 @@ static int s_verify_part_matches_checksum(
         goto on_done;
     }
 
-    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum, 0)) {
+    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum for the skipped part.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);

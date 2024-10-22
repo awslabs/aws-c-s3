@@ -757,7 +757,7 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_byte_buf raw_checksum;
     aws_byte_buf_init(&raw_checksum, allocator, digest_size);
 
-    if (aws_checksum_compute(allocator, checksum_config->checksum_algorithm, &data, &raw_checksum, 0 /*truncate_to*/)) {
+    if (aws_checksum_compute(allocator, checksum_config->checksum_algorithm, &data, &raw_checksum)) {
         goto done;
     }
     struct aws_byte_cursor raw_checksum_cursor = aws_byte_cursor_from_buf(&raw_checksum);

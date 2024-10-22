@@ -49,7 +49,7 @@ static int s_crc64nvme_nist_test_case_3_fn(struct aws_allocator *allocator, void
     uint8_t output[AWS_CRC64_LEN] = {0};
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 0;
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf));
 
     uint8_t expected[] = {0x0C, 0x1A, 0x80, 0x03, 0x6D, 0x65, 0xC5, 0x55};
     struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
@@ -63,37 +63,6 @@ static int s_crc64nvme_nist_test_case_3_fn(struct aws_allocator *allocator, void
 }
 
 AWS_TEST_CASE(crc64nvme_nist_test_case_3, s_crc64nvme_nist_test_case_3_fn)
-
-static int s_crc64nvme_nist_test_case_3_truncated_fn(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    aws_s3_library_init(allocator);
-
-    struct aws_s3_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_CRC64NVME);
-    ASSERT_NOT_NULL(checksum);
-    struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
-
-    for (size_t i = 0; i < 10; ++i) {
-        ASSERT_SUCCESS(aws_checksum_update(checksum, &input));
-    }
-
-    uint8_t expected[] = {0x0C, 0x1A};
-    struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
-    uint8_t output[AWS_CRC64_LEN] = {0};
-    struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, expected_buf.len);
-    output_buf.len = 0;
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 2));
-
-    ASSERT_BIN_ARRAYS_EQUALS(expected_buf.ptr, expected_buf.len, output_buf.buffer, output_buf.len);
-
-    aws_checksum_destroy(checksum);
-
-    aws_s3_library_clean_up();
-
-    return AWS_OP_SUCCESS;
-}
-
-AWS_TEST_CASE(crc64nvme_nist_test_case_3_truncated, s_crc64nvme_nist_test_case_3_truncated_fn)
 
 static int s_crc64nvme_nist_test_case_4_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -111,7 +80,7 @@ static int s_crc64nvme_nist_test_case_4_fn(struct aws_allocator *allocator, void
     uint8_t output[AWS_CRC64_LEN] = {0};
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 0;
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf));
 
     uint8_t expected[] = {0x0C, 0x1A, 0x80, 0x03, 0x6D, 0x65, 0xC5, 0x55};
 
@@ -139,7 +108,7 @@ static int s_crc64nvme_test_invalid_buffer_fn(struct aws_allocator *allocator, v
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 1;
 
-    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_SCA_CRC64NVME, &input, &output_buf, 0));
+    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_SCA_CRC64NVME, &input, &output_buf));
 
     aws_s3_library_clean_up();
 
@@ -165,9 +134,9 @@ static int s_crc64nvme_test_invalid_state_fn(struct aws_allocator *allocator, vo
     output_buf.len = 0;
 
     ASSERT_SUCCESS(aws_checksum_update(checksum, &input));
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf));
     ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(checksum, &input));
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(checksum, &output_buf));
 
     aws_checksum_destroy(checksum);
 

@@ -114,12 +114,12 @@ int s3_hash_update(struct aws_s3_checksum *checksum, const struct aws_byte_curso
     return aws_hash_update(checksum->checksum_impl.hash, to_checksum);
 }
 
-int s3_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to) {
+int s3_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
     checksum->good = false;
-    return aws_hash_finalize(checksum->checksum_impl.hash, output, truncate_to);
+    return aws_hash_finalize(checksum->checksum_impl.hash, output, 0);
 }
 
-static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to) {
+static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_byte_buf *out) {
     AWS_PRECONDITION(aws_byte_buf_is_valid(out));
 
     if (!checksum->good) {
@@ -127,9 +127,6 @@ static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_by
     }
     checksum->good = false;
     size_t len = checksum->digest_size;
-    if (truncate_to && truncate_to < len) {
-        len = truncate_to;
-    }
     if (out->capacity - out->len < len) {
         return aws_raise_error(AWS_ERROR_SHORT_BUFFER);
     }
@@ -145,12 +142,12 @@ static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_by
     return aws_raise_error(AWS_ERROR_INVALID_BUFFER_SIZE);
 }
 
-static int s_crc32_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to) {
-    return s_crc_finalize_helper(checksum, out, truncate_to);
+static int s_crc32_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out) {
+    return s_crc_finalize_helper(checksum, out);
 }
 
-static int s_crc64_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to) {
-    return s_crc_finalize_helper(checksum, out, truncate_to);
+static int s_crc64_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *out) {
+    return s_crc_finalize_helper(checksum, out);
 }
 
 static int s_crc32_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf) {
@@ -283,22 +280,21 @@ int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_
     return checksum->vtable->update(checksum, to_checksum);
 }
 
-int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to) {
-    return checksum->vtable->finalize(checksum, output, truncate_to);
+int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
+    return checksum->vtable->finalize(checksum, output);
 }
 
 static int s_checksum_compute_fn(
     struct aws_allocator *allocator,
     const struct aws_byte_cursor *input,
     struct aws_byte_buf *output,
-    struct aws_s3_checksum *(*s_crc_new)(struct aws_allocator *),
-    size_t truncate_to) {
+    struct aws_s3_checksum *(*s_crc_new)(struct aws_allocator *)) {
     struct aws_s3_checksum *checksum = s_crc_new(allocator);
     if (aws_checksum_update(checksum, input)) {
         aws_checksum_destroy(checksum);
         return AWS_OP_ERR;
     }
-    if (aws_checksum_finalize(checksum, output, truncate_to)) {
+    if (aws_checksum_finalize(checksum, output)) {
         aws_checksum_destroy(checksum);
         return AWS_OP_ERR;
     }
@@ -310,20 +306,19 @@ int aws_checksum_compute(
     struct aws_allocator *allocator,
     enum aws_s3_checksum_algorithm algorithm,
     const struct aws_byte_cursor *input,
-    struct aws_byte_buf *output,
-    size_t truncate_to) {
+    struct aws_byte_buf *output) {
 
     switch (algorithm) {
         case AWS_SCA_SHA1:
-            return aws_sha1_compute(allocator, input, output, truncate_to);
+            return aws_sha1_compute(allocator, input, output, 0);
         case AWS_SCA_SHA256:
-            return aws_sha256_compute(allocator, input, output, truncate_to);
+            return aws_sha256_compute(allocator, input, output, 0);
         case AWS_SCA_CRC64NVME:
-            return s_checksum_compute_fn(allocator, input, output, s_crc64nvme_checksum_new, truncate_to);
+            return s_checksum_compute_fn(allocator, input, output, s_crc64nvme_checksum_new);
         case AWS_SCA_CRC32:
-            return s_checksum_compute_fn(allocator, input, output, s_crc32_checksum_new, truncate_to);
+            return s_checksum_compute_fn(allocator, input, output, s_crc32_checksum_new);
         case AWS_SCA_CRC32C:
-            return s_checksum_compute_fn(allocator, input, output, s_crc32c_checksum_new, truncate_to);
+            return s_checksum_compute_fn(allocator, input, output, s_crc32c_checksum_new);
         default:
             return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
