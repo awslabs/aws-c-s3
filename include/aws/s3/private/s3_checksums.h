@@ -99,7 +99,7 @@ AWS_S3_API
 struct aws_byte_cursor aws_get_http_header_name_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get the cursor to be used as value of `*-checksum-algorithm` header.
+ * Get algorithm's name (e.g. "CRC32"), to be used as the value of headers like `x-amz-checksum-algorithm`
  */
 AWS_S3_API
 struct aws_byte_cursor aws_get_checksum_algorithm_name(enum aws_s3_checksum_algorithm algorithm);
