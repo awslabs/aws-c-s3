@@ -18,8 +18,8 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
     size_t encoded_len = 0;
     aws_byte_buf_init(&read_buf, allocator, buffer_size);
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
-        aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len);
-        aws_byte_buf_init(&compute_checksum_output, allocator, aws_get_digest_size_from_algorithm(algorithm));
+        aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
+        aws_byte_buf_init(&compute_checksum_output, allocator, aws_get_digest_size_from_checksum_algorithm(algorithm));
         aws_byte_buf_init(&stream_checksum_output, allocator, encoded_len);
         aws_byte_buf_init(&compute_encoded_checksum_output, allocator, encoded_len);
         aws_checksum_compute(allocator, algorithm, input, &compute_checksum_output, 0);
@@ -64,11 +64,11 @@ static int s_compute_chunk_stream(
     struct aws_byte_buf *encoded_checksum_output) {
     struct aws_byte_cursor pre_chunk_cursor = aws_byte_cursor_from_string(pre_chunk);
     struct aws_byte_cursor final_chunk = aws_byte_cursor_from_string(s_final_chunk);
-    struct aws_byte_cursor checksum_header_name = aws_get_http_header_name_from_algorithm(algorithm);
+    struct aws_byte_cursor checksum_header_name = aws_get_http_header_name_from_checksum_algorithm(algorithm);
     struct aws_byte_cursor colon = aws_byte_cursor_from_string(s_colon);
     struct aws_byte_cursor post_trailer = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_buf checksum_result;
-    aws_byte_buf_init(&checksum_result, allocator, aws_get_digest_size_from_algorithm(algorithm));
+    aws_byte_buf_init(&checksum_result, allocator, aws_get_digest_size_from_checksum_algorithm(algorithm));
     if (aws_byte_buf_append(output, &pre_chunk_cursor)) {
         return AWS_OP_ERR;
     }
@@ -142,8 +142,9 @@ static int compare_chunk_stream(
     struct aws_byte_buf read_buf;
     aws_byte_buf_init(&read_buf, allocator, buffer_size);
     for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
-        aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len);
-        size_t total_len = len_no_checksum + encoded_len + aws_get_http_header_name_from_algorithm(algorithm).len;
+        aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
+        size_t total_len =
+            len_no_checksum + encoded_len + aws_get_http_header_name_from_checksum_algorithm(algorithm).len;
         aws_byte_buf_init(&computed_encoded_checksum, allocator, encoded_len);
         aws_byte_buf_init(&compute_chunk_output, allocator, total_len);
         aws_byte_buf_init(&stream_chunk_output, allocator, total_len);

@@ -9,10 +9,6 @@
 #include <s3_checksums_test_case_helper.h>
 
 #define AWS_CRC32_LEN 4
-/*
- * these are the NIST test vectors, as compiled here:
- * https://www.di-mgt.com.au/sha_testvectors.html
- */
 
 static int s_crc32_nist_test_case_1_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

@@ -20,10 +20,14 @@ struct aws_checksum_vtable {
 struct aws_s3_checksum {
     struct aws_allocator *allocator;
     struct aws_checksum_vtable *vtable;
-    void *impl;
     size_t digest_size;
     enum aws_s3_checksum_algorithm algorithm;
     bool good;
+    union {
+        struct aws_hash *hash;
+        uint32_t crc_val_32bit;
+        uint64_t crc_val_64bit;
+    } checksum_impl;
 };
 
 struct checksum_config {
@@ -86,26 +90,26 @@ struct aws_input_stream *aws_chunk_stream_new(
  * Get the size of the checksum output corresponding to the aws_s3_checksum_algorithm enum value.
  */
 AWS_S3_API
-size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+size_t aws_get_digest_size_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * Get algorithm's name (e.g. "CRC32"), to be used as the value of headers like `x-amz-checksum-algorithm`
  */
 AWS_S3_API
-struct aws_byte_cursor aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+struct aws_byte_cursor aws_get_http_header_name_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * Get the cursor to be used as value of `*-checksum-algorithm` header.
  */
 AWS_S3_API
-struct aws_byte_cursor aws_get_algorithm_value_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+struct aws_byte_cursor aws_get_checksum_algorithm_name(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * Get the name of checksum algorithm to be used as the details of the parts were uploaded. Referring to
  * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompletedPart.html#AmazonS3-Type-CompletedPart
  */
 AWS_S3_API
-struct aws_byte_cursor aws_get_completed_part_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+struct aws_byte_cursor aws_get_completed_part_name_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * create a new aws_checksum corresponding to the aws_s3_checksum_algorithm enum value.

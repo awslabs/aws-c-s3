@@ -219,7 +219,7 @@ struct aws_input_stream *aws_chunk_stream_new(
         goto error;
     }
 
-    size_t checksum_len = aws_get_digest_size_from_algorithm(algorithm);
+    size_t checksum_len = aws_get_digest_size_from_checksum_algorithm(algorithm);
 
     size_t encoded_checksum_len = 0;
     if (aws_base64_compute_encoded_len(checksum_len, &encoded_checksum_len)) {
@@ -254,7 +254,7 @@ struct aws_input_stream *aws_chunk_stream_new(
         impl->set_current_stream_fn = s_set_post_chunk_stream;
     }
 
-    impl->checksum_header_name = aws_get_http_header_name_from_algorithm(algorithm);
+    impl->checksum_header_name = aws_get_http_header_name_from_checksum_algorithm(algorithm);
 
     if (aws_input_stream_get_length(impl->current_stream, &prechunk_stream_len)) {
         goto error;
