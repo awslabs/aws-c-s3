@@ -1221,6 +1221,7 @@ static void s_get_part_response_headers_checksum_helper(
                 aws_byte_buf_init_copy_from_cursor(
                     &connection->request->request_level_response_header_checksum, meta_request->allocator, header_sum);
                 connection->request->request_level_running_response_sum = aws_checksum_new(meta_request->allocator, i);
+                AWS_ASSERT(connection->request->request_level_running_response_sum != NULL);
             }
             break;
         }

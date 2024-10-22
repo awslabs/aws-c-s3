@@ -105,18 +105,18 @@ struct aws_byte_cursor aws_get_completed_part_name_from_checksum_algorithm(enum 
 }
 
 void s3_hash_destroy(struct aws_s3_checksum *checksum) {
-    struct aws_hash *hash = checksum->checksum_impl.hash;
+    struct aws_hash *hash = checksum->impl.hash;
     aws_hash_destroy(hash);
     aws_mem_release(checksum->allocator, checksum);
 }
 
 int s3_hash_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
-    return aws_hash_update(checksum->checksum_impl.hash, to_checksum);
+    return aws_hash_update(checksum->impl.hash, to_checksum);
 }
 
 int s3_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
     checksum->good = false;
-    return aws_hash_finalize(checksum->checksum_impl.hash, output, 0);
+    return aws_hash_finalize(checksum->impl.hash, output, 0);
 }
 
 static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_byte_buf *out) {
@@ -131,11 +131,11 @@ static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_by
         return aws_raise_error(AWS_ERROR_SHORT_BUFFER);
     }
     if (checksum->digest_size == AWS_CRC32_LEN) {
-        if (aws_byte_buf_write_be32(out, checksum->checksum_impl.crc_val_32bit)) {
+        if (aws_byte_buf_write_be32(out, checksum->impl.crc_val_32bit)) {
             return AWS_OP_SUCCESS;
         }
     } else {
-        if (aws_byte_buf_write_be64(out, checksum->checksum_impl.crc_val_64bit)) {
+        if (aws_byte_buf_write_be64(out, checksum->impl.crc_val_64bit)) {
             return AWS_OP_SUCCESS;
         }
     }
@@ -154,8 +154,7 @@ static int s_crc32_checksum_update(struct aws_s3_checksum *checksum, const struc
     if (!checksum->good) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
-    checksum->checksum_impl.crc_val_32bit =
-        aws_checksums_crc32_ex(buf->ptr, buf->len, checksum->checksum_impl.crc_val_32bit);
+    checksum->impl.crc_val_32bit = aws_checksums_crc32_ex(buf->ptr, buf->len, checksum->impl.crc_val_32bit);
     return AWS_OP_SUCCESS;
 }
 
@@ -163,8 +162,7 @@ static int s_crc32c_checksum_update(struct aws_s3_checksum *checksum, const stru
     if (!checksum->good) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
-    checksum->checksum_impl.crc_val_32bit =
-        aws_checksums_crc32c_ex(buf->ptr, buf->len, checksum->checksum_impl.crc_val_32bit);
+    checksum->impl.crc_val_32bit = aws_checksums_crc32c_ex(buf->ptr, buf->len, checksum->impl.crc_val_32bit);
     return AWS_OP_SUCCESS;
 }
 
@@ -172,8 +170,7 @@ static int s_crc64nvme_checksum_update(struct aws_s3_checksum *checksum, const s
     if (!checksum->good) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
-    checksum->checksum_impl.crc_val_64bit =
-        aws_checksums_crc64nvme_ex(buf->ptr, buf->len, checksum->checksum_impl.crc_val_64bit);
+    checksum->impl.crc_val_64bit = aws_checksums_crc64nvme_ex(buf->ptr, buf->len, checksum->impl.crc_val_64bit);
     return AWS_OP_SUCCESS;
 }
 
@@ -206,7 +203,12 @@ static struct aws_checksum_vtable crc64nvme_vtable = {
 struct aws_s3_checksum *aws_hash_new(struct aws_allocator *allocator, aws_hash_new_fn hash_fn) {
     struct aws_s3_checksum *checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_checksum));
     struct aws_hash *hash = hash_fn(allocator);
-    checksum->checksum_impl.hash = hash;
+    if (!hash) {
+        aws_mem_release(allocator, checksum);
+        aws_raise_error(aws_last_error_or_unknown());
+        return NULL;
+    }
+    checksum->impl.hash = hash;
     checksum->allocator = allocator;
     checksum->vtable = &hash_vtable;
     checksum->good = true;
@@ -218,7 +220,7 @@ static struct aws_s3_checksum *s_crc32_checksum_new(struct aws_allocator *alloca
     struct aws_s3_checksum *checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_checksum));
     checksum->vtable = &crc32_vtable;
     checksum->allocator = allocator;
-    checksum->checksum_impl.crc_val_32bit = 0;
+    checksum->impl.crc_val_32bit = 0;
     checksum->good = true;
     checksum->digest_size = AWS_CRC32_LEN;
 
@@ -229,7 +231,7 @@ static struct aws_s3_checksum *s_crc32c_checksum_new(struct aws_allocator *alloc
     struct aws_s3_checksum *checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_checksum));
     checksum->vtable = &crc32c_vtable;
     checksum->allocator = allocator;
-    checksum->checksum_impl.crc_val_32bit = 0;
+    checksum->impl.crc_val_32bit = 0;
     checksum->good = true;
     checksum->digest_size = AWS_CRC32C_LEN;
     return checksum;
@@ -239,7 +241,7 @@ static struct aws_s3_checksum *s_crc64nvme_checksum_new(struct aws_allocator *al
     struct aws_s3_checksum *checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_checksum));
     checksum->vtable = &crc64nvme_vtable;
     checksum->allocator = allocator;
-    checksum->checksum_impl.crc_val_64bit = 0;
+    checksum->impl.crc_val_64bit = 0;
     checksum->good = true;
     checksum->digest_size = AWS_CRC64_LEN;
     return checksum;
@@ -266,7 +268,9 @@ struct aws_s3_checksum *aws_checksum_new(struct aws_allocator *allocator, enum a
         default:
             return NULL;
     }
-    checksum->algorithm = algorithm;
+    if (checksum != NULL) {
+        checksum->algorithm = algorithm;
+    }
     return checksum;
 }
 
@@ -277,10 +281,12 @@ void aws_checksum_destroy(struct aws_s3_checksum *checksum) {
 }
 
 int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
+    AWS_PRECONDITION(checksum);
     return checksum->vtable->update(checksum, to_checksum);
 }
 
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
+    AWS_PRECONDITION(checksum);
     return checksum->vtable->finalize(checksum, output);
 }
 

@@ -27,7 +27,7 @@ struct aws_s3_checksum {
         struct aws_hash *hash;
         uint32_t crc_val_32bit;
         uint64_t crc_val_64bit;
-    } checksum_impl;
+    } impl;
 };
 
 struct checksum_config {
