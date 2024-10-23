@@ -728,7 +728,7 @@ int aws_s3_check_headers_for_checksum(
         return AWS_OP_SUCCESS;
     }
 
-    for (size_t i = 0; i <= sizeof(s_checksum_algo_priority_list); i++) {
+    for (size_t i = 0; i < sizeof(s_checksum_algo_priority_list); i++) {
         enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
         if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, algorithm)) {
             /* If user doesn't select this algorithm, skip */
