@@ -17,7 +17,7 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
     struct aws_byte_buf read_buf;
     size_t encoded_len = 0;
     aws_byte_buf_init(&read_buf, allocator, buffer_size);
-    for (size_t i = 0; i < sizeof(s_checksum_algo_priority_list); i++) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
         enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
         aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
         aws_byte_buf_init(&compute_checksum_output, allocator, aws_get_digest_size_from_checksum_algorithm(algorithm));
@@ -142,7 +142,7 @@ static int compare_chunk_stream(
     size_t encoded_len = 0;
     struct aws_byte_buf read_buf;
     aws_byte_buf_init(&read_buf, allocator, buffer_size);
-    for (size_t i = 0; i < sizeof(s_checksum_algo_priority_list); i++) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
         enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
         aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
         size_t total_len =
