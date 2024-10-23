@@ -11,6 +11,15 @@
 
 struct aws_s3_checksum;
 
+/* List to check the checksum algorithm to use based on the priority. */
+static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
+    AWS_SCA_CRC64NVME,
+    AWS_SCA_CRC32C,
+    AWS_SCA_CRC32,
+    AWS_SCA_SHA1,
+    AWS_SCA_SHA256,
+};
+
 struct aws_checksum_vtable {
     void (*destroy)(struct aws_s3_checksum *checksum);
     int (*update)(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf);

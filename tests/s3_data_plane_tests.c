@@ -3847,7 +3847,8 @@ static int s_test_s3_round_trip_default_get_fc_helper(struct aws_allocator *allo
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
 
-    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
+    for (size_t i = 0; i <= sizeof(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
         char object_path_sprintf_buffer[128] = "";
         snprintf(
             object_path_sprintf_buffer,

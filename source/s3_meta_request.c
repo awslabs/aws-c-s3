@@ -1207,20 +1207,23 @@ static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
     size_t headers_count) {
-    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
-        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
+    for (size_t i = 0; i <= sizeof(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, algorithm)) {
             /* If user doesn't select this algorithm, skip */
             continue;
         }
-        const struct aws_byte_cursor algorithm_header_name = aws_get_http_header_name_from_checksum_algorithm(i);
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
         struct aws_byte_cursor header_sum;
         if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {
             size_t encoded_len = 0;
-            aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(i), &encoded_len);
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
             if (header_sum.len == encoded_len - 1) {
                 aws_byte_buf_init_copy_from_cursor(
                     &connection->request->request_level_response_header_checksum, meta_request->allocator, header_sum);
-                connection->request->request_level_running_response_sum = aws_checksum_new(meta_request->allocator, i);
+                connection->request->request_level_running_response_sum =
+                    aws_checksum_new(meta_request->allocator, algorithm);
                 AWS_ASSERT(connection->request->request_level_running_response_sum != NULL);
             }
             break;
