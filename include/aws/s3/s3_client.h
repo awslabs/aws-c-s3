@@ -82,6 +82,7 @@ enum aws_s3_meta_request_type {
      * - only {bucket}/{key} format is supported for source and passing arn as
      *   source will not work
      * - source bucket is assumed to be in the same region as dest
+     * - source bucket and dest bucket must both be either directory buckets or regular buckets.
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
@@ -558,19 +559,19 @@ struct aws_s3_checksum_config {
     /**
      * The location of client added checksum header.
      *
-     * If AWS_SCL_NONE. No request payload checksum will be add and calculated.
+     * If AWS_SCL_NONE. No request payload checksum will be calculated or added.
      *
-     * If AWS_SCL_HEADER, the checksum will be calculated by client and added related header to the request sent.
+     * If AWS_SCL_HEADER, the client will calculate the checksum and add it to the headers.
      *
-     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The checksum will be calculate while reading the
-     * payload by client. Related header will be added to the trailer part of the encoded payload. Note the payload of
-     * the original request cannot be aws-chunked encoded already. Otherwise, error will be raised.
+     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The client will calculate the checksum and add it to
+     * the trailer. Note the payload of the original request cannot be aws-chunked encoded already, this will cause an
+     * error.
      */
     enum aws_s3_checksum_location location;
 
     /**
      * The checksum algorithm used.
-     * Must be set if location is not AWS_SCL_NONE. Must be AWS_SCA_NONE if location is AWS_SCL_NONE.
+     * Must be set if location is not AWS_SCL_NONE.
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
