@@ -19,6 +19,7 @@ static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
 };
+AWS_STATIC_ASSERT(AWS_ARRAY_SIZE(s_checksum_algo_priority_list) == (AWS_SCA_END - AWS_SCA_INIT)));
 
 struct aws_checksum_vtable {
     void (*destroy)(struct aws_s3_checksum *checksum);
@@ -102,7 +103,7 @@ AWS_S3_API
 size_t aws_get_digest_size_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get algorithm's name (e.g. "CRC32"), to be used as the value of headers like `x-amz-checksum-algorithm`
+ * Get header name to use for algorithm (e.g. "x-amz-checksum-crc32")
  */
 AWS_S3_API
 struct aws_byte_cursor aws_get_http_header_name_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
