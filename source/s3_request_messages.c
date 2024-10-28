@@ -589,7 +589,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     AWS_PRECONDITION(upload_id);
     AWS_PRECONDITION(parts);
 
-    const struct aws_byte_cursor *mpu_algorithm_checksum_name = NULL;
+    struct aws_byte_cursor mpu_algorithm_checksum_name;
+    AWS_ZERO_STRUCT(mpu_algorithm_checksum_name);
     struct aws_http_message *message = NULL;
     bool set_checksums = checksum_config && checksum_config->location != AWS_SCL_NONE;
     const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(base_message);
@@ -696,13 +697,13 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 goto error_clean_up;
             }
 
-            if (mpu_algorithm_checksum_name) {
+            if (mpu_algorithm_checksum_name.len) {
                 struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(&part->checksum_base64);
 
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
                     goto error_clean_up;
                 }
-                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                if (aws_byte_buf_append_dynamic(body_buffer, &mpu_algorithm_checksum_name)) {
                     goto error_clean_up;
                 }
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket)) {
@@ -714,7 +715,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_end_bracket)) {
                     goto error_clean_up;
                 }
-                if (aws_byte_buf_append_dynamic(body_buffer, mpu_algorithm_checksum_name)) {
+                if (aws_byte_buf_append_dynamic(body_buffer, &mpu_algorithm_checksum_name)) {
                     goto error_clean_up;
                 }
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket_new_line)) {
@@ -794,7 +795,7 @@ static int s_calculate_in_memory_checksum_helper(
     AWS_ZERO_STRUCT(*out_checksum);
 
     int ret_code = AWS_OP_ERR;
-    size_t digest_size = aws_get_digest_size_from_algorithm(checksum_config->checksum_algorithm);
+    size_t digest_size = aws_get_digest_size_from_checksum_algorithm(checksum_config->checksum_algorithm);
     size_t encoded_checksum_len = 0;
     if (aws_base64_compute_encoded_len(digest_size, &encoded_checksum_len)) {
         return AWS_OP_ERR;
@@ -805,7 +806,7 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_byte_buf raw_checksum;
     aws_byte_buf_init(&raw_checksum, allocator, digest_size);
 
-    if (aws_checksum_compute(allocator, checksum_config->checksum_algorithm, &data, &raw_checksum, 0 /*truncate_to*/)) {
+    if (aws_checksum_compute(allocator, checksum_config->checksum_algorithm, &data, &raw_checksum)) {
         goto done;
     }
     struct aws_byte_cursor raw_checksum_cursor = aws_byte_cursor_from_buf(&raw_checksum);
@@ -850,11 +851,11 @@ static int s_calculate_and_add_checksum_to_header_helper(
     }
 
     /* Add the encoded checksum to header. */
-    const struct aws_byte_cursor *header_name =
-        aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm);
+    const struct aws_byte_cursor header_name =
+        aws_get_http_header_name_from_checksum_algorithm(checksum_config->checksum_algorithm);
     struct aws_byte_cursor encoded_checksum_val = aws_byte_cursor_from_buf(local_encoded_checksum);
     struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
-    if (aws_http_headers_set(headers, *header_name, encoded_checksum_val)) {
+    if (aws_http_headers_set(headers, header_name, encoded_checksum_val)) {
         goto done;
     }
 
@@ -927,7 +928,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             if (aws_http_headers_set(
                     headers,
                     g_trailer_header_name,
-                    *aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm))) {
+                    aws_get_http_header_name_from_checksum_algorithm(checksum_config->checksum_algorithm))) {
                 goto error_clean_up;
             }
             /* set x-amz-decoded-content-length header */

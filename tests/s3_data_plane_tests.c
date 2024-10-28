@@ -3847,7 +3847,8 @@ static int s_test_s3_round_trip_default_get_fc_helper(struct aws_allocator *allo
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
 
-    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
         char object_path_sprintf_buffer[128] = "";
         snprintf(
             object_path_sprintf_buffer,
@@ -6903,7 +6904,7 @@ static int s_pause_resume_upload_review_callback(
             struct aws_byte_buf checksum_buf;
             aws_byte_buf_init(&checksum_buf, allocator, 128);
             ASSERT_SUCCESS(
-                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf, 0));
+                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf));
             struct aws_byte_cursor checksum_cursor = aws_byte_cursor_from_buf(&checksum_buf);
 
             struct aws_byte_buf encoded_checksum_buf;

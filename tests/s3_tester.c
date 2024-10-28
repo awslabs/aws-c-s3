@@ -2444,6 +2444,7 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
 
     struct aws_byte_cursor region_cursor = g_test_s3_region;
     if (s3express) {
+        /* TODO: REMOVE THE HACK FOR MOTORCADE */
         region_cursor = aws_byte_cursor_from_c_str("us-west-2");
     }
     client_config.region = region_cursor;

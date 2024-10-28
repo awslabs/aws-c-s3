@@ -833,7 +833,7 @@ static int s_verify_part_matches_checksum(
     }
 
     struct aws_byte_buf checksum;
-    if (aws_byte_buf_init(&checksum, allocator, aws_get_digest_size_from_algorithm(algorithm))) {
+    if (aws_byte_buf_init(&checksum, allocator, aws_get_digest_size_from_checksum_algorithm(algorithm))) {
         return AWS_OP_ERR;
     }
 
@@ -842,14 +842,14 @@ static int s_verify_part_matches_checksum(
     int return_status = AWS_OP_SUCCESS;
 
     size_t encoded_len = 0;
-    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len)) {
+    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to determine length of encoded checksum.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
         goto on_done;
     }
 
-    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum, 0)) {
+    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum for the skipped part.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);

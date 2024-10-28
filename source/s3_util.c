@@ -728,26 +728,28 @@ int aws_s3_check_headers_for_checksum(
         return AWS_OP_SUCCESS;
     }
 
-    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
-        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, algorithm)) {
             /* If user doesn't select this algorithm, skip */
             continue;
         }
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
         struct aws_byte_cursor checksum_value;
-        if (aws_http_headers_get(headers, *algorithm_header_name, &checksum_value) == AWS_OP_SUCCESS) {
+        if (aws_http_headers_get(headers, algorithm_header_name, &checksum_value) == AWS_OP_SUCCESS) {
             /* Found the checksum header, keep the header value and initialize the running checksum */
             size_t encoded_len = 0;
-            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
             if (checksum_value.len == encoded_len - 1) {
                 /* encoded_len includes the nullptr length. -1 is the expected length. */
                 aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
-                *out_checksum = aws_checksum_new(meta_request->allocator, i);
+                *out_checksum = aws_checksum_new(meta_request->allocator, algorithm);
                 if (!*out_checksum) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "Could not create checksum for algorithm: %d, due to error code %d (%s)",
-                        i,
+                        algorithm,
                         aws_last_error_or_unknown(),
                         aws_error_str(aws_last_error_or_unknown()));
                     return AWS_OP_ERR;
