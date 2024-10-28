@@ -19,7 +19,7 @@ static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
 };
-AWS_STATIC_ASSERT(AWS_ARRAY_SIZE(s_checksum_algo_priority_list) == (AWS_SCA_END - AWS_SCA_INIT)));
+AWS_STATIC_ASSERT(AWS_ARRAY_SIZE(s_checksum_algo_priority_list) == (AWS_SCA_END - AWS_SCA_INIT + 1));
 
 struct aws_checksum_vtable {
     void (*destroy)(struct aws_s3_checksum *checksum);
