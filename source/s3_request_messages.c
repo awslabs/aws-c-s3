@@ -303,7 +303,7 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
             if (aws_http_headers_set(
                     headers,
                     g_checksum_algorithm_header_name,
-                    *aws_get_algorithm_value_from_algorithm(checksum_config->checksum_algorithm))) {
+                    aws_get_checksum_algorithm_name(checksum_config->checksum_algorithm))) {
                 goto error_clean_up;
             }
         }
@@ -596,7 +596,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(base_message);
     AWS_ASSERT(initial_message_headers);
     if (set_checksums) {
-        mpu_algorithm_checksum_name = aws_get_completed_part_name_from_algorithm(checksum_config->checksum_algorithm);
+        mpu_algorithm_checksum_name =
+            aws_get_completed_part_name_from_checksum_algorithm(checksum_config->checksum_algorithm);
         message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
             allocator,
             base_message,
@@ -635,7 +636,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
         AWS_ASSERT(checksum_config->checksum_algorithm != AWS_SCA_NONE);
         if (aws_http_headers_set(
                 headers,
-                *aws_get_http_header_name_from_algorithm(checksum_config->checksum_algorithm),
+                aws_get_http_header_name_from_checksum_algorithm(checksum_config->checksum_algorithm),
                 aws_byte_cursor_from_buf(checksum_config->full_object_checksum))) {
             goto error_clean_up;
         }

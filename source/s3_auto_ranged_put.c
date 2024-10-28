@@ -316,9 +316,11 @@ static int s_init_and_verify_checksum_config_from_headers(
     struct aws_byte_cursor header_value;
     AWS_ZERO_STRUCT(header_value);
 
-    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
-        if (aws_http_headers_get(headers, *algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
+        if (aws_http_headers_get(headers, algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
             if (header_algo == AWS_SCA_NONE) {
                 header_algo = algorithm;
             } else {
@@ -350,13 +352,14 @@ static int s_init_and_verify_checksum_config_from_headers(
         AWS_LS_S3_META_REQUEST,
         "id=%p Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
         log_id,
-        AWS_BYTE_CURSOR_PRI(*aws_get_algorithm_value_from_algorithm(header_algo)),
+        AWS_BYTE_CURSOR_PRI(aws_get_checksum_algorithm_name(header_algo)),
         AWS_BYTE_CURSOR_PRI(header_value));
     /* Set algo */
     checksum_config->checksum_algorithm = header_algo;
     if (checksum_config->location == AWS_SCL_NONE) {
         /* Set the checksum location to trailer for the parts, complete MPU will still have the checksum in the header.
-         * But to keep the data integrity for the parts, we need to set the checksum location to trailer to send the parts level checksums.
+         * But to keep the data integrity for the parts, we need to set the checksum location to trailer to send the
+         * parts level checksums.
          */
         checksum_config->location = AWS_SCL_TRAILER;
     }

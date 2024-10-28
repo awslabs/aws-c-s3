@@ -1319,7 +1319,7 @@ static int s_calculate_in_memory_checksum_helper(
     AWS_ASSERT(out_encoded_checksum != NULL);
 
     int ret_code = AWS_OP_ERR;
-    size_t digest_size = aws_get_digest_size_from_algorithm(algo);
+    size_t digest_size = aws_get_digest_size_from_checksum_algorithm(algo);
     size_t encoded_checksum_len = 0;
     if (aws_base64_compute_encoded_len(digest_size, &encoded_checksum_len)) {
         return ret_code;
@@ -1330,7 +1330,7 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_byte_buf raw_checksum;
     aws_byte_buf_init(&raw_checksum, allocator, digest_size);
 
-    if (aws_checksum_compute(allocator, algo, &data, &raw_checksum, 0 /*truncate_to*/)) {
+    if (aws_checksum_compute(allocator, algo, &data, &raw_checksum)) {
         goto done;
     }
     struct aws_byte_cursor raw_checksum_cursor = aws_byte_cursor_from_buf(&raw_checksum);
@@ -1755,10 +1755,10 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_SUCCESS(s_calculate_in_memory_checksum_helper(
                     allocator, aws_byte_cursor_from_buf(&data), options->checksum_algorithm, &out_encoded_checksum));
                 /* Set the header */
-                const struct aws_byte_cursor *header_name =
-                    aws_get_http_header_name_from_algorithm(options->checksum_algorithm);
+                const struct aws_byte_cursor header_name =
+                    aws_get_http_header_name_from_checksum_algorithm(options->checksum_algorithm);
                 ASSERT_SUCCESS(
-                    aws_http_headers_set(headers, *header_name, aws_byte_cursor_from_buf(&out_encoded_checksum)));
+                    aws_http_headers_set(headers, header_name, aws_byte_cursor_from_buf(&out_encoded_checksum)));
                 aws_byte_buf_clean_up(&data);
                 aws_byte_buf_clean_up(&out_encoded_checksum);
             }
