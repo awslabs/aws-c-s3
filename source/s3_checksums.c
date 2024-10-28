@@ -330,9 +330,9 @@ int aws_checksum_compute(
     }
 }
 
-void aws_checksum_config_impl_init(
+void aws_checksum_config_storage_init(
     struct aws_allocator *allocator,
-    struct checksum_config_impl *internal_config,
+    struct checksum_config_storage *internal_config,
     const struct aws_s3_checksum_config *config) {
     AWS_ZERO_STRUCT(*internal_config);
     /* Zero out the struct and set the allocator regardless. */
@@ -380,9 +380,8 @@ void aws_checksum_config_impl_init(
     }
 }
 
-void aws_checksum_config_impl_cleanup(struct checksum_config_impl *internal_config) {
-    if (internal_config->full_object_checksum) {
-        aws_byte_buf_clean_up(internal_config->full_object_checksum);
-        aws_mem_release(internal_config->allocator, internal_config->full_object_checksum);
+void aws_checksum_config_storage_cleanup(struct checksum_config_storage *internal_config) {
+    if (internal_config->has_full_object_checksum) {
+        aws_byte_buf_clean_up(&internal_config->full_object_checksum);
     }
 }

@@ -307,9 +307,9 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
 };
 
 static int s_init_and_verify_checksum_config_from_headers(
-    struct checksum_config_impl *checksum_config,
-    struct aws_http_message *message,
-    void *log_id) {
+    struct checksum_config_storage *checksum_config,
+    const struct aws_http_message *message,
+    const void *log_id) {
     /* Check if the checksum header was set from the message */
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     enum aws_s3_checksum_algorithm header_algo = AWS_SCA_NONE;
@@ -346,7 +346,7 @@ static int s_init_and_verify_checksum_config_from_headers(
             log_id);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
-    AWS_ASSERT(checksum_config->full_object_checksum == NULL);
+    AWS_ASSERT(!checksum_config->has_full_object_checksum);
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
@@ -365,8 +365,9 @@ static int s_init_and_verify_checksum_config_from_headers(
     }
 
     /* Set full object checksum from the header value. */
-    checksum_config->full_object_checksum = aws_mem_calloc(checksum_config->allocator, 1, sizeof(struct aws_byte_buf));
-    aws_byte_buf_init_copy_from_cursor(checksum_config->full_object_checksum, checksum_config->allocator, header_value);
+    aws_byte_buf_init_copy_from_cursor(
+        &checksum_config->full_object_checksum, checksum_config->allocator, header_value);
+    checksum_config->has_full_object_checksum = true;
     return AWS_OP_SUCCESS;
 }
 

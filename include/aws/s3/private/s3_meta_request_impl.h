@@ -272,7 +272,7 @@ struct aws_s3_meta_request {
     const bool should_compute_content_md5;
 
     /* deep copy of the checksum config. */
-    struct checksum_config_impl checksum_config;
+    struct checksum_config_storage checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a multipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
