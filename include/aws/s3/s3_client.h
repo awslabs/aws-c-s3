@@ -595,6 +595,11 @@ struct aws_s3_checksum_config {
      *
      * NOTE: if the http message provided already have the checksum header in it, it's an error to set the callback
      * here to provide the full object checksum in two different ways. AWS_ERROR_INVALID_ARGUMENT will be raised.
+     *
+     * WARNING: This feature is experimental/unstable.
+     * At this time, full object checksum callback is only available for multipart upload
+     * (when Content-Length is above the `multipart_upload_threshold`,
+     * or Content-Length not specified). Otherwise, it will be ignored.
      */
     aws_full_object_checksum_callback_fn *full_object_checksum_cb;
     void *user_data;
