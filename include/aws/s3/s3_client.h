@@ -224,6 +224,15 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
+/**
+ * Optional callback, for you to provide the full object checksum after the object was read.
+ * Client will NOT check the checksum provided before sending it to the server.
+ *
+ * @param checksum. Pointer to the buffer for the full object checksum.
+ *                  Initialize and fill the buffer with checksum string,
+ *                  as sent in the PutObject request (base64-encoded):
+ *                  https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_RequestSyntax
+ */
 typedef void(aws_full_object_checksum_callback_fn)(struct aws_byte_buf *checksum, void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
@@ -583,6 +592,9 @@ struct aws_s3_checksum_config {
      * Optional.
      * Provide the full object checksum after the full object was read and sent to S3, but before the complete MPU was
      * sent.
+     *
+     * NOTE: if the http message provided already have the checksum header in it, it's an error to set the callback
+     * again to provide the full object checksum in two different ways. AWS_ERROR_INVALID_ARGUMENT will be raised.
      */
     aws_full_object_checksum_callback_fn *full_object_checksum_cb;
     void *user_data;
