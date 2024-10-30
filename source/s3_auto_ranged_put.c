@@ -307,18 +307,20 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
 };
 
 static int s_init_and_verify_checksum_config_from_headers(
-    struct checksum_config_impl *checksum_config,
-    struct aws_http_message *message,
-    void *log_id) {
+    struct checksum_config_storage *checksum_config,
+    const struct aws_http_message *message,
+    const void *log_id) {
     /* Check if the checksum header was set from the message */
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     enum aws_s3_checksum_algorithm header_algo = AWS_SCA_NONE;
     struct aws_byte_cursor header_value;
     AWS_ZERO_STRUCT(header_value);
 
-    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; algorithm++) {
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(algorithm);
-        if (aws_http_headers_get(headers, *algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
+        if (aws_http_headers_get(headers, algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
             if (header_algo == AWS_SCA_NONE) {
                 header_algo = algorithm;
             } else {
@@ -344,7 +346,7 @@ static int s_init_and_verify_checksum_config_from_headers(
             log_id);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
-    if (checksum_config->full_object_checksum != NULL) {
+    if (checksum_config->has_full_object_checksum) {
         /* If the full object checksum has been set, it's malformed request */
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -357,7 +359,7 @@ static int s_init_and_verify_checksum_config_from_headers(
         AWS_LS_S3_META_REQUEST,
         "id=%p Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
         log_id,
-        AWS_BYTE_CURSOR_PRI(*aws_get_algorithm_value_from_algorithm(header_algo)),
+        AWS_BYTE_CURSOR_PRI(aws_get_checksum_algorithm_name(header_algo)),
         AWS_BYTE_CURSOR_PRI(header_value));
     /* Set algo */
     checksum_config->checksum_algorithm = header_algo;
@@ -370,8 +372,9 @@ static int s_init_and_verify_checksum_config_from_headers(
     }
 
     /* Set full object checksum from the header value. */
-    checksum_config->full_object_checksum = aws_mem_calloc(checksum_config->allocator, 1, sizeof(struct aws_byte_buf));
-    aws_byte_buf_init_copy_from_cursor(checksum_config->full_object_checksum, checksum_config->allocator, header_value);
+    aws_byte_buf_init_copy_from_cursor(
+        &checksum_config->full_object_checksum, checksum_config->allocator, header_value);
+    checksum_config->has_full_object_checksum = true;
     return AWS_OP_SUCCESS;
 }
 
@@ -841,7 +844,7 @@ static int s_verify_part_matches_checksum(
     }
 
     struct aws_byte_buf checksum;
-    if (aws_byte_buf_init(&checksum, allocator, aws_get_digest_size_from_algorithm(algorithm))) {
+    if (aws_byte_buf_init(&checksum, allocator, aws_get_digest_size_from_checksum_algorithm(algorithm))) {
         return AWS_OP_ERR;
     }
 
@@ -850,14 +853,14 @@ static int s_verify_part_matches_checksum(
     int return_status = AWS_OP_SUCCESS;
 
     size_t encoded_len = 0;
-    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len)) {
+    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to determine length of encoded checksum.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
         goto on_done;
     }
 
-    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum, 0)) {
+    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum for the skipped part.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);

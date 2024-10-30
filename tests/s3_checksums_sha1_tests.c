@@ -92,7 +92,7 @@ static int s_sha1_nist_test_case_5_fn(struct aws_allocator *allocator, void *ctx
     uint8_t output[AWS_SHA1_LEN] = {0};
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 0;
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf));
 
     uint8_t expected[] = {
         0x34, 0xaa, 0x97, 0x3c, 0xd4, 0xc4, 0xda, 0xa4, 0xf6, 0x1e,
@@ -109,38 +109,6 @@ static int s_sha1_nist_test_case_5_fn(struct aws_allocator *allocator, void *ctx
 }
 
 AWS_TEST_CASE(sha1_nist_test_case_5, s_sha1_nist_test_case_5_fn)
-
-static int s_sha1_nist_test_case_5_truncated_fn(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    aws_s3_library_init(allocator);
-
-    struct aws_s3_checksum *checksum = aws_checksum_new(allocator, AWS_SCA_SHA1);
-    ASSERT_NOT_NULL(checksum);
-    struct aws_byte_cursor input = aws_byte_cursor_from_c_str("a");
-
-    for (size_t i = 0; i < 1000000; ++i) {
-        ASSERT_SUCCESS(aws_checksum_update(checksum, &input));
-    }
-
-    uint8_t expected[] = {
-        0x34, 0xaa, 0x97, 0x3c, 0xd4, 0xc4, 0xda, 0xa4, 0xf6, 0x1e, 0xeb, 0x2b, 0xdb, 0xad, 0x27, 0x31};
-    struct aws_byte_cursor expected_buf = aws_byte_cursor_from_array(expected, sizeof(expected));
-    uint8_t output[AWS_SHA1_LEN] = {0};
-    struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, expected_buf.len);
-    output_buf.len = 0;
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 16));
-
-    ASSERT_BIN_ARRAYS_EQUALS(expected_buf.ptr, expected_buf.len, output_buf.buffer, output_buf.len);
-
-    aws_checksum_destroy(checksum);
-
-    aws_s3_library_clean_up();
-
-    return AWS_OP_SUCCESS;
-}
-
-AWS_TEST_CASE(sha1_nist_test_case_5_truncated, s_sha1_nist_test_case_5_truncated_fn)
 
 static int s_sha1_nist_test_case_6_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -159,7 +127,7 @@ static int s_sha1_nist_test_case_6_fn(struct aws_allocator *allocator, void *ctx
     uint8_t output[AWS_SHA1_LEN] = {0};
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 0;
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf));
 
     uint8_t expected[] = {
         0x77, 0x89, 0xf0, 0xc9, 0xef, 0x7b, 0xfc, 0x40, 0xd9, 0x33,
@@ -190,7 +158,7 @@ static int s_sha1_test_invalid_buffer_fn(struct aws_allocator *allocator, void *
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 1;
 
-    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_SCA_SHA1, &input, &output_buf, 0));
+    ASSERT_ERROR(AWS_ERROR_SHORT_BUFFER, aws_checksum_compute(allocator, AWS_SCA_SHA1, &input, &output_buf));
 
     aws_s3_library_clean_up();
 
@@ -216,7 +184,7 @@ static int s_sha1_test_oneshot_fn(struct aws_allocator *allocator, void *ctx) {
     struct aws_byte_buf output_buf = aws_byte_buf_from_array(output, sizeof(output));
     output_buf.len = 0;
 
-    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_SCA_SHA1, &input, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_compute(allocator, AWS_SCA_SHA1, &input, &output_buf));
     ASSERT_BIN_ARRAYS_EQUALS(expected, sizeof(expected), output_buf.buffer, output_buf.len);
 
     aws_s3_library_clean_up();
@@ -243,9 +211,9 @@ static int s_sha1_test_invalid_state_fn(struct aws_allocator *allocator, void *c
     output_buf.len = 0;
 
     ASSERT_SUCCESS(aws_checksum_update(checksum, &input));
-    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf));
     ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_update(checksum, &input));
-    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(checksum, &output_buf, 0));
+    ASSERT_ERROR(AWS_ERROR_INVALID_STATE, aws_checksum_finalize(checksum, &output_buf));
 
     aws_checksum_destroy(checksum);
 
