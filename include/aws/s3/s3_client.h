@@ -586,15 +586,15 @@ struct aws_s3_checksum_config {
      * Must be set if location is not AWS_SCL_NONE.
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
-    /****************************** PUT Object specific *******************************/
 
+    /****************************** PUT Object specific *******************************/
     /**
      * Optional.
      * Provide the full object checksum after the full object was read and sent to S3, but before the complete MPU was
      * sent.
      *
      * NOTE: if the http message provided already have the checksum header in it, it's an error to set the callback
-     * again to provide the full object checksum in two different ways. AWS_ERROR_INVALID_ARGUMENT will be raised.
+     * here to provide the full object checksum in two different ways. AWS_ERROR_INVALID_ARGUMENT will be raised.
      */
     aws_full_object_checksum_callback_fn *full_object_checksum_cb;
     void *user_data;
