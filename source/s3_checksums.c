@@ -349,7 +349,7 @@ void aws_checksum_config_storage_init(
     internal_config->user_data = config->user_data;
     if (internal_config->full_object_checksum_cb) {
         /* allocate the full object checksum when the callback was set. */
-        internal_config->full_object_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
+        internal_config->has_full_object_checksum = true;
     }
 
     if (config->validate_checksum_algorithms) {

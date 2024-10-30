@@ -1306,7 +1306,7 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
         if (auto_ranged_put->base.checksum_config.full_object_checksum_cb) {
             /* Invoke the callback to fill up the full object checksum. Let server side to verify the checksum. */
             auto_ranged_put->base.checksum_config.full_object_checksum_cb(
-                auto_ranged_put->base.checksum_config.full_object_checksum,
+                &auto_ranged_put->base.checksum_config.full_object_checksum,
                 auto_ranged_put->base.checksum_config.user_data);
         }
 
