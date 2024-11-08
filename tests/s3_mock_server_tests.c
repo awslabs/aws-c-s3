@@ -167,6 +167,206 @@ TEST_CASE(multipart_upload_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* Singleton used by tests in this file */
+static struct get_requests_header_tester {
+    struct aws_allocator *alloc;
+
+    /* Store the requests headers in the array. Array of struct aws_http_headers * */
+    struct aws_array_list headers_array;
+    struct aws_mutex lock;
+} s_get_requests_header_tester;
+
+static int s_get_requests_header_tester_init(struct aws_allocator *alloc) {
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(
+        &s_get_requests_header_tester.headers_array, alloc, 1, sizeof(struct aws_http_headers *)));
+    ASSERT_SUCCESS(aws_mutex_init(&s_get_requests_header_tester.lock));
+    return AWS_OP_SUCCESS;
+}
+
+static void s_get_requests_header_tester_clean_up(void) {
+    /* iterate thought the headers array to clean up the headers */
+    for (size_t i = 0; i < aws_array_list_length(&s_get_requests_header_tester.headers_array); ++i) {
+        struct aws_http_headers *headers = NULL;
+        aws_array_list_get_at(&s_get_requests_header_tester.headers_array, &headers, i);
+        aws_http_headers_release(headers);
+    }
+    aws_mutex_clean_up(&s_get_requests_header_tester.lock);
+    aws_array_list_clean_up(&s_get_requests_header_tester.headers_array);
+}
+
+struct aws_http_stream *s_get_requests_header_make_request(
+    struct aws_http_connection *client_connection,
+    const struct aws_http_make_request_options *options) {
+    /**
+     * Record the headers in the array.
+     */
+    aws_mutex_lock(&s_get_requests_header_tester.lock);
+    struct aws_http_headers *headers = aws_http_message_get_headers(options->request);
+    /* Keep the headers alive until we clean up the tester. */
+    aws_http_headers_acquire(headers);
+    aws_array_list_push_back(&s_get_requests_header_tester.headers_array, &headers);
+    aws_mutex_unlock(&s_get_requests_header_tester.lock);
+
+    struct aws_http_stream *stream = aws_http_connection_make_request(client_connection, options);
+    return stream;
+}
+
+TEST_CASE(multipart_upload_unsigned_with_trailer_checksum_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(s_get_requests_header_tester_init(allocator));
+
+    struct aws_s3_client_config client_config = {
+        .tls_mode = AWS_MR_TLS_DISABLED,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
+
+    struct aws_s3_client_vtable s3_client_get_requests_header_vtable = g_s3_client_default_vtable;
+    s3_client_get_requests_header_vtable.http_connection_make_request = s_get_requests_header_make_request;
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+    client->vtable = &s3_client_get_requests_header_vtable;
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics));
+
+    /**
+     * Check the recorded headers.
+     * 4 requests should be made:
+     * - Create MPU
+     * - 2 Upload Part
+     * - Complete MPU
+     */
+    ASSERT_UINT_EQUALS(4, aws_array_list_length(&s_get_requests_header_tester.headers_array));
+    struct aws_byte_cursor content_sha256_header = aws_byte_cursor_from_c_str("x-amz-content-sha256");
+    struct aws_byte_cursor content_sha256_header_val;
+    AWS_ZERO_STRUCT(content_sha256_header_val);
+    struct aws_byte_cursor authorization_header = aws_byte_cursor_from_c_str("Authorization");
+    struct aws_byte_cursor authorization_header_val;
+    AWS_ZERO_STRUCT(authorization_header_val);
+    /* The first request should be Create MPU, and it should not have x-amz-content-sha256 header. */
+    struct aws_http_headers *headers = NULL;
+    ASSERT_SUCCESS(aws_array_list_get_at(&s_get_requests_header_tester.headers_array, &headers, 0));
+    /* No x-amz-content-sha256 header should be found. */
+    ASSERT_FAILS(aws_http_headers_get(headers, content_sha256_header, &content_sha256_header_val));
+    /* The second and third requests should be Upload Part, and it should have x-amz-content-sha256 header with
+     * STREAMING-UNSIGNED-PAYLOAD-TRAILER. */
+    ASSERT_SUCCESS(aws_array_list_get_at(&s_get_requests_header_tester.headers_array, &headers, 1));
+    /* x-amz-content-sha256 header should be found. */
+    ASSERT_SUCCESS(aws_http_headers_get(headers, content_sha256_header, &content_sha256_header_val));
+    ASSERT_TRUE(
+        aws_byte_cursor_eq(&content_sha256_header_val, &g_aws_signed_body_value_streaming_unsigned_payload_trailer));
+    /* But the Authorization header should not be found, since we are not signing the request. */
+    ASSERT_FAILS(aws_http_headers_get(headers, authorization_header, &authorization_header_val));
+    ASSERT_SUCCESS(aws_array_list_get_at(&s_get_requests_header_tester.headers_array, &headers, 2));
+    /* x-amz-content-sha256 header should be found. */
+    ASSERT_SUCCESS(aws_http_headers_get(headers, content_sha256_header, &content_sha256_header_val));
+    ASSERT_TRUE(
+        aws_byte_cursor_eq(&content_sha256_header_val, &g_aws_signed_body_value_streaming_unsigned_payload_trailer));
+    /* But the Authorization header should not be found, since we are not signing the request. */
+    ASSERT_FAILS(aws_http_headers_get(headers, authorization_header, &authorization_header_val));
+    /* The last request should be Complete MPU, and it should not have x-amz-content-sha256 header. */
+    ASSERT_SUCCESS(aws_array_list_get_at(&s_get_requests_header_tester.headers_array, &headers, 3));
+    /* No x-amz-content-sha256 header should be found. */
+    ASSERT_FAILS(aws_http_headers_get(headers, content_sha256_header, &content_sha256_header_val));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    s_get_requests_header_tester_clean_up();
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(single_upload_unsigned_with_trailer_checksum_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(s_get_requests_header_tester_init(allocator));
+
+    struct aws_s3_client_config client_config = {
+        .tls_mode = AWS_MR_TLS_DISABLED,
+        .part_size = 20 * 1024 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
+
+    struct aws_s3_client_vtable s3_client_get_requests_header_vtable = g_s3_client_default_vtable;
+    s3_client_get_requests_header_vtable.http_connection_make_request = s_get_requests_header_make_request;
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+    client->vtable = &s3_client_get_requests_header_vtable;
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+
+    /**
+     * Check the recorded headers.
+     * 1 request should be made:
+     * - Put Object
+     */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&s_get_requests_header_tester.headers_array));
+    struct aws_byte_cursor content_sha256_header = aws_byte_cursor_from_c_str("x-amz-content-sha256");
+    struct aws_byte_cursor content_sha256_header_val;
+    AWS_ZERO_STRUCT(content_sha256_header_val);
+    struct aws_byte_cursor authorization_header = aws_byte_cursor_from_c_str("Authorization");
+    struct aws_byte_cursor authorization_header_val;
+    AWS_ZERO_STRUCT(authorization_header_val);
+    /* The request should be Put Object, and it should have x-amz-content-sha256 header and not Authorization header. */
+    struct aws_http_headers *headers = NULL;
+    ASSERT_SUCCESS(aws_array_list_get_at(&s_get_requests_header_tester.headers_array, &headers, 0));
+    /* x-amz-content-sha256 header should be found. */
+    ASSERT_SUCCESS(aws_http_headers_get(headers, content_sha256_header, &content_sha256_header_val));
+    ASSERT_TRUE(
+        aws_byte_cursor_eq(&content_sha256_header_val, &g_aws_signed_body_value_streaming_unsigned_payload_trailer));
+    /* But the Authorization header should not be found, since we are not signing the request. */
+    ASSERT_FAILS(aws_http_headers_get(headers, authorization_header, &authorization_header_val));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    s_get_requests_header_tester_clean_up();
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     (void)ctx;
 #if defined(AWS_OS_WINDOWS)

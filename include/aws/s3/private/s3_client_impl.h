@@ -528,6 +528,9 @@ void aws_s3_client_update_upload_part_timeout(
     struct aws_s3_request *finished_upload_part_request,
     int finished_error_code);
 
+AWS_S3_API
+extern struct aws_s3_client_vtable g_s3_client_default_vtable;
+
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_CLIENT_IMPL_H */

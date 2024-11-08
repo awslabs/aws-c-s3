@@ -132,7 +132,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
 
-static struct aws_s3_client_vtable s_s3_client_default_vtable = {
+struct aws_s3_client_vtable g_s3_client_default_vtable = {
     .meta_request_factory = s_s3_client_meta_request_factory_default,
     .acquire_http_connection = aws_http_connection_manager_acquire_connection,
     .get_host_address_count = aws_host_resolver_get_host_address_count,
@@ -361,7 +361,7 @@ struct aws_s3_client *aws_s3_client_new(
         goto on_error;
     }
 
-    client->vtable = &s_s3_client_default_vtable;
+    client->vtable = &g_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
