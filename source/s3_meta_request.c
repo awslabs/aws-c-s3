@@ -864,7 +864,7 @@ static void s_get_original_credentials_callback(struct aws_credentials *credenti
     }
 }
 
-static int s_meta_request_resolve_signing_config(
+static void s_meta_request_resolve_signing_config(
     struct aws_signing_config_aws *out_signing_config,
     struct aws_s3_request *request,
     struct aws_s3_meta_request *meta_request) {
@@ -897,7 +897,12 @@ static int s_meta_request_resolve_signing_config(
             &out_signing_config->signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
         out_signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
     }
-    return AWS_OP_SUCCESS;
+
+    /**
+     * In case of the signing was skipped for anonymous credentials, or presigned URL.
+     */
+    request->send_data.require_streaming_unsigned_payload_header = aws_byte_cursor_eq(
+        &out_signing_config->signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer);
 }
 
 void aws_s3_meta_request_sign_request_default_impl(
@@ -915,27 +920,9 @@ void aws_s3_meta_request_sign_request_default_impl(
 
     struct aws_signing_config_aws signing_config;
 
-    if (s_meta_request_resolve_signing_config(&signing_config, request, meta_request)) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: No signing config present. Not signing request %p.",
-            (void *)meta_request,
-            (void *)request);
-
-        on_signing_complete(NULL, AWS_ERROR_SUCCESS, user_data);
-        return;
-    }
+    s_meta_request_resolve_signing_config(&signing_config, request, meta_request);
 
     request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
-
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Created signable %p for request %p with message %p",
-        (void *)meta_request,
-        (void *)request->send_data.signable,
-        (void *)request,
-        (void *)request->send_data.message);
-
     if (request->send_data.signable == NULL) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -946,6 +933,13 @@ void aws_s3_meta_request_sign_request_default_impl(
         on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
         return;
     }
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Created signable %p for request %p with message %p",
+        (void *)meta_request,
+        (void *)request->send_data.signable,
+        (void *)request,
+        (void *)request->send_data.message);
 
     if (signing_config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS && !disable_s3_express_signing) {
         /* Fetch credentials from S3 Express provider. */
@@ -1074,6 +1068,17 @@ finish:
             aws_error_str(error_code));
     }
 
+    /**
+     * Add the x-amz-content-sha256 header to support trailing checksum.
+     */
+    if (request->send_data.require_streaming_unsigned_payload_header) {
+        struct aws_http_header trailer_content_sha256_header = {
+            .name = aws_byte_cursor_from_c_str("x-amz-content-sha256"),
+            .value = g_aws_signed_body_value_streaming_unsigned_payload_trailer,
+        };
+        aws_http_message_add_header(request->send_data.message, trailer_content_sha256_header);
+    }
+
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
@@ -1082,6 +1087,8 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     AWS_PRECONDITION(connection);
     AWS_PRECONDITION(connection->http_connection);
 
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
@@ -1104,7 +1111,8 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         request->upload_timeout_ms = (size_t)options.response_first_byte_timeout_ms;
     }
 
-    struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
+    struct aws_http_stream *stream =
+        client->vtable->http_connection_make_request(connection->http_connection, &options);
 
     if (stream == NULL) {
         AWS_LOGF_ERROR(
