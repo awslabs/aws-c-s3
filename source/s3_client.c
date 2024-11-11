@@ -528,8 +528,9 @@ struct aws_s3_client *aws_s3_client_new(
 
     /* Set up body streaming ELG */
     {
-        size_t num_event_loops = aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
-        size_t num_streaming_threads = num_event_loops;
+        uint16_t num_event_loops =
+            (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
+        uint16_t num_streaming_threads = num_event_loops;
 
         if (num_streaming_threads < 1) {
             num_streaming_threads = 1;
