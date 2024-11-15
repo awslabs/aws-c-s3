@@ -114,7 +114,7 @@ TEST_CASE(client_update_upload_part_timeout) {
         AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
         /* Hack around to set the ideal connection time for testing. */
         size_t test_init_connection = 1000;
-        *(uint32_t *)(void *)&client->ideal_connection_count = test_init_connection;
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)test_init_connection;
         for (size_t i = 0; i < test_init_connection; i++) {
             /* Mock a number of requests completed with the large time for the request */
             uint64_t time_ns = aws_timestamp_convert(i, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
@@ -131,7 +131,7 @@ TEST_CASE(client_update_upload_part_timeout) {
             client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
         }
         /* Change it back */
-        *(uint32_t *)(void *)&client->ideal_connection_count = init_count;
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)init_count;
     }
 
     {
