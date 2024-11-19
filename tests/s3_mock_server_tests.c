@@ -211,6 +211,9 @@ struct aws_http_stream *s_get_requests_header_make_request(
     return stream;
 }
 
+/**
+ * Note: currently (Nov, 2024), S3 don't support create multipart upload anonymously.
+ */
 TEST_CASE(multipart_upload_unsigned_with_trailer_checksum_mock_server) {
     (void)ctx;
 
@@ -223,12 +226,12 @@ TEST_CASE(multipart_upload_unsigned_with_trailer_checksum_mock_server) {
     };
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
-
-    struct aws_s3_client_vtable s3_client_get_requests_header_vtable = g_s3_client_default_vtable;
-    s3_client_get_requests_header_vtable.http_connection_make_request = s_get_requests_header_make_request;
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     ASSERT_NOT_NULL(client);
-    client->vtable = &s3_client_get_requests_header_vtable;
+
+    /* Patch the client vtable to record the request header */
+    struct aws_s3_client_vtable *s3_client_get_requests_header_vtable = client->vtable;
+    s3_client_get_requests_header_vtable->http_connection_make_request = s_get_requests_header_make_request;
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
 
@@ -311,12 +314,12 @@ TEST_CASE(single_upload_unsigned_with_trailer_checksum_mock_server) {
     };
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION));
-
-    struct aws_s3_client_vtable s3_client_get_requests_header_vtable = g_s3_client_default_vtable;
-    s3_client_get_requests_header_vtable.http_connection_make_request = s_get_requests_header_make_request;
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
     ASSERT_NOT_NULL(client);
-    client->vtable = &s3_client_get_requests_header_vtable;
+
+    /* Patch the client vtable to record the request header */
+    struct aws_s3_client_vtable *s3_client_get_requests_header_vtable = client->vtable;
+    s3_client_get_requests_header_vtable->http_connection_make_request = s_get_requests_header_make_request;
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
 

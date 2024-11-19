@@ -1056,18 +1056,18 @@ static void s_s3_meta_request_request_on_signed(
             metric->time_metrics.sign_end_timestamp_ns - metric->time_metrics.sign_start_timestamp_ns;
     }
 
-finish:
-
     /**
-     * Add the x-amz-content-sha256 header to support trailing checksum.
+     * Add "x-amz-content-sha256: STREAMING-UNSIGNED-PAYLOAD-TRAILER" header to support trailing checksum.
      */
-    if (error_code == AWS_ERROR_SUCCESS && request->send_data.require_streaming_unsigned_payload_header) {
+    if (request->send_data.require_streaming_unsigned_payload_header) {
         struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
         error_code = aws_http_headers_set(
             headers,
             aws_byte_cursor_from_c_str("x-amz-content-sha256"),
             g_aws_signed_body_value_streaming_unsigned_payload_trailer);
     }
+
+finish:
 
     if (error_code != AWS_ERROR_SUCCESS) {
 
