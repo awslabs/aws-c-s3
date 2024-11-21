@@ -219,6 +219,7 @@ struct aws_s3_tester_meta_request_options {
         size_t content_length;
         bool skip_content_length;
         struct aws_byte_cursor content_encoding;
+        struct aws_byte_cursor if_none_match_header;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;

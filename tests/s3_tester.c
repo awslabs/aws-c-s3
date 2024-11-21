@@ -1696,6 +1696,13 @@ int aws_s3_tester_send_meta_request_with_options(
                 aws_http_message_add_header(message, content_encoding_header);
             }
 
+            if (options->put_options.if_none_match_header.ptr != NULL) {
+                struct aws_http_header if_none_match_header = {
+                    .name = aws_byte_cursor_from_c_str("if-none-match"),
+                    .value = options->put_options.if_none_match_header,
+                };
+                aws_http_message_add_header(message, if_none_match_header);
+            }
             meta_request_options.message = message;
             aws_byte_buf_clean_up(&object_path_buffer);
         }
