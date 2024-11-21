@@ -3012,6 +3012,8 @@ static int s_test_s3_put_object_async_fail_reading(struct aws_allocator *allocat
 
 static int s_test_validate_if_none_match_failure_response(struct aws_s3_meta_request_test_results *test_results) {
 
+    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED, test_results->finished_response_status);
+
     /**
      * response body should be like:
      * <Error>
@@ -3022,7 +3024,6 @@ static int s_test_validate_if_none_match_failure_response(struct aws_s3_meta_req
      * <HostId></HostId>
      * </Error>
      */
-    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED, test_results->finished_response_status);
 
     struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&test_results->error_response_body);
     struct aws_byte_cursor error_code_string = {0};
