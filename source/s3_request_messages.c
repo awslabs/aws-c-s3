@@ -149,7 +149,6 @@ const struct aws_byte_cursor g_s3_list_parts_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
 };
 
 const size_t g_s3_list_parts_excluded_headers_count = AWS_ARRAY_SIZE(g_s3_list_parts_excluded_headers);
@@ -180,7 +179,6 @@ const struct aws_byte_cursor g_s3_list_parts_with_checksum_excluded_headers[] = 
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
 };
 
 const size_t g_s3_list_parts_with_checksum_excluded_headers_count =
