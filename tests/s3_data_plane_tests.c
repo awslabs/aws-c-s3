@@ -3054,8 +3054,8 @@ static int s_test_s3_put_object_if_none_match(struct aws_allocator *allocator, v
         .put_options =
             {
                 /* Use pre_exist object so that the request should fail with the expected failure message. */
-                .object_path_override = g_pre_existing_object_10MB,
-                .object_size_mb = 5,
+                .object_path_override = g_pre_existing_object_1MB,
+                .object_size_mb = 1,
                 .if_none_match_header = if_none_match_all,
             },
     };
@@ -3081,7 +3081,7 @@ static int s_test_s3_put_object_mpu_if_none_match(struct aws_allocator *allocato
             {
                 /* Use pre_exist object so that the request should fail with the expected failure message. */
                 .object_path_override = g_pre_existing_object_10MB,
-                .object_size_mb = 20,
+                .object_size_mb = 10,
                 .if_none_match_header = if_none_match_all,
             },
     };

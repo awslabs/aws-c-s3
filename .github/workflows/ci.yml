@@ -5,9 +5,9 @@ on:
     branches-ignore:
       - 'main'
 
-# Allow one instance of this workflow per pull request, and cancel older runs when new changes are pushed
+# cancel in-progress builds after a new commit
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
