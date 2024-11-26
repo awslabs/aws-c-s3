@@ -3012,8 +3012,6 @@ static int s_test_s3_put_object_async_fail_reading(struct aws_allocator *allocat
 
 static int s_test_validate_if_none_match_failure_response(struct aws_s3_meta_request_test_results *test_results) {
 
-    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED, test_results->finished_response_status);
-
     /**
      * response body should be like:
      * <Error>
@@ -3060,6 +3058,8 @@ static int s_test_s3_put_object_if_none_match(struct aws_allocator *allocator, v
             },
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED, test_results.finished_response_status);
     ASSERT_SUCCESS(s_test_validate_if_none_match_failure_response(&test_results));
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
@@ -3086,6 +3086,11 @@ static int s_test_s3_put_object_mpu_if_none_match(struct aws_allocator *allocato
             },
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    /** Complete MPU can fail with 200 error */
+    ASSERT_TRUE(
+        AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED == test_results.finished_response_status ||
+        AWS_HTTP_STATUS_CODE_200_OK == test_results.finished_response_status);
     ASSERT_SUCCESS(s_test_validate_if_none_match_failure_response(&test_results));
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
