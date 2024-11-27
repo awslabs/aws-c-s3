@@ -1048,23 +1048,26 @@ static void s_s3_meta_request_request_on_signed(
         goto finish;
     }
 
+    /**
+     * Add "x-amz-content-sha256: STREAMING-UNSIGNED-PAYLOAD-TRAILER" header to support trailing checksum.
+     */
+    if (request->send_data.require_streaming_unsigned_payload_header) {
+        struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
+        if (aws_http_headers_set(
+                headers,
+                aws_byte_cursor_from_c_str("x-amz-content-sha256"),
+                g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
+            error_code = aws_last_error_or_unknown();
+            goto finish;
+        }
+    }
+
     if (request->send_data.metrics) {
         struct aws_s3_request_metrics *metric = request->send_data.metrics;
         aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.sign_end_timestamp_ns);
         AWS_ASSERT(metric->time_metrics.sign_start_timestamp_ns != 0);
         metric->time_metrics.signing_duration_ns =
             metric->time_metrics.sign_end_timestamp_ns - metric->time_metrics.sign_start_timestamp_ns;
-    }
-
-    /**
-     * Add "x-amz-content-sha256: STREAMING-UNSIGNED-PAYLOAD-TRAILER" header to support trailing checksum.
-     */
-    if (request->send_data.require_streaming_unsigned_payload_header) {
-        struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
-        error_code = aws_http_headers_set(
-            headers,
-            aws_byte_cursor_from_c_str("x-amz-content-sha256"),
-            g_aws_signed_body_value_streaming_unsigned_payload_trailer);
     }
 
 finish:
