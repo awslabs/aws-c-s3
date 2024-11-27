@@ -141,6 +141,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
     .parallel_input_stream_new_from_file = aws_parallel_input_stream_new_from_file,
+    .http_connection_make_request = aws_http_connection_make_request,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {
