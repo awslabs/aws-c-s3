@@ -1053,6 +1053,7 @@ static void s_s3_meta_request_request_on_signed(
      */
     if (request->send_data.require_streaming_unsigned_payload_header) {
         struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
+        AWS_ASSERT(headers != NULL);
         if (aws_http_headers_set(
                 headers,
                 aws_byte_cursor_from_c_str("x-amz-content-sha256"),
