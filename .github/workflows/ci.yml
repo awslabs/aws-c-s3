@@ -21,6 +21,9 @@ env:
   AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
   CTEST_PARALLEL_LEVEL: 2
 
+permissions:
+  id-token: write # This is required for requesting the JWT
+
 jobs:
   linux-compat:
     runs-on: ubuntu-24.04 # latest
