@@ -3010,6 +3010,93 @@ static int s_test_s3_put_object_async_fail_reading(struct aws_allocator *allocat
     return 0;
 }
 
+static int s_test_validate_if_none_match_failure_response(struct aws_s3_meta_request_test_results *test_results) {
+
+    /**
+     * response body should be like:
+     * <Error>
+     * <Code>PreconditionFailed</Code>
+     * <Message>At least one of the pre-conditions you specified did not hold</Message>
+     * <Condition>If-None-Match</Condition>
+     * <RequestId></RequestId>
+     * <HostId></HostId>
+     * </Error>
+     */
+
+    struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&test_results->error_response_body);
+    struct aws_byte_cursor error_code_string = {0};
+    struct aws_byte_cursor condition_string = {0};
+
+    const char *error_code_path[] = {"Error", "Code", NULL};
+    ASSERT_SUCCESS(aws_xml_get_body_at_path(test_results->allocator, xml_doc, error_code_path, &error_code_string));
+    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&error_code_string, "PreconditionFailed"));
+
+    const char *condition_path[] = {"Error", "Condition", NULL};
+    ASSERT_SUCCESS(aws_xml_get_body_at_path(test_results->allocator, xml_doc, condition_path, &condition_string));
+    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&condition_string, "If-None-Match"));
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_put_object_if_none_match, s_test_s3_put_object_if_none_match)
+static int s_test_s3_put_object_if_none_match(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+    struct aws_byte_cursor if_none_match_all = aws_byte_cursor_from_c_str("*");
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                /* Use pre_exist object so that the request should fail with the expected failure message. */
+                .object_path_override = g_pre_existing_object_1MB,
+                .object_size_mb = 1,
+                .if_none_match_header = if_none_match_all,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED, test_results.finished_response_status);
+    ASSERT_SUCCESS(s_test_validate_if_none_match_failure_response(&test_results));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_mpu_if_none_match, s_test_s3_put_object_mpu_if_none_match)
+static int s_test_s3_put_object_mpu_if_none_match(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+    struct aws_byte_cursor if_none_match_all = aws_byte_cursor_from_c_str("*");
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                /* Use pre_exist object so that the request should fail with the expected failure message. */
+                .object_path_override = g_pre_existing_object_10MB,
+                .object_size_mb = 10,
+                .if_none_match_header = if_none_match_all,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    /** Complete MPU can fail with 200 error */
+    ASSERT_TRUE(
+        AWS_HTTP_STATUS_CODE_412_PRECONDITION_FAILED == test_results.finished_response_status ||
+        AWS_HTTP_STATUS_CODE_200_OK == test_results.finished_response_status);
+    ASSERT_SUCCESS(s_test_validate_if_none_match_failure_response(&test_results));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_put_object_sse_kms, s_test_s3_put_object_sse_kms)
 static int s_test_s3_put_object_sse_kms(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

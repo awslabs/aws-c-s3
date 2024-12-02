@@ -5,6 +5,11 @@ on:
     branches-ignore:
       - 'main'
 
+# cancel in-progress builds after a new commit
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   BUILDER_VERSION: v0.9.64
   BUILDER_SOURCE: releases

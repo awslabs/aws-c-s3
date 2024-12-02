@@ -141,6 +141,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
     .parallel_input_stream_new_from_file = aws_parallel_input_stream_new_from_file,
+    .http_connection_make_request = aws_http_connection_make_request,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {
@@ -529,7 +530,7 @@ struct aws_s3_client *aws_s3_client_new(
     /* Set up body streaming ELG */
     {
         uint16_t num_event_loops =
-            (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+            (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
         uint16_t num_streaming_threads = num_event_loops;
 
         if (num_streaming_threads < 1) {
