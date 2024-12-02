@@ -38,8 +38,7 @@ const struct aws_byte_cursor g_test_mrap_endpoint =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("moujmk3izc19y.mrap.accesspoint.s3-global.amazonaws.com");
 
 const struct aws_byte_cursor g_test_body_content_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("text/plain");
-const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-east-2");
-// const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
+const struct aws_byte_cursor g_test_s3_region = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("us-west-2");
 
 const struct aws_byte_cursor g_s3_sse_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption");
 const struct aws_byte_cursor g_s3_sse_c_alg_header =
@@ -65,14 +64,10 @@ const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING
 const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
-// struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
-struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-730026");
+struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
 /* If `$CRT_S3_TEST_BUCKET_NAME` envrionment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
  * aws-c-s3-test-bucket-public */
-// struct aws_byte_cursor g_test_public_bucket_name =
-// AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
-struct aws_byte_cursor g_test_public_bucket_name =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-730026-public");
+struct aws_byte_cursor g_test_public_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use
  * `$CRT_S3_TEST_BUCKET_NAME--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com`; otherwise, use
  * aws-c-s3-test-bucket--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com */
@@ -2443,10 +2438,6 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     client_config.enable_s3express = s3express;
 
     struct aws_byte_cursor region_cursor = g_test_s3_region;
-    if (s3express) {
-        /* TODO: REMOVE THE HACK FOR MOTORCADE */
-        region_cursor = aws_byte_cursor_from_c_str("us-west-2");
-    }
     client_config.region = region_cursor;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
