@@ -11,9 +11,10 @@
       "<IsTruncated>true</IsTruncated>",
       "<Part>",
         "<PartNumber>2</PartNumber>",
+        "<ChecksumCRC32>KtQF9Q==</ChecksumCRC32>",
         "<LastModified>2010-11-10T20:48:34.000Z</LastModified>",
         "<ETag>\"7778aef83f66abc1fa1e8477f296d394\"</ETag>",
-        "<Size>10485760</Size>",
+        "<Size>8388608</Size>",
       "</Part>",
     "</ListPartsResult>"
     ]

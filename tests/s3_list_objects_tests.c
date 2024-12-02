@@ -92,7 +92,7 @@ static bool s_on_paginator_finished_predicate(void *arg) {
     return test_data->done;
 }
 
-static bool s_on_list_bucket_valid_object_fn(const struct aws_s3_object_info *info, void *user_data) {
+static int s_on_list_bucket_valid_object_fn(const struct aws_s3_object_info *info, void *user_data) {
     (void)info;
     struct list_bucket_test_data *test_data = user_data;
     struct aws_string *path = NULL;
@@ -105,7 +105,7 @@ static bool s_on_list_bucket_valid_object_fn(const struct aws_s3_object_info *in
 
     aws_array_list_push_back(&test_data->entries_found, &path);
 
-    return true;
+    return AWS_OP_SUCCESS;
 }
 
 static void s_on_list_bucket_page_finished_fn(struct aws_s3_paginator *paginator, int error_code, void *user_data) {

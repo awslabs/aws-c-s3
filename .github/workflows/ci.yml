@@ -5,8 +5,13 @@ on:
     branches-ignore:
       - 'main'
 
+# cancel in-progress builds after a new commit
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  BUILDER_VERSION: v0.9.32
+  BUILDER_VERSION: v0.9.64
   BUILDER_SOURCE: releases
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
@@ -16,6 +21,7 @@ env:
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
   AWS_REGION: us-east-1
+  CTEST_PARALLEL_LEVEL: 2
 
 jobs:
   linux-compat:
@@ -31,7 +37,7 @@ jobs:
           - al2-x64
     steps:
     - name: Checkout Sources
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
         # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
@@ -39,8 +45,9 @@ jobs:
         ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ matrix.image }} build -p ${{ env.PACKAGE_NAME }}
 
   linux-compiler-compat:
-    runs-on: ubuntu-20.04 # latest
+    runs-on: ubuntu-22.04 # latest
     strategy:
+      fail-fast: false
       matrix:
         compiler:
           - clang-3
@@ -59,11 +66,12 @@ jobs:
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
           aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
-          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --compiler=${{ matrix.compiler }} --cmake-extra=-DASSERT_LOCK_HELD=ON
+          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --compiler=${{ matrix.compiler }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DAWS_ENABLE_S3_ENDPOINT_RESOLVER=ON
 
   clang-sanitizers:
-    runs-on: ubuntu-20.04 # latest
+    runs-on: ubuntu-22.04 # latest
     strategy:
+      fail-fast: false
       matrix:
         sanitizers: [",thread", ",address,undefined"]
     steps:
@@ -74,7 +82,7 @@ jobs:
           ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --compiler=clang-11 --cmake-extra=-DENABLE_SANITIZERS=ON --cmake-extra=-DSANITIZERS="${{ matrix.sanitizers }}" --cmake-extra=-DASSERT_LOCK_HELD=ON
 
   linux-shared-libs:
-    runs-on: ubuntu-20.04 # latest
+    runs-on: ubuntu-22.04 # latest
     steps:
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
@@ -83,7 +91,7 @@ jobs:
           ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra=-DASSERT_LOCK_HELD=ON
 
   byo-crypto:
-    runs-on: ubuntu-20.04 # latest
+    runs-on: ubuntu-22.04 # latest
     steps:
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
@@ -102,6 +110,7 @@ jobs:
   windows-vc14:
     runs-on: windows-2019 # windows-2019 is last env with Visual Studio 2015 (v14.0)
     strategy:
+      fail-fast: false
       matrix:
         arch: [x86, x64]
     steps:
@@ -129,11 +138,24 @@ jobs:
       run: |
         python .\aws-c-s3\build\deps\aws-c-common\scripts\appverifier_ctest.py --build_directory .\aws-c-s3\build\aws-c-s3
 
-  osx:
-    runs-on: macos-12 # latest
+  macos:
+    runs-on: macos-14 # latest
     steps:
     - name: Checkout Sources
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+    - name: Build ${{ env.PACKAGE_NAME }} + consumers
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
+        chmod a+x builder
+        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
+
+  macos-x64:
+    runs-on: macos-14-large # latest
+    steps:
+    - name: Checkout Sources
+      uses: actions/checkout@v4
     - name: Build ${{ env.PACKAGE_NAME }} + consumers
       run: |
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
@@ -143,10 +165,18 @@ jobs:
   # Test downstream repos.
   # This should not be required because we can run into a chicken and egg problem if there is a change that needs some fix in a downstream repo.
   downstream:
-    runs-on: ubuntu-20.04 # latest
+    runs-on: ubuntu-22.04 # latest
     steps:
       # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
       - name: Build ${{ env.PACKAGE_NAME }}
         run: |
           aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
           ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build downstream -p ${{ env.PACKAGE_NAME }}
+
+  linux-debug:
+    runs-on: ubuntu-22.04 # latest
+    steps:
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
+        ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --config Debug

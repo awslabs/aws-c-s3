@@ -17,7 +17,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-#if _MSC_VER
+#ifdef _MSC_VER
 #    pragma warning(disable : 4706) /* assignment in conditional */
 #endif                              /* _MSC_VER */
 
@@ -120,6 +120,11 @@ int s3_cp_main(int argc, char *argv[], const char *command_name, void *user_data
 
     if (app_ctx->help_requested) {
         s_usage(0);
+    }
+
+    if (!app_ctx->region) {
+        fprintf(stderr, "region is a required argument\n");
+        s_usage(1);
     }
 
     struct cp_app_ctx cp_app_ctx = {
@@ -726,7 +731,7 @@ static int s_kickoff_get_object(
 }
 
 /* upon listing the objects in a bucket, this is invoked for each object encountered. */
-static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_data) {
+static int s_on_list_object(const struct aws_s3_object_info *info, void *user_data) {
     struct cp_app_ctx *cp_app_ctx = user_data;
 
     /* size greater than zero means it's an actual object. */
@@ -784,7 +789,7 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
             int ret_val = s_kickoff_get_object(cp_app_ctx, &info->key, &destination_cur, info->size);
             aws_byte_buf_clean_up(&dest_directory);
 
-            return ret_val == AWS_OP_SUCCESS;
+            return ret_val;
         }
 
         /* otherwise, we're copying between buckets. Set up the copy here. */
@@ -794,15 +799,14 @@ static bool s_on_list_object(const struct aws_s3_object_info *info, void *user_d
         aws_byte_buf_append_dynamic(&destination_key, &trimmed_key);
         struct aws_byte_cursor destination_key_cur = aws_byte_cursor_from_buf(&destination_key);
 
-        int return_code =
-            s_kick_off_copy_object_request(
-                cp_app_ctx, &cp_app_ctx->source_uri.host_name, &info->key, &destination_key_cur) == AWS_OP_SUCCESS;
+        int return_code = s_kick_off_copy_object_request(
+            cp_app_ctx, &cp_app_ctx->source_uri.host_name, &info->key, &destination_key_cur);
 
         aws_byte_buf_clean_up(&destination_key);
-        return return_code == AWS_OP_SUCCESS;
+        return return_code;
     }
 
-    return true;
+    return AWS_OP_SUCCESS;
 }
 
 static bool s_are_all_transfers_and_listings_done(void *arg) {
@@ -811,10 +815,16 @@ static bool s_are_all_transfers_and_listings_done(void *arg) {
 }
 
 void s_on_object_list_finished(struct aws_s3_paginator *paginator, int error_code, void *user_data) {
-    (void)error_code;
 
     struct cp_app_ctx *cp_app_ctx = user_data;
-
+    if (error_code != AWS_OP_SUCCESS) {
+        fprintf(
+            stderr,
+            "Failure while listing objects. Please check if you have valid credentials and s3 path is correct. Error: "
+            "%s\n",
+            aws_error_debug_str(error_code));
+        exit(1);
+    }
     if (aws_s3_paginator_has_more_results(paginator)) {
         aws_s3_paginator_continue(paginator, &cp_app_ctx->app_ctx->signing_config);
     } else {

@@ -5,7 +5,7 @@ on:
 
 
 env:
-  BUILDER_VERSION: v0.9.29
+  BUILDER_VERSION: v0.9.55
   BUILDER_SOURCE: releases
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Build ${{ env.PACKAGE_NAME }} + consumers
         run: |
           python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"

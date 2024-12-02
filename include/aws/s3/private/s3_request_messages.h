@@ -80,7 +80,7 @@ AWS_S3_API
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    enum aws_s3_checksum_algorithm algorithm);
+    const struct checksum_config *checksum_config);
 
 /* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns a
  * body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and NULL,
@@ -111,7 +111,7 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     bool should_compute_content_md5);
 
 /* Create an HTTP request for an S3 Complete-Multipart-Upload request. Creates the necessary XML payload using the
- * passed in array list of ETags.  (Each ETag is assumed to be an aws_string*)  Buffer passed in will be used to store
+ * passed in array list of `struct aws_s3_mpu_part_info *`. Buffer passed in will be used to store
  * said XML payload, which will be used as the body. */
 AWS_S3_API
 struct aws_http_message *aws_s3_complete_multipart_message_new(
@@ -119,9 +119,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
-    const struct aws_array_list *etags,
-    struct aws_byte_buf *checksums,
-    enum aws_s3_checksum_algorithm algorithm);
+    const struct aws_array_list *parts,
+    const struct checksum_config *checksum_config);
 
 AWS_S3_API
 struct aws_http_message *aws_s3_abort_multipart_upload_message_new(

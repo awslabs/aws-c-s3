@@ -241,12 +241,12 @@ static int s_test_http_headers_match(
     for (size_t i = 0; i < excluded_message0_headers_count; ++i) {
         const struct aws_byte_cursor *excluded_header_name = &excluded_message0_headers[i];
 
-        bool header_existance_is_valid = false;
+        bool header_existence_is_valid = false;
 
-        /* If the heaer is in the exception list, it's okay for message1 to have. (It may have been re-added.) */
+        /* If the header is in the exception list, it's okay for message1 to have. (It may have been re-added.) */
         for (size_t j = 0; j < message1_header_exceptions_count; ++j) {
             if (aws_byte_cursor_eq(excluded_header_name, &message1_header_exceptions[j])) {
-                header_existance_is_valid = true;
+                header_existence_is_valid = true;
                 break;
             }
         }
@@ -256,10 +256,10 @@ static int s_test_http_headers_match(
         AWS_ZERO_STRUCT(message1_header_value);
         int result = aws_http_headers_get(message1_headers, *excluded_header_name, &message1_header_value);
 
-        if (header_existance_is_valid) {
+        if (header_existence_is_valid) {
 
-            /* If this header is allowed to exist in message1, then we don't need to assert on its existance or
-             * non-existance.  But we do want to erase it from the expected_message0_headers, since its value may be
+            /* If this header is allowed to exist in message1, then we don't need to assert on its existence or
+             * non-existence.  But we do want to erase it from the expected_message0_headers, since its value may be
              * different from that in message0. */
             if (result == AWS_OP_SUCCESS) {
                 ASSERT_SUCCESS(aws_http_headers_erase(expected_message0_headers, *excluded_header_name));
@@ -388,14 +388,9 @@ static int s_test_http_message_body_stream(
     ASSERT_TRUE(body_stream != NULL);
 
     /* Check for the content length header. */
-    struct aws_byte_cursor content_length_header_value;
-    AWS_ZERO_STRUCT(content_length_header_value);
-    ASSERT_SUCCESS(aws_http_headers_get(headers, g_content_length_header_name, &content_length_header_value));
-
-    struct aws_string *content_length_header_str = aws_string_new_from_cursor(allocator, &content_length_header_value);
-    uint32_t content_length = (uint32_t)atoi((const char *)content_length_header_str->bytes);
-    ASSERT_TRUE(content_length == (uint32_t)expected_stream_contents->len);
-    aws_string_destroy(content_length_header_str);
+    uint64_t content_length = 0;
+    ASSERT_SUCCESS(aws_s3_tester_get_content_length(headers, &content_length));
+    ASSERT_TRUE(content_length == expected_stream_contents->len);
 
     /* Check that the stream data is equal to the original buffer data. */
     struct aws_byte_buf stream_read_buffer;
@@ -680,19 +675,23 @@ static int s_test_s3_create_multipart_upload_message_new(struct aws_allocator *a
     ASSERT_TRUE(original_message != NULL);
 
     struct aws_http_message *create_multipart_upload_message =
-        aws_s3_create_multipart_upload_message_new(allocator, original_message, AWS_SCA_NONE);
+        aws_s3_create_multipart_upload_message_new(allocator, original_message, NULL);
     ASSERT_TRUE(create_multipart_upload_message != NULL);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(create_multipart_upload_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(create_multipart_upload_message, &expected_create_path));
+
+    const struct aws_byte_cursor header_exclude_exceptions[] = {
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
+    };
     ASSERT_SUCCESS(s_test_http_headers_match(
         allocator,
         original_message,
         create_multipart_upload_message,
         g_s3_create_multipart_upload_excluded_headers,
         g_s3_create_multipart_upload_excluded_headers_count,
-        NULL,
-        0));
+        header_exclude_exceptions,
+        AWS_ARRAY_SIZE(header_exclude_exceptions)));
 
     aws_http_message_release(create_multipart_upload_message);
     aws_http_message_release(original_message);
@@ -804,10 +803,7 @@ struct complete_multipart_upload_xml_test_data {
     bool found_part_number;
 };
 
-static bool s_complete_multipart_upload_traverse_xml_node(
-    struct aws_xml_parser *parser,
-    struct aws_xml_node *node,
-    void *user_data) {
+static int s_complete_multipart_upload_traverse_xml_node(struct aws_xml_node *node, void *user_data) {
 
     const struct aws_byte_cursor complete_multipar_upload_tag_name =
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CompleteMultipartUpload");
@@ -815,41 +811,38 @@ static bool s_complete_multipart_upload_traverse_xml_node(
     const struct aws_byte_cursor etag_tag_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
     const struct aws_byte_cursor part_number_tag_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("PartNumber");
 
-    struct aws_byte_cursor node_name;
-    AWS_ZERO_STRUCT(node_name);
-
-    bool keep_traversing = false;
     struct complete_multipart_upload_xml_test_data *test_data = user_data;
 
-    /* If we can't get the name of the node, stop traversing. */
-    if (aws_xml_node_get_name(node, &node_name)) {
-        /* Couldn't get the tag name, so nothing to do but stop traversing. */
-    } else if (aws_byte_cursor_eq(&node_name, &complete_multipar_upload_tag_name)) {
-        aws_xml_node_traverse(parser, node, s_complete_multipart_upload_traverse_xml_node, user_data);
+    struct aws_byte_cursor node_name = aws_xml_node_get_name(node);
+    if (aws_byte_cursor_eq(&node_name, &complete_multipar_upload_tag_name)) {
+        if (aws_xml_node_traverse(node, s_complete_multipart_upload_traverse_xml_node, user_data)) {
+            return AWS_OP_ERR;
+        }
     } else if (aws_byte_cursor_eq(&node_name, &part_tag_name)) {
-        aws_xml_node_traverse(parser, node, s_complete_multipart_upload_traverse_xml_node, user_data);
+        if (aws_xml_node_traverse(node, s_complete_multipart_upload_traverse_xml_node, user_data)) {
+            return AWS_OP_ERR;
+        }
     } else if (aws_byte_cursor_eq(&node_name, &etag_tag_name)) {
 
         struct aws_byte_cursor node_body;
         AWS_ZERO_STRUCT(node_body);
-        if (aws_xml_node_as_body(parser, node, &node_body)) {
-            goto finish;
+        if (aws_xml_node_as_body(node, &node_body)) {
+            return AWS_OP_ERR;
         }
 
         test_data->found_etag = aws_byte_cursor_eq(&node_body, &test_data->etag_value);
-        keep_traversing = true;
     } else if (aws_byte_cursor_eq(&node_name, &part_number_tag_name)) {
 
         struct aws_byte_cursor node_body;
         AWS_ZERO_STRUCT(node_body);
-        aws_xml_node_as_body(parser, node, &node_body);
+        if (aws_xml_node_as_body(node, &node_body)) {
+            return AWS_OP_ERR;
+        }
 
         test_data->found_part_number = aws_byte_cursor_eq(&node_body, &test_data->part_number_value);
-        keep_traversing = true;
     }
 
-finish:
-    return keep_traversing;
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_complete_multipart_message_new, s_test_s3_complete_multipart_message_new)
@@ -861,10 +854,11 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
 #define EXPECTED_UPLOAD_PART_PATH TEST_PATH "?uploadId=" UPLOAD_ID
 #define ETAG_VALUE "etag_value"
 
-    struct aws_array_list etags;
-    ASSERT_SUCCESS(aws_array_list_init_dynamic(&etags, allocator, 1, sizeof(struct aws_string *)));
-    struct aws_string *etag = aws_string_new_from_c_str(allocator, ETAG_VALUE);
-    ASSERT_SUCCESS(aws_array_list_push_back(&etags, &etag));
+    struct aws_array_list parts;
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&parts, allocator, 1, sizeof(struct aws_s3_mpu_part_info *)));
+    struct aws_s3_mpu_part_info *part = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mpu_part_info));
+    part->etag = aws_string_new_from_c_str(allocator, ETAG_VALUE);
+    ASSERT_SUCCESS(aws_array_list_push_back(&parts, &part));
 
     const struct aws_byte_cursor header_exclude_exceptions[] = {
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Length"),
@@ -882,8 +876,8 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     struct aws_byte_buf body_buffer;
     aws_byte_buf_init(&body_buffer, allocator, 64);
 
-    struct aws_http_message *complete_multipart_message = aws_s3_complete_multipart_message_new(
-        allocator, original_message, &body_buffer, upload_id, &etags, NULL, AWS_SCA_NONE);
+    struct aws_http_message *complete_multipart_message =
+        aws_s3_complete_multipart_message_new(allocator, original_message, &body_buffer, upload_id, &parts, NULL);
 
     ASSERT_SUCCESS(s_test_http_message_request_method(complete_multipart_message, "POST"));
     ASSERT_SUCCESS(s_test_http_message_request_path(complete_multipart_message, &expected_create_path));
@@ -897,12 +891,6 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
         AWS_ARRAY_SIZE(header_exclude_exceptions)));
 
     {
-        struct aws_xml_parser_options parser_options = {
-            .doc = aws_byte_cursor_from_buf(&body_buffer),
-        };
-
-        struct aws_xml_parser *parser = aws_xml_parser_new(allocator, &parser_options);
-
         struct complete_multipart_upload_xml_test_data xml_user_data = {
             .etag_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(ETAG_VALUE),
             .part_number_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("1"),
@@ -910,9 +898,12 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
             .found_part_number = false,
         };
 
-        ASSERT_SUCCESS(
-            aws_xml_parser_parse(parser, s_complete_multipart_upload_traverse_xml_node, (void *)&xml_user_data));
-        aws_xml_parser_destroy(parser);
+        struct aws_xml_parser_options parser_options = {
+            .doc = aws_byte_cursor_from_buf(&body_buffer),
+            .on_root_encountered = s_complete_multipart_upload_traverse_xml_node,
+            .user_data = &xml_user_data,
+        };
+        ASSERT_SUCCESS(aws_xml_parse(allocator, &parser_options));
 
         ASSERT_TRUE(xml_user_data.found_etag);
         ASSERT_TRUE(xml_user_data.found_part_number);
@@ -924,8 +915,9 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
     aws_http_message_release(complete_multipart_message);
     aws_http_message_release(original_message);
 
-    aws_string_destroy(etag);
-    aws_array_list_clean_up(&etags);
+    aws_string_destroy(part->etag);
+    aws_mem_release(allocator, part);
+    aws_array_list_clean_up(&parts);
 #undef TEST_PATH
 #undef UPLOAD_ID
 #undef EXPECTED_UPLOAD_PART_PATH

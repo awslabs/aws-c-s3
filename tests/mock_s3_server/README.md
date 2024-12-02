@@ -4,7 +4,7 @@ A **NON-TLS** mock S3 server based on [python-hyper/h11](https://github.com/pyth
 
 ## How to run the server
 
-Python 3.5+ required.
+Python 3.7+ required.
 
 - Install hyper/h11 and trio python module. `python3 -m pip install h11 trio`
 - Run python. `python3 ./mock_s3_server.py`.
@@ -39,6 +39,8 @@ The server will read from ./{OperationName}/{Key}.json. The json file is formatt
 ```
 
 Where you can define the expected response status, header and response body. If the {Key}.json is not found from file system, it will load the `default.json`.
+
+If the "delay" field is present, the response will be delayed by X seconds.
 
 ### GetObject Response
 

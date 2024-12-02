@@ -86,14 +86,14 @@ static bool s_app_completion_predicate(void *arg) {
 /**
  * Called once for each object returned in the ListObjectsV2 responses.
  */
-bool s_on_object(const struct aws_s3_object_info *info, void *user_data) {
+int s_on_object(const struct aws_s3_object_info *info, void *user_data) {
     struct s3_ls_app_data *app_ctx = user_data;
 
     if (app_ctx->long_format) {
         printf("%-18" PRIu64 " ", info->size);
     }
     printf("%.*s\n", (int)info->key.len, info->key.ptr);
-    return true;
+    return AWS_OP_SUCCESS;
 }
 
 /**
@@ -114,6 +114,13 @@ void s_on_list_finished(struct aws_s3_paginator *paginator, int error_code, void
             }
             return;
         }
+    } else {
+        fprintf(
+            stderr,
+            "Failure while listing objects. Please check if you have valid credentials and s3 path is correct. "
+            "Error: "
+            "%s\n",
+            aws_error_debug_str(error_code));
     }
 
     /* all pages received. triggers the condition variable to exit the application. */
@@ -129,6 +136,11 @@ int s3_ls_main(int argc, char *argv[], const char *command_name, void *user_data
 
     if (app_ctx->help_requested) {
         s_usage(0);
+    }
+
+    if (!app_ctx->region) {
+        fprintf(stderr, "region is a required argument\n");
+        s_usage(1);
     }
 
     struct s3_ls_app_data impl_data = {

@@ -22,78 +22,139 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-struct replace_quote_entities_test_case {
-    struct aws_string *test_string;
-    struct aws_byte_cursor expected_result;
-};
+/* Ensure the library can go through the init/cleanup cycle multiple times */
+AWS_TEST_CASE(test_s3_library_init_cleanup_init_cleanup, s_test_s3_library_init_cleanup_init_cleanup)
+static int s_test_s3_library_init_cleanup_init_cleanup(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    aws_s3_library_init(allocator);
+    aws_s3_library_clean_up();
+
+    aws_s3_library_init(allocator);
+    aws_s3_library_clean_up();
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_request_type_operation_name, s_test_s3_request_type_operation_name)
+static int s_test_s3_request_type_operation_name(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    /* sanity check */
+    ASSERT_STR_EQUALS("HeadObject", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_HEAD_OBJECT));
+
+    /* check that all valid enums give back valid strings */
+    for (enum aws_s3_request_type type = AWS_S3_REQUEST_TYPE_UNKNOWN + 1; type < AWS_S3_REQUEST_TYPE_MAX; ++type) {
+        const char *operation_name = aws_s3_request_type_operation_name(type);
+        ASSERT_NOT_NULL(operation_name);
+        ASSERT_TRUE(strlen(operation_name) > 1);
+    }
+
+    /* check that invalid enums give back empty strings */
+    ASSERT_NOT_NULL(aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_UNKNOWN));
+    ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_UNKNOWN));
+    ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_MAX));
+    ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(-1));
+
+    aws_s3_library_clean_up();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_request_type_from_operation_name, s_test_s3_request_type_from_operation_name)
+static int s_test_s3_request_type_from_operation_name(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    /* sanity check */
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+        aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("HeadObject")));
+
+    /* check is case-insensitive (it's a good idea to be case-insensitive, right?) */
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+        aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("headobject")));
+
+    /* check that all valid enums can round-trip: enum -> name -> enum */
+    for (enum aws_s3_request_type type = AWS_S3_REQUEST_TYPE_UNKNOWN + 1; type < AWS_S3_REQUEST_TYPE_MAX; ++type) {
+        const char *operation_name = aws_s3_request_type_operation_name(type);
+        ASSERT_NOT_NULL(operation_name);
+        ASSERT_TRUE(strlen(operation_name) > 1);
+
+        ASSERT_INT_EQUALS(type, aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str(operation_name)));
+    }
+
+    /* check that invalid operation names give back UNKNOWN */
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_UNKNOWN,
+        aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("MyFakeOperationName")));
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_UNKNOWN, aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("")));
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_UNKNOWN, aws_s3_request_type_from_operation_name(aws_byte_cursor_from_array(NULL, 0)));
+
+    aws_s3_library_clean_up();
+    return 0;
+}
 
 AWS_TEST_CASE(test_s3_replace_quote_entities, s_test_s3_replace_quote_entities)
 static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct test_case {
+        struct aws_byte_cursor test_string;
+        const char *expected_result;
+    };
 
-    struct replace_quote_entities_test_case test_cases[] = {
+    struct test_case test_cases[] = {
         {
-            .test_string = aws_string_new_from_c_str(allocator, "&quot;testtest"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"testtest"),
+            .test_string = aws_byte_cursor_from_c_str("&quot;testtest"),
+            .expected_result = "\"testtest",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, "testtest&quot;"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest\""),
+            .test_string = aws_byte_cursor_from_c_str("testtest&quot;"),
+            .expected_result = "testtest\"",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, "&quot;&quot;"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"\""),
+            .test_string = aws_byte_cursor_from_c_str("&quot;&quot;"),
+            .expected_result = "\"\"",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, "testtest"),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("testtest"),
+            .test_string = aws_byte_cursor_from_c_str("testtest"),
+            .expected_result = "testtest",
         },
         {
-            .test_string = aws_string_new_from_c_str(allocator, ""),
-            .expected_result = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(""),
+            .test_string = aws_byte_cursor_from_c_str(""),
+            .expected_result = "",
         },
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
-        struct replace_quote_entities_test_case *test_case = &test_cases[i];
+        struct test_case *test_case = &test_cases[i];
 
-        struct aws_byte_buf result_byte_buf;
-        AWS_ZERO_STRUCT(result_byte_buf);
-
-        replace_quote_entities(allocator, test_case->test_string, &result_byte_buf);
+        struct aws_byte_buf result_byte_buf = aws_replace_quote_entities(allocator, test_case->test_string);
 
         struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_buf(&result_byte_buf);
 
-        ASSERT_TRUE(aws_byte_cursor_eq(&test_case->expected_result, &result_byte_cursor));
+        ASSERT_CURSOR_VALUE_CSTRING_EQUALS(result_byte_cursor, test_case->expected_result);
 
         aws_byte_buf_clean_up(&result_byte_buf);
-        aws_string_destroy(test_case->test_string);
-        test_case->test_string = NULL;
     }
-
-    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
-
-struct strip_quotes_test_case {
-    struct aws_byte_cursor test_cursor;
-    struct aws_byte_cursor expected_result;
-};
 
 AWS_TEST_CASE(test_s3_strip_quotes, s_test_s3_strip_quotes)
 static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct test_case {
+        struct aws_byte_cursor test_cursor;
+        struct aws_byte_cursor expected_result;
+    };
 
-    struct strip_quotes_test_case test_cases[] = {
+    struct test_case test_cases[] = {
         {
             .test_cursor = aws_byte_cursor_from_c_str("\"test\""),
             .expected_result = aws_byte_cursor_from_c_str("test"),
@@ -117,7 +178,7 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
-        struct strip_quotes_test_case *test_case = &test_cases[i];
+        struct test_case *test_case = &test_cases[i];
 
         struct aws_byte_buf result_byte_buf;
         AWS_ZERO_STRUCT(result_byte_buf);
@@ -132,7 +193,103 @@ static int s_test_s3_strip_quotes(struct aws_allocator *allocator, void *ctx) {
         aws_string_destroy(result);
     }
 
-    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_parse_request_range_header, s_test_s3_parse_request_range_header)
+static int s_test_s3_parse_request_range_header(struct aws_allocator *allocator, void *ctx) {
+
+    (void)ctx;
+
+    struct range_header_example {
+        struct aws_byte_cursor header_value;
+
+        bool has_start_range;
+        bool has_end_range;
+        uint64_t range_start;
+        uint64_t range_end;
+    };
+
+    const struct range_header_example valid_range_examples[] = {
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=5-10"),
+            .has_start_range = true,
+            .has_end_range = true,
+            .range_start = 5,
+            .range_end = 10,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
+            .has_start_range = true,
+            .has_end_range = true,
+            .range_start = 0,
+            .range_end = 0,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-"),
+            .has_start_range = true,
+            .has_end_range = false,
+            .range_start = 0,
+            .range_end = 0,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=5-"),
+            .has_start_range = true,
+            .has_end_range = false,
+            .range_start = 5,
+            .range_end = 0,
+        },
+        {
+            .header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-10"),
+            .has_start_range = false,
+            .has_end_range = true,
+            .range_start = 0,
+            .range_end = 10,
+        },
+    };
+
+    const struct aws_byte_cursor invalid_range_header_values[] = {
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=10-5"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("byts=0-5"),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("5-10"),
+    };
+    bool has_start_range = false;
+    bool has_end_range = false;
+    uint64_t range_start = 0;
+    uint64_t range_end = 0;
+
+    struct aws_http_headers *headers = aws_http_headers_new(allocator);
+    /* Check that it fails if there is no Range header */
+    ASSERT_FAILS(
+        aws_s3_parse_request_range_header(headers, &has_start_range, &has_end_range, &range_start, &range_end));
+
+    /* Check the valid test cases */
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_range_examples); ++i) {
+        printf("valid example [%zu]: " PRInSTR "\n", i, AWS_BYTE_CURSOR_PRI(valid_range_examples[i].header_value));
+
+        aws_http_headers_set(headers, g_range_header_name, valid_range_examples[i].header_value);
+
+        ASSERT_SUCCESS(
+            aws_s3_parse_request_range_header(headers, &has_start_range, &has_end_range, &range_start, &range_end));
+
+        ASSERT_INT_EQUALS(valid_range_examples[i].has_start_range, has_start_range);
+        ASSERT_INT_EQUALS(valid_range_examples[i].has_end_range, has_end_range);
+        ASSERT_INT_EQUALS(valid_range_examples[i].range_start, range_start);
+        ASSERT_INT_EQUALS(valid_range_examples[i].range_end, range_end);
+    }
+
+    /* Check the invalid test cases */
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(invalid_range_header_values); ++i) {
+        printf("invalid example [%zu]: " PRInSTR "\n", i, AWS_BYTE_CURSOR_PRI(invalid_range_header_values[i]));
+
+        aws_http_headers_set(headers, g_range_header_name, invalid_range_header_values[i]);
+
+        ASSERT_FAILS(
+            aws_s3_parse_request_range_header(headers, &has_start_range, &has_end_range, &range_start, &range_end));
+    }
+
+    aws_http_headers_release(headers);
 
     return 0;
 }
@@ -252,13 +409,19 @@ static int s_validate_part_ranges(
     uint32_t num_parts,
     const uint64_t *part_ranges) {
     ASSERT_TRUE(part_ranges != NULL);
-
+    uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
     for (uint32_t i = 0; i < num_parts; ++i) {
         uint64_t part_range_start = 0ULL;
         uint64_t part_range_end = 0ULL;
 
-        aws_s3_get_part_range(
-            object_range_start, object_range_end, part_size, i + 1, &part_range_start, &part_range_end);
+        aws_s3_calculate_auto_ranged_get_part_range(
+            object_range_start,
+            object_range_end,
+            part_size,
+            aligned_first_part_size,
+            i + 1,
+            &part_range_start,
+            &part_range_end);
 
         ASSERT_TRUE(part_range_start == part_ranges[i * 2]);
         ASSERT_TRUE(part_range_end == part_ranges[i * 2 + 1]);
@@ -273,6 +436,51 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
     (void)ctx;
 
     const size_t part_size = 16 * 1024;
+
+    /* Empty File . */
+    {
+        const uint32_t expected_num_parts = 1;
+        const uint64_t object_range_start = 0;
+        const uint64_t object_range_end = 0;
+
+        ASSERT_INT_EQUALS(
+            aws_s3_calculate_auto_ranged_get_num_parts(part_size, 0, object_range_start, object_range_end),
+            expected_num_parts);
+    }
+
+    /* first_part_size is < part_size . */
+    {
+        const uint32_t expected_num_parts = 2;
+        const uint64_t first_part_size = 2;
+        const uint64_t object_range_start = 0;
+        const uint64_t object_range_end = 5;
+
+        const uint64_t part_ranges[] = {
+            0, /* first_part start */
+            1, /* first_part end */
+
+            2, /* second_part start */
+            5, /* second_part end */
+        };
+
+        ASSERT_INT_EQUALS(
+            aws_s3_calculate_auto_ranged_get_num_parts(
+                part_size, first_part_size, object_range_start, object_range_end),
+            expected_num_parts);
+
+        uint64_t part_range_start, part_range_end;
+        aws_s3_calculate_auto_ranged_get_part_range(
+            object_range_start, object_range_end, part_size, first_part_size, 1, &part_range_start, &part_range_end);
+
+        ASSERT_INT_EQUALS(part_range_start, part_ranges[0]);
+        ASSERT_INT_EQUALS(part_range_end, part_ranges[1]);
+
+        aws_s3_calculate_auto_ranged_get_part_range(
+            object_range_start, object_range_end, part_size, first_part_size, 2, &part_range_start, &part_range_end);
+
+        ASSERT_INT_EQUALS(part_range_start, part_ranges[2]);
+        ASSERT_INT_EQUALS(part_range_end, part_ranges[3]);
+    }
 
     /* Perfectly aligned on part boundaries. */
     {
@@ -289,7 +497,9 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
             (uint64_t)part_size * 2ULL - 1ULL,
         };
 
-        ASSERT_TRUE(aws_s3_get_num_parts(part_size, object_range_start, object_range_end) == expected_num_parts);
+        ASSERT_TRUE(
+            aws_s3_calculate_auto_ranged_get_num_parts(part_size, part_size, object_range_start, object_range_end) ==
+            expected_num_parts);
 
         ASSERT_SUCCESS(
             s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
@@ -301,6 +511,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
         const uint64_t half_part_size = part_size >> 1ULL;
         const uint64_t object_range_start = half_part_size;
         const uint64_t object_range_end = (object_range_start + half_part_size + (uint64_t)part_size * 2ULL) - 1ULL;
+        uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
 
         const uint64_t part_ranges[] = {
             object_range_start,
@@ -313,7 +524,9 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
             object_range_start + half_part_size + (uint64_t)part_size * 2ULL - 1ULL,
         };
 
-        ASSERT_TRUE(aws_s3_get_num_parts(part_size, object_range_start, object_range_end) == expected_num_parts);
+        ASSERT_TRUE(
+            aws_s3_calculate_auto_ranged_get_num_parts(
+                part_size, aligned_first_part_size, object_range_start, object_range_end) == expected_num_parts);
 
         ASSERT_SUCCESS(
             s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
@@ -326,6 +539,7 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
         const uint64_t object_range_start = half_part_size;
         const uint64_t object_range_end =
             (object_range_start + half_part_size + (uint64_t)part_size * 2ULL + half_part_size) - 1ULL;
+        uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
 
         const uint64_t part_ranges[] = {
             object_range_start,
@@ -341,7 +555,26 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
             object_range_start + half_part_size + (uint64_t)part_size * 2ULL + half_part_size - 1ULL,
         };
 
-        ASSERT_TRUE(aws_s3_get_num_parts(part_size, object_range_start, object_range_end) == expected_num_parts);
+        ASSERT_TRUE(
+            aws_s3_calculate_auto_ranged_get_num_parts(
+                part_size, aligned_first_part_size, object_range_start, object_range_end) == expected_num_parts);
+
+        ASSERT_SUCCESS(
+            s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
+    }
+
+    /* 1 byte range corner case. */
+    {
+        const uint32_t expected_num_parts = 1;
+        const uint64_t object_range_start = 8;
+        const uint64_t object_range_end = 8;
+        uint64_t aligned_first_part_size = part_size - (object_range_start % part_size);
+
+        const uint64_t part_ranges[] = {8, 8};
+
+        ASSERT_TRUE(
+            aws_s3_calculate_auto_ranged_get_num_parts(
+                part_size, aligned_first_part_size, object_range_start, object_range_end) == expected_num_parts);
 
         ASSERT_SUCCESS(
             s_validate_part_ranges(object_range_start, object_range_end, part_size, expected_num_parts, part_ranges));
@@ -350,8 +583,154 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_aws_xml_get_top_level_tag_with_root_name, s_test_s3_aws_xml_get_top_level_tag_with_root_name)
-static int s_test_s3_aws_xml_get_top_level_tag_with_root_name(struct aws_allocator *allocator, void *ctx) {
+struct s3_request_part_config_example {
+    const char *name;
+    uint64_t content_length;
+    size_t client_part_size;
+    uint64_t client_max_part_size;
+    size_t expected_part_size;
+    uint32_t expected_num_parts;
+};
+
+AWS_TEST_CASE(test_s3_mpu_get_part_size_and_num_parts, s_test_s3_mpu_get_part_size_and_num_parts)
+static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+    uint64_t default_max_part_size = 5368709120ULL;
+
+    const struct s3_request_part_config_example valid_request_part_config[] = {
+        {
+            .name = "simple case",
+            .content_length = MB_TO_BYTES((uint64_t)10000),
+            .client_part_size = MB_TO_BYTES(5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5242880,
+            .expected_num_parts = 2000,
+        },
+        {
+            .name = "large content length with small part size",
+            .content_length = MB_TO_BYTES((uint64_t)990000),
+            .client_part_size = MB_TO_BYTES(5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 103809024,
+            .expected_num_parts = 10000,
+        },
+        {
+
+            .name = "large content length with large part size",
+            .content_length = MB_TO_BYTES((uint64_t)1000000),
+            .client_part_size = MB_TO_BYTES(500),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = MB_TO_BYTES(500),
+            .expected_num_parts = 2000,
+        },
+        {
+            .name = "large odd content length",
+            .content_length = 1044013645824,
+            .client_part_size = 5242880,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 104401365,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "10k parts",
+            .content_length = MB_TO_BYTES((uint64_t)50000),
+            .client_part_size = MB_TO_BYTES(5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = MB_TO_BYTES(5),
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "10k - 1 parts",
+            .content_length = 49995,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 9999,
+        },
+        {
+            .name = "10k with small last part",
+            .content_length = 49998,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 5,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "10k + 1 parts",
+            .content_length = 50001,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 6,
+            .expected_num_parts = 8334,
+
+        },
+        {
+            .name = "bump content length",
+            .content_length = 100000,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 10,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "bump content length with non-zero mod",
+            .content_length = 999999,
+            .client_part_size = 5,
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 100,
+            .expected_num_parts = 10000,
+        },
+        {
+            .name = "5 tb content length",
+            .content_length = MB_TO_BYTES((uint64_t)5 * 1024 * 1024),
+            .client_part_size = MB_TO_BYTES((uint64_t)5),
+            .client_max_part_size = default_max_part_size,
+            .expected_part_size = 549755814,
+            .expected_num_parts = 10000,
+        },
+    };
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(valid_request_part_config); ++i) {
+        AWS_LOGF_INFO(AWS_LS_S3_GENERAL, "valid example [%zu]: %s\n", i, valid_request_part_config[i].name);
+
+        uint64_t content_length = valid_request_part_config[i].content_length;
+        size_t part_size;
+        uint32_t num_parts;
+
+        ASSERT_SUCCESS(aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+            content_length,
+            valid_request_part_config[i].client_part_size,
+            valid_request_part_config[i].client_max_part_size,
+            &part_size,
+            &num_parts));
+        ASSERT_INT_EQUALS(valid_request_part_config[i].expected_part_size, part_size);
+        ASSERT_INT_EQUALS(valid_request_part_config[i].expected_num_parts, num_parts);
+    }
+
+    /* Invalid cases */
+    const struct s3_request_part_config_example invalid_request_part_config[] = {{
+        .name = "max part < required part size",
+        .content_length = 900000,
+        .client_part_size = 5,
+        .client_max_part_size = 10,
+    }};
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(invalid_request_part_config); ++i) {
+        printf("invalid example [%zu]: %s\n", i, invalid_request_part_config[i].name);
+        size_t part_size;
+        uint32_t num_parts;
+        ASSERT_FAILS(aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
+            invalid_request_part_config[i].content_length,
+            invalid_request_part_config[i].client_part_size,
+            invalid_request_part_config[i].client_max_part_size,
+            &part_size,
+            &num_parts));
+    }
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_aws_xml_get_body_at_path, s_test_s3_aws_xml_get_body_at_path)
+static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
 
@@ -364,38 +743,41 @@ static int s_test_s3_aws_xml_get_top_level_tag_with_root_name(struct aws_allocat
         "<HostId>Uuag1LuByRx9e6j5Onimru9pO4ZVKnJ2Qz7/C1NPcfTWAtRPfTaOFg==</HostId>\n"
         "</Error>");
 
-    struct aws_byte_cursor example_success_body = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<CompleteMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n"
-        "<Location>http://Example-Bucket.s3.<Region>.amazonaws.com/Example-Object</Location>\n"
-        "<Bucket>Example-Bucket</Bucket>\n"
-        "<Key>Example-Object</Key>\n"
-        "<ETag>\"3858f62230ac3c915f300c664312c11f-9\"</ETag>\n"
-        "</CompleteMultipartUploadResult>");
+    /* Ensure we can successfully look up <Error><Code> */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"Error", "Code", NULL};
 
-    struct aws_byte_cursor error_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Error");
-    struct aws_byte_cursor code_body_xml_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Code");
-    struct aws_byte_cursor etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
+        ASSERT_SUCCESS(aws_xml_get_body_at_path(allocator, example_error_body, xml_path, &error_code));
+        ASSERT_CURSOR_VALUE_CSTRING_EQUALS(error_code, "AccessDenied");
+    }
 
-    bool root_name_mismatch = false;
-    struct aws_string *error_code = aws_xml_get_top_level_tag_with_root_name(
-        allocator, &code_body_xml_name, &error_body_xml_name, &root_name_mismatch, &example_error_body);
+    /* Ensure we fail if the beginning of the path doesn't match */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"ObviouslyInvalidName", "Code", NULL};
+        ASSERT_ERROR(
+            AWS_ERROR_STRING_MATCH_NOT_FOUND,
+            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, &error_code));
+    }
 
-    ASSERT_NOT_NULL(error_code);
-    ASSERT_FALSE(root_name_mismatch);
-    ASSERT_TRUE(aws_string_eq_c_str(error_code, "AccessDenied"));
-    aws_string_destroy(error_code);
+    /* Ensure we fail if the end of the path doesn't match */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"Error", "ObviouslyInvalidName", NULL};
+        ASSERT_ERROR(
+            AWS_ERROR_STRING_MATCH_NOT_FOUND,
+            aws_xml_get_body_at_path(allocator, example_error_body, xml_path, &error_code));
+    }
 
-    error_code = aws_xml_get_top_level_tag_with_root_name(
-        allocator, &code_body_xml_name, &error_body_xml_name, &root_name_mismatch, &example_success_body);
-    ASSERT_NULL(error_code);
-    ASSERT_TRUE(root_name_mismatch);
-
-    struct aws_string *etag = aws_xml_get_top_level_tag(allocator, &etag_header_name, &example_success_body);
-
-    ASSERT_NOT_NULL(etag);
-    ASSERT_TRUE(aws_string_eq_c_str(etag, "\"3858f62230ac3c915f300c664312c11f-9\""));
-    aws_string_destroy(etag);
-
+    /* Ensure we fail if the document isn't valid XML */
+    {
+        struct aws_byte_cursor error_code = {0};
+        const char *xml_path[] = {"Error", "Code", NULL};
+        ASSERT_ERROR(
+            AWS_ERROR_INVALID_XML,
+            aws_xml_get_body_at_path(
+                allocator, aws_byte_cursor_from_c_str("Obviously invalid XML document"), xml_path, &error_code));
+    }
     return AWS_OP_SUCCESS;
 }
