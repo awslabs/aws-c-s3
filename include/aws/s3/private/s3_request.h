@@ -212,6 +212,9 @@ struct aws_s3_request {
 
         /* The metrics for the request telemetry */
         struct aws_s3_request_metrics *metrics;
+
+        /* The request is required to have the unsigned payload */
+        uint32_t require_streaming_unsigned_payload_header : 1;
     } send_data;
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */

@@ -1,5 +1,5 @@
 {
-    "name": "aws-c-s3-staging",
+    "name": "aws-c-s3",
     "targets": {
         "android": {
             "enabled": false,
