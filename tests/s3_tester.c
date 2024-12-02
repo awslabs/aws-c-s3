@@ -114,6 +114,16 @@ static int s_s3_test_meta_request_header_callback(
     return AWS_OP_SUCCESS;
 }
 
+static bool s_s3_test_meta_request_continue_callback(void *user_data) {
+    struct aws_s3_meta_request_test_results *meta_request_test_results =
+        (struct aws_s3_meta_request_test_results *)user_data;
+
+    if (meta_request_test_results->continue_callback != NULL) {
+        return meta_request_test_results->continue_callback(user_data);
+    }
+    return true;
+}
+
 static int s_s3_test_meta_request_body_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -505,6 +515,9 @@ int aws_s3_tester_bind_meta_request(
 
     ASSERT_TRUE(options->headers_callback == NULL);
     options->headers_callback = s_s3_test_meta_request_header_callback;
+
+    ASSERT_TRUE(options->continue_callback == NULL);
+    options->continue_callback = s_s3_test_meta_request_continue_callback;
 
     ASSERT_TRUE(options->body_callback == NULL);
     options->body_callback = s_s3_test_meta_request_body_callback;
@@ -1732,6 +1745,7 @@ int aws_s3_tester_send_meta_request_with_options(
     }
 
     out_results->headers_callback = options->headers_callback;
+    out_results->continue_callback = options->continue_callback;
     out_results->body_callback = options->body_callback;
     out_results->finish_callback = options->finish_callback;
     out_results->progress_callback = options->progress_callback;

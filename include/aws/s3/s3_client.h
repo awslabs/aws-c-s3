@@ -179,6 +179,11 @@ typedef int(aws_s3_meta_request_receive_body_callback_fn)(
     void *user_data);
 
 /**
+ * Invoked to poll whether the user has canceled the meta request.
+ */
+typedef bool(aws_s3_meta_request_should_continue_fn)(void *user_data);
+
+/**
  * Invoked when the entire meta request execution is complete.
  */
 typedef void(aws_s3_meta_request_finish_fn)(
@@ -766,6 +771,12 @@ struct aws_s3_meta_request_options {
      * See `aws_s3_meta_request_receive_body_callback_fn`.
      */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+
+    /**
+     * Invoked to check whether the user has set the cancellation flag for this request.
+     * See `aws_s3_meta_request_should_continue_fn`.
+     */
+    aws_s3_meta_request_should_continue_fn *continue_callback;
 
     /**
      * Invoked when the entire meta request execution is complete.
