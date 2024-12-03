@@ -970,13 +970,15 @@ static struct aws_s3_meta_request_vtable s_s3_mock_meta_request_vtable = {
     .destroy = s_s3_mock_meta_request_destroy,
 };
 
-static void s_full_object_checksum_callback(struct aws_byte_buf *checksum, void *user_data) {
+static struct aws_string *s_full_object_checksum_callback(struct aws_s3_meta_request *meta_request, void *user_data) {
+    (void)meta_request;
     struct aws_byte_buf *src = (struct aws_byte_buf *)user_data;
-    aws_byte_buf_init_copy(checksum, src->allocator, src);
+    struct aws_string *checksum_str = aws_string_new_from_buf(src->allocator, src);
     /* Clean up the user data from the callback */
     struct aws_allocator *allocator = src->allocator;
     aws_byte_buf_clean_up_secure(src);
     aws_mem_release(allocator, src);
+    return checksum_str;
 }
 
 struct aws_s3_empty_meta_request {

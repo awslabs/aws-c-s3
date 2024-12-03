@@ -342,22 +342,23 @@ static int s_init_and_verify_checksum_config_from_headers(
     if (checksum_config->checksum_algorithm != AWS_SCA_NONE && checksum_config->checksum_algorithm != header_algo) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Could not create auto-ranged-put meta request; checksum config mismatch the checksum from header.",
+            "id=%p: Could not create auto-ranged-put meta request; checksum config mismatch the checksum from header.",
             log_id);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
-    if (checksum_config->has_full_object_checksum) {
-        /* If the full object checksum has been set, it's malformed request */
-        AWS_LOGF_ERROR(
+    if (checksum_config->full_object_checksum_cb) {
+        /* If the full object checksum callback has been set, ignore it, prefer the checksum from header. */
+        AWS_LOGF_INFO(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Could not create auto-ranged-put meta request; full object checksum is set from multiple ways.",
+            "id=%p: The checksum header and the callback are both set, prefer the header value, and ignore the "
+            "callback.",
             log_id);
-        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        checksum_config->full_object_checksum_cb = NULL;
     }
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
+        "id=%p: Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
         log_id,
         AWS_BYTE_CURSOR_PRI(aws_get_checksum_algorithm_name(header_algo)),
         AWS_BYTE_CURSOR_PRI(header_value));
@@ -1305,9 +1306,29 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
         }
         if (auto_ranged_put->base.checksum_config.full_object_checksum_cb) {
             /* Invoke the callback to fill up the full object checksum. Let server side to verify the checksum. */
-            auto_ranged_put->base.checksum_config.full_object_checksum_cb(
-                &auto_ranged_put->base.checksum_config.full_object_checksum,
-                auto_ranged_put->base.checksum_config.user_data);
+            struct aws_string *result = auto_ranged_put->base.checksum_config.full_object_checksum_cb(
+                meta_request, auto_ranged_put->base.checksum_config.user_data);
+            if (!result) {
+                int error_code = aws_last_error_or_unknown();
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Full object checksum callback raised error %d (%s)",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code));
+                /* Error from the callback */
+                aws_future_http_message_set_error(message_future, error_code);
+                goto on_done;
+            }
+            if (aws_byte_buf_init_copy_from_cursor(
+                    &auto_ranged_put->base.checksum_config.full_object_checksum,
+                    allocator,
+                    aws_byte_cursor_from_string(result))) {
+                aws_string_destroy(result);
+                aws_future_http_message_set_error(message_future, aws_last_error_or_unknown());
+                goto on_done;
+            }
+            aws_string_destroy(result);
         }
 
         /* Allocate request body */
