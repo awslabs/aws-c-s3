@@ -353,14 +353,13 @@ static int s_init_and_verify_checksum_config_from_headers(
             log_id);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
-    if (checksum_config->full_object_checksum_callback) {
-        /* If the full object checksum callback has been set, ignore it, prefer the checksum from header. */
-        AWS_LOGF_INFO(
+    if (checksum_config->has_full_object_checksum) {
+        /* If the full object checksum has been set, it's malformed request */
+        AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: The checksum header and the callback are both set, prefer the header value, and ignore the "
-            "callback.",
+            "id=%p: Could not create auto-ranged-put meta request; full object checksum is set from multiple ways.",
             log_id);
-        checksum_config->full_object_checksum_callback = NULL;
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
     AWS_LOGF_DEBUG(
