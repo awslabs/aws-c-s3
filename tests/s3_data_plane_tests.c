@@ -3253,49 +3253,48 @@ AWS_TEST_CASE(test_s3_put_object_sse_c_aes256_multipart, s_test_s3_put_object_ss
 static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     (void)allocator;
-    return AWS_OP_SKIP;
 
-    // struct aws_s3_tester tester;
-    // ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    // struct aws_s3_client_config client_config = {
-    //     .part_size = 5 * 1024 * 1024,
-    // };
+    struct aws_s3_client_config client_config = {
+        .part_size = 5 * 1024 * 1024,
+    };
 
-    // ASSERT_SUCCESS(aws_s3_tester_bind_client(
-    //     &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
-    // struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    // ASSERT_TRUE(client != NULL);
+    ASSERT_TRUE(client != NULL);
 
-    // struct aws_byte_buf path_buf;
-    // AWS_ZERO_STRUCT(path_buf);
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
 
-    // ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-    //     tester.allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt")));
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        tester.allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c.txt")));
 
-    // struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
-    // struct aws_s3_tester_meta_request_options put_options = {
-    //     .allocator = allocator,
-    //     .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-    //     .client = client,
-    //     .sse_type = AWS_S3_TESTER_SSE_C_AES256,
-    //     .put_options =
-    //         {
-    //             .object_size_mb = 10,
-    //             .object_path_override = object_path,
-    //         },
-    // };
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .sse_type = AWS_S3_TESTER_SSE_C_AES256,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+    };
 
-    // ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
-    // client = aws_s3_client_release(client);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    client = aws_s3_client_release(client);
 
-    // aws_byte_buf_clean_up(&path_buf);
-    // aws_s3_tester_clean_up(&tester);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_tester_clean_up(&tester);
 
-    // return 0;
+    return 0;
 }
 
 AWS_TEST_CASE(
