@@ -910,34 +910,13 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
 
-    struct aws_s3_client *client = meta_request->client;
-    AWS_PRECONDITION(client);
+    /* When the body stream supports reading in parallel, and it's upload parts, do parallel preparation to speed up
+     * reading. */
+    bool parallel_prepare =
+        (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
 
-    struct aws_allocator *allocator = client->allocator;
-    AWS_PRECONDITION(allocator);
-    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-
-    struct aws_s3_prepare_request_payload *payload =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_request_payload));
-
-    payload->allocator = allocator;
-    payload->request = request;
-    payload->callback = callback;
-    payload->user_data = user_data;
-
-    aws_task_init(
-        &payload->task,
-        aws_s3_meta_request_default_prepare_request_task,
-        payload,
-        "s3_meta_request_prepare_request_task");
-    if (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
-        /* The body stream supports reading in parallel, so schedule task on any I/O thread when prepare for upload
-         * parts. If we always used the meta-request's dedicated io_event_loop, we wouldn't get any parallelism. */
-        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
-        aws_event_loop_schedule_task_now(loop, &payload->task);
-    } else {
-        aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
-    }
+    aws_s3_meta_request_schedule_prepare_request_default_impl(
+        meta_request, request, parallel_prepare /*parallel*/, callback, user_data);
 }
 
 /* Given a request, prepare it for sending based on its description. */

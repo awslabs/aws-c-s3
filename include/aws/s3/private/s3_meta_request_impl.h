@@ -465,10 +465,12 @@ bool aws_s3_meta_request_checksum_config_has_algorithm(
     struct aws_s3_meta_request *meta_request,
     enum aws_s3_checksum_algorithm algorithm);
 
-void aws_s3_meta_request_default_prepare_request_task(
-    struct aws_task *task,
-    void *arg,
-    enum aws_task_status task_status);
+void aws_s3_meta_request_schedule_prepare_request_default_impl(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    bool parallel,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
 
 AWS_EXTERN_C_END
 
