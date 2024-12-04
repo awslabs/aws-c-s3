@@ -45,7 +45,7 @@ struct checksum_config_storage {
     struct aws_byte_buf full_object_checksum;
     bool has_full_object_checksum;
 
-    aws_s3_meta_request_full_object_checksum_fn *full_object_checksum_cb;
+    aws_s3_meta_request_full_object_checksum_fn *full_object_checksum_callback;
     void *user_data;
 
     enum aws_s3_checksum_location location;

@@ -1770,7 +1770,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     aws_mem_release(allocator, out_encoded_checksum);
                 } else {
                     /* Set the full object checksum via the callback. */
-                    checksum_config.full_object_checksum_cb = s_full_object_checksum_callback;
+                    checksum_config.full_object_checksum_callback = s_full_object_checksum_callback;
                     out_encoded_checksum->allocator = allocator;
                     checksum_config.user_data = out_encoded_checksum;
                 }

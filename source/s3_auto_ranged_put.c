@@ -84,6 +84,12 @@ static bool s_s3_auto_ranged_put_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
+static void s_s3_auto_ranged_put_schedule_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
+
 static struct aws_future_void *s_s3_auto_ranged_put_prepare_request(struct aws_s3_request *request);
 static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data);
 
@@ -297,6 +303,7 @@ static int s_try_init_resume_state_from_persisted_data(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
     .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
+    .schedule_prepare_request = s_s3_auto_ranged_put_schedule_prepare_request,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
@@ -346,14 +353,14 @@ static int s_init_and_verify_checksum_config_from_headers(
             log_id);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
-    if (checksum_config->full_object_checksum_cb) {
+    if (checksum_config->full_object_checksum_callback) {
         /* If the full object checksum callback has been set, ignore it, prefer the checksum from header. */
         AWS_LOGF_INFO(
             AWS_LS_S3_META_REQUEST,
             "id=%p: The checksum header and the callback are both set, prefer the header value, and ignore the "
             "callback.",
             log_id);
-        checksum_config->full_object_checksum_cb = NULL;
+        checksum_config->full_object_checksum_callback = NULL;
     }
 
     AWS_LOGF_DEBUG(
@@ -895,6 +902,44 @@ on_done:
     return return_status;
 }
 
+void s_s3_auto_ranged_put_schedule_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
+
+    struct aws_allocator *allocator = client->allocator;
+    AWS_PRECONDITION(allocator);
+    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    struct aws_s3_prepare_request_payload *payload =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_request_payload));
+
+    payload->allocator = allocator;
+    payload->request = request;
+    payload->callback = callback;
+    payload->user_data = user_data;
+
+    aws_task_init(
+        &payload->task,
+        aws_s3_meta_request_default_prepare_request_task,
+        payload,
+        "s3_meta_request_prepare_request_task");
+    if (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+        /* The body stream supports reading in parallel, so schedule task on any I/O thread when prepare for upload
+         * parts. If we always used the meta-request's dedicated io_event_loop, we wouldn't get any parallelism. */
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
+        aws_event_loop_schedule_task_now(loop, &payload->task);
+    } else {
+        aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
+    }
+}
+
 /* Given a request, prepare it for sending based on its description. */
 static struct aws_future_void *s_s3_auto_ranged_put_prepare_request(struct aws_s3_request *request) {
 
@@ -1299,14 +1344,19 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
     AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
 
     if (request->num_times_prepared == 0) {
+        /**
+         * The prepare stage for CompleteMultipartUpload is guaranteed to happen from the meta request main thread.
+         * So that it's safe to invoke the callback from this stage and not overlapping with any other callbacks.
+         */
+
         /* Invoke upload_review_callback, and fail meta-request if user raises an error */
         if (s_s3_review_multipart_upload(request) != AWS_OP_SUCCESS) {
             aws_future_http_message_set_error(message_future, aws_last_error());
             goto on_done;
         }
-        if (auto_ranged_put->base.checksum_config.full_object_checksum_cb) {
+        if (auto_ranged_put->base.checksum_config.full_object_checksum_callback) {
             /* Invoke the callback to fill up the full object checksum. Let server side to verify the checksum. */
-            struct aws_string *result = auto_ranged_put->base.checksum_config.full_object_checksum_cb(
+            struct aws_string *result = auto_ranged_put->base.checksum_config.full_object_checksum_callback(
                 meta_request, auto_ranged_put->base.checksum_config.user_data);
             if (!result) {
                 int error_code = aws_last_error_or_unknown();
@@ -1320,14 +1370,10 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
                 aws_future_http_message_set_error(message_future, error_code);
                 goto on_done;
             }
-            if (aws_byte_buf_init_copy_from_cursor(
-                    &auto_ranged_put->base.checksum_config.full_object_checksum,
-                    allocator,
-                    aws_byte_cursor_from_string(result))) {
-                aws_string_destroy(result);
-                aws_future_http_message_set_error(message_future, aws_last_error_or_unknown());
-                goto on_done;
-            }
+            aws_byte_buf_init_copy_from_cursor(
+                &auto_ranged_put->base.checksum_config.full_object_checksum,
+                allocator,
+                aws_byte_cursor_from_string(result));
             aws_string_destroy(result);
         }
 

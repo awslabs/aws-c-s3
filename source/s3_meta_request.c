@@ -586,7 +586,6 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
     return is_finished;
 }
 
-static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 static void s_s3_meta_request_on_request_prepared(void *user_data);
 
 /* TODO: document how this is final step in prepare-request sequence.
@@ -670,18 +669,17 @@ static void s_s3_meta_request_schedule_prepare_request_default(
     payload->user_data = user_data;
 
     aws_task_init(
-        &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
-    if (meta_request->request_body_parallel_stream) {
-        /* The body stream supports reading in parallel, so schedule task on any I/O thread.
-         * If we always used the meta-request's dedicated io_event_loop, we wouldn't get any parallelism. */
-        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
-        aws_event_loop_schedule_task_now(loop, &payload->task);
-    } else {
-        aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
-    }
+        &payload->task,
+        aws_s3_meta_request_default_prepare_request_task,
+        payload,
+        "s3_meta_request_prepare_request_task");
+    aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
 }
 
-static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+void aws_s3_meta_request_default_prepare_request_task(
+    struct aws_task *task,
+    void *arg,
+    enum aws_task_status task_status) {
     (void)task;
     (void)task_status;
 

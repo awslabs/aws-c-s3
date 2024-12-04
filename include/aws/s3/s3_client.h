@@ -231,10 +231,9 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
  * @param meta_request  pointer to the aws_s3_meta_request of the upload.
  * @param user_data     pointer to the user_data set.
  *
- * @return The string of the full object checksum
- *            as sent in the PutObject request (base64-encoded):
- *            https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_RequestSyntax
- *         Return NULL and raise the proper error code incase of error happens.
+ * @return A new string with the full object checksum, as it is sent in a PutObject request (base64-encoded):
+ *         https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_RequestSyntax
+ *         If an error occurs, call aws_raise_error(E) with a proper error code and return NULL.
  */
 typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct aws_s3_meta_request *meta_request,
                                                                          void *user_data);
@@ -594,20 +593,20 @@ struct aws_s3_checksum_config {
 
     /**
      * Optional.
-     * Provide the full object checksum after the full object was read and sent to S3, but before the complete MPU was
+     * Provide the full object checksum. This callback is invoked once, after the entire body has been read.
      * sent.
      *
      * NOTE:
-     *  - If the http message provided already have the checksum header in it, it's an error to set the callback
-     *    here to provide the full object checksum in two different ways. AWS_ERROR_INVALID_ARGUMENT will be raised.
-     *  - checksum_algorithm must be set the algorithm used to calculate the checksum.
+     *  - Do not set this callback if the HTTP message already has a checksum header (e.g. x-amz-checksum-crc32). Doing
+     *      so will raise AWS_ERROR_INVALID_ARGUMENT.
+     *  - checksum_algorithm must be set to the algorithm you will use.
      *
      * WARNING: This feature is experimental/unstable.
      * At this time, full object checksum callback is only available for multipart upload
      * (when Content-Length is above the `multipart_upload_threshold`,
      * or Content-Length not specified). Otherwise, it will be ignored.
      */
-    aws_s3_meta_request_full_object_checksum_fn *full_object_checksum_cb;
+    aws_s3_meta_request_full_object_checksum_fn *full_object_checksum_callback;
     void *user_data;
 
     /****************************** GET Object specific *******************************/
