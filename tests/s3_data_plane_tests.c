@@ -4004,7 +4004,7 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
     struct aws_s3_tester_client_options client_options = {
-        .part_size = 16 * 1024,
+        .part_size = MB_TO_BYTES(5),
     };
 
     struct aws_s3_client *client = NULL;
@@ -4027,14 +4027,18 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
         .checksum_via_header = via_header,
         .put_options =
             {
-                .object_size_mb = 1,
+                .object_size_mb = 10,
                 .object_path_override = object_path,
             },
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
     /*** GET FILE ***/
+    client_options.part_size = MB_TO_BYTES(20);
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -4109,8 +4113,12 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    client = aws_s3_client_release(client);
+    tester.bound_to_client = false;
 
     /*** GET FILE ***/
+    client_options.part_size = MB_TO_BYTES(20);
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
