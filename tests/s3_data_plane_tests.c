@@ -3252,6 +3252,7 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
 AWS_TEST_CASE(test_s3_put_object_sse_c_aes256_multipart, s_test_s3_put_object_sse_c_aes256_multipart)
 static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    (void)allocator;
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -3932,7 +3933,8 @@ static int s_test_s3_round_trip_default_get_fc_helper(struct aws_allocator *allo
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
 
-    for (int algorithm = AWS_SCA_INIT; algorithm <= AWS_SCA_END; ++algorithm) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
         char object_path_sprintf_buffer[128] = "";
         snprintf(
             object_path_sprintf_buffer,
@@ -4022,7 +4024,7 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
-        .checksum_algorithm = AWS_SCA_CRC32,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .validate_get_response_checksum = false,
         .checksum_via_header = via_header,
         .put_options =
@@ -4042,7 +4044,7 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
         .validate_get_response_checksum = true,
-        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC64NVME,
         .get_options =
             {
                 .object_path = object_path,
@@ -4074,7 +4076,8 @@ static int s_test_s3_round_trip_multipart_get_fc_header(struct aws_allocator *al
 static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
     struct aws_allocator *allocator,
     void *ctx,
-    bool via_header) {
+    bool via_header,
+    bool add_full_object_checksum_via_header) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -4088,9 +4091,12 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
 
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
+    struct aws_byte_cursor object_name =
+        add_full_object_checksum_via_header
+            ? aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc_full_object.txt")
+            : aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt");
 
-    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_mpu_fc.txt")));
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(allocator, &path_buf, object_name));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
@@ -4105,6 +4111,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
             {
                 .object_size_mb = 10,
                 .object_path_override = object_path,
+                .add_full_object_checksum_via_header = add_full_object_checksum_via_header,
             },
     };
 
@@ -4137,12 +4144,27 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
 
 AWS_TEST_CASE(test_s3_round_trip_mpu_multipart_get_fc, s_test_s3_round_trip_mpu_multipart_get_fc)
 static int s_test_s3_round_trip_mpu_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
-    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, false);
+    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, false, false);
 }
 
 AWS_TEST_CASE(test_s3_round_trip_mpu_multipart_get_fc_header, s_test_s3_round_trip_mpu_multipart_get_fc_header)
 static int s_test_s3_round_trip_mpu_multipart_get_fc_header(struct aws_allocator *allocator, void *ctx) {
-    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, true);
+    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, true, false);
+}
+
+AWS_TEST_CASE(
+    test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc,
+    s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc)
+static int s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, false, true);
+}
+AWS_TEST_CASE(
+    test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header,
+    s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header)
+static int s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, true, true);
 }
 
 static int s_test_s3_download_empty_file_with_checksum_helper(
@@ -6968,7 +6990,7 @@ static int s_pause_resume_upload_review_callback(
             struct aws_byte_buf checksum_buf;
             aws_byte_buf_init(&checksum_buf, allocator, 128);
             ASSERT_SUCCESS(
-                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf, 0));
+                aws_checksum_compute(allocator, review->checksum_algorithm, &reread_part_cursor, &checksum_buf));
             struct aws_byte_cursor checksum_cursor = aws_byte_cursor_from_buf(&checksum_buf);
 
             struct aws_byte_buf encoded_checksum_buf;
@@ -7747,19 +7769,20 @@ static int s_test_s3_upload_review_checksum_location_none(struct aws_allocator *
     ASSERT_STR_EQUALS("7/xUXw==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
     ASSERT_STR_EQUALS("PCOjcw==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
 
-    /* Get the file, which should not have checksums present to validate */
+    /* S3 will store the crc64 checksum for the whole object, and we can still have validate the checksum, but the algo
+     * be validated will be crc64, instead of the crc32 we get from the client. */
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
-        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .expected_validate_checksum_alg = AWS_SCA_CRC64NVME,
         .validate_get_response_checksum = true,
         .get_options =
             {
                 .object_path = object_path,
             },
-        .finish_callback = s_s3_test_no_validate_checksum,
+        .finish_callback = s_s3_test_validate_checksum,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));

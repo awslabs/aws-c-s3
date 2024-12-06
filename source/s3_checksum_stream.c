@@ -24,7 +24,7 @@ static int s_finalize_checksum(struct aws_checksum_stream *impl) {
         return AWS_OP_SUCCESS;
     }
 
-    if (aws_checksum_finalize(impl->checksum, &impl->checksum_result, 0) != AWS_OP_SUCCESS) {
+    if (aws_checksum_finalize(impl->checksum, &impl->checksum_result) != AWS_OP_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Failed to calculate checksum with error code %d (%s).",

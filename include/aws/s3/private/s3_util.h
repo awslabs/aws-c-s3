@@ -61,44 +61,17 @@ extern const struct aws_byte_cursor g_request_validation_mode;
 AWS_S3_API
 extern const struct aws_byte_cursor g_enabled;
 
+/**
+ * The checksum-algorithm header name used for CopyObject and CreateMultipartUpload
+ */
 AWS_S3_API
-extern const struct aws_byte_cursor g_create_mpu_checksum_header_name;
+extern const struct aws_byte_cursor g_checksum_algorithm_header_name;
 
+/**
+ * The checksum-algorithm header name used for PutObject, UploadParts and PutObject*
+ */
 AWS_S3_API
-extern const struct aws_byte_cursor g_crc32c_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_crc32_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_sha1_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_sha256_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_crc32c_create_mpu_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_crc32_create_mpu_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_sha1_create_mpu_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_sha256_create_mpu_header_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_crc32c_complete_mpu_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_crc32_complete_mpu_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_sha1_complete_mpu_name;
-
-AWS_S3_API
-extern const struct aws_byte_cursor g_sha256_complete_mpu_name;
+extern const struct aws_byte_cursor g_sdk_checksum_algorithm_header_name;
 
 AWS_S3_API
 extern const struct aws_byte_cursor g_s3_client_version;
