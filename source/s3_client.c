@@ -945,36 +945,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    if (options->checksum_config) {
-        if (options->checksum_config->location == AWS_SCL_TRAILER) {
-            struct aws_http_headers *headers = aws_http_message_get_headers(options->message);
-            struct aws_byte_cursor existing_encoding;
-            AWS_ZERO_STRUCT(existing_encoding);
-            if (aws_http_headers_get(headers, g_content_encoding_header_name, &existing_encoding) == AWS_OP_SUCCESS) {
-                if (aws_byte_cursor_find_exact(&existing_encoding, &g_content_encoding_header_aws_chunked, NULL) ==
-                    AWS_OP_SUCCESS) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "id=%p Cannot create meta s3 request; for trailer checksum, the original request cannot be "
-                        "aws-chunked encoding. The client will encode the request instead.",
-                        (void *)client);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-            }
-        }
-
-        if (options->checksum_config->location != AWS_SCL_NONE &&
-            options->checksum_config->checksum_algorithm == AWS_SCA_NONE) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum location is set, but no checksum algorithm selected.",
-                (void *)client);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-    }
-
     if (s_apply_endpoint_override(client, message_headers, options->endpoint)) {
         return NULL;
     }

@@ -163,10 +163,12 @@ AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output);
 
 AWS_S3_API
-void aws_checksum_config_storage_init(
+int aws_checksum_config_storage_init(
     struct aws_allocator *allocator,
     struct checksum_config_storage *internal_config,
-    const struct aws_s3_checksum_config *config);
+    const struct aws_s3_checksum_config *config,
+    const struct aws_http_message *message,
+    const void *log_id);
 
 AWS_S3_API
 void aws_checksum_config_storage_cleanup(struct checksum_config_storage *internal_config);

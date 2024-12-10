@@ -218,7 +218,14 @@ int aws_s3_meta_request_init_base(
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
-    aws_checksum_config_storage_init(meta_request->allocator, &meta_request->checksum_config, options->checksum_config);
+    if (aws_checksum_config_storage_init(
+            meta_request->allocator,
+            &meta_request->checksum_config,
+            options->checksum_config,
+            options->message,
+            (void *)meta_request)) {
+        goto error;
+    }
 
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(client, options->signing_config);
