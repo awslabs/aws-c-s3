@@ -84,6 +84,12 @@ static bool s_s3_auto_ranged_put_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
+static void s_s3_auto_ranged_put_schedule_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
+
 static struct aws_future_void *s_s3_auto_ranged_put_prepare_request(struct aws_s3_request *request);
 static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data);
 
@@ -297,6 +303,7 @@ static int s_try_init_resume_state_from_persisted_data(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
     .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
+    .schedule_prepare_request = s_s3_auto_ranged_put_schedule_prepare_request,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
@@ -305,6 +312,78 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .finish = aws_s3_meta_request_finish_default,
     .pause = s_s3_auto_ranged_put_pause,
 };
+
+static int s_init_and_verify_checksum_config_from_headers(
+    struct checksum_config_storage *checksum_config,
+    const struct aws_http_message *message,
+    const void *log_id) {
+    /* Check if the checksum header was set from the message */
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    enum aws_s3_checksum_algorithm header_algo = AWS_SCA_NONE;
+    struct aws_byte_cursor header_value;
+    AWS_ZERO_STRUCT(header_value);
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
+        if (aws_http_headers_get(headers, algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
+            if (header_algo == AWS_SCA_NONE) {
+                header_algo = algorithm;
+            } else {
+                /* If there are multiple checksum headers set, it's malformed request */
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Could not create auto-ranged-put meta request; multiple checksum headers has been set",
+                    log_id);
+                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            }
+        }
+    }
+    if (header_algo == AWS_SCA_NONE) {
+        /* No checksum header found, done */
+        return AWS_OP_SUCCESS;
+    }
+
+    /* Found the full object checksum from the header, check if it matches the explicit setting from config */
+    if (checksum_config->checksum_algorithm != AWS_SCA_NONE && checksum_config->checksum_algorithm != header_algo) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Could not create auto-ranged-put meta request; checksum config mismatch the checksum from header.",
+            log_id);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+    if (checksum_config->has_full_object_checksum) {
+        /* If the full object checksum has been set, it's malformed request */
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Could not create auto-ranged-put meta request; full object checksum is set from multiple ways.",
+            log_id);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
+        log_id,
+        AWS_BYTE_CURSOR_PRI(aws_get_checksum_algorithm_name(header_algo)),
+        AWS_BYTE_CURSOR_PRI(header_value));
+    /* Set algo */
+    checksum_config->checksum_algorithm = header_algo;
+    if (checksum_config->location == AWS_SCL_NONE) {
+        /* Set the checksum location to trailer for the parts, complete MPU will still have the checksum in the header.
+         * But to keep the data integrity for the parts, we need to set the checksum location to trailer to send the
+         * parts level checksums.
+         */
+        checksum_config->location = AWS_SCL_TRAILER;
+    }
+
+    /* Set full object checksum from the header value. */
+    aws_byte_buf_init_copy_from_cursor(
+        &checksum_config->full_object_checksum, checksum_config->allocator, header_value);
+    checksum_config->has_full_object_checksum = true;
+    return AWS_OP_SUCCESS;
+}
 
 /* Allocate a new auto-ranged put meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
@@ -823,6 +902,23 @@ on_done:
     return return_status;
 }
 
+void s_s3_auto_ranged_put_schedule_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+
+    /* When the body stream supports reading in parallel, and it's upload parts, do parallel preparation to speed up
+     * reading. */
+    bool parallel_prepare =
+        (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
+
+    aws_s3_meta_request_schedule_prepare_request_default_impl(
+        meta_request, request, parallel_prepare /*parallel*/, callback, user_data);
+}
+
 /* Given a request, prepare it for sending based on its description. */
 static struct aws_future_void *s_s3_auto_ranged_put_prepare_request(struct aws_s3_request *request) {
 
@@ -1227,10 +1323,38 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
     AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
 
     if (request->num_times_prepared == 0) {
+        /**
+         * The prepare stage for CompleteMultipartUpload is guaranteed to happen from the the meta-request's
+         * io_event_loop thread. So that it's safe to invoke the callback from this stage and not overlapping with any
+         * other callbacks.
+         */
+
         /* Invoke upload_review_callback, and fail meta-request if user raises an error */
         if (s_s3_review_multipart_upload(request) != AWS_OP_SUCCESS) {
             aws_future_http_message_set_error(message_future, aws_last_error());
             goto on_done;
+        }
+        if (auto_ranged_put->base.checksum_config.full_object_checksum_callback) {
+            /* Invoke the callback to fill up the full object checksum. Let server side to verify the checksum. */
+            struct aws_string *result = auto_ranged_put->base.checksum_config.full_object_checksum_callback(
+                meta_request, auto_ranged_put->base.checksum_config.user_data);
+            if (!result) {
+                int error_code = aws_last_error_or_unknown();
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Full object checksum callback raised error %d (%s)",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code));
+                /* Error from the callback */
+                aws_future_http_message_set_error(message_future, error_code);
+                goto on_done;
+            }
+            aws_byte_buf_init_copy_from_cursor(
+                &auto_ranged_put->base.checksum_config.full_object_checksum,
+                allocator,
+                aws_byte_cursor_from_string(result));
+            aws_string_destroy(result);
         }
 
         /* Allocate request body */

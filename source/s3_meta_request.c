@@ -593,9 +593,6 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
     return is_finished;
 }
 
-static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
-static void s_s3_meta_request_on_request_prepared(void *user_data);
-
 /* TODO: document how this is final step in prepare-request sequence.
  * Could be invoked on any thread. */
 static void s_s3_prepare_request_payload_callback_and_destroy(
@@ -637,7 +634,11 @@ static void s_s3_meta_request_schedule_prepare_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     aws_s3_meta_request_prepare_request_callback_fn *callback,
-    void *user_data);
+    void *user_data) {
+    /* By default, don't do any parallel. */
+    aws_s3_meta_request_schedule_prepare_request_default_impl(
+        meta_request, request, false /*parallel*/, callback, user_data);
+}
 
 void aws_s3_meta_request_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -654,9 +655,13 @@ void aws_s3_meta_request_prepare_request(
     }
 }
 
-static void s_s3_meta_request_schedule_prepare_request_default(
+static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+static void s_s3_meta_request_on_request_prepared(void *user_data);
+
+void aws_s3_meta_request_schedule_prepare_request_default_impl(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
+    bool parallel,
     aws_s3_meta_request_prepare_request_callback_fn *callback,
     void *user_data) {
     AWS_PRECONDITION(meta_request);
@@ -678,9 +683,10 @@ static void s_s3_meta_request_schedule_prepare_request_default(
 
     aws_task_init(
         &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
-    if (meta_request->request_body_parallel_stream) {
-        /* The body stream supports reading in parallel, so schedule task on any I/O thread.
-         * If we always used the meta-request's dedicated io_event_loop, we wouldn't get any parallelism. */
+
+    if (parallel) {
+        /* To support reading in parallel, schedule task on any I/O thread in the streaming elg.
+         * Otherwise, we wouldn't get any parallelism. */
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         aws_event_loop_schedule_task_now(loop, &payload->task);
     } else {
@@ -892,8 +898,8 @@ static void s_meta_request_resolve_signing_config(
         AWS_FATAL_ASSERT(false);
     }
 
-    /* If the checksum is configured to be added to the trailer, the payload will be aws-chunked encoded. The payload
-     * will need to be streaming signed/unsigned. */
+    /* If the checksum is configured to be added to the trailer, the payload will be aws-chunked encoded. The
+     * payload will need to be streaming signed/unsigned. */
     if (meta_request->checksum_config.location == AWS_SCL_TRAILER &&
         aws_byte_cursor_eq(&out_signing_config->signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
         out_signing_config->signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
@@ -1145,8 +1151,8 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
             goto error_finish;
         }
 
-        /* Activate the stream within the lock as once the activate invoked, the HTTP level callback can happen right
-         * after.  */
+        /* Activate the stream within the lock as once the activate invoked, the HTTP level callback can happen
+         * right after.  */
         if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
             aws_s3_meta_request_unlock_synced_data(meta_request);
             AWS_LOGF_ERROR(
@@ -1345,8 +1351,9 @@ static int s_s3_meta_request_headers_block_done(
     AWS_PRECONDITION(meta_request);
 
     /*
-     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so we
-     * don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets instead.
+     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so
+     * we don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets
+     * instead.
      */
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
