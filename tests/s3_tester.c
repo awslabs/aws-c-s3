@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/common/encoding.h>
 #include <aws/common/environment.h>
 #include <aws/common/system_info.h>
 #include <aws/common/uri.h>
@@ -1301,6 +1302,43 @@ error_clean_up_message:
     return NULL;
 }
 
+/**
+ * Calculate the in memory checksum based on the checksum config. Initialize and set the out_checksum to the encoded
+ * checksum result
+ */
+static int s_calculate_in_memory_checksum_helper(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor data,
+    enum aws_s3_checksum_algorithm algo,
+    struct aws_byte_buf *out_encoded_checksum) {
+    AWS_ASSERT(out_encoded_checksum != NULL);
+
+    int ret_code = AWS_OP_ERR;
+    size_t digest_size = aws_get_digest_size_from_checksum_algorithm(algo);
+    size_t encoded_checksum_len = 0;
+    if (aws_base64_compute_encoded_len(digest_size, &encoded_checksum_len)) {
+        return ret_code;
+    }
+
+    aws_byte_buf_init(out_encoded_checksum, allocator, encoded_checksum_len);
+
+    struct aws_byte_buf raw_checksum;
+    aws_byte_buf_init(&raw_checksum, allocator, digest_size);
+
+    if (aws_checksum_compute(allocator, algo, &data, &raw_checksum)) {
+        goto done;
+    }
+    struct aws_byte_cursor raw_checksum_cursor = aws_byte_cursor_from_buf(&raw_checksum);
+    if (aws_base64_encode(&raw_checksum_cursor, out_encoded_checksum)) {
+        goto done;
+    }
+
+    ret_code = AWS_OP_SUCCESS;
+done:
+    aws_byte_buf_clean_up(&raw_checksum);
+    return ret_code;
+}
+
 struct aws_http_message *aws_s3_test_put_object_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor *host,
@@ -1696,6 +1734,29 @@ int aws_s3_tester_send_meta_request_with_options(
                 aws_http_message_add_header(message, content_encoding_header);
             }
 
+            if (options->put_options.add_full_object_checksum_via_header) {
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                ASSERT_NOT_NULL(input_stream);
+                struct aws_byte_buf data;
+                int64_t out_length = 0;
+                aws_input_stream_get_length(input_stream, &out_length);
+                aws_byte_buf_init(&data, allocator, (size_t)out_length);
+                /* Read everything into the buf */
+                aws_input_stream_read(input_stream, &data);
+                /* Seek back to beginning for upload. */
+                aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
+                /* Get the checksum from the buf */
+                struct aws_byte_buf out_encoded_checksum;
+                ASSERT_SUCCESS(s_calculate_in_memory_checksum_helper(
+                    allocator, aws_byte_cursor_from_buf(&data), options->checksum_algorithm, &out_encoded_checksum));
+                /* Set the header */
+                const struct aws_byte_cursor header_name =
+                    aws_get_http_header_name_from_checksum_algorithm(options->checksum_algorithm);
+                ASSERT_SUCCESS(
+                    aws_http_headers_set(headers, header_name, aws_byte_cursor_from_buf(&out_encoded_checksum)));
+                aws_byte_buf_clean_up(&data);
+                aws_byte_buf_clean_up(&out_encoded_checksum);
+            }
             if (options->put_options.if_none_match_header.ptr != NULL) {
                 struct aws_http_header if_none_match_header = {
                     .name = aws_byte_cursor_from_c_str("if-none-match"),
@@ -1766,7 +1827,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(out_results, options->sse_type));
 
                 /* Expected number of bytes should have been read from stream, and reported via progress callbacks */
-                if (input_stream != NULL) {
+                if (input_stream != NULL && !options->put_options.add_full_object_checksum_via_header) {
                     ASSERT_UINT_EQUALS(upload_size_bytes, aws_input_stream_tester_total_bytes_read(input_stream));
                 } else if (async_stream != NULL) {
                     ASSERT_UINT_EQUALS(upload_size_bytes, aws_async_input_stream_tester_total_bytes_read(async_stream));
@@ -2382,6 +2443,7 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
     client_config.enable_s3express = s3express;
+
     struct aws_byte_cursor region_cursor = g_test_s3_region;
     client_config.region = region_cursor;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));

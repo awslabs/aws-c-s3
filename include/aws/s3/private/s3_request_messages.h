@@ -17,7 +17,7 @@ struct aws_byte_buf;
 struct aws_byte_cursor;
 struct aws_string;
 struct aws_array_list;
-struct checksum_config;
+struct checksum_config_storage;
 
 AWS_EXTERN_C_BEGIN
 
@@ -52,12 +52,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
-    const struct checksum_config *checksum_config,
+    const struct checksum_config_storage *checksum_config,
     struct aws_byte_buf *out_checksum);
-
-/* Return true if checksum headers has been set. */
-AWS_S3_API
-bool aws_s3_message_util_check_checksum_header(struct aws_http_message *message);
 
 /* Create an HTTP request for an S3 Ranged Get Object Request, using the given request as a basis */
 AWS_S3_API
@@ -80,7 +76,7 @@ AWS_S3_API
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    const struct checksum_config *checksum_config);
+    const struct checksum_config_storage *checksum_config);
 
 /* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns a
  * body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and NULL,
@@ -93,7 +89,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    const struct checksum_config *checksum_config,
+    const struct checksum_config_storage *checksum_config,
     struct aws_byte_buf *encoded_checksum_output);
 
 /* Create an HTTP request for an S3 UploadPartCopy request, using the original request as a basis.
@@ -120,7 +116,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *parts,
-    const struct checksum_config *checksum_config);
+    const struct checksum_config_storage *checksum_config);
 
 AWS_S3_API
 struct aws_http_message *aws_s3_abort_multipart_upload_message_new(

@@ -973,16 +973,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
         }
-        if (options->checksum_config->checksum_algorithm != AWS_SCA_NONE &&
-            options->checksum_config->location == AWS_SCL_NONE && options->upload_review_callback == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum algorithm is set, but no checksum location selected "
-                "and no upload review callback set, so checksums will be unused",
-                (void *)client);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
     }
 
     if (s_apply_endpoint_override(client, message_headers, options->endpoint)) {
@@ -1126,6 +1116,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
 
         meta_request->endpoint = endpoint;
+        /**
+         * shutdown_callback must be the last thing that gets set on the meta_request so that we don’t return NULL and
+         * trigger the shutdown_callback.
+         */
+        meta_request->shutdown_callback = options->shutdown_callback;
 
         s_s3_client_push_meta_request_synced(client, meta_request);
         s_s3_client_schedule_process_work_synced(client);
@@ -1146,11 +1141,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         meta_request = aws_s3_meta_request_release(meta_request);
     } else {
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
-        /**
-         * shutdown_callback must be the last thing that gets set on the meta_request so that we don’t return NULL and
-         * trigger the shutdown_callback.
-         */
-        meta_request->shutdown_callback = options->shutdown_callback;
     }
 
     return meta_request;
@@ -1347,19 +1337,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                             !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                         options);
-                } else {
-                    if (aws_s3_message_util_check_checksum_header(options->message)) {
-                        /* The checksum header has been set and the request will be split. We fail the request */
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "Could not create auto-ranged-put meta request; checksum headers has been set for "
-                            "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
-                            "single part upload.");
-                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                        return NULL;
-                    }
                 }
-
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length_found, content_length, num_parts, options);
             } else { /* else using resume token */
