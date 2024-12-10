@@ -363,6 +363,15 @@ static int s_init_and_verify_checksum_config_from_headers(
         return AWS_OP_SUCCESS;
     }
 
+    if (checksum_config->has_full_object_checksum) {
+        /* If the full object checksum has been set, it's malformed request */
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Could not create auto-ranged-put meta request; full object checksum is set from multiple ways.",
+            log_id);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
         "id=%p Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
