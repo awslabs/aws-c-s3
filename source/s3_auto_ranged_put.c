@@ -1323,7 +1323,7 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
 
     if (request->num_times_prepared == 0) {
         /**
-         * The prepare stage for CompleteMultipartUpload is guaranteed to happen from the meta request main thread.
+         * The prepare stage for CompleteMultipartUpload is guaranteed to happen from the the meta-request's io_event_loop thread.
          * So that it's safe to invoke the callback from this stage and not overlapping with any other callbacks.
          */
 
