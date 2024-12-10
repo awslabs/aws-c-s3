@@ -301,7 +301,8 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
             goto error_clean_up;
         }
     }
-    if (checksum_config && checksum_config->location != AWS_SCL_NONE) {
+
+    if (checksum_config && (checksum_config->location != AWS_SCL_NONE || checksum_config->has_full_object_checksum)) {
         if (checksum_config->checksum_algorithm) {
             if (aws_http_headers_set(
                     headers,
@@ -595,7 +596,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_byte_cursor mpu_algorithm_checksum_name;
     AWS_ZERO_STRUCT(mpu_algorithm_checksum_name);
     struct aws_http_message *message = NULL;
-    bool set_checksums = checksum_config && checksum_config->location != AWS_SCL_NONE;
+    bool set_checksums =
+        checksum_config && (checksum_config->location != AWS_SCL_NONE || checksum_config->has_full_object_checksum);
     const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(base_message);
     AWS_ASSERT(initial_message_headers);
     if (set_checksums) {
