@@ -272,13 +272,18 @@ struct aws_s3_meta_request {
     const bool should_compute_content_md5;
 
     /* deep copy of the checksum config. */
-    struct checksum_config checksum_config;
+    struct checksum_config_storage checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a multipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
 
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
+
+    /* The receiving file handler */
+    FILE *recv_file;
+    struct aws_string *recv_filepath;
+    bool recv_file_delete_on_failure;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */
@@ -344,6 +349,14 @@ AWS_S3_API
 void aws_s3_meta_request_init_signing_date_time_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_date_time *date_time);
+
+AWS_S3_API
+void aws_s3_meta_request_sign_request_default_impl(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data,
+    bool disable_s3_express_signing);
 
 AWS_S3_API
 void aws_s3_meta_request_sign_request_default(
@@ -451,6 +464,13 @@ AWS_S3_API
 bool aws_s3_meta_request_checksum_config_has_algorithm(
     struct aws_s3_meta_request *meta_request,
     enum aws_s3_checksum_algorithm algorithm);
+
+void aws_s3_meta_request_schedule_prepare_request_default_impl(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    bool parallel,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
 
 AWS_EXTERN_C_END
 

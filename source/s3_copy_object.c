@@ -37,12 +37,18 @@ static void s_s3_copy_object_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static void s_s3_copy_object_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data);
+
 static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .update = s_s3_copy_object_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_copy_object_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
-    .sign_request = aws_s3_meta_request_sign_request_default,
+    .sign_request = s_s3_copy_object_sign_request,
     .finished_request = s_s3_copy_object_request_finished,
     .destroy = s_s3_meta_request_copy_object_destroy,
     .finish = aws_s3_meta_request_finish_default,
@@ -795,4 +801,22 @@ static void s_s3_copy_object_request_finished(
     aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
+}
+
+static void s_s3_copy_object_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
+
+    /**
+     * https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html
+     * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html
+     * For CopyObject and UploadPartCopy, the request has to be signed with IAM credentials for directory buckets.
+     * Disable S3 express signing for those types.
+     */
+    bool disable_s3_express_signing = request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS ||
+                                      request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY;
+    aws_s3_meta_request_sign_request_default_impl(
+        meta_request, request, on_signing_complete, user_data, disable_s3_express_signing);
 }

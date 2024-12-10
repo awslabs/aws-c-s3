@@ -82,6 +82,7 @@ enum aws_s3_meta_request_type {
      * - only {bucket}/{key} format is supported for source and passing arn as
      *   source will not work
      * - source bucket is assumed to be in the same region as dest
+     * - source bucket and dest bucket must both be either directory buckets or regular buckets.
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
@@ -223,6 +224,20 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
+/**
+ * Optional callback, for you to provide the full object checksum after the object was read.
+ * Client will NOT check the checksum provided before sending it to the server.
+ *
+ * @param meta_request  pointer to the aws_s3_meta_request of the upload.
+ * @param user_data     pointer to the user_data set.
+ *
+ * @return A new string with the full object checksum, as it is sent in a PutObject request (base64-encoded):
+ *         https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_RequestSyntax
+ *         If an error occurs, call aws_raise_error(E) with a proper error code and return NULL.
+ */
+typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct aws_s3_meta_request *meta_request,
+                                                                         void *user_data);
+
 enum aws_s3_meta_request_tls_mode {
     AWS_MR_TLS_ENABLED,
     AWS_MR_TLS_DISABLED,
@@ -240,7 +255,8 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
-    AWS_SCA_END = AWS_SCA_SHA256,
+    AWS_SCA_CRC64NVME,
+    AWS_SCA_END = AWS_SCA_CRC64NVME,
 };
 
 enum aws_s3_checksum_location {
@@ -249,6 +265,28 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
+enum aws_s3_recv_file_option {
+    /**
+     * Create a new file if it doesn't exist, otherwise replace the existing file.
+     */
+    AWS_S3_RECV_FILE_CREATE_OR_REPLACE = 0,
+    /**
+     * Always create a new file. If the file already exists, AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS will be raised.
+     */
+    AWS_S3_RECV_FILE_CREATE_NEW,
+    /**
+     * Create a new file if it doesn't exist, otherwise append to the existing file.
+     */
+    AWS_S3_RECV_FILE_CREATE_OR_APPEND,
+
+    /**
+     * Write to an existing file at the specified position, defined by the `recv_file_position`.
+     * If the file does not exist, AWS_ERROR_S3_RECV_FILE_NOT_FOUND will be raised.
+     * If `recv_file_position` is not configured, start overwriting data at the beginning of the
+     * file (byte 0).
+     */
+    AWS_S3_RECV_FILE_WRITE_TO_POSITION,
+};
 /**
  * Info about a single part, for you to review before the upload completes.
  */
@@ -533,25 +571,45 @@ struct aws_s3_client_config {
 
 struct aws_s3_checksum_config {
 
+    /****************************** PUT Object specific *******************************/
     /**
      * The location of client added checksum header.
      *
-     * If AWS_SCL_NONE. No request payload checksum will be add and calculated.
+     * If AWS_SCL_NONE. No request payload checksum will be added.
      *
-     * If AWS_SCL_HEADER, the checksum will be calculated by client and added related header to the request sent.
+     * If AWS_SCL_HEADER, the client will calculate the checksum and add it to the headers.
      *
-     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The checksum will be calculate while reading the
-     * payload by client. Related header will be added to the trailer part of the encoded payload. Note the payload of
-     * the original request cannot be aws-chunked encoded already. Otherwise, error will be raised.
+     * If AWS_SCL_TRAILER, the payload will be aws_chunked encoded, The client will calculate the checksum and add it to
+     * the trailer. Note the payload of the original request cannot be aws-chunked encoded already, this will cause an
+     * error.
      */
     enum aws_s3_checksum_location location;
 
     /**
      * The checksum algorithm used.
-     * Must be set if location is not AWS_SCL_NONE. Must be AWS_SCA_NONE if location is AWS_SCL_NONE.
+     * Must be set if location is not AWS_SCL_NONE.
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
+    /**
+     * Optional.
+     * Provide the full object checksum. This callback is invoked once, after the entire body has been read.
+     * sent.
+     *
+     * NOTE:
+     *  - Do not set this callback if the HTTP message already has a checksum header (e.g. x-amz-checksum-crc32). Doing
+     *      so will raise AWS_ERROR_INVALID_ARGUMENT.
+     *  - checksum_algorithm must be set to the algorithm you will use.
+     *
+     * WARNING: This feature is experimental/unstable.
+     * At this time, full object checksum callback is only available for multipart upload
+     * (when Content-Length is above the `multipart_upload_threshold`,
+     * or Content-Length not specified). Otherwise, it will be ignored.
+     */
+    aws_s3_meta_request_full_object_checksum_fn *full_object_checksum_callback;
+    void *user_data;
+
+    /****************************** GET Object specific *******************************/
     /**
      * Enable checksum mode header will be attached to GET requests, this will tell s3 to send back checksums headers if
      * they exist. Calculate the corresponding checksum on the response bodies. The meta request will finish with a did
@@ -569,7 +627,7 @@ struct aws_s3_checksum_config {
      *
      * The list of algorithms for user to pick up when validate the checksum. Client will pick up the algorithm from the
      * list with the priority based on performance, and the algorithm sent by server. The priority based on performance
-     * is [CRC32C, CRC32, SHA1, SHA256].
+     * is [CRC64NVME, CRC32C, CRC32, SHA1, SHA256].
      *
      * If the response checksum was validated by client, the result will indicate which algorithm was picked.
      */
@@ -631,6 +689,34 @@ struct aws_s3_meta_request_options {
     /* Initial HTTP message that defines what operation we are doing.
      * Do not set the message's body-stream if the body is being passed by other means (see note above) */
     struct aws_http_message *message;
+
+    /**
+     * Optional.
+     * If set, the received data will be written into this file.
+     * the `body_callback` will NOT be invoked.
+     * This gives a better performance when receiving data to write to a file.
+     * See `aws_s3_recv_file_option` for the configuration on the receive file.
+     */
+    struct aws_byte_cursor recv_filepath;
+
+    /**
+     * Optional.
+     * Default to AWS_S3_RECV_FILE_CREATE_OR_REPLACE.
+     * This only works with recv_filepath set.
+     * See `aws_s3_recv_file_option`.
+     */
+    enum aws_s3_recv_file_option recv_file_option;
+    /**
+     * Optional.
+     * The specified position to start writing at for the recv file when `recv_file_option` is set to
+     * AWS_S3_RECV_FILE_WRITE_TO_POSITION, ignored otherwise.
+     */
+    uint64_t recv_file_position;
+    /**
+     * Set it to be true to delete the receive file on failure, otherwise, the file will be left as-is.
+     * This only works with recv_filepath set.
+     */
+    bool recv_file_delete_on_failure;
 
     /**
      * Optional.
