@@ -345,6 +345,13 @@ void aws_checksum_config_storage_init(
     internal_config->location = config->location;
     internal_config->validate_response_checksum = config->validate_response_checksum;
 
+    internal_config->full_object_checksum_callback = config->full_object_checksum_callback;
+    internal_config->user_data = config->user_data;
+    if (internal_config->full_object_checksum_callback) {
+        /* allocate the full object checksum when the callback was set. */
+        internal_config->has_full_object_checksum = true;
+    }
+
     if (config->validate_checksum_algorithms) {
         const size_t count = aws_array_list_length(config->validate_checksum_algorithms);
         for (size_t i = 0; i < count; ++i) {
