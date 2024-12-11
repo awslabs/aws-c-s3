@@ -756,6 +756,9 @@ struct aws_s3_meta_request_options {
     /**
      * Optional.
      * if set, the flexible checksum will be performed by client based on the config.
+     *
+     * Notes: checksum can also be added through the http message provided.
+     *      The checksum in http header will override corresponding the checksum config.
      */
     const struct aws_s3_checksum_config *checksum_config;
 

@@ -3918,7 +3918,11 @@ void s_s3_test_no_validate_checksum(
 }
 
 /* TODO: maybe refactor the fc -> flexible checksum tests to be less copy/paste */
-static int s_test_s3_round_trip_default_get_fc_helper(struct aws_allocator *allocator, void *ctx, bool via_header) {
+static int s_test_s3_round_trip_default_get_fc_helper(
+    struct aws_allocator *allocator,
+    void *ctx,
+    bool via_header,
+    enum aws_s3_tester_full_object_checksum full_object_checksum) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -3960,6 +3964,10 @@ static int s_test_s3_round_trip_default_get_fc_helper(struct aws_allocator *allo
                     .object_path_override = object_path,
                 },
         };
+        if (algorithm != AWS_SCA_SHA1 && algorithm != AWS_SCA_SHA256) {
+            /* Full object checksums doesn't support SHA. */
+            put_options.put_options.full_object_checksum = full_object_checksum;
+        }
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
@@ -3992,12 +4000,18 @@ static int s_test_s3_round_trip_default_get_fc_helper(struct aws_allocator *allo
 
 AWS_TEST_CASE(test_s3_round_trip_default_get_fc, s_test_s3_round_trip_default_get_fc)
 static int s_test_s3_round_trip_default_get_fc(struct aws_allocator *allocator, void *ctx) {
-    return s_test_s3_round_trip_default_get_fc_helper(allocator, ctx, false);
+    return s_test_s3_round_trip_default_get_fc_helper(allocator, ctx, false, AWS_TEST_FOC_NONE);
 }
 
 AWS_TEST_CASE(test_s3_round_trip_default_get_fc_header, s_test_s3_round_trip_default_get_fc_header)
 static int s_test_s3_round_trip_default_get_fc_header(struct aws_allocator *allocator, void *ctx) {
-    return s_test_s3_round_trip_default_get_fc_helper(allocator, ctx, true);
+    return s_test_s3_round_trip_default_get_fc_helper(allocator, ctx, true, AWS_TEST_FOC_NONE);
+}
+AWS_TEST_CASE(
+    test_s3_round_trip_default_get_full_object_checksum_fc,
+    s_test_s3_round_trip_default_get_full_object_checksum_fc)
+static int s_test_s3_round_trip_default_get_full_object_checksum_fc(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_round_trip_default_get_fc_helper(allocator, ctx, false, AWS_TEST_FOC_HEADER);
 }
 
 static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *allocator, void *ctx, bool via_header) {
@@ -4066,6 +4080,7 @@ AWS_TEST_CASE(test_s3_round_trip_multipart_get_fc, s_test_s3_round_trip_multipar
 static int s_test_s3_round_trip_multipart_get_fc(struct aws_allocator *allocator, void *ctx) {
     return s_test_s3_round_trip_multipart_get_fc_helper(allocator, ctx, false);
 }
+
 AWS_TEST_CASE(test_s3_round_trip_multipart_get_fc_header, s_test_s3_round_trip_multipart_get_fc_header)
 static int s_test_s3_round_trip_multipart_get_fc_header(struct aws_allocator *allocator, void *ctx) {
     return s_test_s3_round_trip_multipart_get_fc_helper(allocator, ctx, true);
@@ -4166,6 +4181,7 @@ AWS_TEST_CASE(
 static int s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc(struct aws_allocator *allocator, void *ctx) {
     return s_test_s3_round_trip_mpu_multipart_get_fc_helper(allocator, ctx, false, AWS_TEST_FOC_HEADER);
 }
+
 AWS_TEST_CASE(
     test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header,
     s_test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header)

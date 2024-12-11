@@ -2,6 +2,7 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
 #include <aws/checksums/crc.h>
+#include <aws/http/request_response.h>
 
 #define AWS_CRC32_LEN sizeof(uint32_t)
 #define AWS_CRC32C_LEN sizeof(uint32_t)
@@ -330,17 +331,109 @@ int aws_checksum_compute(
     }
 }
 
-void aws_checksum_config_storage_init(
+static int s_init_and_verify_checksum_config_from_headers(
+    struct checksum_config_storage *checksum_config,
+    const struct aws_http_message *message,
+    const void *log_id) {
+    /* Check if the checksum header was set from the message */
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    enum aws_s3_checksum_algorithm header_algo = AWS_SCA_NONE;
+    struct aws_byte_cursor header_value;
+    AWS_ZERO_STRUCT(header_value);
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
+        if (aws_http_headers_get(headers, algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
+            if (header_algo == AWS_SCA_NONE) {
+                header_algo = algorithm;
+            } else {
+                /* If there are multiple checksum headers set, it's malformed request */
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Could not create auto-ranged-put meta request; multiple checksum headers has been set",
+                    log_id);
+                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            }
+        }
+    }
+    if (header_algo == AWS_SCA_NONE) {
+        /* No checksum header found, done */
+        return AWS_OP_SUCCESS;
+    }
+
+    if (checksum_config->has_full_object_checksum) {
+        /* If the full object checksum has been set, it's malformed request */
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Could not create auto-ranged-put meta request; full object checksum is set from multiple ways.",
+            log_id);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Setting the full-object checksum from header; algorithm: " PRInSTR ", value: " PRInSTR ".",
+        log_id,
+        AWS_BYTE_CURSOR_PRI(aws_get_checksum_algorithm_name(header_algo)),
+        AWS_BYTE_CURSOR_PRI(header_value));
+    /* Set algo */
+    checksum_config->checksum_algorithm = header_algo;
+    /**
+     * Set the location to NONE to avoid adding extra checksums from client.
+     *
+     * Notes: The multipart upload will set the location to trailer to add parts level checksums.
+     **/
+    checksum_config->location = AWS_SCL_NONE;
+
+    /* Set full object checksum from the header value. */
+    aws_byte_buf_init_copy_from_cursor(
+        &checksum_config->full_object_checksum, checksum_config->allocator, header_value);
+    checksum_config->has_full_object_checksum = true;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_checksum_config_storage_init(
     struct aws_allocator *allocator,
     struct checksum_config_storage *internal_config,
-    const struct aws_s3_checksum_config *config) {
+    const struct aws_s3_checksum_config *config,
+    const struct aws_http_message *message,
+    const void *log_id) {
     AWS_ZERO_STRUCT(*internal_config);
     /* Zero out the struct and set the allocator regardless. */
     internal_config->allocator = allocator;
 
     if (!config) {
-        return;
+        return AWS_OP_SUCCESS;
     }
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    if (config->location == AWS_SCL_TRAILER) {
+        struct aws_byte_cursor existing_encoding;
+        AWS_ZERO_STRUCT(existing_encoding);
+        if (aws_http_headers_get(headers, g_content_encoding_header_name, &existing_encoding) == AWS_OP_SUCCESS) {
+            if (aws_byte_cursor_find_exact(&existing_encoding, &g_content_encoding_header_aws_chunked, NULL) ==
+                AWS_OP_SUCCESS) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Cannot create meta s3 request; for trailer checksum, the original request cannot be "
+                    "aws-chunked encoding. The client will encode the request instead.",
+                    (void *)log_id);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return AWS_OP_ERR;
+            }
+        }
+    }
+    if (config->location != AWS_SCL_NONE && config->checksum_algorithm == AWS_SCA_NONE) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta s3 request; checksum location is set, but no checksum algorithm selected.",
+            (void *)log_id);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return AWS_OP_ERR;
+    }
+
     internal_config->checksum_algorithm = config->checksum_algorithm;
     internal_config->location = config->location;
     internal_config->validate_response_checksum = config->validate_response_checksum;
@@ -385,6 +478,14 @@ void aws_checksum_config_storage_init(
         internal_config->response_checksum_algorithms.sha1 = true;
         internal_config->response_checksum_algorithms.sha256 = true;
     }
+
+    /* After applying settings from config, check the message header to override the corresponding settings. */
+    if (s_init_and_verify_checksum_config_from_headers(internal_config, message, log_id)) {
+        return AWS_OP_ERR;
+    }
+    /* Anything fail afterward will need to cleanup the storage. */
+
+    return AWS_OP_SUCCESS;
 }
 
 void aws_checksum_config_storage_cleanup(struct checksum_config_storage *internal_config) {
