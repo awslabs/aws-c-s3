@@ -17,14 +17,14 @@
 /**** Configuration info for the c5n.18xlarge *****/
 static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.18xlarge"),
-    .max_throughput_gbps = 100U,
+    .max_throughput_gbps = 100,
     /** not yet **/
     .has_recommended_configuration = false,
 };
 
 static struct aws_s3_platform_info s_c5n_metal_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.metal"),
-    .max_throughput_gbps = 100U,
+    .max_throughput_gbps = 100,
     /** not yet **/
     .has_recommended_configuration = false,
 };
@@ -34,7 +34,7 @@ static struct aws_s3_platform_info s_c5n_metal_platform_info = {
 /****** Begin c5n.large ******/
 static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.9xlarge"),
-    .max_throughput_gbps = 50U,
+    .max_throughput_gbps = 50,
     /** not yet **/
     .has_recommended_configuration = false,
 };
@@ -44,13 +44,13 @@ static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
 /***** Begin p4d.24xlarge and p4de.24xlarge ****/
 static struct aws_s3_platform_info s_p4d_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4d.24xlarge"),
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 
 static struct aws_s3_platform_info s_p4de_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4de.24xlarge"),
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 
@@ -68,19 +68,19 @@ static struct aws_s3_platform_info s_p4de_platform_info = {
  * to the p4d. The rest is for other things on the machine to use. */
 struct aws_s3_platform_info s_p5_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5.48xlarge"),
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 
 struct aws_s3_platform_info s_p5e_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5e.48xlarge"),
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 
 struct aws_s3_platform_info s_p5en_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5en.48xlarge"),
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 /***** End p5.48xlarge *****/
@@ -92,14 +92,14 @@ struct aws_s3_platform_info s_p5en_platform_info = {
 static struct aws_s3_platform_info s_trn2_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn2.48xlarge"),
     /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 
 static struct aws_s3_platform_info s_trn2u_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn2u.48xlarge"),
     /* not all of the advertised 800 Gbps bandwidth can be hit from the cpu in user-space */
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 
