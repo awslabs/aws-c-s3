@@ -26,6 +26,7 @@ struct aws_http_connection;
 struct aws_http_connection_manager;
 struct aws_host_resolver;
 struct aws_s3_endpoint;
+struct aws_priority_queue;
 
 enum aws_s3_connection_finish_code {
     AWS_S3_CONNECTION_FINISH_CODE_SUCCESS,
@@ -185,6 +186,8 @@ struct aws_s3_upload_part_timeout_stats {
     struct {
         uint64_t sum_ns;
         uint64_t num_samples;
+        bool collecting_p90;
+        struct aws_priority_queue p90_samples;
     } initial_request_time;
 
     /* Track the timeout rate. */
