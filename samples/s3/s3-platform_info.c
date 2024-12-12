@@ -65,32 +65,5 @@ int s3_compute_platform_info_main(int argc, char *argv[], const char *command_na
     printf("\t'instance_type': '" PRInSTR "',\n", AWS_BYTE_CURSOR_PRI(platform_info->instance_type));
     printf("\t'max_throughput_gbps': %d,\n", (int)platform_info->max_throughput_gbps);
     printf("\t'has_recommended_configuration': %s,\n", platform_info->has_recommended_configuration ? "true" : "false");
-
-    printf("\t'cpu_groups': [\n");
-
-    for (size_t i = 0; i < platform_info->cpu_group_info_array_length; ++i) {
-        printf("\t{\n");
-        printf("\t\t'cpu_group_index': %d,\n", (int)platform_info->cpu_group_info_array[i].cpu_group);
-        printf("\t\t'cpus_in_group': %d,\n", (int)platform_info->cpu_group_info_array[i].cpus_in_group);
-        printf("\t\t'usable_network_devices': [\n");
-
-        for (size_t j = 0; j < platform_info->cpu_group_info_array[i].nic_name_array_length; j++) {
-            printf(
-                "\t\t\t'" PRInSTR "'", AWS_BYTE_CURSOR_PRI(platform_info->cpu_group_info_array[i].nic_name_array[j]));
-            if (j < platform_info->cpu_group_info_array[i].nic_name_array_length - 1) {
-                printf(",");
-            }
-            printf("\n");
-        }
-        printf("\t\t]\n");
-        printf("\t}");
-        if (i < platform_info->cpu_group_info_array_length - 1) {
-            printf(",");
-        }
-        printf("\n");
-    }
-    printf("\t]\n");
-    printf("}\n");
-
     return 0;
 }
