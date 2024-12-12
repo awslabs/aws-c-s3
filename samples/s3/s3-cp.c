@@ -516,11 +516,16 @@ static int s_kickoff_put_object(
     aws_string_destroy(state);
     aws_string_destroy(label);
     aws_byte_buf_clean_up(&label_buf);
+    struct aws_s3_checksum_config checksum_config = {
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
+        .location = AWS_SCL_TRAILER,
+    };
 
     struct aws_s3_meta_request_options request_options = {
         .user_data = transfer_ctx,
         .signing_config = &cp_app_ctx->app_ctx->signing_config,
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_config = &checksum_config,
         .finish_callback = s_put_request_finished,
     };
 
