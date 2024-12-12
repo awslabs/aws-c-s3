@@ -17,14 +17,14 @@
 /**** Configuration info for the c5n.18xlarge *****/
 static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.18xlarge"),
-    .max_throughput_gbps = 100u,
+    .max_throughput_gbps = 100U,
     /** not yet **/
     .has_recommended_configuration = false,
 };
 
 static struct aws_s3_platform_info s_c5n_metal_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.metal"),
-    .max_throughput_gbps = 100u,
+    .max_throughput_gbps = 100U,
     /** not yet **/
     .has_recommended_configuration = false,
 };
@@ -34,7 +34,7 @@ static struct aws_s3_platform_info s_c5n_metal_platform_info = {
 /****** Begin c5n.large ******/
 static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.9xlarge"),
-    .max_throughput_gbps = 50u,
+    .max_throughput_gbps = 50U,
     /** not yet **/
     .has_recommended_configuration = false,
 };
@@ -44,19 +44,19 @@ static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
 /***** Begin p4d.24xlarge and p4de.24xlarge ****/
 static struct aws_s3_platform_info s_p4d_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4d.24xlarge"),
-    .max_throughput_gbps = 400u,
+    .max_throughput_gbps = 400U,
     .has_recommended_configuration = true,
 };
 
 static struct aws_s3_platform_info s_p4de_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4de.24xlarge"),
-    .max_throughput_gbps = 400u,
+    .max_throughput_gbps = 400U,
     .has_recommended_configuration = true,
 };
 
 /***** End p4d.24xlarge and p4de.24xlarge ****/
 
-/***** Begin p5.48xlarge ******/
+/***** Begin p5_.48xlarge ******/
 
 /* note: the p5 is a stunningly massive instance type.
  * While the specs have 3.2 TB/s for the network bandwidth
@@ -71,7 +71,39 @@ struct aws_s3_platform_info s_p5_platform_info = {
     .max_throughput_gbps = 400U,
     .has_recommended_configuration = true,
 };
+
+struct aws_s3_platform_info s_p5e_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5e.48xlarge"),
+    .max_throughput_gbps = 400U,
+    .has_recommended_configuration = true,
+};
+
+struct aws_s3_platform_info s_p5en_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5en.48xlarge"),
+    .max_throughput_gbps = 400U,
+    .has_recommended_configuration = true,
+};
 /***** End p5.48xlarge *****/
+
+/**** Begin trn2_48_large *****/
+/*
+ * Similar to P5 comment above, we will not be able to get the advertised 3.2Tb bandwidth from CPU.
+ */
+static struct aws_s3_platform_info s_trn2_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn2.48xlarge"),
+    /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
+    .max_throughput_gbps = 400U,
+    .has_recommended_configuration = true,
+};
+
+static struct aws_s3_platform_info s_trn2u_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn2u.48xlarge"),
+    /* not all of the advertised 800 Gbps bandwidth can be hit from the cpu in user-space */
+    .max_throughput_gbps = 400U,
+    .has_recommended_configuration = true,
+};
+
+/**** End trn2_48_large *****/
 
 /**** Begin trn1_32_large *****/
 static struct aws_s3_platform_info s_trn1_n_platform_info = {
@@ -186,6 +218,10 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
     s_add_platform_info_to_table(loader, &s_p4d_platform_info);
     s_add_platform_info_to_table(loader, &s_p4de_platform_info);
     s_add_platform_info_to_table(loader, &s_p5_platform_info);
+    s_add_platform_info_to_table(loader, &s_p5e_platform_info);
+    s_add_platform_info_to_table(loader, &s_p5en_platform_info);
+    s_add_platform_info_to_table(loader, &s_trn2_platform_info);
+    s_add_platform_info_to_table(loader, &s_trn2u_platform_info);
     s_add_platform_info_to_table(loader, &s_trn1_n_platform_info);
     s_add_platform_info_to_table(loader, &s_trn1_platform_info);
 
