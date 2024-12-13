@@ -87,7 +87,7 @@ struct aws_s3_platform_info s_p5en_platform_info = {
 
 /**** Begin trn2.48xlarge and trn2u.48xlarge *****/
 /*
- * Similar to P5 comment above, we will not be able to get the advertised 3.2Tb bandwidth from CPU.
+ * Similar to P5 comment above, we will not be able to get the advertised 3.2TB/s bandwidth from CPU.
  */
 static struct aws_s3_platform_info s_trn2_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn2.48xlarge"),
