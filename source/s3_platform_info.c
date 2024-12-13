@@ -83,9 +83,9 @@ struct aws_s3_platform_info s_p5en_platform_info = {
     .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
-/***** End p5.48xlarge *****/
+/***** End p5_.48xlarge *****/
 
-/**** Begin trn2_48_large *****/
+/**** Begin trn2_.48xlarge *****/
 /*
  * Similar to P5 comment above, we will not be able to get the advertised 3.2Tb bandwidth from CPU.
  */
@@ -103,9 +103,9 @@ static struct aws_s3_platform_info s_trn2u_platform_info = {
     .has_recommended_configuration = true,
 };
 
-/**** End trn2_48_large *****/
+/**** End trn2_.48xlarge *****/
 
-/**** Begin trn1_32_large *****/
+/**** Begin trn1_.32xlarge *****/
 static struct aws_s3_platform_info s_trn1_n_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1n.32xlarge"),
     /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
@@ -120,7 +120,7 @@ static struct aws_s3_platform_info s_trn1_platform_info = {
     .has_recommended_configuration = true,
 };
 
-/**** End trn1.x32_large ******/
+/**** End trn1_.32xlarge ******/
 
 struct aws_s3_platform_info_loader {
     struct aws_allocator *allocator;
