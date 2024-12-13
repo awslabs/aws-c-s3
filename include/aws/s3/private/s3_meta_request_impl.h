@@ -136,6 +136,7 @@ struct aws_s3_meta_request {
     void *impl;
 
     struct aws_s3_meta_request_vtable *vtable;
+    struct aws_input_stream *stream;
 
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;

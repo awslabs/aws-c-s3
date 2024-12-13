@@ -542,6 +542,10 @@ static int s_kickoff_put_object(
         .name = aws_byte_cursor_from_c_str("content-length"),
         .value = aws_byte_cursor_from_c_str(content_length),
     };
+    // struct aws_http_header transfer_encoding_header = {
+    //     .name = aws_byte_cursor_from_c_str("transfer-encoding"),
+    //     .value = aws_byte_cursor_from_c_str("chunked"),
+    // };
 
     request_options.message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
     aws_http_message_add_header(request_options.message, host_header);
@@ -708,10 +712,16 @@ static int s_kickoff_get_object(
         .value = aws_byte_cursor_from_c_str("AWS common runtime command-line client"),
     };
 
+    struct aws_http_header if_match_header = {
+        .name = aws_byte_cursor_from_c_str("if-match"),
+        .value = aws_byte_cursor_from_c_str("123"),
+    };
+
     request_options.message = aws_http_message_new_request(cp_app_ctx->app_ctx->allocator);
     aws_http_message_add_header(request_options.message, host_header);
     aws_http_message_add_header(request_options.message, accept_header);
     aws_http_message_add_header(request_options.message, user_agent_header);
+    aws_http_message_add_header(request_options.message, if_match_header);
     aws_http_message_set_request_method(request_options.message, aws_http_method_get);
 
     struct aws_byte_buf path_buf;

@@ -347,7 +347,15 @@ static void s_s3_default_prepare_request_finish(
         struct aws_http_headers *headers = aws_http_message_get_headers(message);
         aws_http_headers_set(headers, g_request_validation_mode, g_enabled);
     }
-    aws_s3_message_util_assign_body(
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    struct aws_http_header transfer_encoding_header = {
+        .name = aws_byte_cursor_from_c_str("transfer-encoding"),
+        .value = aws_byte_cursor_from_c_str("chunked"),
+    };
+    aws_http_headers_erase(headers, aws_byte_cursor_from_c_str("content-length"));
+    aws_http_headers_add_header(headers, &transfer_encoding_header);
+    meta_request->stream = aws_s3_message_util_assign_body(
         meta_request->allocator,
         &request->request_body,
         message,

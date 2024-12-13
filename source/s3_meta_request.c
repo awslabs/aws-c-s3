@@ -1100,6 +1100,13 @@ finish:
     s_s3_prepare_request_payload_callback_and_destroy(payload, error_code);
 }
 
+static void s_destroy_stream_on_complete(struct aws_http_stream *stream, int error_code, void *user_data) {
+    (void)stream;
+    (void)error_code;
+    struct aws_input_stream *data_stream = user_data;
+    aws_input_stream_release(data_stream);
+}
+
 void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, struct aws_s3_connection *connection) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(connection);
@@ -1179,6 +1186,21 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
             goto error_finish;
         }
     }
+    int64_t length = 0;
+    aws_input_stream_get_length(meta_request->stream, &length);
+    struct aws_http1_chunk_options chunk_options;
+    AWS_ZERO_STRUCT(chunk_options);
+    chunk_options.chunk_data = meta_request->stream;
+    chunk_options.chunk_data_size = length;
+    chunk_options.on_complete = s_destroy_stream_on_complete;
+    chunk_options.user_data = meta_request->stream;
+    aws_http1_stream_write_chunk(stream, &chunk_options);
+    static const struct aws_byte_cursor empty_str = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("");
+    struct aws_input_stream *termination_marker = aws_input_stream_new_from_cursor(meta_request->allocator, &empty_str);
+    chunk_options.chunk_data = termination_marker;
+    chunk_options.chunk_data_size = empty_str.len;
+    chunk_options.user_data = termination_marker;
+    aws_http1_stream_write_chunk(stream, &chunk_options);
     return;
 
 error_finish:

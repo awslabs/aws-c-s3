@@ -126,6 +126,7 @@ static void s_parse_app_ctx(int argc, char *const argv[], struct app_ctx *app_ct
     client_config.client_bootstrap = app_ctx->client_bootstrap;
     client_config.region = aws_byte_cursor_from_c_str(app_ctx->region);
     client_config.signing_config = &app_ctx->signing_config;
+    client_config.tls_mode = AWS_MR_TLS_DISABLED;
     app_ctx->client = aws_s3_client_new(app_ctx->allocator, &client_config);
 }
 

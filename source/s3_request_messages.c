@@ -979,13 +979,13 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)stream_length);
     struct aws_byte_cursor content_length_cursor =
         aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
-    if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
-        goto error_clean_up;
-    }
+    // if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
+    //     goto error_clean_up;
+    // }
 
-    aws_http_message_set_body_stream(out_message, input_stream);
+    // aws_http_message_set_body_stream(out_message, input_stream);
     /* Let the message take the full ownership */
-    aws_input_stream_release(input_stream);
+    // aws_input_stream_release(input_stream);
     aws_byte_buf_clean_up(&content_encoding_header_buf);
     return input_stream;
 
