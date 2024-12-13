@@ -91,14 +91,12 @@ struct aws_s3_platform_info s_p5en_platform_info = {
  */
 static struct aws_s3_platform_info s_trn2_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn2.48xlarge"),
-    /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
     .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
 
 static struct aws_s3_platform_info s_trn2u_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn2u.48xlarge"),
-    /* not all of the advertised 800 Gbps bandwidth can be hit from the cpu in user-space */
     .max_throughput_gbps = 400,
     .has_recommended_configuration = true,
 };
