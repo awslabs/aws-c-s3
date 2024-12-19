@@ -705,6 +705,11 @@ static void s_test_s3_cancel_prepare_meta_request_prepare_request_on_original_do
 
     ++test_user_data->request_prepare_counters[request->request_tag];
 
+    if (results->continue_callback != NULL) {
+        /* Cancel via s_test_continue_callback_cancels_after_first_part(). */
+        return AWS_OP_SUCCESS;
+    }
+
     /* Cancel after the first part is prepared, preventing any additional parts from being prepared. */
     if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
         test_user_data->request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 1) {
@@ -781,6 +786,115 @@ static int s_test_s3_cancel_prepare(struct aws_allocator *allocator, void *ctx) 
         test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD] == 1);
     ASSERT_TRUE(
         test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD] == 0);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+static bool s_test_continue_callback_cancels_after_first_part(void *user_data) {
+    struct aws_s3_meta_request_test_results *results = user_data;
+    AWS_ASSERT(results != NULL);
+
+    struct aws_s3_tester *tester = results->tester;
+    AWS_ASSERT(tester != NULL);
+
+    /* Similar to s_test_s3_cancel_prepare_meta_request_prepare_request: cancel after the first part. */
+    struct test_s3_cancel_prepare_user_data *test_user_data = tester->user_data;
+    return test_user_data->request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 0;
+}
+
+AWS_TEST_CASE(test_s3_continue_callback_cancels, s_test_s3_continue_callback_cancels)
+static int s_test_s3_continue_callback_cancels(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct test_s3_cancel_prepare_user_data test_user_data;
+    AWS_ZERO_STRUCT(test_user_data);
+    tester.user_data = &test_user_data;
+
+    struct aws_s3_client *client = NULL;
+
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_test_s3_cancel_prepare_meta_request_factory;
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+            .continue_callback = s_test_continue_callback_cancels_after_first_part,
+            .put_options =
+                {
+                    .ensure_multipart = true,
+                },
+        };
+        struct aws_s3_meta_request_test_results meta_request_test_results;
+        AWS_ZERO_STRUCT(meta_request_test_results);
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+        ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_S3_CANCELED);
+
+        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    }
+
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD] == 1);
+    ASSERT_TRUE(test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 1);
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD] == 1);
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD] == 0);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+static bool s_test_continue_callback_ok(void *user_data) {
+    (void)user_data;
+    return true;
+}
+
+AWS_TEST_CASE(test_s3_continue_callback_ok, s_test_s3_continue_callback_ok)
+static int s_test_s3_continue_callback_ok(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .continue_callback = s_test_continue_callback_ok,
+            .put_options =
+                {
+                    .ensure_multipart = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
