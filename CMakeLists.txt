@@ -84,7 +84,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_AWS_LIBS})
 
 aws_prepare_shared_lib_exports(${PROJECT_NAME})
 
-install(FILES ${AWS_S3_ROOT_HEADERS} DESTINATION "include/aws/s3" COMPONENT Development)
+install(FILES ${AWS_S3_ROOT_HEADERS} DESTINATION "${INCLUDE_DIRECTORY}/aws/s3" COMPONENT Development)
 
 if (BUILD_SHARED_LIBS)
    set (TARGET_DIR "shared")
