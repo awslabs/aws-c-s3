@@ -10,6 +10,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
+#include <aws/common/uri.h>
 #include <aws/http/request_response.h>
 #include <aws/io/async_stream.h>
 #include <aws/io/stream.h>
@@ -457,8 +458,35 @@ static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING
  */
 struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *base_message) {
+    struct aws_http_message *base_message,
+    struct aws_uri *source_uri) {
     struct aws_http_message *message = NULL;
+
+    message = aws_http_message_new_request(allocator);
+    if (message == NULL) {
+        goto error_cleanup;
+    }
+
+    if (aws_http_message_set_request_method(message, g_head_method)) {
+        goto error_cleanup;
+    }
+    if (source_uri->self_size > 0) {
+        struct aws_byte_cursor host = *aws_uri_host_name(source_uri);
+        struct aws_byte_cursor path = *aws_uri_path(source_uri);
+        struct aws_http_header host_header = {
+            .name = g_host_header_name,
+            .value = host,
+        };
+        if (aws_http_message_add_header(message, host_header)) {
+            goto error_cleanup;
+        }
+
+        if (aws_http_message_set_request_path(message, path)) {
+            goto error_cleanup;
+        }
+        return message;
+    }
+
     struct aws_byte_buf head_object_host_header;
     AWS_ZERO_STRUCT(head_object_host_header);
 
@@ -526,15 +554,6 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     }
 
     if (aws_byte_buf_append_dynamic(&head_object_host_header, &domain_name)) {
-        goto error_cleanup;
-    }
-
-    message = aws_http_message_new_request(allocator);
-    if (message == NULL) {
-        goto error_cleanup;
-    }
-
-    if (aws_http_message_set_request_method(message, g_head_method)) {
         goto error_cleanup;
     }
 

@@ -136,7 +136,8 @@ struct aws_http_message *aws_s3_get_object_size_message_new(
 AWS_S3_API
 struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_allocator *allocator,
-    struct aws_http_message *base_message);
+    struct aws_http_message *base_message,
+    struct aws_uri *source_uri);
 
 /* Add content-md5 header to the http message passed in. The MD5 will be computed from the input_buf */
 AWS_S3_API

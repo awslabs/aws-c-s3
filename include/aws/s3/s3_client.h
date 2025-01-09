@@ -869,6 +869,9 @@ struct aws_s3_meta_request_options {
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
      */
     const uint64_t *object_size_hint;
+
+
+    const struct aws_byte_cursor copy_source_uri;
 };
 
 /* Result details of a meta request.

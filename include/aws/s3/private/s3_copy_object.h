@@ -7,6 +7,7 @@
  */
 
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include <aws/common/uri.h>
 
 enum aws_s3_copy_object_request_tag {
     AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE,
@@ -24,6 +25,8 @@ struct aws_s3_copy_object {
 
     /* Usable after the Create Multipart Upload request succeeds. */
     struct aws_string *upload_id;
+
+    struct aws_uri source_uri;
 
     /* Only meant for use in the update function, which is never called concurrently. */
     struct {
