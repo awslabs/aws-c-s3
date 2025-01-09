@@ -91,12 +91,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     copy_object->synced_data.content_length = UNKNOWN_CONTENT_LENGTH;
     copy_object->synced_data.total_num_parts = UNKNOWN_NUM_PARTS;
     copy_object->threaded_update_data.next_part_number = 1;
-    if(options->copy_source_uri.len != 0) {
-        if(aws_uri_init_parse(&copy_object->source_uri, allocator, &options->copy_source_uri)) {
+    if (options->copy_source_uri.len != 0) {
+        if (aws_uri_init_parse(&copy_object->source_uri, allocator, &options->copy_source_uri)) {
             // TODO: log
             goto on_error;
         }
-        
     }
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new CopyObject Meta Request.", (void *)&copy_object->base);
