@@ -83,6 +83,8 @@ enum aws_s3_meta_request_type {
      *   source will not work
      * - source bucket is assumed to be in the same region as dest
      * - source bucket and dest bucket must both be either directory buckets or regular buckets.
+     *
+     * Provide the `meta_request_options.copy_source_uri` to bypass these limitations.
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
@@ -870,7 +872,11 @@ struct aws_s3_meta_request_options {
      */
     const uint64_t *object_size_hint;
 
-
+    /*
+     * (Optional)
+     * If performing a copy operation, provide the source URI here to bypass the limitations of the copy operation.
+     * This will be ignored for other operations.
+     */
     const struct aws_byte_cursor copy_source_uri;
 };
 
