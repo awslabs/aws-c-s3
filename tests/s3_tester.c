@@ -2482,29 +2482,13 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     test_data.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data.mutex);
     // TODO: separate and fix tests
-    const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
-    struct aws_byte_cursor request_path = x_amz_copy_source;
-    /* Skip optional leading slash. */
-    if (aws_byte_cursor_starts_with(&request_path, &s_slash_char)) {
-        aws_byte_cursor_advance(&request_path, 1);
-    }
-
-    /* From this point forward, the format is {bucket}/{key} - split
-    components.*/
-
-    struct aws_byte_cursor source_bucket = {0};
-
-    if (aws_byte_cursor_next_split(&request_path, '/', &source_bucket)) {
-        aws_byte_cursor_advance(&request_path, source_bucket.len);
-    }
     char source_url[1024];
     snprintf(
         source_url,
         sizeof(source_url),
-        "https://s3.%s.amazonaws.com/" PRInSTR "" PRInSTR "",
+        "https://s3.%s.amazonaws.com/" PRInSTR "",
         g_test_s3_region.ptr,
-        AWS_BYTE_CURSOR_PRI(source_bucket),
-        AWS_BYTE_CURSOR_PRI(request_path));
+        AWS_BYTE_CURSOR_PRI(x_amz_copy_source));
     printf("source_url: %s", source_url);
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = &test_data,
