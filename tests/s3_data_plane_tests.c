@@ -6526,24 +6526,13 @@ static int s_test_s3_copy_object_helper(
         g_test_s3_region.ptr);
 
     struct aws_byte_cursor copy_source_uri;
-    AWS_ZERO_STRUCT(copy_source_uri);
     struct aws_byte_buf encoded_path;
+    AWS_ZERO_STRUCT(copy_source_uri);
     AWS_ZERO_STRUCT(encoded_path);
+
     aws_byte_buf_init(&encoded_path, allocator, source_key.len);
     aws_byte_buf_append_encoding_uri_path(&encoded_path, &source_key);
-    /* switch (source_uri_type) { */
-    /*     case PATH: */
-    /*     case VIRTUAL: */
-    /*         snprintf( */
-    /*             source_url, */
-    /*             sizeof(source_url), */
-    /*             "https://" PRInSTR ".s3.%s.amazonaws.com/" PRInSTR "", */
-    /*             AWS_BYTE_CURSOR_PRI(source_bucket), */
-    /*             g_test_s3_region.ptr, */
-    /*             AWS_BYTE_CURSOR_PRI(source_key)); */
-    /*     case NONE: */
-    /*         break; */
-    /* } */
+
     /* without copy_source_uri */
     ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
         allocator,
