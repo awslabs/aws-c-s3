@@ -2447,16 +2447,15 @@ static bool s_copy_test_completion_predicate(void *arg) {
 
 int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
     struct aws_byte_cursor x_amz_copy_source,
     struct aws_byte_cursor destination_endpoint,
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size,
-    bool s3express) {
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    bool s3express,
+    struct aws_byte_cursor copy_source_uri) {
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
@@ -2464,7 +2463,7 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
 
     struct aws_byte_cursor region_cursor = g_test_s3_region;
     client_config.region = region_cursor;
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
@@ -2481,15 +2480,6 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     };
     test_data.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data.mutex);
-    // TODO: separate and fix tests
-    char source_url[1024];
-    snprintf(
-        source_url,
-        sizeof(source_url),
-        "https://s3.%s.amazonaws.com/" PRInSTR "",
-        g_test_s3_region.ptr,
-        AWS_BYTE_CURSOR_PRI(x_amz_copy_source));
-    printf("source_url: %s", source_url);
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = &test_data,
         .body_callback = NULL,
@@ -2500,7 +2490,7 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
         .shutdown_callback = NULL,
         .signing_config = client_config.signing_config,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
-        .copy_source_uri = aws_byte_cursor_from_c_str(source_url)};
+        .copy_source_uri = copy_source_uri};
 
     if (s3express) {
         meta_request_options.signing_config = &s3express_signing_config;
@@ -2532,13 +2522,12 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     aws_http_message_destroy(message);
     client = aws_s3_client_release(client);
 
-    aws_s3_tester_clean_up(&tester);
-
     return 0;
 }
 
 int aws_test_s3_copy_object_helper(
     struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
     struct aws_byte_cursor source_bucket,
     struct aws_byte_cursor source_key,
     struct aws_byte_cursor destination_endpoint,
@@ -2546,7 +2535,8 @@ int aws_test_s3_copy_object_helper(
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size,
-    bool s3_express) {
+    bool s3_express,
+    struct aws_byte_cursor copy_source_uri) {
 
     char copy_source_value[1024];
     snprintf(
@@ -2562,11 +2552,13 @@ int aws_test_s3_copy_object_helper(
 
     return aws_test_s3_copy_object_from_x_amz_copy_source(
         allocator,
+        tester,
         x_amz_copy_source,
         destination_endpoint,
         destination_key,
         expected_error_code,
         expected_response_status,
         expected_size,
-        s3_express);
+        s3_express,
+        copy_source_uri);
 }
