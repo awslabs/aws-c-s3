@@ -93,7 +93,10 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     copy_object->threaded_update_data.next_part_number = 1;
     if (options->copy_source_uri.len != 0) {
         if (aws_uri_init_parse(&copy_object->source_uri, allocator, &options->copy_source_uri)) {
-            // TODO: log
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Unable to parse the copy_source_uri provided in the request: " PRInSTR "",
+                AWS_BYTE_CURSOR_PRI(options->copy_source_uri));
             goto on_error;
         }
     }
