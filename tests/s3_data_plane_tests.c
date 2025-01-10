@@ -6576,9 +6576,9 @@ static int s_test_s3_copy_object_helper(
     snprintf(
         source_url,
         sizeof(source_url),
-        "https://s3.%s.amazonaws.com/" PRInSTR "/" PRInSTR "",
-        g_test_s3_region.ptr,
+        "https://" PRInSTR ".s3.%s.amazonaws.com/" PRInSTR "",
         AWS_BYTE_CURSOR_PRI(source_bucket),
+        g_test_s3_region.ptr,
         AWS_BYTE_BUF_PRI(encoded_path));
     copy_source_uri = aws_byte_cursor_from_c_str(source_url);
     ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
