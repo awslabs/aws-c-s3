@@ -2521,7 +2521,12 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     aws_mutex_clean_up(&test_data.mutex);
     aws_http_message_destroy(message);
     client = aws_s3_client_release(client);
+
+    aws_s3_tester_wait_for_client_shutdown(tester);
     tester->bound_to_client = false;
+    aws_s3_tester_lock_synced_data(tester);
+    tester->synced_data.client_shutdown = false;
+    aws_s3_tester_unlock_synced_data(tester);
 
     return 0;
 }
