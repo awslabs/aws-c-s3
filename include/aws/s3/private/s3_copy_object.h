@@ -26,6 +26,7 @@ struct aws_s3_copy_object {
     /* Usable after the Create Multipart Upload request succeeds. */
     struct aws_string *upload_id;
 
+    /* (Optional) source_uri for the copy operation. */
     struct aws_uri source_uri;
 
     /* Only meant for use in the update function, which is never called concurrently. */
