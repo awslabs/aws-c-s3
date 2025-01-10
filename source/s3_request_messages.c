@@ -470,7 +470,7 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     if (aws_http_message_set_request_method(message, g_head_method)) {
         goto error_cleanup;
     }
-    if (source_uri->self_size > 0) {
+    if (source_uri != NULL && source_uri->self_size > 0) {
         struct aws_byte_cursor host = *aws_uri_host_name(source_uri);
         struct aws_byte_cursor path = *aws_uri_path(source_uri);
         struct aws_http_header host_header = {

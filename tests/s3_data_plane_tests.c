@@ -6548,7 +6548,6 @@ static int s_test_s3_copy_object_helper(
         copy_source_uri));
 
     /* with path style copy_source_uri */
-    tester.bound_to_client = false;
     char source_url[1024];
     snprintf(
         source_url,
@@ -6572,7 +6571,6 @@ static int s_test_s3_copy_object_helper(
         copy_source_uri));
 
     /* with virtual style copy_source_uri */
-    tester.bound_to_client = false;
     snprintf(
         source_url,
         sizeof(source_url),
@@ -6603,10 +6601,10 @@ AWS_TEST_CASE(test_s3_copy_small_object, s_test_s3_copy_small_object)
 static int s_test_s3_copy_small_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("15mb_file.txt");
-    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("15mb_file_from_custom_bucket.txt");
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-1MB");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_1MB");
     return s_test_s3_copy_object_helper(
-        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK, MB_TO_BYTES(15));
+        allocator, source_key, destination_key, AWS_ERROR_SUCCESS, AWS_HTTP_STATUS_CODE_200_OK, MB_TO_BYTES(1));
 }
 
 AWS_TEST_CASE(test_s3_copy_small_object_special_char, s_test_s3_copy_small_object_special_char)
