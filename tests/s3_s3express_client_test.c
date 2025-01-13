@@ -654,13 +654,20 @@ TEST_CASE(s3express_client_get_object_create_session_error) {
  */
 TEST_CASE(s3express_client_copy_object) {
     (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-10MB");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_10MB");
     struct aws_byte_cursor source_bucket =
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket--usw2-az1--x-s3");
-    return aws_test_s3_copy_object_helper(
+    struct aws_byte_cursor copy_source_uri;
+    AWS_ZERO_STRUCT(copy_source_uri);
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
         allocator,
+        &tester,
         source_bucket,
         source_key,
         g_test_s3express_bucket_usw2_az1_endpoint,
@@ -668,7 +675,11 @@ TEST_CASE(s3express_client_copy_object) {
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK,
         MB_TO_BYTES(10),
-        true);
+        true,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
 }
 
 /**
@@ -676,13 +687,20 @@ TEST_CASE(s3express_client_copy_object) {
  */
 TEST_CASE(s3express_client_copy_object_multipart) {
     (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-2GB");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_2GB");
     struct aws_byte_cursor source_bucket =
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket--usw2-az1--x-s3");
-    return aws_test_s3_copy_object_helper(
+    struct aws_byte_cursor copy_source_uri;
+    AWS_ZERO_STRUCT(copy_source_uri);
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
         allocator,
+        &tester,
         source_bucket,
         source_key,
         g_test_s3express_bucket_usw2_az1_endpoint,
@@ -690,5 +708,9 @@ TEST_CASE(s3express_client_copy_object_multipart) {
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK,
         GB_TO_BYTES(2),
-        true);
+        true,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
 }
