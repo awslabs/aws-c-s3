@@ -77,14 +77,14 @@ enum aws_s3_meta_request_type {
      * a CopyObject request to S3 if the object size is not large enough for
      * a multipart upload.
      * Note: copy support is still in development and has following limitations:
-     * - host header must use virtual host addressing style (path style is not
+     * 1. host header must use virtual host addressing style (path style is not
      *   supported) and both source and dest buckets must have dns compliant name
-     * - only {bucket}/{key} format is supported for source and passing arn as
+     * 2. only {bucket}/{key} format is supported for source and passing arn as
      *   source will not work
-     * - source bucket is assumed to be in the same region as dest
-     * - source bucket and dest bucket must both be either directory buckets or regular buckets.
+     * 3. source bucket is assumed to be in the same region as dest
+     * 4. source bucket and dest bucket must both be either directory buckets or regular buckets.
      *
-     * Provide the `meta_request_options.copy_source_uri` to bypass these limitations.
+     * Provide the `meta_request_options.copy_source_uri` to bypass limitation 1 & 2.
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
@@ -874,7 +874,7 @@ struct aws_s3_meta_request_options {
 
     /*
      * (Optional)
-     * If performing a copy operation, provide the source URI here to bypass the limitations of the copy operation.
+     * If performing a copy operation, provide the source URI here to bypass limitations 1 and 2 of the copy operation.
      * This will be ignored for other operations.
      */
     const struct aws_byte_cursor copy_source_uri;
