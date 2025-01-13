@@ -462,11 +462,12 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_uri *source_uri) {
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
+    struct aws_byte_buf head_object_host_header;
+    AWS_ZERO_STRUCT(head_object_host_header);
+
     if (message == NULL) {
         goto error_cleanup;
     }
-    struct aws_byte_buf head_object_host_header;
-    AWS_ZERO_STRUCT(head_object_host_header);
 
     if (aws_http_message_set_request_method(message, g_head_method)) {
         goto error_cleanup;
