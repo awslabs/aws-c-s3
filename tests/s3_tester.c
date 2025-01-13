@@ -2497,7 +2497,14 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     }
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
-    ASSERT_NOT_NULL(meta_request);
+    if (meta_request == NULL) {
+        if (expected_error_code == AWS_OP_SUCCESS) {
+            AWS_FATAL_ASSERT(false && "meta_request is NULL");
+        } else {
+            ASSERT_INT_EQUALS(expected_error_code, aws_last_error());
+            goto cleanup;
+        }
+    }
 
     /* wait completion of the meta request */
     aws_mutex_lock(&test_data.mutex);
@@ -2512,11 +2519,11 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     if (test_data.meta_request_error_code == AWS_ERROR_SUCCESS) {
         ASSERT_UINT_EQUALS(expected_size, test_data.progress_callback_total_bytes_transferred);
         ASSERT_UINT_EQUALS(expected_size, test_data.progress_callback_content_length);
+        /* assert headers callback was invoked */
+        ASSERT_TRUE(test_data.headers_callback_was_invoked);
     }
 
-    /* assert headers callback was invoked */
-    ASSERT_TRUE(test_data.headers_callback_was_invoked);
-
+cleanup:
     aws_s3_meta_request_release(meta_request);
     aws_mutex_clean_up(&test_data.mutex);
     aws_http_message_destroy(message);

@@ -6712,6 +6712,58 @@ static int s_test_s3_copy_source_prefixed_by_slash(struct aws_allocator *allocat
     return AWS_OP_SUCCESS;
 }
 
+AWS_TEST_CASE(test_s3_copy_invalid_source_uri, s_test_s3_copy_invalid_source_uri)
+static int s_test_s3_copy_invalid_source_uri(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-1MB");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_1MB");
+
+    struct aws_byte_cursor source_bucket = g_test_bucket_name;
+
+    char copy_source_value[1024];
+    snprintf(
+        copy_source_value,
+        sizeof(copy_source_value),
+        "/%.*s/%.*s",
+        (int)source_bucket.len,
+        source_bucket.ptr,
+        (int)source_key.len,
+        source_key.ptr);
+
+    struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
+    struct aws_byte_cursor destination_bucket = g_test_bucket_name;
+
+    char endpoint[1024];
+    snprintf(
+        endpoint,
+        sizeof(endpoint),
+        "%.*s.s3.%s.amazonaws.com",
+        (int)destination_bucket.len,
+        destination_bucket.ptr,
+        g_test_s3_region.ptr);
+
+    struct aws_byte_cursor copy_source_uri = aws_byte_cursor_from_c_str("http://invalid-uri.com:80:80/path");
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_from_x_amz_copy_source(
+        allocator,
+        &tester,
+        x_amz_copy_source,
+        aws_byte_cursor_from_c_str(endpoint),
+        destination_key,
+        AWS_ERROR_MALFORMED_INPUT_STRING,
+        0,
+        MB_TO_BYTES(1),
+        false,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
 /**
  * Test multipart Copy Object meta request using a slash prefix in the x_amz_copy_source header.
  * S3 supports both bucket/key and /bucket/key

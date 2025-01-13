@@ -460,12 +460,13 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_uri *source_uri) {
-    struct aws_http_message *message = NULL;
 
-    message = aws_http_message_new_request(allocator);
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
     if (message == NULL) {
         goto error_cleanup;
     }
+    struct aws_byte_buf head_object_host_header;
+    AWS_ZERO_STRUCT(head_object_host_header);
 
     if (aws_http_message_set_request_method(message, g_head_method)) {
         goto error_cleanup;
@@ -474,6 +475,10 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         /* Parse source host header and path from the provided URI */
         struct aws_byte_cursor host = *aws_uri_host_name(source_uri);
         struct aws_byte_cursor path = *aws_uri_path(source_uri);
+        if (host.len == 0 || path.len == 0) {
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error_cleanup;
+        }
         struct aws_http_header host_header = {
             .name = g_host_header_name,
             .value = host,
@@ -489,8 +494,6 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     }
 
     /* Parse the source host header and path from the x-amz-copy-source header and the destination URI */
-    struct aws_byte_buf head_object_host_header;
-    AWS_ZERO_STRUCT(head_object_host_header);
 
     AWS_PRECONDITION(allocator);
 
@@ -498,19 +501,19 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     struct aws_http_headers *headers = aws_http_message_get_headers(base_message);
     if (!headers) {
         AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing headers");
-        return NULL;
+        goto error_cleanup;
     }
 
     struct aws_byte_cursor source_header;
     const struct aws_byte_cursor copy_source_header = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source");
     if (aws_http_headers_get(headers, copy_source_header, &source_header) != AWS_OP_SUCCESS) {
         AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the x-amz-copy-source header");
-        return NULL;
+        goto error_cleanup;
     }
     struct aws_byte_cursor host;
     if (aws_http_headers_get(headers, g_host_header_name, &host) != AWS_OP_SUCCESS) {
         AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "CopyRequest is missing the Host header");
-        return NULL;
+        goto error_cleanup;
     }
 
     struct aws_byte_cursor request_path = source_header;

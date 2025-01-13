@@ -82,7 +82,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
             copy_object,
             &s_s3_copy_object_vtable,
             &copy_object->base)) {
-        goto on_error;
+        aws_mem_release(allocator, copy_object);
+        return NULL;
     }
 
     aws_array_list_init_dynamic(
@@ -105,7 +106,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
 
     return &copy_object->base;
 on_error:
-    aws_mem_release(allocator, copy_object);
+    aws_s3_meta_request_release(&copy_object->base);
     return NULL;
 }
 
