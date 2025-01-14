@@ -877,7 +877,7 @@ struct aws_s3_meta_request_options {
      * If performing a copy operation, provide the source URI here to bypass limitations 1 and 2 of the copy operation.
      * This will be ignored for other operations.
      */
-    const struct aws_byte_cursor copy_source_uri;
+    struct aws_byte_cursor copy_source_uri;
 };
 
 /* Result details of a meta request.
