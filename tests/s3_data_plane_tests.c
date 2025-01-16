@@ -6509,6 +6509,9 @@ static int s_test_s3_copy_object_helper(
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size) {
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_byte_cursor source_bucket = g_test_bucket_name;
     struct aws_byte_cursor destination_bucket = g_test_bucket_name;
@@ -6522,8 +6525,18 @@ static int s_test_s3_copy_object_helper(
         destination_bucket.ptr,
         g_test_s3_region.ptr);
 
-    return aws_test_s3_copy_object_helper(
+    struct aws_byte_cursor copy_source_uri;
+    struct aws_byte_buf encoded_path;
+    AWS_ZERO_STRUCT(copy_source_uri);
+    AWS_ZERO_STRUCT(encoded_path);
+
+    aws_byte_buf_init(&encoded_path, allocator, source_key.len);
+    aws_byte_buf_append_encoding_uri_path(&encoded_path, &source_key);
+
+    /* without copy_source_uri */
+    ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
         allocator,
+        &tester,
         source_bucket,
         source_key,
         aws_byte_cursor_from_c_str(endpoint),
@@ -6531,7 +6544,57 @@ static int s_test_s3_copy_object_helper(
         expected_error_code,
         expected_response_status,
         expected_size,
-        false);
+        false,
+        copy_source_uri));
+
+    /* with path style copy_source_uri */
+    char source_url[1024];
+    snprintf(
+        source_url,
+        sizeof(source_url),
+        "https://s3.%s.amazonaws.com/" PRInSTR "/" PRInSTR "",
+        g_test_s3_region.ptr,
+        AWS_BYTE_CURSOR_PRI(source_bucket),
+        AWS_BYTE_BUF_PRI(encoded_path));
+    copy_source_uri = aws_byte_cursor_from_c_str(source_url);
+    ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
+        allocator,
+        &tester,
+        source_bucket,
+        source_key,
+        aws_byte_cursor_from_c_str(endpoint),
+        destination_key,
+        expected_error_code,
+        expected_response_status,
+        expected_size,
+        false,
+        copy_source_uri));
+
+    /* with virtual style copy_source_uri */
+    snprintf(
+        source_url,
+        sizeof(source_url),
+        "https://" PRInSTR ".s3.%s.amazonaws.com/" PRInSTR "",
+        AWS_BYTE_CURSOR_PRI(source_bucket),
+        g_test_s3_region.ptr,
+        AWS_BYTE_BUF_PRI(encoded_path));
+    copy_source_uri = aws_byte_cursor_from_c_str(source_url);
+    ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
+        allocator,
+        &tester,
+        source_bucket,
+        source_key,
+        aws_byte_cursor_from_c_str(endpoint),
+        destination_key,
+        expected_error_code,
+        expected_response_status,
+        expected_size,
+        false,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    aws_byte_buf_clean_up(&encoded_path);
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_copy_small_object, s_test_s3_copy_small_object)
@@ -6599,6 +6662,9 @@ static int s_test_s3_copy_object_invalid_source_key(struct aws_allocator *alloca
 AWS_TEST_CASE(test_s3_copy_source_prefixed_by_slash, s_test_s3_copy_source_prefixed_by_slash)
 static int s_test_s3_copy_source_prefixed_by_slash(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-1MB");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_1MB");
@@ -6627,15 +6693,75 @@ static int s_test_s3_copy_source_prefixed_by_slash(struct aws_allocator *allocat
         destination_bucket.ptr,
         g_test_s3_region.ptr);
 
-    return aws_test_s3_copy_object_from_x_amz_copy_source(
+    struct aws_byte_cursor copy_source_uri;
+    AWS_ZERO_STRUCT(copy_source_uri);
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_from_x_amz_copy_source(
         allocator,
+        &tester,
         x_amz_copy_source,
         aws_byte_cursor_from_c_str(endpoint),
         destination_key,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK,
         MB_TO_BYTES(1),
-        false);
+        false,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_copy_invalid_source_uri, s_test_s3_copy_invalid_source_uri)
+static int s_test_s3_copy_invalid_source_uri(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-1MB");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_1MB");
+
+    struct aws_byte_cursor source_bucket = g_test_bucket_name;
+
+    char copy_source_value[1024];
+    snprintf(
+        copy_source_value,
+        sizeof(copy_source_value),
+        "/%.*s/%.*s",
+        (int)source_bucket.len,
+        source_bucket.ptr,
+        (int)source_key.len,
+        source_key.ptr);
+
+    struct aws_byte_cursor x_amz_copy_source = aws_byte_cursor_from_c_str(copy_source_value);
+    struct aws_byte_cursor destination_bucket = g_test_bucket_name;
+
+    char endpoint[1024];
+    snprintf(
+        endpoint,
+        sizeof(endpoint),
+        "%.*s.s3.%s.amazonaws.com",
+        (int)destination_bucket.len,
+        destination_bucket.ptr,
+        g_test_s3_region.ptr);
+
+    struct aws_byte_cursor copy_source_uri = aws_byte_cursor_from_c_str("http://invalid-uri.com:80:80/path");
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_from_x_amz_copy_source(
+        allocator,
+        &tester,
+        x_amz_copy_source,
+        aws_byte_cursor_from_c_str(endpoint),
+        destination_key,
+        AWS_ERROR_MALFORMED_INPUT_STRING,
+        0,
+        MB_TO_BYTES(1),
+        false,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
 }
 
 /**
@@ -6646,6 +6772,9 @@ static int s_test_s3_copy_source_prefixed_by_slash(struct aws_allocator *allocat
 AWS_TEST_CASE(test_s3_copy_source_prefixed_by_slash_multipart, s_test_s3_copy_source_prefixed_by_slash_multipart)
 static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-256MB");
     struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_256MB");
@@ -6674,15 +6803,23 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
         destination_bucket.ptr,
         g_test_s3_region.ptr);
 
-    return aws_test_s3_copy_object_from_x_amz_copy_source(
+    struct aws_byte_cursor copy_source_uri;
+    AWS_ZERO_STRUCT(copy_source_uri);
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_from_x_amz_copy_source(
         allocator,
+        &tester,
         x_amz_copy_source,
         aws_byte_cursor_from_c_str(endpoint),
         destination_key,
         AWS_ERROR_SUCCESS,
         AWS_HTTP_STATUS_CODE_200_OK,
         MB_TO_BYTES(256),
-        false);
+        false,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
 }
 
 static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {

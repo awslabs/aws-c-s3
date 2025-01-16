@@ -2447,16 +2447,15 @@ static bool s_copy_test_completion_predicate(void *arg) {
 
 int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
     struct aws_byte_cursor x_amz_copy_source,
     struct aws_byte_cursor destination_endpoint,
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size,
-    bool s3express) {
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    bool s3express,
+    struct aws_byte_cursor copy_source_uri) {
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
@@ -2464,7 +2463,7 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
 
     struct aws_byte_cursor region_cursor = g_test_s3_region;
     client_config.region = region_cursor;
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(&tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
@@ -2481,7 +2480,6 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     };
     test_data.c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
     aws_mutex_init(&test_data.mutex);
-
     struct aws_s3_meta_request_options meta_request_options = {
         .user_data = &test_data,
         .body_callback = NULL,
@@ -2492,14 +2490,21 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
         .shutdown_callback = NULL,
         .signing_config = client_config.signing_config,
         .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
-    };
+        .copy_source_uri = copy_source_uri};
 
     if (s3express) {
         meta_request_options.signing_config = &s3express_signing_config;
     }
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
-    ASSERT_NOT_NULL(meta_request);
+    if (meta_request == NULL) {
+        if (expected_error_code == AWS_OP_SUCCESS) {
+            AWS_FATAL_ASSERT(false && "meta_request is NULL");
+        } else {
+            ASSERT_INT_EQUALS(expected_error_code, aws_last_error());
+            goto cleanup;
+        }
+    }
 
     /* wait completion of the meta request */
     aws_mutex_lock(&test_data.mutex);
@@ -2514,23 +2519,28 @@ int aws_test_s3_copy_object_from_x_amz_copy_source(
     if (test_data.meta_request_error_code == AWS_ERROR_SUCCESS) {
         ASSERT_UINT_EQUALS(expected_size, test_data.progress_callback_total_bytes_transferred);
         ASSERT_UINT_EQUALS(expected_size, test_data.progress_callback_content_length);
+        /* assert headers callback was invoked */
+        ASSERT_TRUE(test_data.headers_callback_was_invoked);
     }
 
-    /* assert headers callback was invoked */
-    ASSERT_TRUE(test_data.headers_callback_was_invoked);
-
+cleanup:
     aws_s3_meta_request_release(meta_request);
     aws_mutex_clean_up(&test_data.mutex);
     aws_http_message_destroy(message);
     client = aws_s3_client_release(client);
 
-    aws_s3_tester_clean_up(&tester);
+    aws_s3_tester_wait_for_client_shutdown(tester);
+    tester->bound_to_client = false;
+    aws_s3_tester_lock_synced_data(tester);
+    tester->synced_data.client_shutdown = false;
+    aws_s3_tester_unlock_synced_data(tester);
 
     return 0;
 }
 
 int aws_test_s3_copy_object_helper(
     struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
     struct aws_byte_cursor source_bucket,
     struct aws_byte_cursor source_key,
     struct aws_byte_cursor destination_endpoint,
@@ -2538,7 +2548,8 @@ int aws_test_s3_copy_object_helper(
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size,
-    bool s3_express) {
+    bool s3_express,
+    struct aws_byte_cursor copy_source_uri) {
 
     char copy_source_value[1024];
     snprintf(
@@ -2554,11 +2565,13 @@ int aws_test_s3_copy_object_helper(
 
     return aws_test_s3_copy_object_from_x_amz_copy_source(
         allocator,
+        tester,
         x_amz_copy_source,
         destination_endpoint,
         destination_key,
         expected_error_code,
         expected_response_status,
         expected_size,
-        s3_express);
+        s3_express,
+        copy_source_uri);
 }
