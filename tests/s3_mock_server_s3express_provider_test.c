@@ -445,8 +445,8 @@ static size_t s_get_index_from_s3express_cache(
                 AWS_CONTAINER_OF(node, struct aws_linked_hash_table_node, node);
             node = aws_linked_list_next(node);
             struct aws_s3express_session *session = table_node->value;
-            struct aws_string *hash_key =
-                aws_encode_s3express_hash_key_new(s_s3express_tester.allocator, original_credentials, host_value, session->headers);
+            struct aws_string *hash_key = aws_encode_s3express_hash_key_new(
+                s_s3express_tester.allocator, original_credentials, host_value, session->headers);
             if (aws_string_eq(session->hash_key, hash_key)) {
                 aws_string_destroy(hash_key);
                 aws_mutex_unlock(&impl->synced_data.lock);

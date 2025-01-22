@@ -28,7 +28,6 @@ struct aws_credentials_properties_s3express {
      */
     struct aws_byte_cursor region;
 
-
     struct aws_http_headers *headers;
 };
 
