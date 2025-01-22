@@ -6,9 +6,11 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3express_credentials_provider_impl.h"
 #include <aws/auth/credentials.h>
+#include <aws/s3/private/s3_request_messages.h>
 #include <aws/s3/private/s3_util.h>
 #include <aws/s3/s3_client.h>
 
+#include <aws/cal/hash.h>
 #include <aws/common/clock.h>
 #include <aws/common/lru_cache.h>
 #include <aws/common/uri.h>
@@ -17,8 +19,6 @@
 #include <aws/http/status_code.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
-
-#include <aws/cal/hash.h>
 
 #include <inttypes.h>
 
@@ -394,7 +394,8 @@ static void s_on_request_finished(
 
 static struct aws_http_message *s_create_session_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor host_value) {
+    struct aws_byte_cursor host_value,
+    struct aws_http_headers *headers) {
     struct aws_http_message *request = aws_http_message_new_request(allocator);
 
     struct aws_http_header host_header = {
@@ -412,6 +413,20 @@ static struct aws_http_message *s_create_session_request_new(
     };
     if (aws_http_message_add_header(request, user_agent_header)) {
         goto error;
+    }
+
+    for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
+        struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
+        struct aws_byte_cursor header_value;
+        if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
+            struct aws_http_header header = {
+                .name = header_name,
+                .value = header_value,
+            };
+            if (aws_http_message_add_header(request, header)) {
+                goto error;
+            }
+        }
     }
 
     if (aws_http_message_set_request_method(request, aws_http_method_get)) {
@@ -450,6 +465,7 @@ static struct aws_s3express_session_creator *s_aws_s3express_session_creator_des
 /**
  * Encode the hash key to be [host_value][hash_of_credentials]
  * hash_of_credentials is the sha256 of [access_key][secret_access_key]
+ * TODO: Update docs
  **/
 struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_allocator *allocator,
@@ -457,17 +473,31 @@ struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_byte_cursor host_value,
     struct aws_http_headers *headers) {
     (void)headers;
-    struct aws_byte_buf combine_key_buf;
+    struct aws_byte_buf combined_hash_buf;
 
     /* 1. Combine access_key and secret_access_key into one buffer */
     struct aws_byte_cursor access_key = aws_credentials_get_access_key_id(original_credentials);
     struct aws_byte_cursor secret_access_key = aws_credentials_get_secret_access_key(original_credentials);
-    aws_byte_buf_init(&combine_key_buf, allocator, access_key.len + secret_access_key.len);
-    aws_byte_buf_write_from_whole_cursor(&combine_key_buf, access_key);
-    aws_byte_buf_write_from_whole_cursor(&combine_key_buf, secret_access_key);
+    aws_byte_buf_init(&combined_hash_buf, allocator, access_key.len + secret_access_key.len);
+    aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, access_key);
+    aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, secret_access_key);
+
+    /* Write the allowed headers into hash */
+    struct aws_byte_cursor collon = aws_byte_cursor_from_c_str(":");
+    struct aws_byte_cursor comma = aws_byte_cursor_from_c_str(",");
+    for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
+        struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
+        struct aws_byte_cursor header_value;
+        if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
+            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, comma);
+            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_name);
+            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, collon);
+            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_value);
+        }
+    }
 
     /* 2. Get sha256 digest from the combined key */
-    struct aws_byte_cursor combine_key = aws_byte_cursor_from_buf(&combine_key_buf);
+    struct aws_byte_cursor combine_key = aws_byte_cursor_from_buf(&combined_hash_buf);
     struct aws_byte_buf digest_buf;
     aws_byte_buf_init(&digest_buf, allocator, AWS_SHA256_LEN);
     aws_sha256_compute(allocator, &combine_key, &digest_buf, 0);
@@ -481,7 +511,7 @@ struct aws_string *aws_encode_s3express_hash_key_new(
 
     /* Clean up */
     aws_byte_buf_clean_up(&result_buffer);
-    aws_byte_buf_clean_up(&combine_key_buf);
+    aws_byte_buf_clean_up(&combined_hash_buf);
     aws_byte_buf_clean_up(&digest_buf);
 
     return result;
@@ -493,7 +523,8 @@ static struct aws_s3express_session_creator *s_session_creator_new(
     const struct aws_credentials_properties_s3express *s3express_properties) {
 
     struct aws_s3express_credentials_provider_impl *impl = provider->impl;
-    struct aws_http_message *request = s_create_session_request_new(provider->allocator, s3express_properties->host);
+    struct aws_http_message *request =
+        s_create_session_request_new(provider->allocator, s3express_properties->host, s3express_properties->headers);
     if (!request) {
         return NULL;
     }

@@ -234,7 +234,6 @@ const struct aws_byte_cursor g_s3_create_session_allowed_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-bucket-key-enabled"),
-
 };
 
 const size_t g_s3_create_session_allowed_headers_count =
