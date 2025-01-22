@@ -968,6 +968,7 @@ void aws_s3_meta_request_sign_request_default_impl(
         context->user_data = user_data;
         context->properties.host = aws_byte_cursor_from_string(meta_request->s3express_session_host);
         context->properties.region = signing_config.region;
+        context->properties.headers = aws_http_message_get_headers(meta_request->initial_request_message);
 
         if (signing_config.credentials) {
             context->original_credentials = signing_config.credentials;

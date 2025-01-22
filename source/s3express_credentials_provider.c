@@ -48,6 +48,7 @@ struct aws_s3express_session_creator {
     /* The region and host of the session we are creating */
     struct aws_string *region;
     struct aws_string *host;
+    struct aws_http_headers *headers;
 
     struct {
         /* Protected by the impl lock */
@@ -66,6 +67,7 @@ static struct aws_s3express_session *s_aws_s3express_session_new(
     const struct aws_string *hash_key,
     const struct aws_string *region,
     const struct aws_string *host,
+    struct aws_http_headers *headers,
     struct aws_credentials *credentials) {
 
     struct aws_s3express_session *session =
@@ -74,6 +76,8 @@ static struct aws_s3express_session *s_aws_s3express_session_new(
     session->impl = provider->impl;
     session->hash_key = aws_string_new_from_string(provider->allocator, hash_key);
     session->host = aws_string_new_from_string(provider->allocator, host);
+    aws_http_headers_acquire(headers);
+    session->headers = headers;
     if (region) {
         session->region = aws_string_new_from_string(provider->allocator, region);
     }
@@ -94,6 +98,7 @@ static void s_aws_s3express_session_destroy(struct aws_s3express_session *sessio
     aws_string_destroy(session->hash_key);
     aws_string_destroy(session->region);
     aws_string_destroy(session->host);
+    aws_http_headers_release(session->headers);
     aws_credentials_release(session->s3express_credentials);
     aws_mem_release(session->allocator, session);
 }
@@ -368,6 +373,7 @@ static void s_on_request_finished(
                 session_creator->hash_key,
                 session_creator->region,
                 session_creator->host,
+                session_creator->headers,
                 credentials);
             aws_cache_put(impl->synced_data.cache, session->hash_key, session);
         }
@@ -434,6 +440,7 @@ static struct aws_s3express_session_creator *s_aws_s3express_session_creator_des
     aws_string_destroy(session_creator->hash_key);
     aws_string_destroy(session_creator->region);
     aws_string_destroy(session_creator->host);
+    aws_http_headers_release(session_creator->headers);
 
     aws_byte_buf_clean_up(&session_creator->response_buf);
     aws_mem_release(session_creator->allocator, session_creator);
@@ -447,8 +454,9 @@ static struct aws_s3express_session_creator *s_aws_s3express_session_creator_des
 struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_allocator *allocator,
     const struct aws_credentials *original_credentials,
-    struct aws_byte_cursor host_value) {
-
+    struct aws_byte_cursor host_value,
+    struct aws_http_headers *headers) {
+    (void)headers;
     struct aws_byte_buf combine_key_buf;
 
     /* 1. Combine access_key and secret_access_key into one buffer */
@@ -500,6 +508,8 @@ static struct aws_s3express_session_creator *s_session_creator_new(
     session_creator->provider = provider;
     session_creator->host = aws_string_new_from_cursor(session_creator->allocator, &s3express_properties->host);
     session_creator->region = aws_string_new_from_cursor(session_creator->allocator, &s3express_properties->region);
+    aws_http_headers_acquire(s3express_properties->headers);
+    session_creator->headers = s3express_properties->headers;
 
     struct aws_signing_config_aws s3express_signing_config = {
         .credentials = original_credentials,
@@ -556,8 +566,8 @@ static int s_s3express_get_creds(
 
     uint64_t current_stamp = UINT64_MAX;
     aws_sys_clock_get_ticks(&current_stamp);
-    struct aws_string *hash_key =
-        aws_encode_s3express_hash_key_new(provider->allocator, original_credentials, s3express_properties->host);
+    struct aws_string *hash_key = aws_encode_s3express_hash_key_new(
+        provider->allocator, original_credentials, s3express_properties->host, s3express_properties->headers);
     uint64_t now_seconds = aws_timestamp_convert(current_stamp, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_SECS, NULL);
 
     s_credentials_provider_s3express_impl_lock_synced_data(impl);
@@ -764,7 +774,8 @@ static void s_refresh_session_list(
                         struct aws_string *current_creds_hash = aws_encode_s3express_hash_key_new(
                             provider->allocator,
                             current_original_credentials,
-                            aws_byte_cursor_from_string(session->host));
+                            aws_byte_cursor_from_string(session->host),
+                            session->headers);
                         bool creds_match = aws_string_eq(current_creds_hash, hash_key);
                         aws_string_destroy(current_creds_hash);
                         if (!creds_match) {
@@ -784,6 +795,7 @@ static void s_refresh_session_list(
 
                         struct aws_credentials_properties_s3express s3express_properties = {
                             .host = aws_byte_cursor_from_string(session->host),
+                            .headers = session->headers,
                         };
                         if (session->region) {
                             s3express_properties.region = aws_byte_cursor_from_string(session->region);

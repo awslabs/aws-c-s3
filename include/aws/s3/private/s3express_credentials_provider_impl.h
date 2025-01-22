@@ -26,6 +26,8 @@ struct aws_s3express_session {
     /* The region and host of the session */
     struct aws_string *region;
     struct aws_string *host;
+
+    struct aws_http_headers *headers;
     bool inactive;
 
     /* Only used for mock tests */
@@ -112,7 +114,8 @@ AWS_S3_API
 struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_allocator *allocator,
     const struct aws_credentials *original_credentials,
-    struct aws_byte_cursor host_value);
+    struct aws_byte_cursor host_value,
+    struct aws_http_headers *headers);
 
 AWS_EXTERN_C_END
 #endif /* AWS_S3EXPRESS_CREDENTIALS_PROVIDER_IMPL_H */
