@@ -76,8 +76,10 @@ static struct aws_s3express_session *s_aws_s3express_session_new(
     session->impl = provider->impl;
     session->hash_key = aws_string_new_from_string(provider->allocator, hash_key);
     session->host = aws_string_new_from_string(provider->allocator, host);
-    aws_http_headers_acquire(headers);
-    session->headers = headers;
+    if (headers != NULL) {
+        aws_http_headers_acquire(headers);
+        session->headers = headers;
+    }
     if (region) {
         session->region = aws_string_new_from_string(provider->allocator, region);
     }
@@ -414,17 +416,18 @@ static struct aws_http_message *s_create_session_request_new(
     if (aws_http_message_add_header(request, user_agent_header)) {
         goto error;
     }
-
-    for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
-        struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
-        struct aws_byte_cursor header_value;
-        if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
-            struct aws_http_header header = {
-                .name = header_name,
-                .value = header_value,
-            };
-            if (aws_http_message_add_header(request, header)) {
-                goto error;
+    if (headers != NULL) {
+        for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
+            struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
+            struct aws_byte_cursor header_value;
+            if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
+                struct aws_http_header header = {
+                    .name = header_name,
+                    .value = header_value,
+                };
+                if (aws_http_message_add_header(request, header)) {
+                    goto error;
+                }
             }
         }
     }
@@ -483,16 +486,18 @@ struct aws_string *aws_encode_s3express_hash_key_new(
     aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, secret_access_key);
 
     /* Write the allowed headers into hash */
-    struct aws_byte_cursor collon = aws_byte_cursor_from_c_str(":");
-    struct aws_byte_cursor comma = aws_byte_cursor_from_c_str(",");
-    for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
-        struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
-        struct aws_byte_cursor header_value;
-        if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
-            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, comma);
-            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_name);
-            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, collon);
-            aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_value);
+    if (headers != NULL) {
+        struct aws_byte_cursor collon = aws_byte_cursor_from_c_str(":");
+        struct aws_byte_cursor comma = aws_byte_cursor_from_c_str(",");
+        for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
+            struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
+            struct aws_byte_cursor header_value;
+            if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
+                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, comma);
+                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_name);
+                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, collon);
+                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_value);
+            }
         }
     }
 
@@ -539,8 +544,10 @@ static struct aws_s3express_session_creator *s_session_creator_new(
     session_creator->provider = provider;
     session_creator->host = aws_string_new_from_cursor(session_creator->allocator, &s3express_properties->host);
     session_creator->region = aws_string_new_from_cursor(session_creator->allocator, &s3express_properties->region);
-    aws_http_headers_acquire(s3express_properties->headers);
-    session_creator->headers = s3express_properties->headers;
+    if (s3express_properties->headers != NULL) {
+        aws_http_headers_acquire(s3express_properties->headers);
+        session_creator->headers = s3express_properties->headers;
+    }
 
     struct aws_signing_config_aws s3express_signing_config = {
         .credentials = original_credentials,
