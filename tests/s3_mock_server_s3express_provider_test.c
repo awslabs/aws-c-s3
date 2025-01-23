@@ -269,8 +269,6 @@ struct aws_s3express_credentials_provider *s_s3express_credentials_provider_fact
     s_s3express_tester.shutdown_user_data = shutdown_user_data;
     struct aws_s3express_credentials_provider_default_options options = {
         .client = client,
-        // .shutdown_complete_callback = s_on_shutdown_complete,
-        // .shutdown_user_data = &s_s3express_tester,
         .mock_test.bg_refresh_secs_override = s_bg_refresh_secs_override,
     };
     struct aws_s3express_credentials_provider *provider =

@@ -405,8 +405,9 @@ static struct aws_http_message *s_create_session_request_new(
         .name = g_host_header_name,
         .value = host_value,
     };
-
-    /* NOTE: ONLY FOR TESTS. Don't add the host header for endpoint override. */
+    /* NOTE: Only for Tests.
+     * Don't add the host header for endpoint override.
+     */
     if (endpoint_override == NULL) {
         if (aws_http_message_add_header(request, host_header)) {
             goto error;
@@ -443,7 +444,10 @@ static struct aws_http_message *s_create_session_request_new(
     struct aws_byte_cursor path_and_query = s_create_session_path_query;
     if (endpoint_override != NULL) {
         const struct aws_byte_cursor *override_path_query = aws_uri_path_and_query(endpoint_override);
-        if (override_path_query->len > 0) {
+        /* NOTE: Only for Tests.
+         * path_and_query is at least 1 due to /. Only override if its length is more than 1
+         */
+        if (override_path_query->len > 1) {
             path_and_query = *override_path_query;
         }
     }
@@ -486,7 +490,7 @@ struct aws_string *aws_encode_s3express_hash_key_new(
     const struct aws_credentials *original_credentials,
     struct aws_byte_cursor host_value,
     struct aws_http_headers *headers) {
-    (void)headers;
+
     struct aws_byte_buf combined_hash_buf;
 
     /* 1. Combine access_key and secret_access_key into one buffer */
