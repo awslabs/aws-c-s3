@@ -397,7 +397,8 @@ static void s_on_request_finished(
 static struct aws_http_message *s_create_session_request_new(
     struct aws_allocator *allocator,
     struct aws_byte_cursor host_value,
-    struct aws_http_headers *headers) {
+    struct aws_http_headers *headers,
+    const struct aws_uri *endpoint_override) {
     struct aws_http_message *request = aws_http_message_new_request(allocator);
 
     struct aws_http_header host_header = {
@@ -405,8 +406,11 @@ static struct aws_http_message *s_create_session_request_new(
         .value = host_value,
     };
 
-    if (aws_http_message_add_header(request, host_header)) {
-        goto error;
+    /* NOTE: ONLY FOR TESTS. Don't add the host header for endpoint override. */
+    if (endpoint_override == NULL) {
+        if (aws_http_message_add_header(request, host_header)) {
+            goto error;
+        }
     }
 
     struct aws_http_header user_agent_header = {
@@ -436,7 +440,14 @@ static struct aws_http_message *s_create_session_request_new(
         goto error;
     }
 
-    if (aws_http_message_set_request_path(request, s_create_session_path_query)) {
+    struct aws_byte_cursor path_and_query = s_create_session_path_query;
+    if (endpoint_override != NULL) {
+        const struct aws_byte_cursor *override_path_query = aws_uri_path_and_query(endpoint_override);
+        if (override_path_query->len > 0) {
+            path_and_query = *override_path_query;
+        }
+    }
+    if (aws_http_message_set_request_path(request, path_and_query)) {
         goto error;
     }
     return request;
@@ -528,14 +539,13 @@ static struct aws_s3express_session_creator *s_session_creator_new(
     const struct aws_credentials_properties_s3express *s3express_properties) {
 
     struct aws_s3express_credentials_provider_impl *impl = provider->impl;
-    struct aws_http_message *request =
-        s_create_session_request_new(provider->allocator, s3express_properties->host, s3express_properties->headers);
+    struct aws_http_message *request = s_create_session_request_new(
+        provider->allocator,
+        s3express_properties->host,
+        s3express_properties->headers,
+        impl->mock_test.endpoint_override);
     if (!request) {
         return NULL;
-    }
-    if (impl->mock_test.endpoint_override) {
-        /* NOTE: ONLY FOR TESTS. Erase the host header for endpoint override. */
-        aws_http_headers_erase(aws_http_message_get_headers(request), g_host_header_name);
     }
 
     struct aws_s3express_session_creator *session_creator =

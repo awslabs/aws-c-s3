@@ -140,6 +140,8 @@ struct aws_s3_tester_client_options {
     size_t num_network_interface_names;
     uint32_t setup_region : 1;
     uint32_t use_proxy : 1;
+    aws_s3express_provider_factory_fn *s3express_provider_override_factory;
+    void *factory_user_data;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */

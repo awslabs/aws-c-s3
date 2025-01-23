@@ -1387,6 +1387,9 @@ int aws_s3_tester_client_new(
     struct aws_s3_client_config client_config = {
         .part_size = options->part_size,
         .max_part_size = options->max_part_size,
+        .s3express_provider_override_factory = options->s3express_provider_override_factory,
+        .factory_user_data = options->factory_user_data,
+        .enable_s3express = options->s3express_provider_override_factory != NULL,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,

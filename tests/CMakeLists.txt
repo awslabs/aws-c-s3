@@ -351,6 +351,7 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(s3express_provider_background_refresh_mock_server)
     add_net_test_case(s3express_provider_background_refresh_remove_inactive_creds_mock_server)
     add_net_test_case(s3express_provider_stress_mock_server)
+    add_net_test_case(s3express_provider_get_credentials_kms_headers_mock_server)
 
     add_net_test_case(s3express_client_sanity_test_mock_server)
     add_net_test_case(s3express_client_sanity_override_test_mock_server)

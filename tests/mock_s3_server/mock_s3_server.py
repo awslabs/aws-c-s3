@@ -56,7 +56,7 @@ class ResponseConfig:
     json_path: str = None
     throttle: bool = False
     force_retry: bool = False
-
+    request_headers = None
     def _resolve_file_path(self, wrapper, request_type):
         global SHOULD_THROTTLE
         if self.json_path is None:
@@ -85,6 +85,16 @@ class ResponseConfig:
                      ".\n generate_body_size: ", self.generate_body_size)
         with open(self.json_path, 'r') as f:
             data = json.load(f)
+        headers = wrapper.basic_headers()
+
+        # If request_headers is present, validate that the request contains all required headers
+        if 'request_headers' in data:
+                for header in data['request_headers']:
+                    header_bytes = header.encode('utf-8')
+                    if not any(header_bytes == h[0] for h in self.request_headers):
+                        response =  Response(status_code=500, delay=0, headers=headers,
+                                             data=json.dumps({'error': f"Missing required header: {header}"}), chunked=chunked, head_request=head_request)
+                        return response
 
         # if response has delay, then sleep before sending it
         delay = data.get('delay', 0)
@@ -95,7 +105,6 @@ class ResponseConfig:
         else:
             body = "\n".join(data['body'])
 
-        headers = wrapper.basic_headers()
         content_length_set = False
         for header in data['headers'].items():
             headers.append((header[0], str(header[1])))
@@ -499,6 +508,7 @@ async def handle_mock_s3_request(wrapper, request):
 
     if response_config is None:
         response_config = ResponseConfig(parsed_path.path)
+    response_config.request_headers = request.headers
 
     response = response_config.resolve_response(
         wrapper, request_type, head_request=method == "HEAD")
