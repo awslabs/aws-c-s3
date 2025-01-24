@@ -260,9 +260,7 @@ struct aws_s3express_credentials_provider *s_s3express_credentials_provider_fact
     aws_simple_completion_callback on_provider_shutdown_callback,
     void *shutdown_user_data,
     void *factory_user_data) {
-    (void)allocator;
-    (void)client;
-    (void)on_provider_shutdown_callback;
+
     (void)shutdown_user_data;
     (void)factory_user_data;
     s_s3express_tester.on_provider_shutdown_callback = on_provider_shutdown_callback;
@@ -280,7 +278,7 @@ struct aws_s3express_credentials_provider *s_s3express_credentials_provider_fact
     return provider;
 }
 
-TEST_CASE(s3express_provider_get_credentials_kms_headers_mock_server) {
+TEST_CASE(s3express_provider_get_credentials_sse_headers_mock_server) {
     (void)ctx;
 
     struct aws_s3_tester tester;
