@@ -529,4 +529,4 @@ async def serve(port):
         print("KeyboardInterrupt - shutting down")
 
 if __name__ == "__main__":
-    trio.run(serve, 8181)
+    trio.run(serve, 8080)
