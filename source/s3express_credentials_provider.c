@@ -480,11 +480,6 @@ static struct aws_s3express_session_creator *s_aws_s3express_session_creator_des
     return NULL;
 }
 
-/**
- * Encode the hash key to be [host_value][hash_of_credentials]
- * hash_of_credentials is the sha256 of [access_key][secret_access_key]
- * TODO: Update docs
- **/
 struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_allocator *allocator,
     const struct aws_credentials *original_credentials,

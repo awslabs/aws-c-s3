@@ -10,6 +10,7 @@
 #include "s3_tester.h"
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
+#include <aws/common/encoding.h>
 #include <aws/common/lru_cache.h>
 #include <aws/io/stream.h>
 #include <aws/io/uri.h>
@@ -713,4 +714,54 @@ TEST_CASE(s3express_client_copy_object_multipart) {
 
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;
+}
+
+/**
+ * Test hash of the express cache key 
+ */
+TEST_CASE(s3express_hash_key_test) {
+    (void)ctx;
+
+    struct aws_string *access_key = aws_string_new_from_c_str(allocator, "AccessKey");
+    struct aws_string *secret_access_key = aws_string_new_from_c_str(allocator, "SecretAccessKey");
+    struct aws_http_headers *headers = aws_http_headers_new(allocator);
+    aws_http_headers_add(
+        headers, aws_byte_cursor_from_c_str("x-amz-server-side-encryption"), aws_byte_cursor_from_c_str("aws:kms"));
+    aws_http_headers_add(
+        headers,
+        aws_byte_cursor_from_c_str("x-amz-server-side-encryption-aws-kms-key-id"),
+        aws_byte_cursor_from_c_str("kms-key-id"));
+    aws_http_headers_add(
+        headers,
+        aws_byte_cursor_from_c_str("x-amz-server-side-encryption-context"),
+        aws_byte_cursor_from_c_str("context"));
+    aws_http_headers_add(
+        headers,
+        aws_byte_cursor_from_c_str("x-amz-server-side-encryption-bucket-key-enabled"),
+        aws_byte_cursor_from_c_str("true"));
+    aws_http_headers_add(
+        headers, aws_byte_cursor_from_c_str("header-not-allowed"), aws_byte_cursor_from_c_str("should-be-ignored"));
+
+    struct aws_credentials *creds =
+        aws_credentials_new_from_string(allocator, access_key, secret_access_key, NULL, UINT64_MAX);
+
+    struct aws_string *hash_key =
+        aws_encode_s3express_hash_key_new(allocator, creds, aws_byte_cursor_from_c_str("host"), headers);
+    struct aws_byte_cursor hash_cursor = aws_byte_cursor_from_string(hash_key);
+
+    struct aws_byte_buf encoded_buf;
+    aws_byte_buf_init(&encoded_buf, allocator, 100);
+    aws_hex_encode_append_dynamic(&hash_cursor, &encoded_buf);
+
+    char *expected_encoded_key = "686f737498ae6a365790707488b3e85402c9eddf422dc39f096e15eaba0d7cdd45f57ad2";
+    ASSERT_BIN_ARRAYS_EQUALS(expected_encoded_key, strlen(expected_encoded_key), encoded_buf.buffer, encoded_buf.len);
+
+    aws_byte_buf_clean_up(&encoded_buf);
+    aws_string_destroy(access_key);
+    aws_string_destroy(secret_access_key);
+    aws_credentials_release(creds);
+    aws_string_destroy(hash_key);
+    aws_http_headers_release(headers);
+
+    return 0;
 }
