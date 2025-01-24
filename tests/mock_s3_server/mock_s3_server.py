@@ -8,7 +8,7 @@ import json
 from itertools import count
 from urllib.parse import parse_qs, urlparse
 import os
-from typing import Optional
+from typing import Optional, List, Tuple
 from enum import Enum
 
 import trio
@@ -56,7 +56,8 @@ class ResponseConfig:
     json_path: str = None
     throttle: bool = False
     force_retry: bool = False
-    request_headers = None
+    request_headers: Optional[List[Tuple[bytes, bytes]]] = None
+
     def _resolve_file_path(self, wrapper, request_type):
         global SHOULD_THROTTLE
         if self.json_path is None:
