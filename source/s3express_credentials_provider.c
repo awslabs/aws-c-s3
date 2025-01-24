@@ -404,7 +404,7 @@ static struct aws_http_message *s_create_session_request_new(
     struct aws_byte_cursor host = host_value;
     /* NOTE: Only for Tests. */
     if (endpoint_override != NULL) {
-        host = *aws_uri_host_name(endpoint_override);
+        host = *aws_uri_authority(endpoint_override);
     }
     struct aws_http_header host_header = {
         .name = g_host_header_name,
