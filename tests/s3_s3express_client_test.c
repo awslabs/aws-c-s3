@@ -721,6 +721,7 @@ TEST_CASE(s3express_client_copy_object_multipart) {
  */
 TEST_CASE(s3express_hash_key_test) {
     (void)ctx;
+    aws_s3_library_init(allocator);
 
     struct aws_string *access_key = aws_string_new_from_c_str(allocator, "AccessKey");
     struct aws_string *secret_access_key = aws_string_new_from_c_str(allocator, "SecretAccessKey");
@@ -767,5 +768,7 @@ TEST_CASE(s3express_hash_key_test) {
     aws_string_destroy(hash_key);
     aws_http_headers_release(headers);
 
-    return 0;
+    aws_s3_library_clean_up();
+
+    return AWS_OP_SUCCESS;
 }
