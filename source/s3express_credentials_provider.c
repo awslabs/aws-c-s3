@@ -401,17 +401,17 @@ static struct aws_http_message *s_create_session_request_new(
     const struct aws_uri *endpoint_override) {
     struct aws_http_message *request = aws_http_message_new_request(allocator);
 
+    struct aws_byte_cursor host = host_value;
+    /* NOTE: Only for Tests. */
+    if (endpoint_override != NULL) {
+        host = *aws_uri_host_name(endpoint_override);
+    }
     struct aws_http_header host_header = {
         .name = g_host_header_name,
-        .value = host_value,
+        .value = host,
     };
-    /* NOTE: Only for Tests.
-     * Don't add the host header for endpoint override.
-     */
-    if (endpoint_override == NULL) {
-        if (aws_http_message_add_header(request, host_header)) {
-            goto error;
-        }
+    if (aws_http_message_add_header(request, host_header)) {
+        goto error;
     }
 
     struct aws_http_header user_agent_header = {
@@ -571,8 +571,6 @@ static struct aws_s3express_session_creator *s_session_creator_new(
         .body_callback = s_on_incoming_body_fn,
         .finish_callback = s_on_request_finished,
         .signing_config = &s3express_signing_config,
-        /* Override endpoint only for tests. */
-        .endpoint = impl->mock_test.endpoint_override ? impl->mock_test.endpoint_override : NULL,
         .user_data = session_creator,
         .operation_name = aws_byte_cursor_from_c_str("CreateSession"),
     };
