@@ -27,6 +27,7 @@ const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
 const size_t g_s3_create_multipart_upload_excluded_headers_count =
@@ -62,6 +63,7 @@ const struct aws_byte_cursor g_s3_upload_part_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
 const size_t g_s3_upload_part_excluded_headers_count = AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers);
@@ -96,6 +98,7 @@ const struct aws_byte_cursor g_s3_complete_multipart_upload_excluded_headers[] =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-mp-object-size"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
 const size_t g_s3_complete_multipart_upload_excluded_headers_count =
@@ -131,6 +134,7 @@ const struct aws_byte_cursor g_s3_complete_multipart_upload_with_checksum_exclud
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-mp-object-size"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
 const struct aws_byte_cursor g_s3_list_parts_excluded_headers[] = {
@@ -162,6 +166,7 @@ const struct aws_byte_cursor g_s3_list_parts_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
 const size_t g_s3_list_parts_excluded_headers_count = AWS_ARRAY_SIZE(g_s3_list_parts_excluded_headers);
@@ -192,6 +197,7 @@ const struct aws_byte_cursor g_s3_list_parts_with_checksum_excluded_headers[] = 
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
 const size_t g_s3_list_parts_with_checksum_excluded_headers_count =
@@ -227,9 +233,11 @@ const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
 const struct aws_byte_cursor g_s3_create_session_allowed_headers[] = {
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-aws-kms-key-id"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-context"),

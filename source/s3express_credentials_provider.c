@@ -486,14 +486,14 @@ struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_byte_cursor host_value,
     struct aws_http_headers *headers) {
 
-    struct aws_byte_buf combined_hash_buf;
+    struct aws_byte_buf combined_buf;
 
     /* 1. Combine access_key and secret_access_key into one buffer */
     struct aws_byte_cursor access_key = aws_credentials_get_access_key_id(original_credentials);
     struct aws_byte_cursor secret_access_key = aws_credentials_get_secret_access_key(original_credentials);
-    aws_byte_buf_init(&combined_hash_buf, allocator, access_key.len + secret_access_key.len);
-    aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, access_key);
-    aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, secret_access_key);
+    aws_byte_buf_init(&combined_buf, allocator, access_key.len + secret_access_key.len);
+    aws_byte_buf_write_from_whole_cursor(&combined_buf, access_key);
+    aws_byte_buf_write_from_whole_cursor(&combined_buf, secret_access_key);
 
     /* Write the allowed headers into hash */
     if (headers != NULL) {
@@ -503,19 +503,19 @@ struct aws_string *aws_encode_s3express_hash_key_new(
             struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
             struct aws_byte_cursor header_value;
             if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
-                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, comma);
-                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_name);
-                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, collon);
-                aws_byte_buf_write_from_whole_cursor(&combined_hash_buf, header_value);
+                aws_byte_buf_append_dynamic(&combined_buf, &comma);
+                aws_byte_buf_append_dynamic(&combined_buf, &header_name);
+                aws_byte_buf_append_dynamic(&combined_buf, &collon);
+                aws_byte_buf_append_dynamic(&combined_buf, &header_value);
             }
         }
     }
 
     /* 2. Get sha256 digest from the combined key */
-    struct aws_byte_cursor combine_key = aws_byte_cursor_from_buf(&combined_hash_buf);
+    struct aws_byte_cursor combined_cursor = aws_byte_cursor_from_buf(&combined_buf);
     struct aws_byte_buf digest_buf;
     aws_byte_buf_init(&digest_buf, allocator, AWS_SHA256_LEN);
-    aws_sha256_compute(allocator, &combine_key, &digest_buf, 0);
+    aws_sha256_compute(allocator, &combined_cursor, &digest_buf, 0);
 
     /* 3. Encode the result to be [host_value][hash_of_credentials] */
     struct aws_byte_buf result_buffer;
@@ -526,7 +526,7 @@ struct aws_string *aws_encode_s3express_hash_key_new(
 
     /* Clean up */
     aws_byte_buf_clean_up(&result_buffer);
-    aws_byte_buf_clean_up(&combined_hash_buf);
+    aws_byte_buf_clean_up(&combined_buf);
     aws_byte_buf_clean_up(&digest_buf);
 
     return result;
