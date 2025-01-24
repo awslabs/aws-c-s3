@@ -554,7 +554,8 @@ struct aws_s3_client_config {
      * If not set, client will create a default S3 Express provider under the hood.
      *
      * NOTE: THE FOLLOWING BEHAVIOR IS EXPERIMENTAL AND UNSTABLE
-     * Default S3 Express provider will pass the headers allowed in `g_s3_create_session_allowed_headers` to the CreateSession call.
+     * Default S3 Express provider will pass the headers allowed in `g_s3_create_session_allowed_headers` to the
+     * CreateSession call.
      */
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
     void *factory_user_data;
