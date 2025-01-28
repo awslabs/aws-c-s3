@@ -1030,6 +1030,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             }
 
             endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
+            port = aws_uri_port(&host_uri);
             aws_uri_clean_up(&host_uri);
         }
 

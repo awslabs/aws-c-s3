@@ -26,6 +26,8 @@ struct aws_s3express_session {
     /* The region and host of the session */
     struct aws_string *region;
     struct aws_string *host;
+
+    struct aws_http_headers *headers;
     bool inactive;
 
     /* Only used for mock tests */
@@ -105,14 +107,19 @@ struct aws_s3express_credentials_provider *aws_s3express_credentials_provider_ne
     const struct aws_s3express_credentials_provider_default_options *options);
 
 /**
- * Encode the hash key to be [host_value][hash_of_credentials]
- * hash_of_credentials is the sha256 of [access_key][secret_access_key]
+ * Encodes the hash key in the format: [host_value][hash_of_credentials_and_headers]
+ *
+ * The hash_of_credentials_and_headers is calculated as follows:
+ * 1. Concatenate: [access_key][secret_access_key][headers]
+ *    where headers = ",header_name1:header_value1,header_name2:header_value2..."
+ * 2. Generates SHA256 hash of the concatenated string
  */
 AWS_S3_API
 struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_allocator *allocator,
     const struct aws_credentials *original_credentials,
-    struct aws_byte_cursor host_value);
+    struct aws_byte_cursor host_value,
+    struct aws_http_headers *headers);
 
 AWS_EXTERN_C_END
 #endif /* AWS_S3EXPRESS_CREDENTIALS_PROVIDER_IMPL_H */
