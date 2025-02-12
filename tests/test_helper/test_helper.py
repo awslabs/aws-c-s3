@@ -115,7 +115,7 @@ def create_bucket(client, **kwargs):
         raise e
 
 
-def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
+def create_bucket_with_lifecycle(availability_zone=None, client=s3_client, region=REGION):
     if availability_zone is not None:
         bucket_config = {
             'Location': {
@@ -129,14 +129,14 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
         }
         bucket_name = BUCKET_NAME_BASE+f"--{availability_zone}--x-s3"
     else:
-        bucket_config = {'LocationConstraint': REGION}
+        bucket_config = {'LocationConstraint': region}
         bucket_name = BUCKET_NAME_BASE
 
     create_bucket(client,
                   Bucket=bucket_name,
                   CreateBucketConfiguration=bucket_config)
     print(f"s3://{bucket_name} - Configuring bucket...")
-    if availability_zone is None:
+    if availability_zone is not None:
         # https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-buckets-objects-lifecycle.html#directory-bucket-lifecycle-differences
         # S3 express requires a bucket policy to allow session-based access to perform lifecycle actions
         account_id = boto3.client(
@@ -156,7 +156,7 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
                         }
                     },
                     "Resource": [
-                        f"arn:aws:s3express:{REGION}:{account_id}:bucket/{bucket_name}"
+                        f"arn:aws:s3express:{region}:{account_id}:bucket/{bucket_name}"
                     ]
                 }
             ]
@@ -169,24 +169,18 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
         LifecycleConfiguration={
             'Rules': [
                 {
-                    'ID': 'clean up non-pre-existing objects',
-                    'Expiration': {
-                        'Days': 1,
-                    },
-                    'Filter': {
-                        'Prefix': 'upload/',
-                    },
+                    'ID': 'Abort all incomplete multipart uploads after 1 day',
                     'Status': 'Enabled',
-                    'NoncurrentVersionExpiration': {
-                        'NoncurrentDays': 1,
-                    },
-                    'AbortIncompleteMultipartUpload': {
-                        'DaysAfterInitiation': 1,
-                    },
+                    'Filter': {'Prefix': ''},  # blank string means all
+                    'AbortIncompleteMultipartUpload': {'DaysAfterInitiation': 1},
                 },
-            ],
-        },
-    )
+                {
+                    'ID': 'Objects under upload directory expire after 1 day',
+                    'Status': 'Enabled',
+                    'Filter': {'Prefix': 'upload/'},
+                    'Expiration': {'Days': 1},
+                },
+            ]})
 
     put_pre_existing_objects(
         10*MB, 'pre-existing-10MB', bucket=bucket_name, client=client)
@@ -259,7 +253,7 @@ def cleanup(bucket_name, availability_zone=None, client=s3_client):
 
 
 if args.action == 'init':
-    create_bucket_with_lifecycle("use1-az4", s3_client_east1)
+    create_bucket_with_lifecycle("use1-az4", s3_client_east1, "us-east-1")
     create_bucket_with_lifecycle("usw2-az1")
     create_bucket_with_lifecycle()
     create_bucket_with_public_object()
