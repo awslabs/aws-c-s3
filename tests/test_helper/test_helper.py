@@ -3,6 +3,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0.
 import argparse
+import json
 import boto3
 import botocore
 import sys
@@ -134,31 +135,58 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
     create_bucket(client,
                   Bucket=bucket_name,
                   CreateBucketConfiguration=bucket_config)
+    print(f"s3://{bucket_name} - Configuring bucket...")
     if availability_zone is None:
-        print(f"s3://{bucket_name} - Configuring bucket...")
-        client.put_bucket_lifecycle_configuration(
-            Bucket=bucket_name,
-            LifecycleConfiguration={
-                'Rules': [
-                    {
-                        'ID': 'clean up non-pre-existing objects',
-                        'Expiration': {
-                            'Days': 1,
-                        },
-                        'Filter': {
-                            'Prefix': 'upload/',
-                        },
-                        'Status': 'Enabled',
-                        'NoncurrentVersionExpiration': {
-                            'NoncurrentDays': 1,
-                        },
-                        'AbortIncompleteMultipartUpload': {
-                            'DaysAfterInitiation': 1,
-                        },
+        # https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-buckets-objects-lifecycle.html#directory-bucket-lifecycle-differences
+        # S3 express requires a bucket policy to allow session-based access to perform lifecycle actions
+        account_id = boto3.client(
+            'sts').get_caller_identity().get('Account')
+        bucket_policy = {
+            "Version": "2008-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {
+                        "Service": "lifecycle.s3.amazonaws.com"
                     },
-                ],
-            },
-        )
+                    "Action": "s3express:CreateSession",
+                    "Condition": {
+                        "StringEquals": {
+                            "s3express:SessionMode": "ReadWrite"
+                        }
+                    },
+                    "Resource": [
+                        f"arn:aws:s3express:{REGION}:{account_id}:bucket/{bucket_name}"
+                    ]
+                }
+            ]
+        }
+        client.put_bucket_policy(
+            Bucket=bucket_name, Policy=json.dumps(bucket_policy))
+
+    client.put_bucket_lifecycle_configuration(
+        Bucket=bucket_name,
+        LifecycleConfiguration={
+            'Rules': [
+                {
+                    'ID': 'clean up non-pre-existing objects',
+                    'Expiration': {
+                        'Days': 1,
+                    },
+                    'Filter': {
+                        'Prefix': 'upload/',
+                    },
+                    'Status': 'Enabled',
+                    'NoncurrentVersionExpiration': {
+                        'NoncurrentDays': 1,
+                    },
+                    'AbortIncompleteMultipartUpload': {
+                        'DaysAfterInitiation': 1,
+                    },
+                },
+            ],
+        },
+    )
 
     put_pre_existing_objects(
         10*MB, 'pre-existing-10MB', bucket=bucket_name, client=client)

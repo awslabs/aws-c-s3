@@ -90,12 +90,12 @@ class ResponseConfig:
 
         # If request_headers is present, validate that the request contains all required headers
         if 'request_headers' in data:
-                for header in data['request_headers']:
-                    header_bytes = header.encode('utf-8')
-                    if not any(header_bytes == h[0] for h in self.request_headers):
-                        response =  Response(status_code=500, delay=0, headers=headers,
-                                             data=json.dumps({'error': f"Missing required header: {header}"}), chunked=chunked, head_request=head_request)
-                        return response
+            for header in data['request_headers']:
+                header_bytes = header.encode('utf-8')
+                if not any(header_bytes == h[0] for h in self.request_headers):
+                    response = Response(status_code=500, delay=0, headers=headers,
+                                        data=json.dumps({'error': f"Missing required header: {header}"}), chunked=chunked, head_request=head_request)
+                    return response
 
         # if response has delay, then sleep before sending it
         delay = data.get('delay', 0)
@@ -411,7 +411,6 @@ def handle_get_object_modified(start_range, end_range, request):
     else:
         # Check the request header to make sure "If-Match" is set
         etag = get_request_header_value(request, "if-match")
-        print(etag)
         # fetch Etag from the first_part response file
         response_file = os.path.join(
             base_dir, S3Opts.GetObject.name, f"get_object_modified_first_part.json")
@@ -436,7 +435,7 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
 
     if (parsed_path.path == "/get_object_invalid_response_missing_content_range" or
         parsed_path.path == "/get_object_invalid_response_missing_etags" or
-        parsed_path.path == "/get_object_long_error"):
+            parsed_path.path == "/get_object_long_error"):
         # Don't generate the body for those requests
         return response_config
 
