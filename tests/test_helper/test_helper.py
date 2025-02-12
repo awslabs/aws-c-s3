@@ -262,8 +262,10 @@ if args.action == 'init':
     create_bucket_with_lifecycle("usw2-az1")
     create_bucket_with_lifecycle()
     if args.create_public_bucket:
-        print("Skipping public bucket, run with --create_public_bucket if you need these.")
         create_bucket_with_public_object()
+    else:
+        print("Skipping public bucket, run with --create_public_bucket if you need these.")
+
     if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME_BASE:
         print(
             f"*** Set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME_BASE} before running the tests ***")
