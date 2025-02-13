@@ -28,12 +28,17 @@ parser.add_argument(
 parser.add_argument(
     'bucket_name',
     nargs='?',
-    help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
+    help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. \
+        Otherwise, a random name will be generated.')
 parser.add_argument(
     '--large_objects',
     action='store_true',
     help='enable helper to create pre-existing large objects.')
-
+parser.add_argument(
+    '--create_public_bucket',
+    action='store_true',
+    help='Allow script to create a public bucket. If not specified, the script will not attempt to create a public bucket. \
+        Note: Some aws-c-s3 tests will fail without public bucket.')
 
 args = parser.parse_args()
 
@@ -256,7 +261,11 @@ if args.action == 'init':
     create_bucket_with_lifecycle("use1-az4", s3_client_east1, "us-east-1")
     create_bucket_with_lifecycle("usw2-az1")
     create_bucket_with_lifecycle()
-    create_bucket_with_public_object()
+    if args.create_public_bucket:
+        create_bucket_with_public_object()
+    else:
+        print("Skipping public bucket, run with --create_public_bucket if you need these.")
+
     if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME_BASE:
         print(
             f"*** Set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME_BASE} before running the tests ***")
