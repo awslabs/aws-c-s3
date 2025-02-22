@@ -746,8 +746,7 @@ int aws_s3_check_headers_for_checksum(
             /* Found the checksum header, keep the header value and initialize the running checksum */
             size_t encoded_len = 0;
             aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
-            if (checksum_value.len == encoded_len - 1) {
-                /* encoded_len includes the nullptr length. -1 is the expected length. */
+            if (checksum_value.len == encoded_len) {
                 aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
                 *out_checksum = aws_checksum_new(meta_request->allocator, algorithm);
                 if (!*out_checksum) {

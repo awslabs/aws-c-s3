@@ -259,10 +259,9 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_input_stream_get_length(impl->current_stream, &prechunk_stream_len)) {
         goto error;
     }
-    /* we subtract one since aws_base64_compute_encoded_len accounts for the null terminator which won't show up in our
-     * stream */
+
     impl->length = prechunk_stream_len + stream_length + final_chunk_len + impl->checksum_header_name.len + colon_len +
-                   encoded_checksum_len + post_trailer_len - 1;
+                   encoded_checksum_len + post_trailer_len;
 
     AWS_ASSERT(impl->current_stream);
     aws_ref_count_init(&impl->base.ref_count, impl, (aws_simple_completion_callback *)s_aws_input_chunk_stream_destroy);
