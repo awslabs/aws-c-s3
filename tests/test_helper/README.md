@@ -31,6 +31,7 @@ python3 test_helper.py clean
     - `pre-existing-10MB-kms` [SSE-KMS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html) encrypted fille
     - `pre-existing-10MB`
     - `pre-existing-1MB`
+    - `pre-existing-1MB-@`
     - `pre-existing-empty`
     - `pre-existing-error-xml`
     - with `--large_objects` enabled, several large objects will also be uploaded. Currently, only aws-c-s3's tests require these files, the aws-crt-*** repos do not:
