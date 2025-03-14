@@ -1418,6 +1418,9 @@ void aws_s3_request_metrics_get_request_type(
     const struct aws_s3_request_metrics *metrics,
     enum aws_s3_request_type *out_request_type);
 
+AWS_S3_API
+int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint64_t *part_number);
+
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);

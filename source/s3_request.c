@@ -318,6 +318,14 @@ int aws_s3_request_metrics_get_receiving_duration_ns(
     return AWS_OP_SUCCESS;
 }
 
+int aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint64_t *part_number) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(part_number);
+
+    *part_number = metrics->req_resp_info_metrics.part_number;
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_request_metrics_get_response_status_code(
     const struct aws_s3_request_metrics *metrics,
     int *response_status) {

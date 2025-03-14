@@ -89,6 +89,8 @@ struct aws_s3_request_metrics {
         struct aws_string *operation_name;
         /* The type of request made */
         enum aws_s3_request_type request_type;
+
+        uint64_t part_number;
     } req_resp_info_metrics;
 
     struct {

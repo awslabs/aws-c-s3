@@ -1302,6 +1302,7 @@ static int s_s3_meta_request_incoming_headers(
             aws_http_headers_add(s3_metrics->req_resp_info_metrics.response_headers, *name, *value);
         }
         s3_metrics->req_resp_info_metrics.response_status = request->send_data.response_status;
+        s3_metrics->req_resp_info_metrics.part_number = request->part_number;
     }
 
     bool successful_response =
@@ -2043,7 +2044,7 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     aws_high_res_clock_get_ticks((uint64_t *)&current_time);
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: waahm7: Time:%lu\tpartNumber:%d",
+        "id=%p: waahm7: Time:%llu\tpartNumber:%d",
         (void *)meta_request,
         current_time - previous_timestamp,
         (*top_request)->part_number);
