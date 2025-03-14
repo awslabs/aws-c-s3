@@ -2044,7 +2044,7 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     aws_high_res_clock_get_ticks((uint64_t *)&current_time);
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: waahm7: Time:%llu\tpartNumber:%d",
+        "id=%p: waahm7: Time:%" PRIu64 "\tpartNumber:%d",
         (void *)meta_request,
         current_time - previous_timestamp,
         (*top_request)->part_number);
