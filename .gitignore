@@ -11,6 +11,9 @@ Release
 *.iml
 tags
 
+#clangd
+.cache
+
 #vim swap file
 *.swp
 

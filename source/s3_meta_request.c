@@ -2015,11 +2015,14 @@ static void s_s3_meta_request_body_streaming_push_synced(
     aws_priority_queue_push(&meta_request->synced_data.pending_body_streaming_requests, &request);
 }
 
+static uint64_t previous_timestamp = 0;
 static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
-
+    if (previous_timestamp == 0) {
+        aws_high_res_clock_get_ticks((uint64_t *)&previous_timestamp);
+    }
     if (0 == aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests)) {
         return NULL;
     }
@@ -2035,7 +2038,16 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     if ((*top_request)->part_number != meta_request->synced_data.next_streaming_part) {
         return NULL;
     }
-
+    // waahm7
+    uint64_t current_time = 0;
+    aws_high_res_clock_get_ticks((uint64_t *)&current_time);
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: waahm7: Time:%llu\tpartNumber:%d",
+        (void *)meta_request,
+        current_time - previous_timestamp,
+        (*top_request)->part_number);
+    previous_timestamp = current_time;
     struct aws_s3_request *request = NULL;
     aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
 

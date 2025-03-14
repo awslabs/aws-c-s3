@@ -947,7 +947,7 @@ update_synced_data:
                         }
                         aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
                     }
-
+                    // waahm7: here
                     aws_s3_meta_request_stream_response_body_synced(meta_request, request);
                     /* The body of the request is queued to be streamed, don't finish the metrics yet. */
                     finishing_metrics = false;
