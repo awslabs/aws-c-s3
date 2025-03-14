@@ -318,9 +318,13 @@ struct aws_s3_client *aws_s3_client_new(
             mem_limit = GB_TO_BYTES(1);
         }
 #else
-        if (client_config->throughput_target_gbps > 75.0) {
+        if (client_config->throughput_target_gbps >= 200.0) {
+            mem_limit = GB_TO_BYTES(24);
+        } else if (client_config->throughput_target_gbps >= 100.0) {
+            mem_limit = GB_TO_BYTES(16);
+        } else if (client_config->throughput_target_gbps >= 75.0) {
             mem_limit = GB_TO_BYTES(8);
-        } else if (client_config->throughput_target_gbps > 25.0) {
+        } else if (client_config->throughput_target_gbps >= 25.0) {
             mem_limit = GB_TO_BYTES(4);
         } else {
             mem_limit = GB_TO_BYTES(2);
