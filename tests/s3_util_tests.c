@@ -22,10 +22,24 @@
 #include <inttypes.h>
 #include <stdio.h>
 
+/* Ensure the library can go through the init/cleanup cycle multiple times */
+AWS_TEST_CASE(test_s3_library_init_cleanup_init_cleanup, s_test_s3_library_init_cleanup_init_cleanup)
+static int s_test_s3_library_init_cleanup_init_cleanup(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    aws_s3_library_init(allocator);
+    aws_s3_library_clean_up();
+
+    aws_s3_library_init(allocator);
+    aws_s3_library_clean_up();
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_request_type_operation_name, s_test_s3_request_type_operation_name)
 static int s_test_s3_request_type_operation_name(struct aws_allocator *allocator, void *ctx) {
-    (void)allocator;
     (void)ctx;
+    aws_s3_library_init(allocator);
 
     /* sanity check */
     ASSERT_STR_EQUALS("HeadObject", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_HEAD_OBJECT));
@@ -43,6 +57,44 @@ static int s_test_s3_request_type_operation_name(struct aws_allocator *allocator
     ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_MAX));
     ASSERT_STR_EQUALS("", aws_s3_request_type_operation_name(-1));
 
+    aws_s3_library_clean_up();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_request_type_from_operation_name, s_test_s3_request_type_from_operation_name)
+static int s_test_s3_request_type_from_operation_name(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    /* sanity check */
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+        aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("HeadObject")));
+
+    /* check is case-insensitive (it's a good idea to be case-insensitive, right?) */
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_HEAD_OBJECT,
+        aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("headobject")));
+
+    /* check that all valid enums can round-trip: enum -> name -> enum */
+    for (enum aws_s3_request_type type = AWS_S3_REQUEST_TYPE_UNKNOWN + 1; type < AWS_S3_REQUEST_TYPE_MAX; ++type) {
+        const char *operation_name = aws_s3_request_type_operation_name(type);
+        ASSERT_NOT_NULL(operation_name);
+        ASSERT_TRUE(strlen(operation_name) > 1);
+
+        ASSERT_INT_EQUALS(type, aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str(operation_name)));
+    }
+
+    /* check that invalid operation names give back UNKNOWN */
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_UNKNOWN,
+        aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("MyFakeOperationName")));
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_UNKNOWN, aws_s3_request_type_from_operation_name(aws_byte_cursor_from_c_str("")));
+    ASSERT_INT_EQUALS(
+        AWS_S3_REQUEST_TYPE_UNKNOWN, aws_s3_request_type_from_operation_name(aws_byte_cursor_from_array(NULL, 0)));
+
+    aws_s3_library_clean_up();
     return 0;
 }
 

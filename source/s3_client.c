@@ -141,6 +141,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
     .parallel_input_stream_new_from_file = aws_parallel_input_stream_new_from_file,
+    .http_connection_make_request = aws_http_connection_make_request,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {
@@ -346,7 +347,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
 
     if (client->buffer_pool == NULL) {
-        goto on_early_fail;
+        goto on_error;
     }
 
     struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
@@ -357,7 +358,7 @@ struct aws_s3_client *aws_s3_client_new(
             "Cannot create client from client_config; configured max part size should not exceed memory limit."
             "size.");
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
-        goto on_early_fail;
+        goto on_error;
     }
 
     client->vtable = &s_s3_client_default_vtable;
@@ -365,7 +366,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
 
     if (aws_mutex_init(&client->synced_data.lock) != AWS_OP_SUCCESS) {
-        goto on_early_fail;
+        goto on_error;
     }
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
@@ -488,10 +489,48 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
+    client->num_network_interface_names = client_config->num_network_interface_names;
+    if (client_config->num_network_interface_names > 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client received network interface names array with length %zu.",
+            (void *)client,
+            client->num_network_interface_names);
+        aws_array_list_init_dynamic(
+            &client->network_interface_names,
+            client->allocator,
+            client_config->num_network_interface_names,
+            sizeof(struct aws_string *));
+        client->network_interface_names_cursor_array = aws_mem_calloc(
+            client->allocator, client_config->num_network_interface_names, sizeof(struct aws_byte_cursor));
+        for (size_t i = 0; i < client_config->num_network_interface_names; i++) {
+            struct aws_byte_cursor interface_name = client_config->network_interface_names_array[i];
+            struct aws_string *interface_name_str = aws_string_new_from_cursor(client->allocator, &interface_name);
+            aws_array_list_push_back(&client->network_interface_names, &interface_name_str);
+            if (aws_is_network_interface_name_valid(aws_string_c_str(interface_name_str)) == false) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p network_interface_names_array[%zu]=" PRInSTR " is not valid.",
+                    (void *)client,
+                    i,
+                    AWS_BYTE_CURSOR_PRI(interface_name));
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                goto on_error;
+            }
+            client->network_interface_names_cursor_array[i] = aws_byte_cursor_from_string(interface_name_str);
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p network_interface_names_array[%zu]=" PRInSTR "",
+                (void *)client,
+                i,
+                AWS_BYTE_CURSOR_PRI(client->network_interface_names_cursor_array[i]));
+        }
+    }
+
     /* Set up body streaming ELG */
     {
         uint16_t num_event_loops =
-            (uint16_t)aws_array_list_length(&client->client_bootstrap->event_loop_group->event_loops);
+            (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
         uint16_t num_streaming_threads = num_event_loops;
 
         if (num_streaming_threads < 1) {
@@ -600,10 +639,22 @@ on_error:
     aws_mem_release(client->allocator, client->proxy_ev_settings);
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
-    aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
+    if (client->client_bootstrap != NULL) {
+        aws_event_loop_group_release(client->client_bootstrap->event_loop_group);
+    }
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
-on_early_fail:
+
+    aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
+    for (size_t i = 0; i < aws_array_list_length(&client->network_interface_names); i++) {
+        struct aws_string *interface_name = NULL;
+        aws_array_list_get_at(&client->network_interface_names, &interface_name, i);
+        aws_string_destroy(interface_name);
+    }
+
+    aws_array_list_clean_up(&client->network_interface_names);
+    aws_s3_buffer_pool_destroy(client->buffer_pool);
+
     aws_mem_release(client->allocator, client);
     return NULL;
 }
@@ -713,6 +764,15 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
     aws_s3_buffer_pool_destroy(client->buffer_pool);
+
+    aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
+    for (size_t i = 0; i < client->num_network_interface_names; i++) {
+        struct aws_string *interface_name = NULL;
+        aws_array_list_get_at(&client->network_interface_names, &interface_name, i);
+        aws_string_destroy(interface_name);
+    }
+    aws_array_list_clean_up(&client->network_interface_names);
+
     aws_mem_release(client->allocator, client);
     client = NULL;
 
@@ -885,52 +945,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    if (options->checksum_config) {
-        if (options->checksum_config->location == AWS_SCL_TRAILER) {
-            struct aws_http_headers *headers = aws_http_message_get_headers(options->message);
-            struct aws_byte_cursor existing_encoding;
-            AWS_ZERO_STRUCT(existing_encoding);
-            if (aws_http_headers_get(headers, g_content_encoding_header_name, &existing_encoding) == AWS_OP_SUCCESS) {
-                if (aws_byte_cursor_find_exact(&existing_encoding, &g_content_encoding_header_aws_chunked, NULL) ==
-                    AWS_OP_SUCCESS) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "id=%p Cannot create meta s3 request; for trailer checksum, the original request cannot be "
-                        "aws-chunked encoding. The client will encode the request instead.",
-                        (void *)client);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-            }
-        }
-
-        if (options->checksum_config->location == AWS_SCL_HEADER) {
-            /* TODO: support calculate checksum to add to header */
-            aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
-            return NULL;
-        }
-
-        if (options->checksum_config->location != AWS_SCL_NONE &&
-            options->checksum_config->checksum_algorithm == AWS_SCA_NONE) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum location is set, but no checksum algorithm selected.",
-                (void *)client);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-        if (options->checksum_config->checksum_algorithm != AWS_SCA_NONE &&
-            options->checksum_config->location == AWS_SCL_NONE && options->upload_review_callback == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum algorithm is set, but no checksum location selected "
-                "and no upload review callback set, so checksums will be unused",
-                (void *)client);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-    }
-
     if (s_apply_endpoint_override(client, message_headers, options->endpoint)) {
         return NULL;
     }
@@ -1016,6 +1030,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             }
 
             endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
+            port = aws_uri_port(&host_uri);
             aws_uri_clean_up(&host_uri);
         }
 
@@ -1048,6 +1063,8 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .connect_timeout_ms = client->connect_timeout_ms,
                 .tcp_keep_alive_options = client->tcp_keep_alive_options,
                 .monitoring_options = &client->monitoring_options,
+                .network_interface_names_array = client->network_interface_names_cursor_array,
+                .num_network_interface_names = client->num_network_interface_names,
             };
 
             endpoint = aws_s3_endpoint_new(client->allocator, &endpoint_options);
@@ -1070,6 +1087,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
 
         meta_request->endpoint = endpoint;
+        /**
+         * shutdown_callback must be the last thing that gets set on the meta_request so that we don’t return NULL and
+         * trigger the shutdown_callback.
+         */
+        meta_request->shutdown_callback = options->shutdown_callback;
 
         s_s3_client_push_meta_request_synced(client, meta_request);
         s_s3_client_schedule_process_work_synced(client);
@@ -1286,19 +1308,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                             !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                         options);
-                } else {
-                    if (aws_s3_message_util_check_checksum_header(options->message)) {
-                        /* The checksum header has been set and the request will be split. We fail the request */
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "Could not create auto-ranged-put meta request; checksum headers has been set for "
-                            "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
-                            "single part upload.");
-                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                        return NULL;
-                    }
                 }
-
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length_found, content_length, num_parts, options);
             } else { /* else using resume token */
@@ -1319,6 +1329,13 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
             return aws_s3_meta_request_copy_object_new(client->allocator, client, options);
         }
         case AWS_S3_META_REQUEST_TYPE_DEFAULT:
+            if (options->operation_name.len == 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST, "Could not create Default Meta Request; operation name is required");
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+
             return aws_s3_meta_request_default_new(
                 client->allocator,
                 client,
@@ -1733,7 +1750,7 @@ static bool s_s3_client_should_update_meta_request(
     /* CreateSession has high priority to bypass the checks. */
     if (meta_request->type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
         struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
-        if (aws_string_eq_c_str(meta_request_default->operation_name, "CreateSession")) {
+        if (meta_request_default->request_type == AWS_S3_REQUEST_TYPE_CREATE_SESSION) {
             return true;
         }
     }
@@ -2092,12 +2109,19 @@ static void s_s3_client_on_acquire_http_connection(
             error_code,
             aws_error_str(error_code));
 
-        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE) {
+        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED ||
+            error_code == AWS_IO_SOCKET_INVALID_OPTIONS) {
             /**
-             * Fall fast without retry
+             * Fail fast without retry
              * - Invalid DNS name will not change after retry.
-             * - TLS negotiation is expensive and retry will not help in most case.
              */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Meta request cannot recover from error %d (%s) while acquiring HTTP connection. (request=%p)",
+                (void *)meta_request,
+                error_code,
+                aws_error_str(error_code),
+                (void *)request);
             goto error_fail;
         }
 

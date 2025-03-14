@@ -220,6 +220,7 @@ struct aws_s3_paginated_operation *aws_s3_list_parts_operation_new(
     aws_ref_count_init(&operation_data->ref_count, operation_data, s_ref_count_zero_callback);
 
     struct aws_s3_paginated_operation_params operation_params = {
+        .operation_name = aws_byte_cursor_from_c_str("ListParts"),
         .next_message = s_construct_next_request_http_message,
         .on_result_node_encountered_fn = s_xml_on_ListPartsResult_child,
         .on_paginated_operation_cleanup = s_on_paginator_cleanup,

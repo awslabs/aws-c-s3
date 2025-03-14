@@ -15,28 +15,9 @@
 #include <aws/s3/private/s3_platform_info.h>
 
 /**** Configuration info for the c5n.18xlarge *****/
-static struct aws_byte_cursor s_c5n_nic_array[] = {AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0")};
-
-static struct aws_s3_cpu_group_info s_c5n_18xlarge_cpu_group_info_array[] = {
-    {
-        .cpu_group = 0u,
-        .nic_name_array = s_c5n_nic_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_c5n_nic_array),
-        .cpus_in_group = 36,
-    },
-    {
-        .cpu_group = 1u,
-        .nic_name_array = NULL,
-        .nic_name_array_length = 0u,
-        .cpus_in_group = 36,
-    },
-};
-
 static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.18xlarge"),
     .max_throughput_gbps = 100u,
-    .cpu_group_info_array = s_c5n_18xlarge_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_c5n_18xlarge_cpu_group_info_array),
     /** not yet **/
     .has_recommended_configuration = false,
 };
@@ -44,8 +25,6 @@ static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
 static struct aws_s3_platform_info s_c5n_metal_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.metal"),
     .max_throughput_gbps = 100u,
-    .cpu_group_info_array = s_c5n_18xlarge_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_c5n_18xlarge_cpu_group_info_array),
     /** not yet **/
     .has_recommended_configuration = false,
 };
@@ -53,20 +32,9 @@ static struct aws_s3_platform_info s_c5n_metal_platform_info = {
 /****** End c5n.18xlarge *****/
 
 /****** Begin c5n.large ******/
-static struct aws_s3_cpu_group_info s_c5n_9xlarge_cpu_group_info_array[] = {
-    {
-        .cpu_group = 0u,
-        .nic_name_array = s_c5n_nic_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_c5n_nic_array),
-        .cpus_in_group = 36,
-    },
-};
-
 static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.9xlarge"),
     .max_throughput_gbps = 50u,
-    .cpu_group_info_array = s_c5n_9xlarge_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_c5n_9xlarge_cpu_group_info_array),
     /** not yet **/
     .has_recommended_configuration = false,
 };
@@ -74,44 +42,15 @@ static struct aws_s3_platform_info s_c5n_9xlarge_platform_info = {
 /****** End c5n.9large *****/
 
 /***** Begin p4d.24xlarge and p4de.24xlarge ****/
-static struct aws_byte_cursor s_p4d_socket1_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth1"),
-};
-
-static struct aws_byte_cursor s_p4d_socket2_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth2"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth3"),
-};
-
-static struct aws_s3_cpu_group_info s_p4d_cpu_group_info_array[] = {
-    {
-        .cpu_group = 0u,
-        .nic_name_array = s_p4d_socket1_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_p4d_socket1_array),
-        .cpus_in_group = 48,
-    },
-    {
-        .cpu_group = 1u,
-        .nic_name_array = s_p4d_socket2_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_p4d_socket1_array),
-        .cpus_in_group = 48,
-    },
-};
-
 static struct aws_s3_platform_info s_p4d_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4d.24xlarge"),
     .max_throughput_gbps = 400u,
-    .cpu_group_info_array = s_p4d_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_p4d_cpu_group_info_array),
     .has_recommended_configuration = true,
 };
 
 static struct aws_s3_platform_info s_p4de_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p4de.24xlarge"),
     .max_throughput_gbps = 400u,
-    .cpu_group_info_array = s_p4d_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_p4d_cpu_group_info_array),
     .has_recommended_configuration = true,
 };
 
@@ -127,113 +66,25 @@ static struct aws_s3_platform_info s_p4de_platform_info = {
  * per node. However, practically, due to the topology of this instance
  * as far as this client is concerned, there are two NICs per node, similar
  * to the p4d. The rest is for other things on the machine to use. */
-
-struct aws_byte_cursor s_p5_socket1_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth1"),
-};
-
-static struct aws_byte_cursor s_p5_socket2_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth2"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth3"),
-};
-
-static struct aws_s3_cpu_group_info s_p5_cpu_group_info_array[] = {
-    {
-        .cpu_group = 0u,
-        .nic_name_array = s_p5_socket1_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_p5_socket1_array),
-        .cpus_in_group = 96,
-    },
-    {
-        .cpu_group = 1u,
-        .nic_name_array = s_p5_socket2_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_p5_socket2_array),
-        .cpus_in_group = 96,
-    },
-};
-
 struct aws_s3_platform_info s_p5_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5.48xlarge"),
-    .max_throughput_gbps = 400u,
-    .cpu_group_info_array = s_p5_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_p5_cpu_group_info_array),
+    .max_throughput_gbps = 400U,
     .has_recommended_configuration = true,
 };
-
 /***** End p5.48xlarge *****/
 
 /**** Begin trn1_32_large *****/
-struct aws_byte_cursor s_trn1_n_socket1_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth1"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth2"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth3"),
-
-};
-
-static struct aws_byte_cursor s_trn1_n_socket2_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth4"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth5"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth6"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth7"),
-};
-
-static struct aws_s3_cpu_group_info s_trn1_n_cpu_group_info_array[] = {
-    {
-        .cpu_group = 0u,
-        .nic_name_array = s_trn1_n_socket1_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_trn1_n_socket1_array),
-        .cpus_in_group = 64,
-    },
-    {
-        .cpu_group = 1u,
-        .nic_name_array = s_trn1_n_socket2_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_trn1_n_socket2_array),
-        .cpus_in_group = 64,
-    },
-};
-
 static struct aws_s3_platform_info s_trn1_n_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1n.32xlarge"),
     /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
     .max_throughput_gbps = 800,
-    .cpu_group_info_array = s_trn1_n_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_trn1_n_cpu_group_info_array),
     .has_recommended_configuration = true,
-};
-
-struct aws_byte_cursor s_trn1_socket1_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth0"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth1"),
-};
-
-static struct aws_byte_cursor s_trn1_socket2_array[] = {
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth3"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("eth4"),
-};
-
-static struct aws_s3_cpu_group_info s_trn1_cpu_group_info_array[] = {
-    {
-        .cpu_group = 0u,
-        .nic_name_array = s_trn1_socket1_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_trn1_socket1_array),
-        .cpus_in_group = 64,
-    },
-    {
-        .cpu_group = 1u,
-        .nic_name_array = s_trn1_socket2_array,
-        .nic_name_array_length = AWS_ARRAY_SIZE(s_trn1_socket2_array),
-        .cpus_in_group = 64,
-    },
 };
 
 static struct aws_s3_platform_info s_trn1_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1.32xlarge"),
     /* not all of the advertised 800 Gbps bandwidth can be hit from the cpu in user-space */
     .max_throughput_gbps = 600,
-    .cpu_group_info_array = s_trn1_cpu_group_info_array,
-    .cpu_group_info_array_length = AWS_ARRAY_SIZE(s_trn1_cpu_group_info_array),
     .has_recommended_configuration = true,
 };
 

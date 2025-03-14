@@ -6,9 +6,11 @@
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3express_credentials_provider_impl.h"
 #include <aws/auth/credentials.h>
+#include <aws/s3/private/s3_request_messages.h>
 #include <aws/s3/private/s3_util.h>
 #include <aws/s3/s3_client.h>
 
+#include <aws/cal/hash.h>
 #include <aws/common/clock.h>
 #include <aws/common/lru_cache.h>
 #include <aws/common/uri.h>
@@ -17,8 +19,6 @@
 #include <aws/http/status_code.h>
 #include <aws/io/channel_bootstrap.h>
 #include <aws/io/event_loop.h>
-
-#include <aws/cal/hash.h>
 
 #include <inttypes.h>
 
@@ -48,6 +48,7 @@ struct aws_s3express_session_creator {
     /* The region and host of the session we are creating */
     struct aws_string *region;
     struct aws_string *host;
+    struct aws_http_headers *headers;
 
     struct {
         /* Protected by the impl lock */
@@ -66,6 +67,7 @@ static struct aws_s3express_session *s_aws_s3express_session_new(
     const struct aws_string *hash_key,
     const struct aws_string *region,
     const struct aws_string *host,
+    struct aws_http_headers *headers,
     struct aws_credentials *credentials) {
 
     struct aws_s3express_session *session =
@@ -74,6 +76,10 @@ static struct aws_s3express_session *s_aws_s3express_session_new(
     session->impl = provider->impl;
     session->hash_key = aws_string_new_from_string(provider->allocator, hash_key);
     session->host = aws_string_new_from_string(provider->allocator, host);
+    if (headers != NULL) {
+        aws_http_headers_acquire(headers);
+        session->headers = headers;
+    }
     if (region) {
         session->region = aws_string_new_from_string(provider->allocator, region);
     }
@@ -94,6 +100,7 @@ static void s_aws_s3express_session_destroy(struct aws_s3express_session *sessio
     aws_string_destroy(session->hash_key);
     aws_string_destroy(session->region);
     aws_string_destroy(session->host);
+    aws_http_headers_release(session->headers);
     aws_credentials_release(session->s3express_credentials);
     aws_mem_release(session->allocator, session);
 }
@@ -368,6 +375,7 @@ static void s_on_request_finished(
                 session_creator->hash_key,
                 session_creator->region,
                 session_creator->host,
+                session_creator->headers,
                 credentials);
             aws_cache_put(impl->synced_data.cache, session->hash_key, session);
         }
@@ -388,14 +396,20 @@ static void s_on_request_finished(
 
 static struct aws_http_message *s_create_session_request_new(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor host_value) {
+    struct aws_byte_cursor host_value,
+    struct aws_http_headers *headers,
+    const struct aws_uri *endpoint_override) {
     struct aws_http_message *request = aws_http_message_new_request(allocator);
 
+    struct aws_byte_cursor host = host_value;
+    /* NOTE: Only for Tests. */
+    if (endpoint_override != NULL) {
+        host = *aws_uri_authority(endpoint_override);
+    }
     struct aws_http_header host_header = {
         .name = g_host_header_name,
-        .value = host_value,
+        .value = host,
     };
-
     if (aws_http_message_add_header(request, host_header)) {
         goto error;
     }
@@ -407,12 +421,37 @@ static struct aws_http_message *s_create_session_request_new(
     if (aws_http_message_add_header(request, user_agent_header)) {
         goto error;
     }
+    if (headers != NULL) {
+        for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
+            struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
+            struct aws_byte_cursor header_value;
+            if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
+                struct aws_http_header header = {
+                    .name = header_name,
+                    .value = header_value,
+                };
+                if (aws_http_message_add_header(request, header)) {
+                    goto error;
+                }
+            }
+        }
+    }
 
     if (aws_http_message_set_request_method(request, aws_http_method_get)) {
         goto error;
     }
 
-    if (aws_http_message_set_request_path(request, s_create_session_path_query)) {
+    struct aws_byte_cursor path_and_query = s_create_session_path_query;
+    if (endpoint_override != NULL) {
+        const struct aws_byte_cursor *override_path_query = aws_uri_path_and_query(endpoint_override);
+        /* NOTE: Only for Tests.
+         * path_and_query is at least 1 due to /. Only override if its length is more than 1
+         */
+        if (override_path_query->len > 1) {
+            path_and_query = *override_path_query;
+        }
+    }
+    if (aws_http_message_set_request_path(request, path_and_query)) {
         goto error;
     }
     return request;
@@ -434,35 +473,49 @@ static struct aws_s3express_session_creator *s_aws_s3express_session_creator_des
     aws_string_destroy(session_creator->hash_key);
     aws_string_destroy(session_creator->region);
     aws_string_destroy(session_creator->host);
+    aws_http_headers_release(session_creator->headers);
 
     aws_byte_buf_clean_up(&session_creator->response_buf);
     aws_mem_release(session_creator->allocator, session_creator);
     return NULL;
 }
 
-/**
- * Encode the hash key to be [host_value][hash_of_credentials]
- * hash_of_credentials is the sha256 of [access_key][secret_access_key]
- **/
 struct aws_string *aws_encode_s3express_hash_key_new(
     struct aws_allocator *allocator,
     const struct aws_credentials *original_credentials,
-    struct aws_byte_cursor host_value) {
+    struct aws_byte_cursor host_value,
+    struct aws_http_headers *headers) {
 
-    struct aws_byte_buf combine_key_buf;
+    struct aws_byte_buf combined_buf;
 
     /* 1. Combine access_key and secret_access_key into one buffer */
     struct aws_byte_cursor access_key = aws_credentials_get_access_key_id(original_credentials);
     struct aws_byte_cursor secret_access_key = aws_credentials_get_secret_access_key(original_credentials);
-    aws_byte_buf_init(&combine_key_buf, allocator, access_key.len + secret_access_key.len);
-    aws_byte_buf_write_from_whole_cursor(&combine_key_buf, access_key);
-    aws_byte_buf_write_from_whole_cursor(&combine_key_buf, secret_access_key);
+    aws_byte_buf_init(&combined_buf, allocator, access_key.len + secret_access_key.len);
+    aws_byte_buf_write_from_whole_cursor(&combined_buf, access_key);
+    aws_byte_buf_write_from_whole_cursor(&combined_buf, secret_access_key);
+
+    /* Write the allowed headers into hash */
+    if (headers != NULL) {
+        struct aws_byte_cursor collon = aws_byte_cursor_from_c_str(":");
+        struct aws_byte_cursor comma = aws_byte_cursor_from_c_str(",");
+        for (size_t header_index = 0; header_index < g_s3_create_session_allowed_headers_count; ++header_index) {
+            struct aws_byte_cursor header_name = g_s3_create_session_allowed_headers[header_index];
+            struct aws_byte_cursor header_value;
+            if (aws_http_headers_get(headers, header_name, &header_value) == AWS_OP_SUCCESS && header_value.len > 0) {
+                aws_byte_buf_append_dynamic(&combined_buf, &comma);
+                aws_byte_buf_append_dynamic(&combined_buf, &header_name);
+                aws_byte_buf_append_dynamic(&combined_buf, &collon);
+                aws_byte_buf_append_dynamic(&combined_buf, &header_value);
+            }
+        }
+    }
 
     /* 2. Get sha256 digest from the combined key */
-    struct aws_byte_cursor combine_key = aws_byte_cursor_from_buf(&combine_key_buf);
+    struct aws_byte_cursor combined_cursor = aws_byte_cursor_from_buf(&combined_buf);
     struct aws_byte_buf digest_buf;
     aws_byte_buf_init(&digest_buf, allocator, AWS_SHA256_LEN);
-    aws_sha256_compute(allocator, &combine_key, &digest_buf, 0);
+    aws_sha256_compute(allocator, &combined_cursor, &digest_buf, 0);
 
     /* 3. Encode the result to be [host_value][hash_of_credentials] */
     struct aws_byte_buf result_buffer;
@@ -473,7 +526,7 @@ struct aws_string *aws_encode_s3express_hash_key_new(
 
     /* Clean up */
     aws_byte_buf_clean_up(&result_buffer);
-    aws_byte_buf_clean_up(&combine_key_buf);
+    aws_byte_buf_clean_up(&combined_buf);
     aws_byte_buf_clean_up(&digest_buf);
 
     return result;
@@ -485,13 +538,13 @@ static struct aws_s3express_session_creator *s_session_creator_new(
     const struct aws_credentials_properties_s3express *s3express_properties) {
 
     struct aws_s3express_credentials_provider_impl *impl = provider->impl;
-    struct aws_http_message *request = s_create_session_request_new(provider->allocator, s3express_properties->host);
+    struct aws_http_message *request = s_create_session_request_new(
+        provider->allocator,
+        s3express_properties->host,
+        s3express_properties->headers,
+        impl->mock_test.endpoint_override);
     if (!request) {
         return NULL;
-    }
-    if (impl->mock_test.endpoint_override) {
-        /* NOTE: ONLY FOR TESTS. Erase the host header for endpoint override. */
-        aws_http_headers_erase(aws_http_message_get_headers(request), g_host_header_name);
     }
 
     struct aws_s3express_session_creator *session_creator =
@@ -500,6 +553,10 @@ static struct aws_s3express_session_creator *s_session_creator_new(
     session_creator->provider = provider;
     session_creator->host = aws_string_new_from_cursor(session_creator->allocator, &s3express_properties->host);
     session_creator->region = aws_string_new_from_cursor(session_creator->allocator, &s3express_properties->region);
+    if (s3express_properties->headers != NULL) {
+        aws_http_headers_acquire(s3express_properties->headers);
+        session_creator->headers = s3express_properties->headers;
+    }
 
     struct aws_signing_config_aws s3express_signing_config = {
         .credentials = original_credentials,
@@ -514,8 +571,6 @@ static struct aws_s3express_session_creator *s_session_creator_new(
         .body_callback = s_on_incoming_body_fn,
         .finish_callback = s_on_request_finished,
         .signing_config = &s3express_signing_config,
-        /* Override endpoint only for tests. */
-        .endpoint = impl->mock_test.endpoint_override ? impl->mock_test.endpoint_override : NULL,
         .user_data = session_creator,
         .operation_name = aws_byte_cursor_from_c_str("CreateSession"),
     };
@@ -556,8 +611,8 @@ static int s_s3express_get_creds(
 
     uint64_t current_stamp = UINT64_MAX;
     aws_sys_clock_get_ticks(&current_stamp);
-    struct aws_string *hash_key =
-        aws_encode_s3express_hash_key_new(provider->allocator, original_credentials, s3express_properties->host);
+    struct aws_string *hash_key = aws_encode_s3express_hash_key_new(
+        provider->allocator, original_credentials, s3express_properties->host, s3express_properties->headers);
     uint64_t now_seconds = aws_timestamp_convert(current_stamp, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_SECS, NULL);
 
     s_credentials_provider_s3express_impl_lock_synced_data(impl);
@@ -764,7 +819,8 @@ static void s_refresh_session_list(
                         struct aws_string *current_creds_hash = aws_encode_s3express_hash_key_new(
                             provider->allocator,
                             current_original_credentials,
-                            aws_byte_cursor_from_string(session->host));
+                            aws_byte_cursor_from_string(session->host),
+                            session->headers);
                         bool creds_match = aws_string_eq(current_creds_hash, hash_key);
                         aws_string_destroy(current_creds_hash);
                         if (!creds_match) {
@@ -784,6 +840,7 @@ static void s_refresh_session_list(
 
                         struct aws_credentials_properties_s3express s3express_properties = {
                             .host = aws_byte_cursor_from_string(session->host),
+                            .headers = session->headers,
                         };
                         if (session->region) {
                             s3express_properties.region = aws_byte_cursor_from_string(session->region);

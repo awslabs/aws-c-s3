@@ -37,12 +37,18 @@ static void s_s3_copy_object_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static void s_s3_copy_object_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data);
+
 static struct aws_s3_meta_request_vtable s_s3_copy_object_vtable = {
     .update = s_s3_copy_object_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .prepare_request = s_s3_copy_object_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
-    .sign_request = aws_s3_meta_request_sign_request_default,
+    .sign_request = s_s3_copy_object_sign_request,
     .finished_request = s_s3_copy_object_request_finished,
     .destroy = s_s3_meta_request_copy_object_destroy,
     .finish = aws_s3_meta_request_finish_default,
@@ -86,10 +92,22 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     copy_object->synced_data.content_length = UNKNOWN_CONTENT_LENGTH;
     copy_object->synced_data.total_num_parts = UNKNOWN_NUM_PARTS;
     copy_object->threaded_update_data.next_part_number = 1;
+    if (options->copy_source_uri.len != 0) {
+        if (aws_uri_init_parse(&copy_object->source_uri, allocator, &options->copy_source_uri)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Unable to parse the copy_source_uri provided in the request: " PRInSTR "",
+                AWS_BYTE_CURSOR_PRI(options->copy_source_uri));
+            goto on_error;
+        }
+    }
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new CopyObject Meta Request.", (void *)&copy_object->base);
 
     return &copy_object->base;
+on_error:
+    aws_s3_meta_request_release(&copy_object->base);
+    return NULL;
 }
 
 static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *meta_request) {
@@ -99,6 +117,7 @@ static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *me
     struct aws_s3_copy_object *copy_object = meta_request->impl;
 
     aws_string_destroy(copy_object->upload_id);
+    aws_uri_clean_up(&copy_object->source_uri);
     copy_object->upload_id = NULL;
 
     for (size_t part_index = 0; part_index < aws_array_list_length(&copy_object->synced_data.part_list); ++part_index) {
@@ -358,7 +377,7 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
         /* Prepares the GetObject HEAD request to get the source object size. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE: {
             message = aws_s3_get_source_object_size_message_new(
-                meta_request->allocator, meta_request->initial_request_message);
+                meta_request->allocator, meta_request->initial_request_message, &copy_object->source_uri);
             break;
         }
 
@@ -603,17 +622,13 @@ static void s_s3_copy_object_request_finished(
 
             /* Invoke headers callback if it was requested for this meta request */
             if (meta_request->headers_callback != NULL) {
-                struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
-
-                /* Copy all the response headers from this request. */
-                copy_http_headers(request->send_data.response_headers, final_response_headers);
 
                 /* Invoke the callback without lock */
                 aws_s3_meta_request_unlock_synced_data(meta_request);
                 /* Notify the user of the headers. */
                 if (meta_request->headers_callback(
                         meta_request,
-                        final_response_headers,
+                        request->send_data.response_headers,
                         request->send_data.response_status,
                         meta_request->user_data)) {
 
@@ -622,8 +637,6 @@ static void s_s3_copy_object_request_finished(
                 meta_request->headers_callback = NULL;
                 /* Grab the lock again after the callback */
                 aws_s3_meta_request_lock_synced_data(meta_request);
-
-                aws_http_headers_release(final_response_headers);
             }
 
             /* Signals completion of the meta request */
@@ -741,15 +754,12 @@ static void s_s3_copy_object_request_finished(
 
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
             if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL) {
-                struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
-
-                /* Copy all the response headers from this request. */
-                copy_http_headers(request->send_data.response_headers, final_response_headers);
 
                 /* Copy over any response headers that we've previously determined are needed for this final
                  * response.
                  */
-                copy_http_headers(copy_object->synced_data.needed_response_headers, final_response_headers);
+                copy_http_headers(
+                    copy_object->synced_data.needed_response_headers, request->send_data.response_headers);
 
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
@@ -762,7 +772,7 @@ static void s_s3_copy_object_request_finished(
                         aws_replace_quote_entities(meta_request->allocator, etag_header_value);
 
                     aws_http_headers_set(
-                        final_response_headers,
+                        request->send_data.response_headers,
                         g_etag_header_name,
                         aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
 
@@ -774,7 +784,7 @@ static void s_s3_copy_object_request_finished(
                 aws_s3_meta_request_unlock_synced_data(meta_request);
                 if (meta_request->headers_callback(
                         meta_request,
-                        final_response_headers,
+                        request->send_data.response_headers,
                         request->send_data.response_status,
                         meta_request->user_data)) {
 
@@ -783,8 +793,6 @@ static void s_s3_copy_object_request_finished(
                 meta_request->headers_callback = NULL;
                 /* Grab the lock again after the callback */
                 aws_s3_meta_request_lock_synced_data(meta_request);
-
-                aws_http_headers_release(final_response_headers);
             }
 
             copy_object->synced_data.complete_multipart_upload_completed = true;
@@ -806,4 +814,22 @@ static void s_s3_copy_object_request_finished(
     aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
+}
+
+static void s_s3_copy_object_sign_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_signing_complete_fn *on_signing_complete,
+    void *user_data) {
+
+    /**
+     * https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html
+     * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html
+     * For CopyObject and UploadPartCopy, the request has to be signed with IAM credentials for directory buckets.
+     * Disable S3 express signing for those types.
+     */
+    bool disable_s3_express_signing = request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_BYPASS ||
+                                      request->request_tag == AWS_S3_COPY_OBJECT_REQUEST_TAG_MULTIPART_COPY;
+    aws_s3_meta_request_sign_request_default_impl(
+        meta_request, request, on_signing_complete, user_data, disable_s3_express_signing);
 }

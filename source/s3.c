@@ -4,7 +4,9 @@
  */
 
 #include <aws/s3/private/s3_platform_info.h>
+#include <aws/s3/private/s3_util.h>
 #include <aws/s3/s3.h>
+#include <aws/s3/s3_client.h>
 
 #include <aws/auth/auth.h>
 #include <aws/common/error.h>
@@ -47,6 +49,10 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED, "CreateSession call failed when signing with S3 Express."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE, "part_size mismatch, possibly due to wrong object_size_hint. Retrying with Range instead of partNumber."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_REQUEST_HAS_COMPLETED, "Request has already completed, action cannot be performed."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS, "File already exists, cannot create as new."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RECV_FILE_NOT_FOUND, "The receive file doesn't exist, cannot create as configuration required."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_REQUEST_TIMEOUT, "RequestTimeout error received from S3."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_TOKEN_EXPIRED, "Token expired - needs a refresh."),
 };
 /* clang-format on */
 
@@ -75,6 +81,103 @@ static struct aws_log_subject_info_list s_s3_log_subject_list = {
     .count = AWS_ARRAY_SIZE(s_s3_log_subject_infos),
 };
 
+struct aws_s3_request_type_info {
+    enum aws_s3_request_type type;
+    struct aws_string *name_string;
+    struct aws_byte_cursor name_cursor;
+};
+
+static struct aws_s3_request_type_info s_s3_request_type_info_array[AWS_S3_REQUEST_TYPE_MAX];
+
+/* Hash-table for case-insensitive lookup, from operation-name -> request-type.
+ * key is operation-name (stored as `struct aws_byte_cursor*`, pointing into array above).
+ * value is request-type (stored as `enum aws_s3_request_type *`, pointing into array above). */
+static struct aws_hash_table s_s3_operation_name_to_request_type_table;
+
+static void s_s3_request_type_register(enum aws_s3_request_type type, const struct aws_string *name) {
+
+    AWS_PRECONDITION(type >= 0 && type < AWS_ARRAY_SIZE(s_s3_request_type_info_array));
+    AWS_PRECONDITION(AWS_IS_ZEROED(s_s3_request_type_info_array[type]));
+
+    struct aws_s3_request_type_info *info = &s_s3_request_type_info_array[type];
+    info->type = type;
+    info->name_string = (struct aws_string *)name;
+    info->name_cursor = aws_byte_cursor_from_string(name);
+
+    int err = aws_hash_table_put(&s_s3_operation_name_to_request_type_table, &info->name_cursor, &info->type, NULL);
+    AWS_FATAL_ASSERT(!err);
+}
+
+AWS_STATIC_STRING_FROM_LITERAL(s_HeadObject_str, "HeadObject");
+AWS_STATIC_STRING_FROM_LITERAL(s_GetObject_str, "GetObject");
+AWS_STATIC_STRING_FROM_LITERAL(s_ListParts_str, "ListParts");
+AWS_STATIC_STRING_FROM_LITERAL(s_CreateMultipartUpload_str, "CreateMultipartUpload");
+AWS_STATIC_STRING_FROM_LITERAL(s_UploadPart_str, "UploadPart");
+AWS_STATIC_STRING_FROM_LITERAL(s_AbortMultipartUpload_str, "AbortMultipartUpload");
+AWS_STATIC_STRING_FROM_LITERAL(s_CompleteMultipartUpload_str, "CompleteMultipartUpload");
+AWS_STATIC_STRING_FROM_LITERAL(s_UploadPartCopy_str, "UploadPartCopy");
+AWS_STATIC_STRING_FROM_LITERAL(s_CopyObject_str, "CopyObject");
+AWS_STATIC_STRING_FROM_LITERAL(s_PutObject_str, "PutObject");
+AWS_STATIC_STRING_FROM_LITERAL(s_CreateSession_str, "CreateSession");
+
+static void s_s3_request_type_info_init(struct aws_allocator *allocator) {
+    int err = aws_hash_table_init(
+        &s_s3_operation_name_to_request_type_table,
+        allocator,
+        AWS_ARRAY_SIZE(s_s3_request_type_info_array) /*initial_size*/,
+        aws_hash_byte_cursor_ptr_ignore_case,
+        (aws_hash_callback_eq_fn *)aws_byte_cursor_eq_ignore_case,
+        NULL /*destroy_key*/,
+        NULL /*destroy_value*/);
+    AWS_FATAL_ASSERT(!err);
+
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_HEAD_OBJECT, s_HeadObject_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_GET_OBJECT, s_GetObject_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_LIST_PARTS, s_ListParts_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, s_CreateMultipartUpload_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_UPLOAD_PART, s_UploadPart_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD, s_AbortMultipartUpload_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD, s_CompleteMultipartUpload_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY, s_UploadPartCopy_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_COPY_OBJECT, s_CopyObject_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_PUT_OBJECT, s_PutObject_str);
+    s_s3_request_type_register(AWS_S3_REQUEST_TYPE_CREATE_SESSION, s_CreateSession_str);
+}
+
+static void s_s3_request_type_info_clean_up(void) {
+    aws_hash_table_clean_up(&s_s3_operation_name_to_request_type_table);
+    AWS_ZERO_ARRAY(s_s3_request_type_info_array);
+}
+
+struct aws_string *aws_s3_request_type_to_operation_name_static_string(enum aws_s3_request_type type) {
+
+    if (type >= 0 && type < AWS_ARRAY_SIZE(s_s3_request_type_info_array)) {
+        struct aws_s3_request_type_info *info = &s_s3_request_type_info_array[type];
+        return info->name_string;
+    }
+
+    return NULL;
+}
+
+const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type) {
+    struct aws_string *name_string = aws_s3_request_type_to_operation_name_static_string(type);
+    if (name_string != NULL) {
+        return aws_string_c_str(name_string);
+    }
+
+    return "";
+}
+
+enum aws_s3_request_type aws_s3_request_type_from_operation_name(struct aws_byte_cursor name) {
+    struct aws_hash_element *elem = NULL;
+    aws_hash_table_find(&s_s3_operation_name_to_request_type_table, &name, &elem);
+    if (elem != NULL) {
+        enum aws_s3_request_type *type = elem->value;
+        return *type;
+    }
+    return AWS_S3_REQUEST_TYPE_UNKNOWN;
+}
+
 static bool s_library_initialized = false;
 static struct aws_allocator *s_library_allocator = NULL;
 static struct aws_s3_platform_info_loader *s_loader;
@@ -97,6 +200,8 @@ void aws_s3_library_init(struct aws_allocator *allocator) {
     aws_register_log_subject_info_list(&s_s3_log_subject_list);
     s_loader = aws_s3_platform_info_loader_new(allocator);
     AWS_FATAL_ASSERT(s_loader);
+    s_s3_request_type_info_init(allocator);
+
     s_library_initialized = true;
 }
 
@@ -118,9 +223,10 @@ void aws_s3_library_clean_up(void) {
     }
 
     s_library_initialized = false;
-    s_loader = aws_s3_platform_info_loader_release(s_loader);
     aws_thread_join_all_managed();
 
+    s_s3_request_type_info_clean_up();
+    s_loader = aws_s3_platform_info_loader_release(s_loader);
     aws_unregister_log_subject_info_list(&s_s3_log_subject_list);
     aws_unregister_error_info(&s_error_list);
     aws_http_library_clean_up();

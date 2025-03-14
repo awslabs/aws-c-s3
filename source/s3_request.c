@@ -33,10 +33,7 @@ struct aws_s3_request *aws_s3_request_new(
     request->request_tag = request_tag;
     request->request_type = request_type;
 
-    const char *operation_name = aws_s3_request_type_operation_name(request_type);
-    if (operation_name[0] != '\0') {
-        request->operation_name = aws_string_new_from_c_str(request->allocator, operation_name);
-    }
+    request->operation_name = aws_s3_request_type_to_operation_name_static_string(request_type);
 
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
@@ -180,10 +177,7 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
 
     metrics->req_resp_info_metrics.request_type = request->request_type;
-
-    if (request->operation_name != NULL) {
-        metrics->req_resp_info_metrics.operation_name = aws_string_new_from_string(allocator, request->operation_name);
-    }
+    metrics->req_resp_info_metrics.operation_name = aws_string_new_from_string(allocator, request->operation_name);
 
     metrics->time_metrics.start_timestamp_ns = -1;
     metrics->time_metrics.end_timestamp_ns = -1;

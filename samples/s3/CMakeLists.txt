@@ -1,7 +1,5 @@
 project(s3 C)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_INSTALL_PREFIX}/lib/cmake")
-
 file(GLOB S3_SRC
         "*.c"
         )
@@ -25,5 +23,5 @@ install(TARGETS ${S3_PROJECT_NAME}
         EXPORT ${S3_PROJECT_NAME}-targets
         COMPONENT Runtime
         RUNTIME
-        DESTINATION bin
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT Runtime)

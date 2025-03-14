@@ -151,7 +151,10 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
 
     ASSERT_SUCCESS(aws_array_list_init_dynamic(&test_data.entries_found, allocator, 16, sizeof(struct aws_string *)));
 
-    struct aws_byte_cursor endpoint = aws_byte_cursor_from_c_str("s3.us-west-2.amazonaws.com");
+    char endpoint_buff[128] = "";
+    snprintf(
+        endpoint_buff, sizeof(endpoint_buff), "s3." PRInSTR ".amazonaws.com", AWS_BYTE_CURSOR_PRI(g_test_s3_region));
+    struct aws_byte_cursor endpoint = aws_byte_cursor_from_c_str(endpoint_buff);
 
     struct aws_s3_list_objects_params params = {
         .client = client,

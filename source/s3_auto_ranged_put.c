@@ -84,6 +84,12 @@ static bool s_s3_auto_ranged_put_update(
     uint32_t flags,
     struct aws_s3_request **out_request);
 
+static void s_s3_auto_ranged_put_schedule_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
+
 static struct aws_future_void *s_s3_auto_ranged_put_prepare_request(struct aws_s3_request *request);
 static void s_s3_auto_ranged_put_prepare_request_finish(void *user_data);
 
@@ -297,6 +303,7 @@ static int s_try_init_resume_state_from_persisted_data(
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
     .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
+    .schedule_prepare_request = s_s3_auto_ranged_put_schedule_prepare_request,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
     .sign_request = aws_s3_meta_request_sign_request_default,
@@ -361,6 +368,12 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
 
     if (s_try_init_resume_state_from_persisted_data(allocator, auto_ranged_put, options->resume_token)) {
         goto error_clean_up;
+    }
+
+    if (auto_ranged_put->base.checksum_config.full_object_checksum.len > 0) {
+        /* The full object checksum was set, make sure the parts level checksum will be calculated and sent via client.
+         */
+        auto_ranged_put->base.checksum_config.location = AWS_SCL_TRAILER;
     }
 
     AWS_LOGF_DEBUG(
@@ -767,7 +780,7 @@ static int s_verify_part_matches_checksum(
     }
 
     struct aws_byte_buf checksum;
-    if (aws_byte_buf_init(&checksum, allocator, aws_get_digest_size_from_algorithm(algorithm))) {
+    if (aws_byte_buf_init(&checksum, allocator, aws_get_digest_size_from_checksum_algorithm(algorithm))) {
         return AWS_OP_ERR;
     }
 
@@ -776,14 +789,14 @@ static int s_verify_part_matches_checksum(
     int return_status = AWS_OP_SUCCESS;
 
     size_t encoded_len = 0;
-    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(algorithm), &encoded_len)) {
+    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to determine length of encoded checksum.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
         goto on_done;
     }
 
-    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum, 0)) {
+    if (aws_checksum_compute(allocator, algorithm, &body_cur, &checksum)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "Failed to resume upload. Unable to compute checksum for the skipped part.");
         return_status = aws_raise_error(AWS_ERROR_S3_RESUME_FAILED);
@@ -815,6 +828,23 @@ on_done:
     aws_byte_buf_clean_up(&checksum);
     aws_byte_buf_clean_up(&encoded_checksum);
     return return_status;
+}
+
+void s_s3_auto_ranged_put_schedule_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+
+    /* When the body stream supports reading in parallel, and it's upload parts, do parallel preparation to speed up
+     * reading. */
+    bool parallel_prepare =
+        (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
+
+    aws_s3_meta_request_schedule_prepare_request_default_impl(
+        meta_request, request, parallel_prepare /*parallel*/, callback, user_data);
 }
 
 /* Given a request, prepare it for sending based on its description. */
@@ -1221,10 +1251,38 @@ static struct aws_future_http_message *s_s3_prepare_complete_multipart_upload(st
     AWS_FATAL_ASSERT(auto_ranged_put->upload_id);
 
     if (request->num_times_prepared == 0) {
+        /**
+         * The prepare stage for CompleteMultipartUpload is guaranteed to happen from the the meta-request's
+         * io_event_loop thread. So that it's safe to invoke the callback from this stage and not overlapping with any
+         * other callbacks.
+         */
+
         /* Invoke upload_review_callback, and fail meta-request if user raises an error */
         if (s_s3_review_multipart_upload(request) != AWS_OP_SUCCESS) {
             aws_future_http_message_set_error(message_future, aws_last_error());
             goto on_done;
+        }
+        if (auto_ranged_put->base.checksum_config.full_object_checksum_callback) {
+            /* Invoke the callback to fill up the full object checksum. Let server side to verify the checksum. */
+            struct aws_string *result = auto_ranged_put->base.checksum_config.full_object_checksum_callback(
+                meta_request, auto_ranged_put->base.checksum_config.user_data);
+            if (!result) {
+                int error_code = aws_last_error_or_unknown();
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Full object checksum callback raised error %d (%s)",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code));
+                /* Error from the callback */
+                aws_future_http_message_set_error(message_future, error_code);
+                goto on_done;
+            }
+            aws_byte_buf_init_copy_from_cursor(
+                &auto_ranged_put->base.checksum_config.full_object_checksum,
+                allocator,
+                aws_byte_cursor_from_string(result));
+            aws_string_destroy(result);
         }
 
         /* Allocate request body */
@@ -1568,15 +1626,11 @@ static void s_s3_auto_ranged_put_request_finished(
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
             if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL) {
-                struct aws_http_headers *final_response_headers = aws_http_headers_new(meta_request->allocator);
-
-                /* Copy all the response headers from this request. */
-                copy_http_headers(request->send_data.response_headers, final_response_headers);
-
                 /* Copy over any response headers that we've previously determined are needed for this final
                  * response.
                  */
-                copy_http_headers(auto_ranged_put->synced_data.needed_response_headers, final_response_headers);
+                copy_http_headers(
+                    auto_ranged_put->synced_data.needed_response_headers, request->send_data.response_headers);
 
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
@@ -1597,7 +1651,7 @@ static void s_s3_auto_ranged_put_request_finished(
                         aws_replace_quote_entities(meta_request->allocator, etag_header_value);
 
                     aws_http_headers_set(
-                        final_response_headers,
+                        request->send_data.response_headers,
                         g_etag_header_name,
                         aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
 
@@ -1609,7 +1663,7 @@ static void s_s3_auto_ranged_put_request_finished(
                 /* Notify the user of the headers. */
                 if (meta_request->headers_callback(
                         meta_request,
-                        final_response_headers,
+                        request->send_data.response_headers,
                         request->send_data.response_status,
                         meta_request->user_data)) {
 
@@ -1618,8 +1672,6 @@ static void s_s3_auto_ranged_put_request_finished(
                 meta_request->headers_callback = NULL;
                 /* Grab the lock again after the callback */
                 aws_s3_meta_request_lock_synced_data(meta_request);
-
-                aws_http_headers_release(final_response_headers);
             }
 
             auto_ranged_put->synced_data.complete_multipart_upload_completed = true;

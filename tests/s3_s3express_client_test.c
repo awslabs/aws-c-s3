@@ -10,6 +10,7 @@
 #include "s3_tester.h"
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
+#include <aws/common/encoding.h>
 #include <aws/common/lru_cache.h>
 #include <aws/io/stream.h>
 #include <aws/io/uri.h>
@@ -21,7 +22,10 @@
     static int s_test_##NAME(struct aws_allocator *allocator, void *ctx)
 
 #define DEFINE_HEADER(NAME, VALUE)                                                                                     \
-    { .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME), .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE), }
+    {                                                                                                                  \
+        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(NAME),                                                           \
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE),                                                         \
+    }
 
 struct aws_s3express_client_tester {
     struct aws_allocator *allocator;
@@ -643,5 +647,128 @@ TEST_CASE(s3express_client_get_object_create_session_error) {
     aws_http_message_release(message);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/**
+ * Test copy object within the same directory bucket.
+ */
+TEST_CASE(s3express_client_copy_object) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-10MB");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_10MB");
+    struct aws_byte_cursor source_bucket =
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket--usw2-az1--x-s3");
+    struct aws_byte_cursor copy_source_uri;
+    AWS_ZERO_STRUCT(copy_source_uri);
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
+        allocator,
+        &tester,
+        source_bucket,
+        source_key,
+        g_test_s3express_bucket_usw2_az1_endpoint,
+        destination_key,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK,
+        MB_TO_BYTES(10),
+        true,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/**
+ * Test multipart copy object within the same directory bucket.
+ */
+TEST_CASE(s3express_client_copy_object_multipart) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("pre-existing-2GB");
+    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("copies/destination_2GB");
+    struct aws_byte_cursor source_bucket =
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket--usw2-az1--x-s3");
+    struct aws_byte_cursor copy_source_uri;
+    AWS_ZERO_STRUCT(copy_source_uri);
+
+    ASSERT_SUCCESS(aws_test_s3_copy_object_helper(
+        allocator,
+        &tester,
+        source_bucket,
+        source_key,
+        g_test_s3express_bucket_usw2_az1_endpoint,
+        destination_key,
+        AWS_ERROR_SUCCESS,
+        AWS_HTTP_STATUS_CODE_200_OK,
+        GB_TO_BYTES(2),
+        true,
+        copy_source_uri));
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/**
+ * Test hash of the express cache key
+ */
+TEST_CASE(s3express_hash_key_test) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    struct aws_string *access_key = aws_string_new_from_c_str(allocator, "AccessKey");
+    struct aws_string *secret_access_key = aws_string_new_from_c_str(allocator, "SecretAccessKey");
+    struct aws_http_headers *headers = aws_http_headers_new(allocator);
+    aws_http_headers_add(
+        headers, aws_byte_cursor_from_c_str("x-amz-create-session-mode"), aws_byte_cursor_from_c_str("ReadOnly"));
+    aws_http_headers_add(
+        headers, aws_byte_cursor_from_c_str("x-amz-server-side-encryption"), aws_byte_cursor_from_c_str("aws:kms"));
+    aws_http_headers_add(
+        headers,
+        aws_byte_cursor_from_c_str("x-amz-server-side-encryption-aws-kms-key-id"),
+        aws_byte_cursor_from_c_str("kms-key-id"));
+    aws_http_headers_add(
+        headers,
+        aws_byte_cursor_from_c_str("x-amz-server-side-encryption-context"),
+        aws_byte_cursor_from_c_str("context"));
+    aws_http_headers_add(
+        headers,
+        aws_byte_cursor_from_c_str("x-amz-server-side-encryption-bucket-key-enabled"),
+        aws_byte_cursor_from_c_str("true"));
+    aws_http_headers_add(
+        headers,
+        aws_byte_cursor_from_c_str("header-not-in-allow-list"),
+        aws_byte_cursor_from_c_str("should-be-ignored"));
+
+    struct aws_credentials *creds =
+        aws_credentials_new_from_string(allocator, access_key, secret_access_key, NULL, UINT64_MAX);
+
+    struct aws_string *hash_key =
+        aws_encode_s3express_hash_key_new(allocator, creds, aws_byte_cursor_from_c_str(""), headers);
+    struct aws_byte_cursor hash_cursor = aws_byte_cursor_from_string(hash_key);
+
+    struct aws_byte_buf encoded_buf;
+    aws_byte_buf_init(&encoded_buf, allocator, 200);
+    aws_hex_encode_append_dynamic(&hash_cursor, &encoded_buf);
+
+    char *expected_encoded_key = "cabfefee4365e075646ba8928ed9f757481d1062ffcb0a3afe5b9c428dd45800";
+    ASSERT_BIN_ARRAYS_EQUALS(expected_encoded_key, strlen(expected_encoded_key), encoded_buf.buffer, encoded_buf.len);
+
+    aws_byte_buf_clean_up(&encoded_buf);
+    aws_string_destroy(access_key);
+    aws_string_destroy(secret_access_key);
+    aws_credentials_release(creds);
+    aws_string_destroy(hash_key);
+    aws_http_headers_release(headers);
+
+    aws_s3_library_clean_up();
+
     return AWS_OP_SUCCESS;
 }

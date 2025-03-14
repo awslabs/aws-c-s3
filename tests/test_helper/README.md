@@ -24,26 +24,39 @@ python3 test_helper.py clean
 ### `init` action
 
 * Create `<BUCKET_NAME>` in us-west-2.
-* Add the lifecycle to automatic clean up the `upload/` after one day
-* Upload files:
-  + `pre-existing-10MB-aes256-c` [SSE-C](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html#sse-c-highlights) encrypted fille
-  + `pre-existing-10MB-aes256` [SSE-S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/specifying-s3-encryption.html) encrypted fille
-  + `pre-existing-10MB-kms` [SSE-KMS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html) encrypted fille
-  + `pre-existing-10MB`
-  + `pre-existing-1MB`
-  + `pre-existing-empty`
+  + Add the lifecycle to automatic clean up the `upload/` and clean up incomplete multipart uploads after one day.
+  + Upload files:
+    - `pre-existing-10MB-aes256-c` [SSE-C](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html#sse-c-highlights) encrypted fille
+    - `pre-existing-10MB-aes256` [SSE-S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/specifying-s3-encryption.html) encrypted fille
+    - `pre-existing-10MB-kms` [SSE-KMS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html) encrypted fille
+    - `pre-existing-10MB`
+    - `pre-existing-1MB`
+    - `pre-existing-1MB-@`
+    - `pre-existing-empty`
+    - `pre-existing-error-xml`
+    - with `--large_objects` enabled, several large objects will also be uploaded. Currently, only aws-c-s3's tests require these files, the aws-crt-*** repos do not:
+      - `pre-existing-256MB`
+      - `pre-existing-256MB-@`
+      - `pre-existing-2GB`
+      - `pre-existing-2GB-@`
 
-* Create `<BUCKET_NAME>-public` in us-west-2
-* Upload files:
-  + `pre-existing-1MB` 1MB file with public read access.
+* with `--create_public_bucket` enabled, create `<BUCKET_NAME>-public` in us-west-2
+  + Upload files:
+    - `pre-existing-1MB` 1MB file with public read access.
 
 * Create directory bucket `<BUCKET_NAME>--usw2-az1--x-s3` in us-west-2
-* Upload files:
-  + `pre-existing-10MB` 10MB file.
+  + Add the lifecycle to automatic clean up the `upload/` and clean up incomplete multipart uploads after one day.
+  + Upload files:
+    - `pre-existing-10MB` 10MB file.
+    - with `--large_objects` enabled
+      - `pre-existing-2GB`
 
 * Create directory bucket `<BUCKET_NAME>--use1-az4--x-s3` in us-east-1
-* Upload files:
-  + `pre-existing-10MB` 10MB file.
+  + Add the lifecycle to automatic clean up the `upload/` and clean up incomplete multipart uploads after one day.
+  + Upload files:
+    - `pre-existing-10MB` 10MB file.
+    - with `--large_objects` enabled
+      - `pre-existing-2GB`
 
 ### `clean` action
 

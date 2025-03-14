@@ -70,6 +70,12 @@ enum aws_s3_tester_default_type_mode {
     AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT,
 };
 
+enum aws_s3_tester_full_object_checksum {
+    AWS_TEST_FOC_NONE = 0,
+    AWS_TEST_FOC_HEADER,
+    AWS_TEST_FOC_CALLBACK,
+};
+
 struct aws_s3_client_vtable_patch {
     struct aws_s3_client_vtable *original_vtable;
     struct aws_s3_client_vtable patched_vtable;
@@ -130,8 +136,12 @@ struct aws_s3_tester_client_options {
     enum aws_s3_client_tls_usage tls_usage;
     uint64_t part_size;
     size_t max_part_size;
+    const struct aws_byte_cursor *network_interface_names_array;
+    size_t num_network_interface_names;
     uint32_t setup_region : 1;
     uint32_t use_proxy : 1;
+    aws_s3express_provider_factory_fn *s3express_provider_override_factory;
+    void *factory_user_data;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -162,6 +172,7 @@ struct aws_s3_tester_meta_request_options {
     struct aws_array_list *validate_checksum_algorithms;
     enum aws_s3_checksum_algorithm expected_validate_checksum_alg;
     bool disable_put_trailing_checksum;
+    bool checksum_via_header;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;
@@ -186,6 +197,12 @@ struct aws_s3_tester_meta_request_options {
         struct aws_byte_cursor object_range;
         /* Get the part from S3, starts from 1. 0 means not set. */
         int part_number;
+        bool file_on_disk;
+        enum aws_s3_recv_file_option recv_file_option;
+        uint64_t recv_file_position;
+        bool recv_file_delete_on_failure;
+        /* If larger than 0, create a pre-exist file with the length */
+        uint64_t pre_exist_file_length;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -210,6 +227,8 @@ struct aws_s3_tester_meta_request_options {
         size_t content_length;
         bool skip_content_length;
         struct aws_byte_cursor content_encoding;
+        enum aws_s3_tester_full_object_checksum full_object_checksum;
+        struct aws_byte_cursor if_none_match_header;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
@@ -242,6 +261,7 @@ struct aws_s3_meta_request_test_results {
     struct aws_http_headers *response_headers;
     uint64_t expected_range_start;
     uint64_t received_body_size;
+    int64_t received_file_size;
     /* an atomic for tests that want to check from the main thread whether data is still arriving */
     struct aws_atomic_var received_body_size_delta;
     int finished_response_status;
@@ -486,6 +506,7 @@ extern const struct aws_byte_cursor g_pre_existing_object_1MB;
 extern const struct aws_byte_cursor g_pre_existing_object_10MB;
 extern const struct aws_byte_cursor g_pre_existing_object_kms_10MB;
 extern const struct aws_byte_cursor g_pre_existing_object_aes256_10MB;
+extern const struct aws_byte_cursor g_pre_existing_object_async_error_xml;
 extern const struct aws_byte_cursor g_pre_existing_empty_object;
 
 extern const struct aws_byte_cursor g_put_object_prefix;
@@ -504,5 +525,36 @@ extern struct aws_byte_cursor g_test_s3express_bucket_usw2_az1_endpoint;
  * `$CRT_S3_TEST_BUCKET_NAME--us1-az1--x-s3.s3express-use1-az4.us-east-1.amazonaws.com`; otherwise, use
  * aws-c-s3-test-bucket--use1-az4--x-s3.s3express-use1-az4.us-east-1.amazonaws.com */
 extern struct aws_byte_cursor g_test_s3express_bucket_use1_az4_endpoint;
+
+/**
+ * Take the source with source_bucket and source_key, and the destination_endpoint to help testing copy object
+ */
+int aws_test_s3_copy_object_helper(
+    struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
+    struct aws_byte_cursor source_bucket,
+    struct aws_byte_cursor source_key,
+    struct aws_byte_cursor destination_endpoint,
+    struct aws_byte_cursor destination_key,
+    int expected_error_code,
+    int expected_response_status,
+    uint64_t expected_size,
+    bool s3_express,
+    struct aws_byte_cursor copy_source_uri);
+
+/**
+ * Take the source with x_amz_copy_source, and the destination_endpoint to help testing copy object.
+ */
+int aws_test_s3_copy_object_from_x_amz_copy_source(
+    struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
+    struct aws_byte_cursor x_amz_copy_source,
+    struct aws_byte_cursor destination_endpoint,
+    struct aws_byte_cursor destination_key,
+    int expected_error_code,
+    int expected_response_status,
+    uint64_t expected_size,
+    bool s3_express,
+    struct aws_byte_cursor copy_source_uri);
 
 #endif /* AWS_S3_TESTER_H */

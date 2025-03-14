@@ -1,0 +1,15 @@
+
+{
+    "status": 400,
+    "headers": {"x-amz-request-id": "12345"},
+    "body": [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "",
+        "<Error>",
+         "<Code>RequestTimeout</Code>",
+         "<Message>Your socket connection to the server was not read from or written to within the timeout period. Idle connections will be closed.</Message>",
+         "<RequestId>1234</RequestId>",
+         "<HostId>asdf</HostId>",
+         "</Error>"
+    ]
+  }

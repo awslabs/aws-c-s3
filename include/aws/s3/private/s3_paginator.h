@@ -83,6 +83,11 @@ struct aws_s3_paginator_params {
  */
 struct aws_s3_paginated_operation_params {
     /**
+     * The S3 operation name (e.g. "ListParts"). Must not be empty.
+     */
+    struct aws_byte_cursor operation_name;
+
+    /**
      * Name of the top level result node. Must not be empty.
      */
     struct aws_byte_cursor result_xml_node_name;

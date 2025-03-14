@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_request.h"
 #include <aws/auth/credentials.h>
 #include <aws/common/clock.h>
+#include <aws/common/encoding.h>
 #include <aws/common/string.h>
 #include <aws/common/xml_parser.h>
 #include <aws/http/request_response.h>
@@ -42,20 +43,10 @@ const struct aws_byte_cursor g_trailer_header_name = AWS_BYTE_CUR_INIT_FROM_STRI
 const struct aws_byte_cursor g_request_validation_mode = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-mode");
 const struct aws_byte_cursor g_enabled = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("enabled");
 
-const struct aws_byte_cursor g_create_mpu_checksum_header_name =
+const struct aws_byte_cursor g_checksum_algorithm_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-algorithm");
-const struct aws_byte_cursor g_crc32c_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c");
-const struct aws_byte_cursor g_crc32_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32");
-const struct aws_byte_cursor g_sha1_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1");
-const struct aws_byte_cursor g_sha256_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256");
-const struct aws_byte_cursor g_crc32c_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32C");
-const struct aws_byte_cursor g_crc32_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32");
-const struct aws_byte_cursor g_sha1_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA1");
-const struct aws_byte_cursor g_sha256_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA256");
-const struct aws_byte_cursor g_crc32c_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32C");
-const struct aws_byte_cursor g_crc32_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32");
-const struct aws_byte_cursor g_sha1_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA1");
-const struct aws_byte_cursor g_sha256_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
+const struct aws_byte_cursor g_sdk_checksum_algorithm_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
 const struct aws_byte_cursor g_mp_parts_count_header_name =
@@ -72,33 +63,6 @@ const struct aws_byte_cursor g_user_agent_header_unknown = AWS_BYTE_CUR_INIT_FRO
 
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
-
-const char *aws_s3_request_type_operation_name(enum aws_s3_request_type type) {
-    switch (type) {
-        case AWS_S3_REQUEST_TYPE_HEAD_OBJECT:
-            return "HeadObject";
-        case AWS_S3_REQUEST_TYPE_GET_OBJECT:
-            return "GetObject";
-        case AWS_S3_REQUEST_TYPE_LIST_PARTS:
-            return "ListParts";
-        case AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD:
-            return "CreateMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_UPLOAD_PART:
-            return "UploadPart";
-        case AWS_S3_REQUEST_TYPE_ABORT_MULTIPART_UPLOAD:
-            return "AbortMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD:
-            return "CompleteMultipartUpload";
-        case AWS_S3_REQUEST_TYPE_UPLOAD_PART_COPY:
-            return "UploadPartCopy";
-        case AWS_S3_REQUEST_TYPE_COPY_OBJECT:
-            return "CopyObject";
-        case AWS_S3_REQUEST_TYPE_PUT_OBJECT:
-            return "PutObject";
-        default:
-            return "";
-    }
-}
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
@@ -702,7 +666,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor error_code_string) {
+int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_byte_cursor error_code_string) {
     if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "SlowDown")) {
         return AWS_ERROR_S3_SLOW_DOWN;
     }
@@ -713,6 +677,16 @@ int aws_s3_crt_error_code_from_server_error_code_string(struct aws_byte_cursor e
     if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "RequestTimeTooSkewed")) {
         return AWS_ERROR_S3_REQUEST_TIME_TOO_SKEWED;
     }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "RequestTimeout")) {
+        return AWS_ERROR_S3_REQUEST_TIMEOUT;
+    }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "ExpiredToken") ||
+        aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "TokenRefreshRequired")) {
+        return AWS_ERROR_S3_TOKEN_EXPIRED;
+    }
+
     return AWS_ERROR_UNKNOWN;
 }
 
@@ -735,4 +709,60 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
         }
         request->send_data.metrics = aws_s3_request_metrics_release(metrics);
     }
+}
+
+int aws_s3_check_headers_for_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_http_headers *headers,
+    struct aws_s3_checksum **out_checksum,
+    struct aws_byte_buf *out_checksum_buffer,
+    bool meta_request_level) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(out_checksum);
+    AWS_PRECONDITION(out_checksum_buffer);
+
+    if (!headers || aws_http_headers_count(headers) == 0) {
+        *out_checksum = NULL;
+        return AWS_OP_SUCCESS;
+    }
+    if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
+        /* g_mp_parts_count_header_name indicates it's a object was uploaded as a
+         * multipart upload. So, the checksum should not be applied to the meta request level.
+         * But we we want to check it for the request level. */
+        *out_checksum = NULL;
+        return AWS_OP_SUCCESS;
+    }
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, algorithm)) {
+            /* If user doesn't select this algorithm, skip */
+            continue;
+        }
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
+        struct aws_byte_cursor checksum_value;
+        if (aws_http_headers_get(headers, algorithm_header_name, &checksum_value) == AWS_OP_SUCCESS) {
+            /* Found the checksum header, keep the header value and initialize the running checksum */
+            size_t encoded_len = 0;
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
+            if (checksum_value.len == encoded_len) {
+                aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
+                *out_checksum = aws_checksum_new(meta_request->allocator, algorithm);
+                if (!*out_checksum) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "Could not create checksum for algorithm: %d, due to error code %d (%s)",
+                        algorithm,
+                        aws_last_error_or_unknown(),
+                        aws_error_str(aws_last_error_or_unknown()));
+                    return AWS_OP_ERR;
+                }
+                return AWS_OP_SUCCESS;
+            }
+            break;
+        }
+    }
+    *out_checksum = NULL;
+    return AWS_OP_SUCCESS;
 }

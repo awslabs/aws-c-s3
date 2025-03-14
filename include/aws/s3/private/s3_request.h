@@ -85,7 +85,7 @@ struct aws_s3_request_metrics {
         struct aws_string *host_address;
         /* The the request ID header value. */
         struct aws_string *request_id;
-        /* S3 operation name for the request (NULL if unknown) */
+        /* S3 operation name for the request */
         struct aws_string *operation_name;
         /* The type of request made */
         enum aws_s3_request_type request_type;
@@ -185,7 +185,7 @@ struct aws_s3_request {
     /* Actual S3 type for the single request (may be AWS_S3_REQUEST_TYPE_UNKNOWN) */
     enum aws_s3_request_type request_type;
 
-    /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") (NULL if unknown) */
+    /* S3 operation name for the single request (e.g. "CompleteMultipartUpload") */
     struct aws_string *operation_name;
 
     /* Members of this structure will be repopulated each time the request is sent. If the request fails, and needs to
@@ -212,6 +212,9 @@ struct aws_s3_request {
 
         /* The metrics for the request telemetry */
         struct aws_s3_request_metrics *metrics;
+
+        /* The request is required to have the unsigned payload */
+        uint32_t require_streaming_unsigned_payload_header : 1;
     } send_data;
 
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
