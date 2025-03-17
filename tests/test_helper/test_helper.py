@@ -3,6 +3,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0.
 import argparse
+import json
 import boto3
 import botocore
 import sys
@@ -27,12 +28,17 @@ parser.add_argument(
 parser.add_argument(
     'bucket_name',
     nargs='?',
-    help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. Otherwise, a random name will be generated.')
+    help='The bucket name base to use for the test buckets. If not specified, the $CRT_S3_TEST_BUCKET_NAME will be used, if set. \
+        Otherwise, a random name will be generated.')
 parser.add_argument(
     '--large_objects',
     action='store_true',
     help='enable helper to create pre-existing large objects.')
-
+parser.add_argument(
+    '--create_public_bucket',
+    action='store_true',
+    help='Allow script to create a public bucket. If not specified, the script will not attempt to create a public bucket. \
+        Note: Some aws-c-s3 tests will fail without public bucket.')
 
 args = parser.parse_args()
 
@@ -114,7 +120,7 @@ def create_bucket(client, **kwargs):
         raise e
 
 
-def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
+def create_bucket_with_lifecycle(availability_zone=None, client=s3_client, region=REGION):
     if availability_zone is not None:
         bucket_config = {
             'Location': {
@@ -128,37 +134,58 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client):
         }
         bucket_name = BUCKET_NAME_BASE+f"--{availability_zone}--x-s3"
     else:
-        bucket_config = {'LocationConstraint': REGION}
+        bucket_config = {'LocationConstraint': region}
         bucket_name = BUCKET_NAME_BASE
 
     create_bucket(client,
                   Bucket=bucket_name,
                   CreateBucketConfiguration=bucket_config)
-    if availability_zone is None:
-        print(f"s3://{bucket_name} - Configuring bucket...")
-        client.put_bucket_lifecycle_configuration(
-            Bucket=bucket_name,
-            LifecycleConfiguration={
-                'Rules': [
-                    {
-                        'ID': 'clean up non-pre-existing objects',
-                        'Expiration': {
-                            'Days': 1,
-                        },
-                        'Filter': {
-                            'Prefix': 'upload/',
-                        },
-                        'Status': 'Enabled',
-                        'NoncurrentVersionExpiration': {
-                            'NoncurrentDays': 1,
-                        },
-                        'AbortIncompleteMultipartUpload': {
-                            'DaysAfterInitiation': 1,
-                        },
+    print(f"s3://{bucket_name} - Configuring bucket...")
+    if availability_zone is not None:
+        # https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-buckets-objects-lifecycle.html#directory-bucket-lifecycle-differences
+        # S3 express requires a bucket policy to allow session-based access to perform lifecycle actions
+        account_id = boto3.client(
+            'sts').get_caller_identity().get('Account')
+        bucket_policy = {
+            "Version": "2008-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {
+                        "Service": "lifecycle.s3.amazonaws.com"
                     },
-                ],
-            },
-        )
+                    "Action": "s3express:CreateSession",
+                    "Condition": {
+                        "StringEquals": {
+                            "s3express:SessionMode": "ReadWrite"
+                        }
+                    },
+                    "Resource": [
+                        f"arn:aws:s3express:{region}:{account_id}:bucket/{bucket_name}"
+                    ]
+                }
+            ]
+        }
+        client.put_bucket_policy(
+            Bucket=bucket_name, Policy=json.dumps(bucket_policy))
+
+    client.put_bucket_lifecycle_configuration(
+        Bucket=bucket_name,
+        LifecycleConfiguration={
+            'Rules': [
+                {
+                    'ID': 'Abort all incomplete multipart uploads after 1 day',
+                    'Status': 'Enabled',
+                    'Filter': {'Prefix': ''},  # blank string means all
+                    'AbortIncompleteMultipartUpload': {'DaysAfterInitiation': 1},
+                },
+                {
+                    'ID': 'Objects under upload directory expire after 1 day',
+                    'Status': 'Enabled',
+                    'Filter': {'Prefix': 'upload/'},
+                    'Expiration': {'Days': 1},
+                },
+            ]})
 
     put_pre_existing_objects(
         10*MB, 'pre-existing-10MB', bucket=bucket_name, client=client)
@@ -231,10 +258,14 @@ def cleanup(bucket_name, availability_zone=None, client=s3_client):
 
 
 if args.action == 'init':
-    create_bucket_with_lifecycle("use1-az4", s3_client_east1)
+    create_bucket_with_lifecycle("use1-az4", s3_client_east1, "us-east-1")
     create_bucket_with_lifecycle("usw2-az1")
     create_bucket_with_lifecycle()
-    create_bucket_with_public_object()
+    if args.create_public_bucket:
+        create_bucket_with_public_object()
+    else:
+        print("Skipping public bucket, run with --create_public_bucket if you need these.")
+
     if os.environ.get('CRT_S3_TEST_BUCKET_NAME') != BUCKET_NAME_BASE:
         print(
             f"*** Set the environment variable $CRT_S3_TEST_BUCKET_NAME to {BUCKET_NAME_BASE} before running the tests ***")

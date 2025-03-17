@@ -77,12 +77,14 @@ enum aws_s3_meta_request_type {
      * a CopyObject request to S3 if the object size is not large enough for
      * a multipart upload.
      * Note: copy support is still in development and has following limitations:
-     * - host header must use virtual host addressing style (path style is not
+     * 1. host header must use virtual host addressing style (path style is not
      *   supported) and both source and dest buckets must have dns compliant name
-     * - only {bucket}/{key} format is supported for source and passing arn as
+     * 2. only {bucket}/{key} format is supported for source and passing arn as
      *   source will not work
-     * - source bucket is assumed to be in the same region as dest
-     * - source bucket and dest bucket must both be either directory buckets or regular buckets.
+     * 3. source bucket is assumed to be in the same region as dest
+     * 4. source bucket and dest bucket must both be either directory buckets or regular buckets.
+     *
+     * Provide the `meta_request_options.copy_source_uri` to bypass limitation 1 & 2.
      */
     AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
 
@@ -224,6 +226,20 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
+/**
+ * Optional callback, for you to provide the full object checksum after the object was read.
+ * Client will NOT check the checksum provided before sending it to the server.
+ *
+ * @param meta_request  pointer to the aws_s3_meta_request of the upload.
+ * @param user_data     pointer to the user_data set.
+ *
+ * @return A new string with the full object checksum, as it is sent in a PutObject request (base64-encoded):
+ *         https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_RequestSyntax
+ *         If an error occurs, call aws_raise_error(E) with a proper error code and return NULL.
+ */
+typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct aws_s3_meta_request *meta_request,
+                                                                         void *user_data);
+
 enum aws_s3_meta_request_tls_mode {
     AWS_MR_TLS_ENABLED,
     AWS_MR_TLS_DISABLED,
@@ -241,7 +257,8 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_CRC32,
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
-    AWS_SCA_END = AWS_SCA_SHA256,
+    AWS_SCA_CRC64NVME,
+    AWS_SCA_END = AWS_SCA_CRC64NVME,
 };
 
 enum aws_s3_checksum_location {
@@ -535,6 +552,10 @@ struct aws_s3_client_config {
      * If set, client will invoke the factory to get the provider to use, when needed.
      *
      * If not set, client will create a default S3 Express provider under the hood.
+     *
+     * NOTE: THE FOLLOWING BEHAVIOR IS EXPERIMENTAL AND UNSTABLE
+     * Default S3 Express provider will pass the headers allowed in `g_s3_create_session_allowed_headers` to the
+     * CreateSession call.
      */
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
     void *factory_user_data;
@@ -556,10 +577,11 @@ struct aws_s3_client_config {
 
 struct aws_s3_checksum_config {
 
+    /****************************** PUT Object specific *******************************/
     /**
      * The location of client added checksum header.
      *
-     * If AWS_SCL_NONE. No request payload checksum will be calculated or added.
+     * If AWS_SCL_NONE. No request payload checksum will be added.
      *
      * If AWS_SCL_HEADER, the client will calculate the checksum and add it to the headers.
      *
@@ -575,6 +597,25 @@ struct aws_s3_checksum_config {
      */
     enum aws_s3_checksum_algorithm checksum_algorithm;
 
+    /**
+     * Optional.
+     * Provide the full object checksum. This callback is invoked once, after the entire body has been read.
+     * sent.
+     *
+     * NOTE:
+     *  - Do not set this callback if the HTTP message already has a checksum header (e.g. x-amz-checksum-crc32). Doing
+     *      so will raise AWS_ERROR_INVALID_ARGUMENT.
+     *  - checksum_algorithm must be set to the algorithm you will use.
+     *
+     * WARNING: This feature is experimental/unstable.
+     * At this time, full object checksum callback is only available for multipart upload
+     * (when Content-Length is above the `multipart_upload_threshold`,
+     * or Content-Length not specified). Otherwise, it will be ignored.
+     */
+    aws_s3_meta_request_full_object_checksum_fn *full_object_checksum_callback;
+    void *user_data;
+
+    /****************************** GET Object specific *******************************/
     /**
      * Enable checksum mode header will be attached to GET requests, this will tell s3 to send back checksums headers if
      * they exist. Calculate the corresponding checksum on the response bodies. The meta request will finish with a did
@@ -592,7 +633,7 @@ struct aws_s3_checksum_config {
      *
      * The list of algorithms for user to pick up when validate the checksum. Client will pick up the algorithm from the
      * list with the priority based on performance, and the algorithm sent by server. The priority based on performance
-     * is [CRC32C, CRC32, SHA1, SHA256].
+     * is [CRC64NVME, CRC32C, CRC32, SHA1, SHA256].
      *
      * If the response checksum was validated by client, the result will indicate which algorithm was picked.
      */
@@ -721,6 +762,9 @@ struct aws_s3_meta_request_options {
     /**
      * Optional.
      * if set, the flexible checksum will be performed by client based on the config.
+     *
+     * Notes: checksum can also be added through the http message provided.
+     *      The checksum in http header will override corresponding the checksum config.
      */
     const struct aws_s3_checksum_config *checksum_config;
 
@@ -831,6 +875,13 @@ struct aws_s3_meta_request_options {
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
      */
     const uint64_t *object_size_hint;
+
+    /*
+     * (Optional)
+     * If performing a copy operation, provide the source URI here to bypass limitations 1 and 2 of the copy operation.
+     * This will be ignored for other operations.
+     */
+    struct aws_byte_cursor copy_source_uri;
 };
 
 /* Result details of a meta request.

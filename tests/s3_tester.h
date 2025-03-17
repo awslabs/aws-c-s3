@@ -70,6 +70,12 @@ enum aws_s3_tester_default_type_mode {
     AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT,
 };
 
+enum aws_s3_tester_full_object_checksum {
+    AWS_TEST_FOC_NONE = 0,
+    AWS_TEST_FOC_HEADER,
+    AWS_TEST_FOC_CALLBACK,
+};
+
 struct aws_s3_client_vtable_patch {
     struct aws_s3_client_vtable *original_vtable;
     struct aws_s3_client_vtable patched_vtable;
@@ -134,6 +140,8 @@ struct aws_s3_tester_client_options {
     size_t num_network_interface_names;
     uint32_t setup_region : 1;
     uint32_t use_proxy : 1;
+    aws_s3express_provider_factory_fn *s3express_provider_override_factory;
+    void *factory_user_data;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -219,6 +227,8 @@ struct aws_s3_tester_meta_request_options {
         size_t content_length;
         bool skip_content_length;
         struct aws_byte_cursor content_encoding;
+        enum aws_s3_tester_full_object_checksum full_object_checksum;
+        struct aws_byte_cursor if_none_match_header;
     } put_options;
 
     enum aws_s3_tester_sse_type sse_type;
@@ -521,6 +531,7 @@ extern struct aws_byte_cursor g_test_s3express_bucket_use1_az4_endpoint;
  */
 int aws_test_s3_copy_object_helper(
     struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
     struct aws_byte_cursor source_bucket,
     struct aws_byte_cursor source_key,
     struct aws_byte_cursor destination_endpoint,
@@ -528,19 +539,22 @@ int aws_test_s3_copy_object_helper(
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size,
-    bool s3_express);
+    bool s3_express,
+    struct aws_byte_cursor copy_source_uri);
 
 /**
  * Take the source with x_amz_copy_source, and the destination_endpoint to help testing copy object.
  */
 int aws_test_s3_copy_object_from_x_amz_copy_source(
     struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
     struct aws_byte_cursor x_amz_copy_source,
     struct aws_byte_cursor destination_endpoint,
     struct aws_byte_cursor destination_key,
     int expected_error_code,
     int expected_response_status,
     uint64_t expected_size,
-    bool s3_express);
+    bool s3_express,
+    struct aws_byte_cursor copy_source_uri);
 
 #endif /* AWS_S3_TESTER_H */

@@ -27,6 +27,8 @@ struct aws_credentials_properties_s3express {
      * If empty, the region of the S3 client will be used.
      */
     struct aws_byte_cursor region;
+
+    struct aws_http_headers *headers;
 };
 
 struct aws_s3express_credentials_provider_vtable {

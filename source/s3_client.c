@@ -142,6 +142,7 @@ static struct aws_s3_client_vtable s_s3_client_default_vtable = {
     .endpoint_shutdown_callback = s_s3_client_endpoint_shutdown_callback,
     .finish_destroy = s_s3_client_finish_destroy_default,
     .parallel_input_stream_new_from_file = aws_parallel_input_stream_new_from_file,
+    .http_connection_make_request = aws_http_connection_make_request,
 };
 
 void aws_s3_set_dns_ttl(size_t ttl) {
@@ -318,9 +319,13 @@ struct aws_s3_client *aws_s3_client_new(
             mem_limit = GB_TO_BYTES(1);
         }
 #else
-        if (client_config->throughput_target_gbps > 75.0) {
+        if (client_config->throughput_target_gbps >= 200.0) {
+            mem_limit = GB_TO_BYTES(24);
+        } else if (client_config->throughput_target_gbps >= 100.0) {
+            mem_limit = GB_TO_BYTES(16);
+        } else if (client_config->throughput_target_gbps >= 75.0) {
             mem_limit = GB_TO_BYTES(8);
-        } else if (client_config->throughput_target_gbps > 25.0) {
+        } else if (client_config->throughput_target_gbps >= 25.0) {
             mem_limit = GB_TO_BYTES(4);
         } else {
             mem_limit = GB_TO_BYTES(2);
@@ -948,46 +953,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
 
-    if (options->checksum_config) {
-        if (options->checksum_config->location == AWS_SCL_TRAILER) {
-            struct aws_http_headers *headers = aws_http_message_get_headers(options->message);
-            struct aws_byte_cursor existing_encoding;
-            AWS_ZERO_STRUCT(existing_encoding);
-            if (aws_http_headers_get(headers, g_content_encoding_header_name, &existing_encoding) == AWS_OP_SUCCESS) {
-                if (aws_byte_cursor_find_exact(&existing_encoding, &g_content_encoding_header_aws_chunked, NULL) ==
-                    AWS_OP_SUCCESS) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "id=%p Cannot create meta s3 request; for trailer checksum, the original request cannot be "
-                        "aws-chunked encoding. The client will encode the request instead.",
-                        (void *)client);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-            }
-        }
-
-        if (options->checksum_config->location != AWS_SCL_NONE &&
-            options->checksum_config->checksum_algorithm == AWS_SCA_NONE) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum location is set, but no checksum algorithm selected.",
-                (void *)client);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-        if (options->checksum_config->checksum_algorithm != AWS_SCA_NONE &&
-            options->checksum_config->location == AWS_SCL_NONE && options->upload_review_callback == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Cannot create meta s3 request; checksum algorithm is set, but no checksum location selected "
-                "and no upload review callback set, so checksums will be unused",
-                (void *)client);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            return NULL;
-        }
-    }
-
     if (s_apply_endpoint_override(client, message_headers, options->endpoint)) {
         return NULL;
     }
@@ -1073,6 +1038,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
             }
 
             endpoint_host_name = aws_string_new_from_cursor(client->allocator, aws_uri_host_name(&host_uri));
+            port = aws_uri_port(&host_uri);
             aws_uri_clean_up(&host_uri);
         }
 
@@ -1129,6 +1095,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         }
 
         meta_request->endpoint = endpoint;
+        /**
+         * shutdown_callback must be the last thing that gets set on the meta_request so that we don’t return NULL and
+         * trigger the shutdown_callback.
+         */
+        meta_request->shutdown_callback = options->shutdown_callback;
 
         s_s3_client_push_meta_request_synced(client, meta_request);
         s_s3_client_schedule_process_work_synced(client);
@@ -1149,11 +1120,6 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         meta_request = aws_s3_meta_request_release(meta_request);
     } else {
         AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p: Created meta request %p", (void *)client, (void *)meta_request);
-        /**
-         * shutdown_callback must be the last thing that gets set on the meta_request so that we don’t return NULL and
-         * trigger the shutdown_callback.
-         */
-        meta_request->shutdown_callback = options->shutdown_callback;
     }
 
     return meta_request;
@@ -1350,19 +1316,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED &&
                             !aws_http_headers_has(initial_message_headers, g_content_md5_header_name),
                         options);
-                } else {
-                    if (aws_s3_message_util_check_checksum_header(options->message)) {
-                        /* The checksum header has been set and the request will be split. We fail the request */
-                        AWS_LOGF_ERROR(
-                            AWS_LS_S3_META_REQUEST,
-                            "Could not create auto-ranged-put meta request; checksum headers has been set for "
-                            "auto-ranged-put that will be split. Pre-calculated checksums are only supported for "
-                            "single part upload.");
-                        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                        return NULL;
-                    }
                 }
-
                 return aws_s3_meta_request_auto_ranged_put_new(
                     client->allocator, client, part_size, content_length_found, content_length, num_parts, options);
             } else { /* else using resume token */
@@ -2163,12 +2117,11 @@ static void s_s3_client_on_acquire_http_connection(
             error_code,
             aws_error_str(error_code));
 
-        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_IO_TLS_ERROR_NEGOTIATION_FAILURE ||
-            error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED || error_code == AWS_IO_SOCKET_INVALID_OPTIONS) {
+        if (error_code == AWS_IO_DNS_INVALID_NAME || error_code == AWS_ERROR_PLATFORM_NOT_SUPPORTED ||
+            error_code == AWS_IO_SOCKET_INVALID_OPTIONS) {
             /**
-             * Fall fast without retry
+             * Fail fast without retry
              * - Invalid DNS name will not change after retry.
-             * - TLS negotiation is expensive and retry will not help in most case.
              */
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,

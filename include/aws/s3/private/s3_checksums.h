@@ -11,26 +11,48 @@
 
 struct aws_s3_checksum;
 
+/* List to check the checksum algorithm to use based on the priority. */
+static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
+    AWS_SCA_CRC64NVME,
+    AWS_SCA_CRC32C,
+    AWS_SCA_CRC32,
+    AWS_SCA_SHA1,
+    AWS_SCA_SHA256,
+};
+AWS_STATIC_ASSERT(AWS_ARRAY_SIZE(s_checksum_algo_priority_list) == (AWS_SCA_END - AWS_SCA_INIT + 1));
+
 struct aws_checksum_vtable {
     void (*destroy)(struct aws_s3_checksum *checksum);
     int (*update)(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf);
-    int (*finalize)(struct aws_s3_checksum *checksum, struct aws_byte_buf *out, size_t truncate_to);
+    int (*finalize)(struct aws_s3_checksum *checksum, struct aws_byte_buf *out);
 };
 
 struct aws_s3_checksum {
     struct aws_allocator *allocator;
     struct aws_checksum_vtable *vtable;
-    void *impl;
     size_t digest_size;
     enum aws_s3_checksum_algorithm algorithm;
     bool good;
+    union {
+        struct aws_hash *hash;
+        uint32_t crc_val_32bit;
+        uint64_t crc_val_64bit;
+    } impl;
 };
 
-struct checksum_config {
+struct checksum_config_storage {
+    struct aws_allocator *allocator;
+    struct aws_byte_buf full_object_checksum;
+    bool has_full_object_checksum;
+
+    aws_s3_meta_request_full_object_checksum_fn *full_object_checksum_callback;
+    void *user_data;
+
     enum aws_s3_checksum_location location;
     enum aws_s3_checksum_algorithm checksum_algorithm;
     bool validate_response_checksum;
     struct {
+        bool crc64nvme;
         bool crc32c;
         bool crc32;
         bool sha1;
@@ -85,25 +107,26 @@ struct aws_input_stream *aws_chunk_stream_new(
  * Get the size of the checksum output corresponding to the aws_s3_checksum_algorithm enum value.
  */
 AWS_S3_API
-size_t aws_get_digest_size_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+size_t aws_get_digest_size_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get the header name corresponding to the aws_s3_checksum_algorithm enum value.
+ * Get header name to use for algorithm (e.g. "x-amz-checksum-crc32")
  */
 AWS_S3_API
-const struct aws_byte_cursor *aws_get_http_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+struct aws_byte_cursor aws_get_http_header_name_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get the multipart upload header name corresponding to the aws_s3_checksum_algorithm enum value.
+ * Get algorithm's name (e.g. "CRC32"), to be used as the value of headers like `x-amz-checksum-algorithm`
  */
 AWS_S3_API
-const struct aws_byte_cursor *aws_get_create_mpu_header_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+struct aws_byte_cursor aws_get_checksum_algorithm_name(enum aws_s3_checksum_algorithm algorithm);
 
 /**
- * Get the complete multipart upload name corresponding to the aws_s3_checksum_algorithm enum value.
+ * Get the name of checksum algorithm to be used as the details of the parts were uploaded. Referring to
+ * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompletedPart.html#AmazonS3-Type-CompletedPart
  */
 AWS_S3_API
-const struct aws_byte_cursor *aws_get_complete_mpu_name_from_algorithm(enum aws_s3_checksum_algorithm algorithm);
+struct aws_byte_cursor aws_get_completed_part_name_from_checksum_algorithm(enum aws_s3_checksum_algorithm algorithm);
 
 /**
  * create a new aws_checksum corresponding to the aws_s3_checksum_algorithm enum value.
@@ -121,8 +144,7 @@ int aws_checksum_compute(
     struct aws_allocator *allocator,
     enum aws_s3_checksum_algorithm algorithm,
     const struct aws_byte_cursor *input,
-    struct aws_byte_buf *output,
-    size_t truncate_to);
+    struct aws_byte_buf *output);
 
 /**
  * Cleans up and deallocates checksum.
@@ -141,9 +163,17 @@ int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_
  * Allocation of output is the caller's responsibility.
  */
 AWS_S3_API
-int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output, size_t truncate_to);
+int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output);
 
 AWS_S3_API
-void checksum_config_init(struct checksum_config *internal_config, const struct aws_s3_checksum_config *config);
+int aws_checksum_config_storage_init(
+    struct aws_allocator *allocator,
+    struct checksum_config_storage *internal_config,
+    const struct aws_s3_checksum_config *config,
+    const struct aws_http_message *message,
+    const void *log_id);
+
+AWS_S3_API
+void aws_checksum_config_storage_cleanup(struct checksum_config_storage *internal_config);
 
 #endif /* AWS_S3_CHECKSUMS_H */

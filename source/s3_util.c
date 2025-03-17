@@ -43,20 +43,10 @@ const struct aws_byte_cursor g_trailer_header_name = AWS_BYTE_CUR_INIT_FROM_STRI
 const struct aws_byte_cursor g_request_validation_mode = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-mode");
 const struct aws_byte_cursor g_enabled = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("enabled");
 
-const struct aws_byte_cursor g_create_mpu_checksum_header_name =
+const struct aws_byte_cursor g_checksum_algorithm_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-algorithm");
-const struct aws_byte_cursor g_crc32c_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c");
-const struct aws_byte_cursor g_crc32_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32");
-const struct aws_byte_cursor g_sha1_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1");
-const struct aws_byte_cursor g_sha256_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256");
-const struct aws_byte_cursor g_crc32c_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32C");
-const struct aws_byte_cursor g_crc32_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32");
-const struct aws_byte_cursor g_sha1_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA1");
-const struct aws_byte_cursor g_sha256_create_mpu_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA256");
-const struct aws_byte_cursor g_crc32c_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32C");
-const struct aws_byte_cursor g_crc32_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC32");
-const struct aws_byte_cursor g_sha1_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA1");
-const struct aws_byte_cursor g_sha256_complete_mpu_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
+const struct aws_byte_cursor g_sdk_checksum_algorithm_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
 const struct aws_byte_cursor g_mp_parts_count_header_name =
@@ -692,6 +682,11 @@ int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_b
         return AWS_ERROR_S3_REQUEST_TIMEOUT;
     }
 
+    if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "ExpiredToken") ||
+        aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "TokenRefreshRequired")) {
+        return AWS_ERROR_S3_TOKEN_EXPIRED;
+    }
+
     return AWS_ERROR_UNKNOWN;
 }
 
@@ -738,26 +733,27 @@ int aws_s3_check_headers_for_checksum(
         return AWS_OP_SUCCESS;
     }
 
-    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
-        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, algorithm)) {
             /* If user doesn't select this algorithm, skip */
             continue;
         }
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
         struct aws_byte_cursor checksum_value;
-        if (aws_http_headers_get(headers, *algorithm_header_name, &checksum_value) == AWS_OP_SUCCESS) {
+        if (aws_http_headers_get(headers, algorithm_header_name, &checksum_value) == AWS_OP_SUCCESS) {
             /* Found the checksum header, keep the header value and initialize the running checksum */
             size_t encoded_len = 0;
-            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
-            if (checksum_value.len == encoded_len - 1) {
-                /* encoded_len includes the nullptr length. -1 is the expected length. */
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
+            if (checksum_value.len == encoded_len) {
                 aws_byte_buf_init_copy_from_cursor(out_checksum_buffer, meta_request->allocator, checksum_value);
-                *out_checksum = aws_checksum_new(meta_request->allocator, i);
+                *out_checksum = aws_checksum_new(meta_request->allocator, algorithm);
                 if (!*out_checksum) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "Could not create checksum for algorithm: %d, due to error code %d (%s)",
-                        i,
+                        algorithm,
                         aws_last_error_or_unknown(),
                         aws_error_str(aws_last_error_or_unknown()));
                     return AWS_OP_ERR;

@@ -114,7 +114,7 @@ static bool s_validate_checksum(
     aws_byte_buf_init(&encoded_response_body_sum, checksum_to_validate->allocator, encoded_checksum_len);
     aws_byte_buf_init(&response_body_sum, checksum_to_validate->allocator, checksum_to_validate->digest_size);
 
-    if (aws_checksum_finalize(checksum_to_validate, &response_body_sum, 0)) {
+    if (aws_checksum_finalize(checksum_to_validate, &response_body_sum)) {
         goto done;
     }
     struct aws_byte_cursor response_body_sum_cursor = aws_byte_cursor_from_buf(&response_body_sum);
@@ -218,7 +218,14 @@ int aws_s3_meta_request_init_base(
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
-    checksum_config_init(&meta_request->checksum_config, options->checksum_config);
+    if (aws_checksum_config_storage_init(
+            meta_request->allocator,
+            &meta_request->checksum_config,
+            options->checksum_config,
+            options->message,
+            (void *)meta_request)) {
+        goto error;
+    }
 
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(client, options->signing_config);
@@ -481,6 +488,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Cleaning up meta request", (void *)meta_request);
 
     /* Clean up our initial http message */
+    aws_checksum_config_storage_cleanup(&meta_request->checksum_config);
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
@@ -585,9 +593,6 @@ bool aws_s3_meta_request_is_finished(struct aws_s3_meta_request *meta_request) {
     return is_finished;
 }
 
-static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
-static void s_s3_meta_request_on_request_prepared(void *user_data);
-
 /* TODO: document how this is final step in prepare-request sequence.
  * Could be invoked on any thread. */
 static void s_s3_prepare_request_payload_callback_and_destroy(
@@ -629,7 +634,11 @@ static void s_s3_meta_request_schedule_prepare_request_default(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     aws_s3_meta_request_prepare_request_callback_fn *callback,
-    void *user_data);
+    void *user_data) {
+    /* By default, don't do any parallel. */
+    aws_s3_meta_request_schedule_prepare_request_default_impl(
+        meta_request, request, false /*parallel*/, callback, user_data);
+}
 
 void aws_s3_meta_request_prepare_request(
     struct aws_s3_meta_request *meta_request,
@@ -646,9 +655,13 @@ void aws_s3_meta_request_prepare_request(
     }
 }
 
-static void s_s3_meta_request_schedule_prepare_request_default(
+static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+static void s_s3_meta_request_on_request_prepared(void *user_data);
+
+void aws_s3_meta_request_schedule_prepare_request_default_impl(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
+    bool parallel,
     aws_s3_meta_request_prepare_request_callback_fn *callback,
     void *user_data) {
     AWS_PRECONDITION(meta_request);
@@ -670,9 +683,10 @@ static void s_s3_meta_request_schedule_prepare_request_default(
 
     aws_task_init(
         &payload->task, s_s3_meta_request_prepare_request_task, payload, "s3_meta_request_prepare_request_task");
-    if (meta_request->request_body_parallel_stream) {
-        /* The body stream supports reading in parallel, so schedule task on any I/O thread.
-         * If we always used the meta-request's dedicated io_event_loop, we wouldn't get any parallelism. */
+
+    if (parallel) {
+        /* To support reading in parallel, schedule task on any I/O thread in the streaming elg.
+         * Otherwise, we wouldn't get any parallelism. */
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         aws_event_loop_schedule_task_now(loop, &payload->task);
     } else {
@@ -864,7 +878,7 @@ static void s_get_original_credentials_callback(struct aws_credentials *credenti
     }
 }
 
-static int s_meta_request_resolve_signing_config(
+static void s_meta_request_resolve_signing_config(
     struct aws_signing_config_aws *out_signing_config,
     struct aws_s3_request *request,
     struct aws_s3_meta_request *meta_request) {
@@ -884,8 +898,8 @@ static int s_meta_request_resolve_signing_config(
         AWS_FATAL_ASSERT(false);
     }
 
-    /* If the checksum is configured to be added to the trailer, the payload will be aws-chunked encoded. The payload
-     * will need to be streaming signed/unsigned. */
+    /* If the checksum is configured to be added to the trailer, the payload will be aws-chunked encoded. The
+     * payload will need to be streaming signed/unsigned. */
     if (meta_request->checksum_config.location == AWS_SCL_TRAILER &&
         aws_byte_cursor_eq(&out_signing_config->signed_body_value, &g_aws_signed_body_value_unsigned_payload)) {
         out_signing_config->signed_body_value = g_aws_signed_body_value_streaming_unsigned_payload_trailer;
@@ -897,7 +911,12 @@ static int s_meta_request_resolve_signing_config(
             &out_signing_config->signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
         out_signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
     }
-    return AWS_OP_SUCCESS;
+
+    /**
+     * In case of the signing was skipped for anonymous credentials, or presigned URL.
+     */
+    request->send_data.require_streaming_unsigned_payload_header = aws_byte_cursor_eq(
+        &out_signing_config->signed_body_value, &g_aws_signed_body_value_streaming_unsigned_payload_trailer);
 }
 
 void aws_s3_meta_request_sign_request_default_impl(
@@ -915,27 +934,9 @@ void aws_s3_meta_request_sign_request_default_impl(
 
     struct aws_signing_config_aws signing_config;
 
-    if (s_meta_request_resolve_signing_config(&signing_config, request, meta_request)) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: No signing config present. Not signing request %p.",
-            (void *)meta_request,
-            (void *)request);
-
-        on_signing_complete(NULL, AWS_ERROR_SUCCESS, user_data);
-        return;
-    }
+    s_meta_request_resolve_signing_config(&signing_config, request, meta_request);
 
     request->send_data.signable = aws_signable_new_http_request(meta_request->allocator, request->send_data.message);
-
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Created signable %p for request %p with message %p",
-        (void *)meta_request,
-        (void *)request->send_data.signable,
-        (void *)request,
-        (void *)request->send_data.message);
-
     if (request->send_data.signable == NULL) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -946,6 +947,13 @@ void aws_s3_meta_request_sign_request_default_impl(
         on_signing_complete(NULL, aws_last_error_or_unknown(), user_data);
         return;
     }
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Created signable %p for request %p with message %p",
+        (void *)meta_request,
+        (void *)request->send_data.signable,
+        (void *)request,
+        (void *)request->send_data.message);
 
     if (signing_config.algorithm == AWS_SIGNING_ALGORITHM_V4_S3EXPRESS && !disable_s3_express_signing) {
         /* Fetch credentials from S3 Express provider. */
@@ -960,6 +968,7 @@ void aws_s3_meta_request_sign_request_default_impl(
         context->user_data = user_data;
         context->properties.host = aws_byte_cursor_from_string(meta_request->s3express_session_host);
         context->properties.region = signing_config.region;
+        context->properties.headers = aws_http_message_get_headers(meta_request->initial_request_message);
 
         if (signing_config.credentials) {
             context->original_credentials = signing_config.credentials;
@@ -1054,6 +1063,21 @@ static void s_s3_meta_request_request_on_signed(
         goto finish;
     }
 
+    /**
+     * Add "x-amz-content-sha256: STREAMING-UNSIGNED-PAYLOAD-TRAILER" header to support trailing checksum.
+     */
+    if (request->send_data.require_streaming_unsigned_payload_header) {
+        struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
+        AWS_ASSERT(headers != NULL);
+        if (aws_http_headers_set(
+                headers,
+                aws_byte_cursor_from_c_str("x-amz-content-sha256"),
+                g_aws_signed_body_value_streaming_unsigned_payload_trailer)) {
+            error_code = aws_last_error_or_unknown();
+            goto finish;
+        }
+    }
+
     if (request->send_data.metrics) {
         struct aws_s3_request_metrics *metric = request->send_data.metrics;
         aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.sign_end_timestamp_ns);
@@ -1082,6 +1106,8 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     AWS_PRECONDITION(connection);
     AWS_PRECONDITION(connection->http_connection);
 
+    struct aws_s3_client *client = meta_request->client;
+    AWS_PRECONDITION(client);
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
@@ -1104,7 +1130,8 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         request->upload_timeout_ms = (size_t)options.response_first_byte_timeout_ms;
     }
 
-    struct aws_http_stream *stream = aws_http_connection_make_request(connection->http_connection, &options);
+    struct aws_http_stream *stream =
+        client->vtable->http_connection_make_request(connection->http_connection, &options);
 
     if (stream == NULL) {
         AWS_LOGF_ERROR(
@@ -1125,8 +1152,8 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
             goto error_finish;
         }
 
-        /* Activate the stream within the lock as once the activate invoked, the HTTP level callback can happen right
-         * after.  */
+        /* Activate the stream within the lock as once the activate invoked, the HTTP level callback can happen
+         * right after.  */
         if (aws_http_stream_activate(stream) != AWS_OP_SUCCESS) {
             aws_s3_meta_request_unlock_synced_data(meta_request);
             AWS_LOGF_ERROR(
@@ -1191,10 +1218,10 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
 static bool s_header_value_from_list(
     const struct aws_http_header *headers,
     size_t headers_count,
-    const struct aws_byte_cursor *name,
+    const struct aws_byte_cursor name,
     struct aws_byte_cursor *out_value) {
     for (size_t i = 0; i < headers_count; ++i) {
-        if (aws_byte_cursor_eq(&headers[i].name, name)) {
+        if (aws_byte_cursor_eq(&headers[i].name, &name)) {
             *out_value = headers[i].value;
             return true;
         }
@@ -1207,20 +1234,24 @@ static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
     size_t headers_count) {
-    for (int i = AWS_SCA_INIT; i <= AWS_SCA_END; i++) {
-        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, i)) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+        if (!aws_s3_meta_request_checksum_config_has_algorithm(meta_request, algorithm)) {
             /* If user doesn't select this algorithm, skip */
             continue;
         }
-        const struct aws_byte_cursor *algorithm_header_name = aws_get_http_header_name_from_algorithm(i);
+        const struct aws_byte_cursor algorithm_header_name =
+            aws_get_http_header_name_from_checksum_algorithm(algorithm);
         struct aws_byte_cursor header_sum;
         if (s_header_value_from_list(headers, headers_count, algorithm_header_name, &header_sum)) {
             size_t encoded_len = 0;
-            aws_base64_compute_encoded_len(aws_get_digest_size_from_algorithm(i), &encoded_len);
-            if (header_sum.len == encoded_len - 1) {
+            aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len);
+            if (header_sum.len == encoded_len) {
                 aws_byte_buf_init_copy_from_cursor(
                     &connection->request->request_level_response_header_checksum, meta_request->allocator, header_sum);
-                connection->request->request_level_running_response_sum = aws_checksum_new(meta_request->allocator, i);
+                connection->request->request_level_running_response_sum =
+                    aws_checksum_new(meta_request->allocator, algorithm);
+                AWS_ASSERT(connection->request->request_level_running_response_sum != NULL);
             }
             break;
         }
@@ -1321,8 +1352,9 @@ static int s_s3_meta_request_headers_block_done(
     AWS_PRECONDITION(meta_request);
 
     /*
-     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so we
-     * don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets instead.
+     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so
+     * we don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets
+     * instead.
      */
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
@@ -2486,6 +2518,8 @@ bool aws_s3_meta_request_checksum_config_has_algorithm(
     AWS_PRECONDITION(meta_request);
 
     switch (algorithm) {
+        case AWS_SCA_CRC64NVME:
+            return meta_request->checksum_config.response_checksum_algorithms.crc64nvme;
         case AWS_SCA_CRC32C:
             return meta_request->checksum_config.response_checksum_algorithms.crc32c;
         case AWS_SCA_CRC32:

@@ -92,10 +92,22 @@ struct aws_s3_meta_request *aws_s3_meta_request_copy_object_new(
     copy_object->synced_data.content_length = UNKNOWN_CONTENT_LENGTH;
     copy_object->synced_data.total_num_parts = UNKNOWN_NUM_PARTS;
     copy_object->threaded_update_data.next_part_number = 1;
+    if (options->copy_source_uri.len != 0) {
+        if (aws_uri_init_parse(&copy_object->source_uri, allocator, &options->copy_source_uri)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Unable to parse the copy_source_uri provided in the request: " PRInSTR "",
+                AWS_BYTE_CURSOR_PRI(options->copy_source_uri));
+            goto on_error;
+        }
+    }
 
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Created new CopyObject Meta Request.", (void *)&copy_object->base);
 
     return &copy_object->base;
+on_error:
+    aws_s3_meta_request_release(&copy_object->base);
+    return NULL;
 }
 
 static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *meta_request) {
@@ -105,6 +117,7 @@ static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *me
     struct aws_s3_copy_object *copy_object = meta_request->impl;
 
     aws_string_destroy(copy_object->upload_id);
+    aws_uri_clean_up(&copy_object->source_uri);
     copy_object->upload_id = NULL;
 
     for (size_t part_index = 0; part_index < aws_array_list_length(&copy_object->synced_data.part_list); ++part_index) {
@@ -364,7 +377,7 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
         /* Prepares the GetObject HEAD request to get the source object size. */
         case AWS_S3_COPY_OBJECT_REQUEST_TAG_GET_OBJECT_SIZE: {
             message = aws_s3_get_source_object_size_message_new(
-                meta_request->allocator, meta_request->initial_request_message);
+                meta_request->allocator, meta_request->initial_request_message, &copy_object->source_uri);
             break;
         }
 

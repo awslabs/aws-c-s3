@@ -272,7 +272,7 @@ struct aws_s3_meta_request {
     const bool should_compute_content_md5;
 
     /* deep copy of the checksum config. */
-    struct checksum_config checksum_config;
+    struct checksum_config_storage checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a multipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
@@ -464,6 +464,13 @@ AWS_S3_API
 bool aws_s3_meta_request_checksum_config_has_algorithm(
     struct aws_s3_meta_request *meta_request,
     enum aws_s3_checksum_algorithm algorithm);
+
+void aws_s3_meta_request_schedule_prepare_request_default_impl(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    bool parallel,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
 
 AWS_EXTERN_C_END
 

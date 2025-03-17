@@ -49,6 +49,7 @@ enum aws_s3_errors {
     AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS,
     AWS_ERROR_S3_RECV_FILE_NOT_FOUND,
     AWS_ERROR_S3_REQUEST_TIMEOUT,
+    AWS_ERROR_S3_TOKEN_EXPIRED,
 
     AWS_ERROR_S3_END_RANGE = AWS_ERROR_ENUM_END_RANGE(AWS_C_S3_PACKAGE_ID)
 };
@@ -65,16 +66,6 @@ enum aws_s3_subject {
 
 struct aws_s3_platform_info;
 
-struct aws_s3_cpu_group_info {
-    /* group index, this usually refers to a particular numa node */
-    uint16_t cpu_group;
-    /* array of network devices on this node */
-    struct aws_byte_cursor *nic_name_array;
-    /* length of network devices array */
-    size_t nic_name_array_length;
-    size_t cpus_in_group;
-};
-
 #ifdef _MSC_VER
 #    pragma warning(push)
 #    pragma warning(disable : 4626) /* assignment operator was implicitly defined as deleted */
@@ -86,11 +77,6 @@ struct aws_s3_platform_info {
     struct aws_byte_cursor instance_type;
     /* max throughput for this instance type, in gigabits per second */
     double max_throughput_gbps;
-    /* array of cpu group info. This will always have at least one entry. */
-    struct aws_s3_cpu_group_info *cpu_group_info_array;
-    /* length of cpu group info array */
-    size_t cpu_group_info_array_length;
-
     /* The current build of this library specifically knows an optimal configuration for this
      * platform */
     bool has_recommended_configuration;

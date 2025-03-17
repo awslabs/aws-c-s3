@@ -37,9 +37,7 @@ static inline int s_verify_checksum_test_case(
             aws_byte_cursor_advance(&input_cpy, max_advance);
         }
 
-        size_t truncation_size = checksum->digest_size - expected->len;
-
-        ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf, truncation_size));
+        ASSERT_SUCCESS(aws_checksum_finalize(checksum, &output_buf));
         ASSERT_BIN_ARRAYS_EQUALS(expected->ptr, expected->len, output_buf.buffer, output_buf.len);
 
         aws_checksum_destroy(checksum);

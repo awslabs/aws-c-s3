@@ -45,6 +45,8 @@ struct aws_s3express_provider_tester {
     struct aws_uri mock_server;
     struct aws_s3_client *client;
 
+    aws_simple_completion_callback *on_provider_shutdown_callback;
+    void *shutdown_user_data;
     int error_code;
 };
 
@@ -252,6 +254,83 @@ TEST_CASE(s3express_provider_get_credentials_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+struct aws_s3express_credentials_provider *s_s3express_credentials_provider_factory(
+    struct aws_allocator *allocator,
+    struct aws_s3_client *client,
+    aws_simple_completion_callback on_provider_shutdown_callback,
+    void *shutdown_user_data,
+    void *factory_user_data) {
+
+    (void)shutdown_user_data;
+    (void)factory_user_data;
+    s_s3express_tester.on_provider_shutdown_callback = on_provider_shutdown_callback;
+    s_s3express_tester.shutdown_user_data = shutdown_user_data;
+    struct aws_s3express_credentials_provider_default_options options = {
+        .client = client,
+        .mock_test.bg_refresh_secs_override = s_bg_refresh_secs_override,
+    };
+    struct aws_s3express_credentials_provider *provider =
+        aws_s3express_credentials_provider_new_default(allocator, &options);
+    struct aws_s3express_credentials_provider_impl *impl = provider->impl;
+    impl->mock_test.endpoint_override = &s_s3express_tester.mock_server;
+    impl->mock_test.s3express_session_is_valid_override = s_s3express_session_always_true;
+
+    return provider;
+}
+
+TEST_CASE(s3express_provider_get_credentials_sse_headers_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    ASSERT_SUCCESS(s_s3express_tester_init(allocator));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .s3express_provider_override_factory = s_s3express_credentials_provider_factory,
+        .factory_user_data = NULL,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/sse_kms");
+    char uri[1024] = {'\0'};
+    snprintf(uri, sizeof(uri), "" PRInSTR "sse_kms?session=", AWS_BYTE_CURSOR_PRI(g_mock_server_uri));
+    struct aws_byte_cursor uri_cursor = aws_byte_cursor_from_c_str(uri);
+    aws_uri_clean_up(&s_s3express_tester.mock_server);
+    ASSERT_SUCCESS(aws_uri_init_parse(&s_s3express_tester.mock_server, allocator, &uri_cursor));
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+        .use_s3express_signing = true,
+        .sse_type = AWS_S3_TESTER_SSE_KMS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+
+    /* Call the provider shutdown callback to finish cleanup */
+    s_s3express_tester.on_provider_shutdown_callback(s_s3express_tester.shutdown_user_data);
+    ASSERT_SUCCESS(s_s3express_tester_cleanup());
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(s3express_provider_get_credentials_multiple_mock_server) {
     (void)ctx;
 
@@ -445,8 +524,8 @@ static size_t s_get_index_from_s3express_cache(
                 AWS_CONTAINER_OF(node, struct aws_linked_hash_table_node, node);
             node = aws_linked_list_next(node);
             struct aws_s3express_session *session = table_node->value;
-            struct aws_string *hash_key =
-                aws_encode_s3express_hash_key_new(s_s3express_tester.allocator, original_credentials, host_value);
+            struct aws_string *hash_key = aws_encode_s3express_hash_key_new(
+                s_s3express_tester.allocator, original_credentials, host_value, session->headers);
             if (aws_string_eq(session->hash_key, hash_key)) {
                 aws_string_destroy(hash_key);
                 aws_mutex_unlock(&impl->synced_data.lock);

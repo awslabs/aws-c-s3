@@ -25,6 +25,7 @@ The server will read from ./{OperationName}/{Key}.json. The json file is formatt
 {
     "status": 200,
     "headers": {"Connection": "close"},
+    "request_headers:" {"HeaderA": "ValueA"}
     "body": [
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
         "",
@@ -40,6 +41,7 @@ The server will read from ./{OperationName}/{Key}.json. The json file is formatt
 
 Where you can define the expected response status, header and response body. If the {Key}.json is not found from file system, it will load the `default.json`.
 
+The server validates that all specified headers in the "request_headers" field are present in the incoming request. If any required header is missing, the request will fail. These headers will not be part of the Response headers.
 If the "delay" field is present, the response will be delayed by X seconds.
 
 ### GetObject Response
