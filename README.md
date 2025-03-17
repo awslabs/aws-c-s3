@@ -32,7 +32,7 @@ CMake 3.9+ is required to build.
 If you are building on Linux, you will need to build aws-lc and s2n-tls first.
 
 ```
-git clone git@github.com:awslabs/aws-lc.git
+git clone git@github.com:aws/aws-lc.git
 cmake -S aws-lc -B aws-lc/build -DCMAKE_INSTALL_PREFIX=<install-path>
 cmake --build aws-lc/build --target install
 
