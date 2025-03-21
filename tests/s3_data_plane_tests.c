@@ -1757,7 +1757,7 @@ static int s_apply_backpressure_until_meta_request_finish(
          *       may push more bytes to the user (up to 1 part) than they've asked for. */
         uint64_t hacky_wiggle_room = part_size;
         uint64_t max_data_allowed = accumulated_window_increments + hacky_wiggle_room;
-        ASSERT_TRUE(accumulated_data_size <= max_data_allowed, "Received more data than the read window allows");
+        ASSERTF_TRUE(accumulated_data_size <= max_data_allowed, "Received more data than the read window allows");
 
         /* If we're done, we're done */
         if (done) {

@@ -95,7 +95,7 @@ static int s_asyncwrite_tester_validate(struct asyncwrite_tester *tester) {
     ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(&tester->test_results, 0 /*flags*/));
 
     /* Validate the checksums, to be we uploaded what we meant to upload */
-    ASSERT_TRUE(tester->test_results.upload_review.part_count > 0, "Update this code to handle whole-object checksum");
+    ASSERTF_TRUE(tester->test_results.upload_review.part_count > 0, "Update this code to handle whole-object checksum");
     struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester->source_buf);
     for (size_t part_i = 0; part_i < tester->test_results.upload_review.part_count; ++part_i) {
         /* calculate checksum of this part, from source_buffer */
@@ -531,7 +531,7 @@ static int s_wait_for_sub_request_to_send(
         if (!request_sent) {
             /* Check for timeout, then sleep a bit before checking again */
             ASSERT_SUCCESS(aws_high_res_clock_get_ticks(&now));
-            ASSERT_TRUE(
+            ASSERTF_TRUE(
                 now < timeout_timestamp,
                 "Timed out waiting for %s to be sent",
                 aws_s3_request_type_operation_name(request_type));

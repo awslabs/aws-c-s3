@@ -423,7 +423,7 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
             return AWS_OP_SKIP;
         }
 #    endif
-        ASSERT_TRUE(false, "aws_s3_tester_send_meta_request_with_options(() failed");
+        ASSERTF_TRUE(false, "aws_s3_tester_send_meta_request_with_options(() failed");
     }
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);

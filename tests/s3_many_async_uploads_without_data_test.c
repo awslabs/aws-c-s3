@@ -115,7 +115,7 @@ static int s_test_s3_many_async_uploads_without_data(struct aws_allocator *alloc
             struct aws_future_void *write_future =
                 aws_s3_meta_request_write(meta_request_i, aws_byte_cursor_from_buf(&tmp_data), eof);
 
-            ASSERT_TRUE(
+            ASSERTF_TRUE(
                 aws_future_void_wait(write_future, SEND_DATA_TIMEOUT_NANOS),
                 "Timed out waiting to send data on upload %d/%d."
                 " After writing %zu bytes, timed out on write(data=%zu, eof=%d)",

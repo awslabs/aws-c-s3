@@ -186,7 +186,7 @@ static int s_test_s3_list_bucket_valid(struct aws_allocator *allocator, void *ct
         }
         ASSERT_TRUE(length > 0);
     } else {
-        ASSERT_TRUE(
+        ASSERTF_TRUE(
             false,
             "Failing test because the operation failed with error %s\n",
             aws_error_debug_str(test_data.error_code));
