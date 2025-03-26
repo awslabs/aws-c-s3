@@ -24,6 +24,6 @@
 #        define AWS_S3_API
 #    endif
 
-#endif /* defined(USE_WINDOWS_DLL_SEMANTICS) || defined(WIN32) */
+#endif /* defined(AWS_CRT_USE_WINDOWS_DLL_SEMANTICS) || defined(_WIN32) */
 
 #endif /* AWS_S3_EXPORTS_H */
