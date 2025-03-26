@@ -233,6 +233,6 @@ void aws_s3_library_clean_up(void) {
     aws_unregister_error_info(&s_error_list);
     aws_http_library_clean_up();
     aws_auth_library_clean_up();
-    aws_checksums_library_init(aws_auth_library_clean_up);
+    aws_checksums_library_init();
     s_library_allocator = NULL;
 }
