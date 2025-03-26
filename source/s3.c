@@ -9,6 +9,7 @@
 #include <aws/s3/s3_client.h>
 
 #include <aws/auth/auth.h>
+#include <aws/checksums/checksums.h>
 #include <aws/common/error.h>
 #include <aws/common/hash_table.h>
 #include <aws/http/http.h>
@@ -195,6 +196,7 @@ void aws_s3_library_init(struct aws_allocator *allocator) {
 
     aws_auth_library_init(s_library_allocator);
     aws_http_library_init(s_library_allocator);
+    aws_checksums_library_init(s_library_allocator);
 
     aws_register_error_info(&s_error_list);
     aws_register_log_subject_info_list(&s_s3_log_subject_list);
@@ -231,5 +233,6 @@ void aws_s3_library_clean_up(void) {
     aws_unregister_error_info(&s_error_list);
     aws_http_library_clean_up();
     aws_auth_library_clean_up();
+    aws_checksums_library_clean_up();
     s_library_allocator = NULL;
 }
