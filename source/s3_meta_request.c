@@ -1629,7 +1629,7 @@ void aws_s3_meta_request_send_request_finish_default(
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: Request %p finished with error code %d (%s) and response status %d, request id: %s, amz_id_2: %s",
+        "id=%p: Request %p finished with error code %d (%s) and response status %d, x-amz-request-id: %s, x-amz-id-2: %s",
         (void *)meta_request,
         (void *)request,
         error_code,
