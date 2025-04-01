@@ -100,6 +100,8 @@ void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     request->send_data.signable = NULL;
     aws_http_headers_release(request->send_data.response_headers);
     request->send_data.response_headers = NULL;
+    aws_string_destroy(request->send_data.request_id);
+    aws_string_destroy(request->send_data.amz_id_2);
 
     aws_byte_buf_clean_up(&request->send_data.response_body);
 
