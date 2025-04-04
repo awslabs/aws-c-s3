@@ -1893,8 +1893,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     }
     /* END CRITICAL SECTION */
     bool paused = false;
-    aws_s3_meta_request_pause_complete_fn *on_pause_complete;
-    void *pause_user_data;
+    aws_s3_meta_request_pause_complete_fn *on_pause_complete = NULL;
+    void *pause_user_data = NULL;
 
     /* Deliver all events */
     for (size_t event_i = 0; event_i < aws_array_list_length(event_delivery_array); ++event_i) {
