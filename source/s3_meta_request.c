@@ -2037,7 +2037,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         struct aws_s3_meta_request_resume_token *out_resume_token = NULL;
         int rt_code = aws_s3_meta_request_pause(meta_request, &out_resume_token);
         AWS_FATAL_ASSERT(rt_code == AWS_OP_SUCCESS);
-        on_pause_complete(pause_user_data, out_resume_token, pause_user_data);
+        on_pause_complete(meta_request, out_resume_token, pause_user_data);
         aws_s3_meta_request_resume_token_release(out_resume_token);
     }
 

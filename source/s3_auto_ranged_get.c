@@ -1033,7 +1033,9 @@ static int s_s3_auto_ranged_get_pause(
 
     (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
     (*out_resume_token)->object_last_modified =
-        aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->object_last_modified);
+        auto_ranged_get->object_last_modified == NULL
+            ? NULL
+            : aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->object_last_modified);
     (*out_resume_token)->part_size = meta_request->part_size;
     (*out_resume_token)->total_num_parts = auto_ranged_get->synced_data.total_num_parts;
     (*out_resume_token)->num_parts_completed = meta_request->synced_data.num_parts_delivery_completed;
