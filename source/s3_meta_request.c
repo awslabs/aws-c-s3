@@ -2604,4 +2604,5 @@ int aws_s3_meta_request_pause_async_default(
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
     aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
+    return AWS_OP_SUCCESS;
 }
