@@ -112,6 +112,8 @@ extern const struct aws_byte_cursor g_decoded_content_length_header_name;
 AWS_S3_API
 extern const struct aws_byte_cursor g_etag_header_name;
 
+extern const struct aws_byte_cursor g_last_modified_header_name;
+
 AWS_S3_API
 extern const size_t g_s3_min_upload_part_size;
 

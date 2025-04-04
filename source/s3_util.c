@@ -31,6 +31,7 @@ const struct aws_byte_cursor g_if_match_header_name = AWS_BYTE_CUR_INIT_FROM_STR
 const struct aws_byte_cursor g_request_id_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-id");
 const struct aws_byte_cursor g_amz_id_2_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-id-2");
 const struct aws_byte_cursor g_etag_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ETag");
+const struct aws_byte_cursor g_last_modified_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Last-Modified");
 const struct aws_byte_cursor g_content_range_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Range");
 const struct aws_byte_cursor g_content_type_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Type");
 const struct aws_byte_cursor g_content_encoding_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-Encoding");

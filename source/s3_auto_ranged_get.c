@@ -32,6 +32,9 @@ static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code);
+static int s_s3_auto_ranged_get_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token **out_resume_token);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
@@ -42,6 +45,8 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .finished_request = s_s3_auto_ranged_get_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .pause = s_s3_auto_ranged_get_pause,
+    .pause_async = aws_s3_meta_request_pause_async_default,
 };
 
 static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_request) {
@@ -131,6 +136,7 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
+    aws_string_destroy(auto_ranged_get->object_last_modified);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
@@ -786,14 +792,23 @@ static void s_s3_auto_ranged_get_request_finished(
 
             goto update_synced_data;
         }
-        if ((!request_failed || first_part_size_mismatch) && !auto_ranged_get->initial_message_has_if_match_header) {
+        if (!request_failed || first_part_size_mismatch) {
             AWS_ASSERT(auto_ranged_get->etag == NULL);
             struct aws_byte_cursor etag_header_value;
+            AWS_ASSERT(auto_ranged_get->object_last_modified == NULL);
+            struct aws_byte_cursor object_last_modified_header_value;
 
             if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value)) {
                 aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
                 error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
+            }
+            if (aws_http_headers_get(
+                    request->send_data.response_headers,
+                    g_last_modified_header_name,
+                    &object_last_modified_header_value) == AWS_OP_SUCCESS) {
+                auto_ranged_get->object_last_modified =
+                    aws_string_new_from_cursor(meta_request->allocator, &object_last_modified_header_value);
             }
 
             AWS_LOGF_TRACE(
@@ -986,4 +1001,53 @@ update_synced_data:
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+}
+
+static int s_s3_auto_ranged_get_pause(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token **out_resume_token) {
+
+    *out_resume_token = NULL;
+
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+
+    /* lock */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Pausing request with %u out of %u parts have completed.",
+        (void *)meta_request,
+        meta_request->synced_data.num_parts_delivery_completed,
+        auto_ranged_get->synced_data.total_num_parts);
+
+    /* upload can be in one of several states:
+     * - not started, i.e. we didn't even call crete mpu yet - return success,
+     *   token is NULL and cancel the upload
+     * - in the middle of upload - return success, create token and cancel
+     *     upload
+     * - complete MPU started - return success, generate token and try to cancel
+     *   complete MPU
+     */
+    *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
+
+    (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+    (*out_resume_token)->object_last_modified =
+        aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->object_last_modified);
+    (*out_resume_token)->part_size = meta_request->part_size;
+    (*out_resume_token)->total_num_parts = auto_ranged_get->synced_data.total_num_parts;
+    (*out_resume_token)->num_parts_completed = meta_request->synced_data.num_parts_delivery_completed;
+
+    /**
+     * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
+     * This allows the client to resume the upload later, setting the persistable state in the meta request options.
+     */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+
+    /* unlock */
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    return AWS_OP_SUCCESS;
 }

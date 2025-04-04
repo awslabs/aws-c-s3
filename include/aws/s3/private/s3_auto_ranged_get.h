@@ -20,6 +20,7 @@ struct aws_s3_auto_ranged_get {
     enum aws_s3_checksum_algorithm validation_algorithm;
 
     struct aws_string *etag;
+    struct aws_string *object_last_modified;
 
     bool initial_message_has_start_range;
     bool initial_message_has_end_range;
