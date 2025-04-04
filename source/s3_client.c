@@ -2397,6 +2397,7 @@ static void s_resume_token_ref_count_zero_callback(void *arg) {
     struct aws_s3_meta_request_resume_token *token = arg;
 
     aws_string_destroy(token->multipart_upload_id);
+    aws_string_destroy(token->object_last_modified);
 
     aws_mem_release(token->allocator, token);
 }
