@@ -2477,6 +2477,16 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     return aws_byte_cursor_from_c_str("");
 }
 
+struct aws_byte_cursor aws_s3_meta_request_resume_object_last_modified(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT && resume_token->object_last_modified != NULL) {
+        return aws_byte_cursor_from_string(resume_token->object_last_modified);
+    }
+
+    return aws_byte_cursor_from_c_str("");
+}
+
 static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
 const size_t g_expect_timeout_offset_ms =
     700; /* 0.7 Secs. From experiments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
