@@ -400,8 +400,7 @@ int aws_s3_meta_request_pause_async(
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
 
-    meta_request->vtable->pause_async(meta_request, on_pause_complete, user_data);
-    return AWS_OP_SUCCESS;
+    return meta_request->vtable->pause_async(meta_request, on_pause_complete, user_data);
 }
 
 void aws_s3_meta_request_set_fail_synced(
@@ -2577,13 +2576,21 @@ bool aws_s3_meta_request_checksum_config_has_algorithm(
     }
 }
 
-void aws_s3_meta_request_pause_async_default(
+int aws_s3_meta_request_pause_async_default(
     struct aws_s3_meta_request *meta_request,
     aws_s3_meta_request_pause_complete_fn *on_pause_complete,
     void *user_data) {
     AWS_PRECONDITION(meta_request);
     /* TODO: PUT OBJECT check for content_length */
     aws_s3_meta_request_lock_synced_data(meta_request);
+    if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Cannot pause meta request. The meta request has already finished.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
     struct aws_s3_meta_request_event event = {
         .type = AWS_S3_META_REQUEST_EVENT_PAUSE,
         .u.pause.on_pause_complete = on_pause_complete,

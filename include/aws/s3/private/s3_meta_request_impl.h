@@ -130,7 +130,7 @@ struct aws_s3_meta_request_vtable {
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
     /* Pause the given request, and notify when the pause completes */
-    void (*pause_async)(
+    int (*pause_async)(
         struct aws_s3_meta_request *meta_request,
         aws_s3_meta_request_pause_complete_fn *on_pause_complete,
         void *user_data);
@@ -484,7 +484,7 @@ void aws_s3_meta_request_schedule_prepare_request_default_impl(
     aws_s3_meta_request_prepare_request_callback_fn *callback,
     void *user_data);
 
-void aws_s3_meta_request_pause_async_default(
+int aws_s3_meta_request_pause_async_default(
     struct aws_s3_meta_request *meta_request,
     aws_s3_meta_request_pause_complete_fn *on_pause_complete,
     void *user_data);
