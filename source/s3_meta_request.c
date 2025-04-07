@@ -2593,9 +2593,9 @@ int aws_s3_meta_request_pause_async_default(
     }
     struct aws_s3_meta_request_event event = {
         .type = AWS_S3_META_REQUEST_EVENT_PAUSE,
-        .u.pause.on_pause_complete = on_pause_complete,
-        .u.pause.user_data = user_data,
     };
+    event.u.pause.on_pause_complete = on_pause_complete;
+    event.u.pause.user_data = user_data;
     aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
     /**
      * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
