@@ -373,6 +373,25 @@ typedef struct aws_s3express_credentials_provider *(
                                        void *shutdown_user_data,
                                        void *factory_user_data);
 
+struct aws_s3_buffer_ticket;
+
+struct aws_s3_buffer_pool {
+    void (*destroy)(struct aws_s3_buffer_pool *pool);
+
+    struct aws_s3_buffer_ticket *(*reserve)(struct aws_s3_buffer_pool *pool, size_t size);
+    struct aws_byte_buf (*claim)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
+    void (*release)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
+
+    void (*trim)(struct aws_s3_buffer_pool *pool);
+
+    struct aws_allocator *allocator;
+    void *user_data;
+};
+
+typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,
+                                                                   uint64_t part_size,
+                                                                   uint64_t mem_limit);
+
 /* Keepalive properties are TCP only.
  * If interval or timeout are zero, then default values are used.
  */
@@ -573,6 +592,13 @@ struct aws_s3_client_config {
      */
     const struct aws_byte_cursor *network_interface_names_array;
     size_t num_network_interface_names;
+
+    /**
+     * Experimental (touch at your own risk).
+     * (Optional)
+     * Factory function to create buffer pool.
+     */
+    aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
 };
 
 struct aws_s3_checksum_config {

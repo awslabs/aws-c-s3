@@ -31,9 +31,9 @@
 AWS_EXTERN_C_BEGIN
 
 struct aws_s3_buffer_pool;
-struct aws_s3_buffer_pool_ticket;
+struct aws_s3_buffer_ticket;
 
-struct aws_s3_buffer_pool_usage_stats {
+struct aws_s3_default_buffer_pool_usage_stats {
     /* Effective Max memory limit. Memory limit value provided during construction minus
      * buffer reserved for overhead of the pool */
     size_t mem_limit;
@@ -71,7 +71,7 @@ struct aws_s3_buffer_pool_usage_stats {
  * buffers can no longer be reserved from (reservation hold is placed on the pool).
  * Returns buffer pool pointer on success and NULL on failure.
  */
-AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
+AWS_S3_API struct aws_s3_default_buffer_pool *aws_s3_default_buffer_pool_new(
     struct aws_allocator *allocator,
     size_t chunk_size,
     size_t mem_limit);
@@ -80,7 +80,7 @@ AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_new(
  * Destroys buffer pool.
  * Does nothing if buffer_pool is NULL.
  */
-AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool);
+AWS_S3_API void aws_s3_default_buffer_pool_destroy(struct aws_s3_default_buffer_pool *buffer_pool);
 
 /*
  * Reserves memory from the pool for later use.
@@ -95,19 +95,19 @@ AWS_S3_API void aws_s3_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_poo
  * If you MUST acquire a buffer now (waiting to reserve a ticket would risk deadlock),
  * use aws_s3_buffer_pool_acquire_forced_buffer() instead.
  */
-AWS_S3_API struct aws_s3_buffer_pool_ticket *aws_s3_buffer_pool_reserve(
-    struct aws_s3_buffer_pool *buffer_pool,
+AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
+    struct aws_s3_default_buffer_pool *buffer_pool,
     size_t size);
 
 /*
  * Whether pool has a reservation hold.
  */
-AWS_S3_API bool aws_s3_buffer_pool_has_reservation_hold(struct aws_s3_buffer_pool *buffer_pool);
+AWS_S3_API bool aws_s3_default_buffer_pool_has_reservation_hold(struct aws_s3_default_buffer_pool *buffer_pool);
 
 /*
  * Remove reservation hold on pool.
  */
-AWS_S3_API void aws_s3_buffer_pool_remove_reservation_hold(struct aws_s3_buffer_pool *buffer_pool);
+AWS_S3_API void aws_s3_default_buffer_pool_remove_reservation_hold(struct aws_s3_default_buffer_pool *buffer_pool);
 
 /*
  * Trades in the ticket for a buffer.
@@ -115,9 +115,9 @@ AWS_S3_API void aws_s3_buffer_pool_remove_reservation_hold(struct aws_s3_buffer_
  * Using the same ticket twice will return the same buffer.
  * Buffer is only valid until the ticket is released.
  */
-AWS_S3_API struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
-    struct aws_s3_buffer_pool *buffer_pool,
-    struct aws_s3_buffer_pool_ticket *ticket);
+AWS_S3_API struct aws_byte_buf aws_s3_default_buffer_pool_acquire_buffer(
+    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_ticket *ticket);
 
 /*
  * Force immediate acquisition of a buffer from the pool.
@@ -125,30 +125,31 @@ AWS_S3_API struct aws_byte_buf aws_s3_buffer_pool_acquire_buffer(
  * This cannot fail, not even if the pool has a reservation hold,
  * not even if the memory limit has been exceeded.
  */
-AWS_S3_API struct aws_byte_buf aws_s3_buffer_pool_acquire_forced_buffer(
-    struct aws_s3_buffer_pool *buffer_pool,
+AWS_S3_API struct aws_byte_buf aws_s3_default_buffer_pool_acquire_forced_buffer(
+    struct aws_s3_default_buffer_pool *buffer_pool,
     size_t size,
-    struct aws_s3_buffer_pool_ticket **out_new_ticket);
+    struct aws_s3_buffer_ticket **out_new_ticket);
 
 /*
  * Releases the ticket.
  * Any buffers associated with the ticket are invalidated.
  */
-AWS_S3_API void aws_s3_buffer_pool_release_ticket(
-    struct aws_s3_buffer_pool *buffer_pool,
-    struct aws_s3_buffer_pool_ticket *ticket);
+AWS_S3_API void aws_s3_default_buffer_pool_release_ticket(
+    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_ticket *ticket);
 
 /*
  * Get pool memory usage stats.
  */
-AWS_S3_API struct aws_s3_buffer_pool_usage_stats aws_s3_buffer_pool_get_usage(struct aws_s3_buffer_pool *buffer_pool);
+AWS_S3_API struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usage(
+    struct aws_s3_default_buffer_pool *buffer_pool);
 
 /*
  * Trims all unused mem from the pool.
  * Warning: fairly slow operation, do not use in critical path.
  * TODO: partial trimming? ex. only trim down to 50% of max?
  */
-AWS_S3_API void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool);
+AWS_S3_API void aws_s3_default_buffer_pool_trim(struct aws_s3_default_buffer_pool *buffer_pool);
 
 AWS_EXTERN_C_END
 

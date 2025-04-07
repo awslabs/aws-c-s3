@@ -5,9 +5,9 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
-#include "aws/s3/private/s3_buffer_pool.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
+#include "aws/s3/private/s3_default_buffer_pool.h"
 #include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_parallel_input_stream.h"
@@ -225,6 +225,54 @@ static void s_s3express_provider_finish_destroy(void *user_data) {
     /* END CRITICAL SECTION */
 }
 
+static void s_default_buffer_pool_destroy(struct aws_s3_buffer_pool *pool) {
+    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+
+    aws_s3_default_buffer_pool_destroy(default_pool);
+    aws_mem_release(pool->allocator, pool);
+}
+
+struct aws_s3_buffer_ticket *s_default_pool_reserve(struct aws_s3_buffer_pool *pool, size_t size) {
+    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+
+    return aws_s3_default_buffer_pool_reserve(default_pool, size);
+}
+
+struct aws_byte_buf s_default_pool_claim(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket) {
+    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+
+    return aws_s3_default_buffer_pool_acquire_buffer(default_pool, ticket);
+}
+
+void s_default_pool_release(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket) {
+    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+
+    aws_s3_default_buffer_pool_release_ticket(default_pool, ticket);
+}
+
+void s_default_pool_trim(struct aws_s3_buffer_pool *pool) {
+    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+
+    aws_s3_default_buffer_pool_trim(default_pool);
+}
+
+static struct aws_s3_buffer_pool *s_create_default_buffer_pool(
+    struct aws_allocator *allocator,
+    uint64_t part_size,
+    uint64_t mem_limit) {
+    struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
+
+    pool->allocator = allocator;
+    pool->user_data = aws_s3_default_buffer_pool_new(allocator, part_size, mem_limit);
+    pool->destroy = s_default_buffer_pool_destroy;
+    pool->claim = s_default_pool_claim;
+    pool->reserve = s_default_pool_reserve;
+    pool->release = s_default_pool_release;
+    pool->trim = s_default_pool_trim;
+
+    return pool;
+}
+
 struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -348,12 +396,17 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
+    if (client_config->buffer_pool_factory_fn) {
+        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, part_size, mem_limit);
+    } else {
+        client->buffer_pool = s_create_default_buffer_pool(allocator, part_size, mem_limit);
+    }
 
     if (client->buffer_pool == NULL) {
         goto on_error;
     }
 
+    /* TODO: bring this back?
     struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
 
     if (client_config->max_part_size > pool_usage.mem_limit) {
@@ -364,6 +417,7 @@ struct aws_s3_client *aws_s3_client_new(
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         goto on_error;
     }
+    */
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -409,9 +463,11 @@ struct aws_s3_client *aws_s3_client_new(
         *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
     }
 
+    /*
     if (client_config->max_part_size > pool_usage.mem_limit) {
         *((uint64_t *)&client->max_part_size) = pool_usage.mem_limit;
     }
+    */
 
     if (client->max_part_size > SIZE_MAX) {
         /* For the 32bit max part size to be SIZE_MAX */
@@ -657,7 +713,8 @@ on_error:
     }
 
     aws_array_list_clean_up(&client->network_interface_names);
-    aws_s3_buffer_pool_destroy(client->buffer_pool);
+    client->buffer_pool->destroy(client->buffer_pool);
+    client->buffer_pool = NULL;
 
     aws_mem_release(client->allocator, client);
     return NULL;
@@ -767,7 +824,8 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
-    aws_s3_buffer_pool_destroy(client->buffer_pool);
+    client->buffer_pool->destroy(client->buffer_pool);
+    client->buffer_pool = NULL;
 
     aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
     for (size_t i = 0; i < client->num_network_interface_names; i++) {
@@ -1411,7 +1469,7 @@ static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, 
     uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     if (num_reqs_in_flight == 0) {
-        aws_s3_buffer_pool_trim(client->buffer_pool);
+        client->buffer_pool->trim(client->buffer_pool);
     }
 }
 
@@ -1810,13 +1868,16 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
+    /*
+    Do we still need it?
     aws_s3_buffer_pool_remove_reservation_hold(client->buffer_pool);
+    */
 
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /**
          * Iterate through the meta requests to update meta requests and get new requests that can then be prepared
-+         * (reading from any streams, signing, etc.) for sending.
+         * (reading from any streams, signing, etc.) for sending.
          */
         while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 

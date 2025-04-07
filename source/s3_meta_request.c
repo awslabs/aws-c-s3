@@ -513,7 +513,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
-        aws_s3_buffer_pool_release_ticket(
+        meta_request->client->buffer_pool->release(
             meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
 
         meta_request->client = aws_s3_client_release(meta_request->client);
@@ -1418,8 +1418,8 @@ static int s_s3_meta_request_incoming_body(
 
     if (request->send_data.response_body.capacity == 0) {
         if (request->has_part_size_response_body && request->ticket != NULL) {
-            request->send_data.response_body =
-                aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
+            request->send_data.response_body = request->meta_request->client->buffer_pool->claim(
+                request->meta_request->client->buffer_pool, request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
@@ -2329,10 +2329,19 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
             /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
              * waited for a normal ticket reservation, respecting the pool's memory limit.
              * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
-            meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_forced_buffer(
-                meta_request->client->buffer_pool,
-                meta_request->part_size,
-                &meta_request->synced_data.async_write.buffered_data_ticket /*out_new_ticket*/);
+
+            meta_request->synced_data.async_write.buffered_data_ticket =
+                meta_request->client->buffer_pool->reserve(meta_request->client->buffer_pool, meta_request->part_size);
+
+            AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
+
+            meta_request->synced_data.async_write.buffered_data = meta_request->client->buffer_pool->claim(
+                meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+            // TODO
+            // meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_forced_buffer(
+            //     meta_request->client->buffer_pool,
+            //     meta_request->part_size,
+            //     &meta_request->synced_data.async_write.buffered_data_ticket /*out_new_ticket*/);
         }
 
         /* Copy as much data as we can into the buffer */

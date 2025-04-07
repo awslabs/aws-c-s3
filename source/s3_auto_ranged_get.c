@@ -225,7 +225,7 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.num_parts_requested > 0) {
                     goto has_work_remaining;
                 }
-                struct aws_s3_buffer_pool_ticket *ticket = NULL;
+                struct aws_s3_buffer_ticket *ticket = NULL;
                 switch (s_s3_get_request_type_for_discovering_object_size(meta_request)) {
                     case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
                         AWS_LOGF_INFO(
@@ -246,7 +246,8 @@ static bool s_s3_auto_ranged_get_update(
                             "id=%p: Doing a 'GET_OBJECT_WITH_PART_NUMBER_1' to discover the size of the object and get "
                             "the first part",
                             (void *)meta_request);
-                        ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                        ticket = meta_request->client->buffer_pool->reserve(
+                            meta_request->client->buffer_pool, meta_request->part_size);
 
                         if (ticket == NULL) {
                             goto has_work_remaining;
@@ -298,7 +299,7 @@ static bool s_s3_auto_ranged_get_update(
                              * even if expect to receive less data. Pool will
                              * reserve the whole part size for it anyways, so no
                              * reason getting a smaller chunk. */
-                            ticket = aws_s3_buffer_pool_reserve(
+                            ticket = meta_request->client->buffer_pool->reserve(
                                 meta_request->client->buffer_pool, (size_t)meta_request->part_size);
 
                             if (ticket == NULL) {
@@ -360,8 +361,8 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
-                struct aws_s3_buffer_pool_ticket *ticket =
-                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
+                struct aws_s3_buffer_ticket *ticket = meta_request->client->buffer_pool->reserve(
+                    meta_request->client->buffer_pool, meta_request->part_size);
 
                 if (ticket == NULL) {
                     goto has_work_remaining;

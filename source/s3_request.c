@@ -131,7 +131,7 @@ static void s_s3_request_destroy(void *user_data) {
 
     aws_s3_request_clean_up_send_data(request);
     aws_byte_buf_clean_up(&request->request_body);
-    aws_s3_buffer_pool_release_ticket(request->meta_request->client->buffer_pool, request->ticket);
+    request->meta_request->client->buffer_pool->release(request->meta_request->client->buffer_pool, request->ticket);
     aws_string_destroy(request->operation_name);
     aws_s3_meta_request_release(request->meta_request);
 

@@ -12,7 +12,6 @@
 #include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
-#include <aws/s3/private/s3_buffer_pool.h>
 #include <aws/s3/private/s3_checksums.h>
 
 struct aws_http_message;
@@ -135,7 +134,7 @@ struct aws_s3_request {
      * retried.*/
     struct aws_byte_buf request_body;
 
-    struct aws_s3_buffer_pool_ticket *ticket;
+    struct aws_s3_buffer_ticket *ticket;
 
     /* Beginning range of this part. */
     /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
