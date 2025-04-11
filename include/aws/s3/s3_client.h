@@ -1234,21 +1234,12 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Upload id associated with operation.
- * Only valid for tokens returned from upload operation. For all other operations
- * this will return empty.
- */
-AWS_S3_API
-struct aws_byte_cursor aws_s3_meta_request_resume_object_last_modified(
-    struct aws_s3_meta_request_resume_token *resume_token);
-
-/*
  * Object last modified time associated with operation.
  * Only valid for tokens returned from download operation. For all other operations
  * this will return empty.
  */
 AWS_S3_API
-struct aws_byte_cursor aws_s3_meta_request_resume_token_object_last_modified_time(
+struct aws_byte_cursor aws_s3_meta_request_resume_object_last_modified(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /**
