@@ -218,6 +218,8 @@ struct aws_s3_client {
 
     /* Event loop group for streaming request bodies back to the user. */
     struct aws_event_loop_group *body_streaming_elg;
+    /* Event loop group for streaming request bodies back to the user. */
+    struct aws_event_loop_group *spearate_body_streaming_elg;
 
     /* Region of the S3 bucket. */
     struct aws_string *region;

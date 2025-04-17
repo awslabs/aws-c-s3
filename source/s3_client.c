@@ -548,12 +548,14 @@ struct aws_s3_client *aws_s3_client_new(
 
         client->body_streaming_elg = aws_event_loop_group_new_default(
             client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
+        client->spearate_body_streaming_elg =
+            aws_event_loop_group_new_default(client->allocator, 1, &body_streaming_elg_shutdown_options);
 
         if (!client->body_streaming_elg) {
             /* Fail to create elg, we should fail the call */
             goto on_error;
         }
-        client->synced_data.body_streaming_elg_allocated = true;
+        client->synced_data.body_streaming_elg_allocated = 2;
     }
     /* Setup cannot fail after this point. */
 
@@ -705,7 +707,9 @@ static void s_s3_client_start_destroy(void *user_data) {
     /* END CRITICAL SECTION */
 
     aws_event_loop_group_release(client->body_streaming_elg);
+    aws_event_loop_group_release(client->spearate_body_streaming_elg);
     client->body_streaming_elg = NULL;
+    client->spearate_body_streaming_elg = NULL;
     aws_s3express_credentials_provider_release(client->s3express_provider);
 
     /* BEGIN CRITICAL SECTION */
@@ -794,7 +798,7 @@ static void s_s3_client_body_streaming_elg_shutdown(void *user_data) {
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
-        client->synced_data.body_streaming_elg_allocated = false;
+        client->synced_data.body_streaming_elg_allocated -= 1;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }

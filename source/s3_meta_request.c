@@ -149,6 +149,37 @@ static void s_validate_meta_request_checksum_on_finish(
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 }
 
+static void s_separate_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task_status;
+    struct aws_allocator *allocator = arg;
+
+    /* Read every bytes from the file and calculate the checksum. */
+    printf("$$$$$$ separate read task started\n");
+    struct aws_input_stream *stream =
+        aws_input_stream_new_from_file(allocator, "/home/ec2-user/aws-crt-s3-benchmarks/files/upload/30GiB-1x/1");
+    struct aws_byte_buf checksum_output;
+    aws_byte_buf_init(&checksum_output, allocator, 8 * 1024 * 1024);
+    struct aws_input_stream *checksum_stream =
+        aws_checksum_stream_new(allocator, stream, AWS_SCA_CRC64NVME, &checksum_output);
+    struct aws_byte_buf buffer;
+    aws_byte_buf_init(&buffer, allocator, 8 * 1024 * 1024);
+    struct aws_stream_status status;
+    while (aws_input_stream_get_status(checksum_stream, &status) == AWS_OP_SUCCESS &&
+           status.is_end_of_stream == false) {
+        if (aws_input_stream_read(checksum_stream, &buffer)) {
+            printf("read error\n");
+            break;
+        }
+        buffer.len = 0;
+    }
+    aws_input_stream_destroy(checksum_stream);
+    aws_input_stream_destroy(stream);
+    printf("$$$$$$ separate read task finished\n");
+    struct aws_byte_cursor checksum_cur = aws_byte_cursor_from_buf(&checksum_output);
+    printf("$$$$$$ checksum: %.*s\n", (int)checksum_cur.len, checksum_cur.ptr);
+    aws_mem_release(allocator, task);
+}
+
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -295,6 +326,12 @@ int aws_s3_meta_request_init_base(
     /* If the request's body is being passed in some other way, set that up.
      * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
+        struct aws_event_loop *separate_loop = aws_event_loop_group_get_next_loop(client->spearate_body_streaming_elg);
+        printf("separate loop: %p\n", (void *)separate_loop);
+        struct aws_task *task = aws_mem_calloc(allocator, 1, sizeof(struct aws_task));
+        aws_task_init(task, s_separate_read_task, allocator, "s_separate_read_task");
+        aws_event_loop_schedule_task_now(separate_loop, task);
+
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
             client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
