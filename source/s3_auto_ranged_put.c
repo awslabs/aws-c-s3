@@ -623,6 +623,12 @@ static bool s_s3_auto_ranged_put_update(
                     goto has_work_remaining;
                 }
             }
+            if (meta_request->synced_data.calculating_checksum == true) {
+                printf("%p Calculating checksum\n", (void *)meta_request);
+                goto has_work_remaining;
+            } else {
+                printf("%p Complete MPU\n", (void *)meta_request);
+            }
 
             /* If the complete-multipart-upload request hasn't been set yet, then send it now. */
             if (!auto_ranged_put->synced_data.complete_multipart_upload_sent) {

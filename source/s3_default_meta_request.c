@@ -199,7 +199,6 @@ static bool s_s3_meta_request_default_update(
             if (meta_request->synced_data.num_parts_delivery_completed < 1) {
                 goto has_work_remaining;
             }
-
             goto no_work_remaining;
 
         } else {

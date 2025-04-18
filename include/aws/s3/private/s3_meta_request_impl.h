@@ -247,6 +247,8 @@ struct aws_s3_meta_request {
             void *waker_user_data;
         } async_write;
 
+        bool calculating_checksum;
+
     } synced_data;
 
     /* Anything in this structure should only ever be accessed by the client on its process work event loop task. */
