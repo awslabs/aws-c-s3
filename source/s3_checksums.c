@@ -483,6 +483,7 @@ int aws_checksum_config_storage_init(
     if (s_init_and_verify_checksum_config_from_headers(internal_config, message, log_id)) {
         return AWS_OP_ERR;
     }
+    internal_config->has_full_object_checksum = true;
     /* Anything fail afterward will need to cleanup the storage. */
 
     return AWS_OP_SUCCESS;

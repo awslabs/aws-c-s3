@@ -152,15 +152,19 @@ static void s_validate_meta_request_checksum_on_finish(
 static void s_separate_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task_status;
     struct aws_s3_meta_request *meta_request = (struct aws_s3_meta_request *)arg;
+
     printf("$$$$$$ %p separate read task started\n", (void *)meta_request);
     struct aws_s3_client *client = meta_request->client;
     /* Read every bytes from the file and calculate the checksum. */
     struct aws_input_stream *stream =
-        aws_input_stream_new_from_file(meta_request->allocator, "/home/ec2-user/aws-crt-s3-benchmarks/files/upload/30GiB-1x/1");
-    struct aws_byte_buf checksum_output;
-    aws_byte_buf_init(&checksum_output, meta_request->allocator, 8 * 1024 * 1024);
+        aws_input_stream_new_from_file(meta_request->allocator, "/home/ec2-user/aws-crt-s3-benchmarks/files/upload/10GiB-1x/1");
+        printf("$$$$$$ %p 1\n", (void *)meta_request);
+    aws_byte_buf_init(&meta_request->checksum_config.full_object_checksum, meta_request->allocator, 8 * 1024 * 1024);
     struct aws_input_stream *checksum_stream =
-        aws_checksum_stream_new(meta_request->allocator, stream, AWS_SCA_CRC32, &checksum_output);
+        aws_checksum_stream_new(meta_request->allocator, stream, AWS_SCA_CRC64NVME, &meta_request->checksum_config.full_object_checksum);
+        if(!checksum_stream) {
+            printf("$$$$$$ %p checksum stream error\n", (void *)meta_request);
+        }
     struct aws_byte_buf buffer;
     aws_byte_buf_init(&buffer, meta_request->allocator, 8 * 1024 * 1024);
     struct aws_stream_status status;
@@ -175,9 +179,8 @@ static void s_separate_read_task(struct aws_task *task, void *arg, enum aws_task
     aws_input_stream_destroy(checksum_stream);
     aws_input_stream_destroy(stream);
     printf("$$$$$$ separate read task finished\n");
-    struct aws_byte_cursor checksum_cur = aws_byte_cursor_from_buf(&checksum_output);
+    struct aws_byte_cursor checksum_cur = aws_byte_cursor_from_buf(&meta_request->checksum_config.full_object_checksum);
     printf("$$$$$$ checksum: %.*s\n", (int)checksum_cur.len, checksum_cur.ptr);
-
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
     meta_request->synced_data.calculating_checksum = false;
