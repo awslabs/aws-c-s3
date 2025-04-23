@@ -87,8 +87,6 @@ struct aws_s3_default_buffer_pool {
 
     size_t mem_limit;
 
-    bool has_reservation_hold;
-
     size_t primary_allocated;
     size_t primary_reserved;
     size_t primary_used;
@@ -99,6 +97,14 @@ struct aws_s3_default_buffer_pool {
     size_t forced_used;
 
     struct aws_array_list blocks;
+
+    struct aws_linked_list pending_reserves;
+};
+
+struct s3_pending_reserve {
+    struct aws_linked_list_node node;
+    struct aws_future_s3_buffer_ticket *ticket_future;
+    struct aws_s3_buffer_pool_reserve_meta meta;
 };
 
 struct s3_buffer_pool_block {
@@ -203,6 +209,8 @@ struct aws_s3_default_buffer_pool *aws_s3_default_buffer_pool_new(
     aws_array_list_init_dynamic(
         &buffer_pool->blocks, allocator, s_block_list_initial_capacity, sizeof(struct s3_buffer_pool_block));
 
+    aws_linked_list_init(&buffer_pool->pending_reserves);
+
     return buffer_pool;
 }
 
@@ -248,21 +256,9 @@ void aws_s3_default_buffer_pool_trim(struct aws_s3_default_buffer_pool *buffer_p
     aws_mutex_unlock(&buffer_pool->mutex);
 }
 
-struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
-    struct aws_s3_default_buffer_pool *buffer_pool,
-    size_t size) {
-    AWS_PRECONDITION(buffer_pool);
-
-    if (buffer_pool->has_reservation_hold) {
-        return NULL;
-    }
-
-    AWS_FATAL_ASSERT(size != 0);
-    AWS_FATAL_ASSERT(size <= buffer_pool->mem_limit);
-
+struct aws_s3_buffer_ticket *s_try_reserve(struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
     struct aws_s3_buffer_ticket *ticket = NULL;
-    aws_mutex_lock(&buffer_pool->mutex);
-
     size_t overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
                            buffer_pool->secondary_reserved;
 
@@ -271,12 +267,12 @@ struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
      * primary, trim the primary in hopes we can free up enough memory.
      * TODO: something smarter, like partial trim?
      */
-    if (size > buffer_pool->primary_size_cutoff && (size + overall_taken) > buffer_pool->mem_limit &&
+    if (meta.size > buffer_pool->primary_size_cutoff && (meta.size + overall_taken) > buffer_pool->mem_limit &&
         (buffer_pool->primary_allocated >
-         (buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->block_size))) {
+        (buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->block_size))) {
         s_buffer_pool_trim_synced(buffer_pool);
         overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
-                        buffer_pool->secondary_reserved;
+                    buffer_pool->secondary_reserved;
     }
 
     /* Don't let forced buffers account for 100% of the memory limit */
@@ -286,40 +282,47 @@ struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
         overall_taken -= buffer_pool->forced_used - max_impact_of_forced_on_limit;
     }
 
-    if ((size + overall_taken) <= buffer_pool->mem_limit) {
+    if ((meta.size + overall_taken) <= buffer_pool->mem_limit) {
         ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_ticket));
-        ticket->size = size;
-        if (size <= buffer_pool->primary_size_cutoff) {
-            buffer_pool->primary_reserved += size;
+        ticket->size = meta.size;
+        if (meta.size <= buffer_pool->primary_size_cutoff) {
+            buffer_pool->primary_reserved += meta.size;
         } else {
-            buffer_pool->secondary_reserved += size;
+            buffer_pool->secondary_reserved += meta.size;
         }
-    } /*else {
-        buffer_pool->has_reservation_hold = true;
-    }*/
+    }
 
-    aws_mutex_unlock(&buffer_pool->mutex);
-
-    /*if (ticket == NULL) {
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_CLIENT,
-            "Memory limit reached while trying to allocate buffer of size %zu. "
-            "Putting new buffer reservations on hold...",
-            size);
-        aws_raise_error(AWS_ERROR_S3_EXCEEDS_MEMORY_LIMIT);
-    }*/
     return ticket;
 }
 
-bool aws_s3_default_buffer_pool_has_reservation_hold(struct aws_s3_default_buffer_pool *buffer_pool) {
+struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
+    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
     AWS_PRECONDITION(buffer_pool);
-    return buffer_pool->has_reservation_hold;
-}
 
-void aws_s3_default_buffer_pool_remove_reservation_hold(struct aws_s3_default_buffer_pool *buffer_pool) {
-    AWS_PRECONDITION(buffer_pool);
-    AWS_LOGF_TRACE(AWS_LS_S3_CLIENT, "Releasing buffer reservation hold.");
-    buffer_pool->has_reservation_hold = false;
+    AWS_FATAL_ASSERT(meta.size != 0);
+    AWS_FATAL_ASSERT(meta.size <= buffer_pool->mem_limit);
+
+    aws_mutex_lock(&buffer_pool->mutex);
+
+    struct aws_s3_buffer_ticket *ticket = s_try_reserve(buffer_pool, meta);
+
+    struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(buffer_pool->base_allocator);
+    if (ticket != NULL) {
+        aws_future_s3_buffer_ticket_set_result_by_move(future, &ticket);
+    } else {
+        struct s3_pending_reserve *pending_reserve =
+            aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct s3_pending_reserve));
+
+        pending_reserve->meta = meta;
+        pending_reserve->ticket_future = future;
+        
+        aws_linked_list_push_back(&buffer_pool->pending_reserves, &pending_reserve->node);
+    }
+
+    aws_mutex_unlock(&buffer_pool->mutex);
+
+    return future;
 }
 
 static uint8_t *s_primary_acquire_synced(
@@ -495,6 +498,20 @@ void aws_s3_default_buffer_pool_release_ticket(
     }
 
     aws_mem_release(buffer_pool->base_allocator, ticket);
+
+    if (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
+        struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
+        struct s3_pending_reserve *pending_reserve =
+            AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+
+        struct aws_s3_buffer_ticket *ticket = s_try_reserve(buffer_pool, pending_reserve->meta);
+
+        if (ticket != NULL) {
+            aws_future_s3_buffer_ticket_set_result_by_move(pending_reserve->ticket_future, &ticket);
+            aws_linked_list_pop_front(&buffer_pool->pending_reserves);
+            aws_mem_release(buffer_pool->base_allocator, pending_reserve);
+        }
+    }
 
     aws_mutex_unlock(&buffer_pool->mutex);
 }

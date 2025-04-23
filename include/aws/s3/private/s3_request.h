@@ -20,9 +20,8 @@ struct aws_s3_meta_request;
 
 enum aws_s3_request_flags {
     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY = 0x00000002,
-    AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000004,
-    AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY = 0x00000008,
+    AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000002,
+    AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL = 0x00000004,
 };
 
 /**
@@ -224,11 +223,8 @@ struct aws_s3_request {
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
     uint32_t record_response_headers : 1;
 
-    /* When true, the response body buffer will be allocated in the size of a part. */
-    uint32_t has_part_size_response_body : 1;
-
-    /* When true, the request body buffer will be allocated in the size of a part. */
-    uint32_t has_part_size_request_body : 1;
+    /* Indicates whether buffer should be allocated for the request from the pool. */
+    uint32_t should_allocate_buffer_from_pool : 1;
 
     /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
     uint32_t tracked_by_client : 1;

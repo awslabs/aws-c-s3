@@ -232,10 +232,11 @@ static void s_default_buffer_pool_destroy(struct aws_s3_buffer_pool *pool) {
     aws_mem_release(pool->allocator, pool);
 }
 
-struct aws_s3_buffer_ticket *s_default_pool_reserve(struct aws_s3_buffer_pool *pool, size_t size) {
+struct aws_future_s3_buffer_ticket *s_default_pool_reserve(struct aws_s3_buffer_pool *pool, 
+        struct aws_s3_buffer_pool_reserve_meta meta) {
     struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
 
-    return aws_s3_default_buffer_pool_reserve(default_pool, size);
+    return aws_s3_default_buffer_pool_reserve(default_pool, meta);
 }
 
 struct aws_byte_buf s_default_pool_claim(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket) {
@@ -1867,11 +1868,6 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     };
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
-
-    /*
-    Do we still need it?
-    aws_s3_buffer_pool_remove_reservation_hold(client->buffer_pool);
-    */
 
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 

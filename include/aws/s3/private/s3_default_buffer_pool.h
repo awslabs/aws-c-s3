@@ -7,6 +7,7 @@
  */
 
 #include <aws/s3/s3.h>
+#include <aws/s3/s3_buffer_pool.h>
 
 /*
  * S3 buffer pool.
@@ -95,19 +96,9 @@ AWS_S3_API void aws_s3_default_buffer_pool_destroy(struct aws_s3_default_buffer_
  * If you MUST acquire a buffer now (waiting to reserve a ticket would risk deadlock),
  * use aws_s3_buffer_pool_acquire_forced_buffer() instead.
  */
-AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
+AWS_S3_API struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_default_buffer_pool *buffer_pool,
-    size_t size);
-
-/*
- * Whether pool has a reservation hold.
- */
-AWS_S3_API bool aws_s3_default_buffer_pool_has_reservation_hold(struct aws_s3_default_buffer_pool *buffer_pool);
-
-/*
- * Remove reservation hold on pool.
- */
-AWS_S3_API void aws_s3_default_buffer_pool_remove_reservation_hold(struct aws_s3_default_buffer_pool *buffer_pool);
+    struct aws_s3_buffer_pool_reserve_meta meta);
 
 /*
  * Trades in the ticket for a buffer.

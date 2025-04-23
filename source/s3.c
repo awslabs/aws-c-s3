@@ -53,6 +53,7 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RECV_FILE_NOT_FOUND, "The receive file doesn't exist, cannot create as configuration required."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_REQUEST_TIMEOUT, "RequestTimeout error received from S3."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_TOKEN_EXPIRED, "Token expired - needs a refresh."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED, "Could not reserve memory for object."),
 };
 /* clang-format on */
 
