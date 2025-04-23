@@ -210,6 +210,11 @@ struct aws_s3_request {
         /* Returned response status of this request. */
         int response_status;
 
+        /* Returned request ID of this request. */
+        struct aws_string *request_id;
+        /* Returned amz ID 2 of this request. */
+        struct aws_string *amz_id_2;
+
         /* The metrics for the request telemetry */
         struct aws_s3_request_metrics *metrics;
 

@@ -1276,6 +1276,7 @@ static int s_s3_meta_request_incoming_headers(
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
+    bool collect_metrics = request->send_data.metrics != NULL;
 
     if (aws_http_stream_get_incoming_response_status(stream, &request->send_data.response_status)) {
         AWS_LOGF_ERROR(
@@ -1284,22 +1285,12 @@ static int s_s3_meta_request_incoming_headers(
             (void *)meta_request,
             (void *)request);
     }
-    if (request->send_data.metrics) {
+
+    if (collect_metrics) {
         /* Record the headers to the metrics */
         struct aws_s3_request_metrics *s3_metrics = request->send_data.metrics;
         if (s3_metrics->req_resp_info_metrics.response_headers == NULL) {
             s3_metrics->req_resp_info_metrics.response_headers = aws_http_headers_new(meta_request->allocator);
-        }
-
-        for (size_t i = 0; i < headers_count; ++i) {
-            const struct aws_byte_cursor *name = &headers[i].name;
-            const struct aws_byte_cursor *value = &headers[i].value;
-            if (aws_byte_cursor_eq(name, &g_request_id_header_name)) {
-                s3_metrics->req_resp_info_metrics.request_id =
-                    aws_string_new_from_cursor(connection->request->allocator, value);
-            }
-
-            aws_http_headers_add(s3_metrics->req_resp_info_metrics.response_headers, *name, *value);
         }
         s3_metrics->req_resp_info_metrics.response_status = request->send_data.response_status;
     }
@@ -1320,11 +1311,25 @@ static int s_s3_meta_request_incoming_headers(
         if (request->send_data.response_headers == NULL) {
             request->send_data.response_headers = aws_http_headers_new(meta_request->allocator);
         }
+    }
 
-        for (size_t i = 0; i < headers_count; ++i) {
-            const struct aws_byte_cursor *name = &headers[i].name;
-            const struct aws_byte_cursor *value = &headers[i].value;
-
+    for (size_t i = 0; i < headers_count; ++i) {
+        const struct aws_byte_cursor *name = &headers[i].name;
+        const struct aws_byte_cursor *value = &headers[i].value;
+        if (request->send_data.request_id == NULL && aws_byte_cursor_eq(name, &g_request_id_header_name)) {
+            request->send_data.request_id = aws_string_new_from_cursor(connection->request->allocator, value);
+            if (collect_metrics) {
+                request->send_data.metrics->req_resp_info_metrics.request_id =
+                    aws_string_new_from_cursor(connection->request->allocator, value);
+            }
+        }
+        if (request->send_data.amz_id_2 == NULL && aws_byte_cursor_eq(name, &g_amz_id_2_header_name)) {
+            request->send_data.amz_id_2 = aws_string_new_from_cursor(connection->request->allocator, value);
+        }
+        if (collect_metrics) {
+            aws_http_headers_add(request->send_data.metrics->req_resp_info_metrics.response_headers, *name, *value);
+        }
+        if (should_record_headers) {
             aws_http_headers_add(request->send_data.response_headers, *name, *value);
         }
     }
@@ -1624,12 +1629,15 @@ void aws_s3_meta_request_send_request_finish_default(
 
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST,
-        "id=%p: Request %p finished with error code %d (%s) and response status %d",
+        "id=%p: Request %p finished with error code %d (%s) and response status %d, x-amz-request-id: %s, x-amz-id-2: "
+        "%s",
         (void *)meta_request,
         (void *)request,
         error_code,
         aws_error_debug_str(error_code),
-        response_status);
+        response_status,
+        request->send_data.request_id ? aws_string_c_str(request->send_data.request_id) : "N/A",
+        request->send_data.amz_id_2 ? aws_string_c_str(request->send_data.amz_id_2) : "N/A");
 
     enum aws_s3_connection_finish_code finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
 
