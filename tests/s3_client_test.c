@@ -99,7 +99,6 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
 
-        /* Check that retry should be turned off */
         ASSERT_TRUE(client->synced_data.upload_part_stats.stop_timeout);
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         ASSERT_UINT_EQUALS(0, current_timeout_ms);
@@ -110,7 +109,7 @@ TEST_CASE(client_update_upload_part_timeout) {
         }
     }
     {
-        /* 2. Test that the P90 of the init samples are used correctly */
+        /* 2.1. Test that the P90 of the init samples are used correctly and at least 1 sec */
         AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
         /* Hack around to set the ideal connection time for testing. */
         size_t test_init_connection = 1000;
@@ -122,9 +121,33 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
 
-        /* Check that retry should be turned off */
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-        ASSERT_UINT_EQUALS(900, current_timeout_ms);
+        /* the P90 of the results is 900, but it has to be at least 1000 */
+        ASSERT_UINT_EQUALS(1000, current_timeout_ms);
+        /* clean up */
+        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
+        }
+        /* Change it back */
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)init_count;
+    }
+    {
+        /* 2.2. Test that the P90 of the init samples are used correctly */
+        AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
+        /* Hack around to set the ideal connection time for testing. */
+        size_t test_init_connection = 10000;
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)test_init_connection;
+        for (size_t i = 0; i < test_init_connection; i++) {
+            /* Mock a number of requests completed with the large time for the request */
+            uint64_t time_ns = aws_timestamp_convert(i, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+            s_init_mock_s3_request_upload_part_timeout(&mock_request, 0, time_ns, time_ns);
+            aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
+        }
+
+        size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        /* P90 is 9000 */
+        ASSERT_UINT_EQUALS(9000, current_timeout_ms);
         /* clean up */
         if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
             aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);

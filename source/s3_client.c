@@ -2604,7 +2604,7 @@ void aws_s3_client_update_upload_part_timeout(
                         aws_priority_queue_top(&stats->initial_request_time.p90_samples, (void **)&p90_ns);
                         uint64_t p90_ms =
                             aws_timestamp_convert(*p90_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL);
-                        uint64_t init_upload_timeout_ms = aws_max_u64(&p90_ms, 1000 /*1sec*/);
+                        uint64_t init_upload_timeout_ms = aws_max_u64(p90_ms, 1000 /*1sec*/);
                         aws_atomic_store_int(&client->upload_timeout_ms, (size_t)init_upload_timeout_ms);
                         /* Clean up the queue now, as not needed anymore. */
                         aws_priority_queue_clean_up(&stats->initial_request_time.p90_samples);
