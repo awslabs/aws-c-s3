@@ -180,7 +180,7 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
-    meta_request->checksum = aws_checksum_new(allocator, AWS_SCA_CRC64NVME);
+    meta_request->checksum = aws_checksum_new(allocator, options->checksum_config->checksum_algorithm);
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -2239,14 +2239,13 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     if(status.is_end_of_stream) {
         struct aws_byte_buf checksum_buf;
         aws_byte_buf_init(&checksum_buf,meta_request->allocator, 8*1024*1024);
-        struct aws_byte_buf encoded_buf;
-        aws_byte_buf_init(&encoded_buf,meta_request->allocator, 8*1024*1024);
+        aws_byte_buf_init(&meta_request->checksum_config.full_object_checksum, meta_request->allocator, 8 * 1024 * 1024);
         if(aws_checksum_finalize(meta_request->checksum, &checksum_buf) != AWS_OP_SUCCESS) {
             printf("WAHT>>>>>>>\n");
         }
         struct aws_byte_cursor checksum_cur = aws_byte_cursor_from_buf(&checksum_buf);
-        AWS_FATAL_ASSERT(aws_base64_encode(&checksum_cur, &encoded_buf) == AWS_OP_SUCCESS);
-        struct aws_byte_cursor encoded_cur = aws_byte_cursor_from_buf(&encoded_buf);
+        AWS_FATAL_ASSERT(aws_base64_encode(&checksum_cur, &meta_request->checksum_config.full_object_checksum) == AWS_OP_SUCCESS);
+        struct aws_byte_cursor encoded_cur = aws_byte_cursor_from_buf(&meta_request->checksum_config.full_object_checksum);
 
         printf("$$$$$$ checksum: %.*s\n", (int)encoded_cur.len, encoded_cur.ptr);
         printf("aws_s3_meta_request_read_body: end of stream\n");
