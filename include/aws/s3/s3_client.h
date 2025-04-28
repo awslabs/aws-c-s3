@@ -189,6 +189,25 @@ typedef void(aws_s3_meta_request_finish_fn)(
     const struct aws_s3_meta_request_result *meta_request_result,
     void *user_data);
 
+struct aws_s3_meta_request_receive_body_extra_info {
+    uint64_t range_start;
+
+    struct aws_s3_buffer_ticket *ticket;
+
+    void *user_data;
+};
+
+typedef int(aws_s3_meta_request_receive_body_callback_ex_fn)(
+
+    /* The meta request that the callback is being issued for. */
+    struct aws_s3_meta_request *meta_request,
+
+    /* The body data for this chunk of the object. */
+    const struct aws_byte_cursor *body,
+
+    /* Extra information associated with the delivered body */
+    const struct aws_s3_meta_request_receive_body_extra_info info);
+
 /**
  * Information sent in the meta_request progress callback.
  */
@@ -818,6 +837,15 @@ struct aws_s3_meta_request_options {
      * See `aws_s3_meta_request_receive_body_callback_fn`.
      */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+
+    /**
+     * Invoked to provide the response body as it is received.
+     * Provides extra information as compared to regular callback.
+     * Note: if both body_callback and body_callback_ex are specified, 
+     * only body_callback_ex will be called.
+     * See `aws_s3_meta_request_receive_body_callback_ex_fn`.
+     */
+    aws_s3_meta_request_receive_body_callback_ex_fn *body_callback_ex;
 
     /**
      * Invoked when the entire meta request execution is complete.

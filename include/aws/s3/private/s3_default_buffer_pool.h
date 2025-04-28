@@ -111,22 +111,17 @@ AWS_S3_API struct aws_byte_buf aws_s3_default_buffer_pool_acquire_buffer(
     struct aws_s3_buffer_ticket *ticket);
 
 /*
- * Force immediate acquisition of a buffer from the pool.
- * This should only be used if waiting to reserve a ticket would risk deadlock.
- * This cannot fail, not even if the pool has a reservation hold,
- * not even if the memory limit has been exceeded.
+ * Acquires ticket.
+ * Increases ref count by 1.
  */
-AWS_S3_API struct aws_byte_buf aws_s3_default_buffer_pool_acquire_forced_buffer(
-    struct aws_s3_default_buffer_pool *buffer_pool,
-    size_t size,
-    struct aws_s3_buffer_ticket **out_new_ticket);
+AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_acquire_ticket(
+    struct aws_s3_buffer_ticket *ticket);
 
 /*
  * Releases the ticket.
- * Any buffers associated with the ticket are invalidated.
+ * Once ref count reaches 0 any buffers associated with the ticket are invalidated.
  */
-AWS_S3_API void aws_s3_default_buffer_pool_release_ticket(
-    struct aws_s3_default_buffer_pool *buffer_pool,
+AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_release_ticket(
     struct aws_s3_buffer_ticket *ticket);
 
 /*

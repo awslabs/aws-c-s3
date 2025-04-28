@@ -15,7 +15,7 @@ struct aws_s3_buffer_ticket;
 /**
  * aws_future<aws_s3_buffer_ticket*>
  */
-AWS_FUTURE_T_POINTER_WITH_RELEASE_DECLARATION(aws_future_s3_buffer_ticket, struct aws_s3_buffer_ticket, AWS_S3_API)
+AWS_FUTURE_T_POINTER_DECLARATION(aws_future_s3_buffer_ticket, struct aws_s3_buffer_ticket, AWS_S3_API)
 
 struct aws_s3_buffer_pool_reserve_meta {
     struct aws_s3_client *client;
@@ -30,9 +30,11 @@ struct aws_s3_buffer_pool {
     struct aws_future_s3_buffer_ticket *(*reserve)(struct aws_s3_buffer_pool *pool, 
         struct aws_s3_buffer_pool_reserve_meta meta);
     struct aws_byte_buf (*claim)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
-    void (*release)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
 
-    void (*trim)(struct aws_s3_buffer_pool *pool);
+    struct aws_s3_buffer_ticket *(*ticket_acquire)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
+    struct aws_s3_buffer_ticket *(*ticket_release)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
+
+    void (*trim)(struct aws_s3_buffer_pool *pool, struct aws_s3_client *client);
 
     struct aws_allocator *allocator;
     void *user_data;

@@ -7,7 +7,9 @@
 
 #include <aws/common/array_list.h>
 #include <aws/common/mutex.h>
+#include <aws/common/ref_count.h>
 #include <aws/s3/private/s3_util.h>
+#include <aws/io/future.h>
 
 /*
  * S3 Buffer Pool.
@@ -39,11 +41,17 @@
  * the pool, but waiting for a normal ticket reservation could cause deadlock.
  */
 
+AWS_FUTURE_T_POINTER_IMPLEMENTATION(aws_future_s3_buffer_ticket, struct aws_s3_buffer_ticket)
+
+struct aws_s3_default_buffer_pool;
+
 struct aws_s3_buffer_ticket {
     size_t size;
     uint8_t *ptr;
     size_t chunks_used;
     bool forced;
+    struct aws_ref_count ref_count;
+    struct aws_s3_default_buffer_pool *pool;
 };
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
@@ -191,7 +199,7 @@ struct aws_s3_default_buffer_pool *aws_s3_default_buffer_pool_new(
         chunk_size = 0;
     }
 
-    struct aws_s3_default_buffer_pool *buffer_pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
+    struct aws_s3_default_buffer_pool *buffer_pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_default_buffer_pool));
 
     AWS_FATAL_ASSERT(buffer_pool != NULL);
 
@@ -257,6 +265,79 @@ void aws_s3_default_buffer_pool_trim(struct aws_s3_default_buffer_pool *buffer_p
 }
 
 struct aws_s3_buffer_ticket *s_try_reserve(struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool_reserve_meta meta);
+
+static void s_aws_ticket_destroy(void *data) {
+    struct aws_s3_buffer_ticket *ticket = data;
+    struct aws_s3_default_buffer_pool *buffer_pool = ticket->pool;
+
+    if (ticket->ptr == NULL) {
+        /* Ticket was never used, make sure to clean up reserved count. */
+        aws_mutex_lock(&buffer_pool->mutex);
+        if (ticket->size <= buffer_pool->primary_size_cutoff) {
+            buffer_pool->primary_reserved -= ticket->size;
+        } else {
+            buffer_pool->secondary_reserved -= ticket->size;
+        }
+        aws_mutex_unlock(&buffer_pool->mutex);
+        aws_mem_release(buffer_pool->base_allocator, ticket);
+        return;
+    }
+
+    aws_mutex_lock(&buffer_pool->mutex);
+    if (ticket->size <= buffer_pool->primary_size_cutoff) {
+
+        size_t chunks_used = ticket->size / buffer_pool->chunk_size;
+        if (ticket->size % buffer_pool->chunk_size != 0) {
+            ++chunks_used; /* round up */
+        }
+
+        bool found = false;
+        for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
+            struct s3_buffer_pool_block *block;
+            aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
+
+            if (block->block_ptr <= ticket->ptr && block->block_ptr + block->block_size > ticket->ptr) {
+                size_t alloc_i = (ticket->ptr - block->block_ptr) / buffer_pool->chunk_size;
+
+                block->alloc_bit_mask = s_clear_bits(block->alloc_bit_mask, alloc_i, chunks_used);
+                buffer_pool->primary_used -= ticket->size;
+
+                found = true;
+                break;
+            }
+        }
+
+        AWS_FATAL_ASSERT(found);
+    } else {
+        aws_mem_release(buffer_pool->base_allocator, ticket->ptr);
+        buffer_pool->secondary_used -= ticket->size;
+    }
+
+    if (ticket->forced) {
+        buffer_pool->forced_used -= ticket->size;
+    }
+
+    aws_mem_release(buffer_pool->base_allocator, ticket);
+
+    if (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
+        struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
+        struct s3_pending_reserve *pending_reserve =
+            AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+
+        struct aws_s3_buffer_ticket *ticket = s_try_reserve(buffer_pool, pending_reserve->meta);
+
+        if (ticket != NULL) {
+            aws_future_s3_buffer_ticket_set_result(pending_reserve->ticket_future, ticket);
+            aws_linked_list_pop_front(&buffer_pool->pending_reserves);
+            aws_mem_release(buffer_pool->base_allocator, pending_reserve);
+        }
+    }
+
+    aws_mutex_unlock(&buffer_pool->mutex);
+}
+
+struct aws_s3_buffer_ticket *s_try_reserve(struct aws_s3_default_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_reserve_meta meta) {
     struct aws_s3_buffer_ticket *ticket = NULL;
     size_t overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
@@ -285,6 +366,8 @@ struct aws_s3_buffer_ticket *s_try_reserve(struct aws_s3_default_buffer_pool *bu
     if ((meta.size + overall_taken) <= buffer_pool->mem_limit) {
         ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_ticket));
         ticket->size = meta.size;
+        ticket->pool = buffer_pool;
+        aws_ref_count_init(&ticket->ref_count, ticket, (aws_simple_completion_callback *)s_aws_ticket_destroy);
         if (meta.size <= buffer_pool->primary_size_cutoff) {
             buffer_pool->primary_reserved += meta.size;
         } else {
@@ -305,11 +388,20 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
 
     aws_mutex_lock(&buffer_pool->mutex);
 
-    struct aws_s3_buffer_ticket *ticket = s_try_reserve(buffer_pool, meta);
+    struct aws_s3_buffer_ticket *ticket = NULL;
+    if (meta.can_block) {
+        ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_ticket));
+        ticket->size = meta.size;
+        ticket->forced = true;
+        ticket->pool = buffer_pool;
+        aws_ref_count_init(&ticket->ref_count, ticket, (aws_simple_completion_callback *)s_aws_ticket_destroy);
+    } else {
+        ticket = s_try_reserve(buffer_pool, meta);
+    }
 
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(buffer_pool->base_allocator);
     if (ticket != NULL) {
-        aws_future_s3_buffer_ticket_set_result_by_move(future, &ticket);
+        aws_future_s3_buffer_ticket_set_result(future, ticket);
     } else {
         struct s3_pending_reserve *pending_reserve =
             aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct s3_pending_reserve));
@@ -412,108 +504,29 @@ static struct aws_byte_buf s_acquire_buffer_synced(
         }
     }
 
+    if (ticket->forced) {
+        buffer_pool->forced_used += ticket->size;
+    }
+
     return aws_byte_buf_from_empty_array(ticket->ptr, ticket->size);
 }
 
-struct aws_byte_buf aws_s3_default_buffer_pool_acquire_forced_buffer(
-    struct aws_s3_default_buffer_pool *buffer_pool,
-    size_t size,
-    struct aws_s3_buffer_ticket **out_new_ticket) {
+struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_acquire_ticket(
+    struct aws_s3_buffer_ticket *ticket) {
+    AWS_PRECONDITION(ticket);
 
-    AWS_PRECONDITION(buffer_pool);
-    AWS_PRECONDITION(out_new_ticket);
-
-    AWS_FATAL_ASSERT(size != 0);
-
-    aws_mutex_lock(&buffer_pool->mutex);
-
-    struct aws_s3_buffer_ticket *ticket =
-        aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_ticket));
-    ticket->size = size;
-    ticket->forced = true;
-
-    struct aws_byte_buf buf = s_acquire_buffer_synced(buffer_pool, ticket);
-
-    buffer_pool->forced_used += size;
-
-    aws_mutex_unlock(&buffer_pool->mutex);
-
-    *out_new_ticket = ticket;
-    return buf;
+    aws_ref_count_acquire(&ticket->ref_count);
+    return ticket;
 }
 
-void aws_s3_default_buffer_pool_release_ticket(
-    struct aws_s3_default_buffer_pool *buffer_pool,
+struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_release_ticket(
     struct aws_s3_buffer_ticket *ticket) {
 
-    if (buffer_pool == NULL || ticket == NULL) {
-        return;
+    if (ticket != NULL) {
+        aws_ref_count_release(&ticket->ref_count);
     }
 
-    if (ticket->ptr == NULL) {
-        /* Ticket was never used, make sure to clean up reserved count. */
-        aws_mutex_lock(&buffer_pool->mutex);
-        if (ticket->size <= buffer_pool->primary_size_cutoff) {
-            buffer_pool->primary_reserved -= ticket->size;
-        } else {
-            buffer_pool->secondary_reserved -= ticket->size;
-        }
-        aws_mutex_unlock(&buffer_pool->mutex);
-        aws_mem_release(buffer_pool->base_allocator, ticket);
-        return;
-    }
-
-    aws_mutex_lock(&buffer_pool->mutex);
-    if (ticket->size <= buffer_pool->primary_size_cutoff) {
-
-        size_t chunks_used = ticket->size / buffer_pool->chunk_size;
-        if (ticket->size % buffer_pool->chunk_size != 0) {
-            ++chunks_used; /* round up */
-        }
-
-        bool found = false;
-        for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
-            struct s3_buffer_pool_block *block;
-            aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
-
-            if (block->block_ptr <= ticket->ptr && block->block_ptr + block->block_size > ticket->ptr) {
-                size_t alloc_i = (ticket->ptr - block->block_ptr) / buffer_pool->chunk_size;
-
-                block->alloc_bit_mask = s_clear_bits(block->alloc_bit_mask, alloc_i, chunks_used);
-                buffer_pool->primary_used -= ticket->size;
-
-                found = true;
-                break;
-            }
-        }
-
-        AWS_FATAL_ASSERT(found);
-    } else {
-        aws_mem_release(buffer_pool->base_allocator, ticket->ptr);
-        buffer_pool->secondary_used -= ticket->size;
-    }
-
-    if (ticket->forced) {
-        buffer_pool->forced_used -= ticket->size;
-    }
-
-    aws_mem_release(buffer_pool->base_allocator, ticket);
-
-    if (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
-        struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
-        struct s3_pending_reserve *pending_reserve =
-            AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
-
-        struct aws_s3_buffer_ticket *ticket = s_try_reserve(buffer_pool, pending_reserve->meta);
-
-        if (ticket != NULL) {
-            aws_future_s3_buffer_ticket_set_result_by_move(pending_reserve->ticket_future, &ticket);
-            aws_linked_list_pop_front(&buffer_pool->pending_reserves);
-            aws_mem_release(buffer_pool->base_allocator, pending_reserve);
-        }
-    }
-
-    aws_mutex_unlock(&buffer_pool->mutex);
+    return NULL;
 }
 
 struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usage(

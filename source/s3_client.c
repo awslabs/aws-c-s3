@@ -245,13 +245,22 @@ struct aws_byte_buf s_default_pool_claim(struct aws_s3_buffer_pool *pool, struct
     return aws_s3_default_buffer_pool_acquire_buffer(default_pool, ticket);
 }
 
-void s_default_pool_release(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket) {
-    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+struct aws_s3_buffer_ticket *s_default_pool_ticket_acquire(struct aws_s3_buffer_pool *pool, 
+    struct aws_s3_buffer_ticket *ticket) {
+    (void)pool;
 
-    aws_s3_default_buffer_pool_release_ticket(default_pool, ticket);
+    return aws_s3_default_buffer_pool_acquire_ticket(ticket);
 }
 
-void s_default_pool_trim(struct aws_s3_buffer_pool *pool) {
+struct aws_s3_buffer_ticket *s_default_pool_ticket_release(struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_ticket *ticket) {
+    (void)pool;
+
+    return aws_s3_default_buffer_pool_release_ticket(ticket);
+}
+
+void s_default_pool_trim(struct aws_s3_buffer_pool *pool, struct aws_s3_client *client) {
+    (void)client;
     struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
 
     aws_s3_default_buffer_pool_trim(default_pool);
@@ -268,7 +277,8 @@ static struct aws_s3_buffer_pool *s_create_default_buffer_pool(
     pool->destroy = s_default_buffer_pool_destroy;
     pool->claim = s_default_pool_claim;
     pool->reserve = s_default_pool_reserve;
-    pool->release = s_default_pool_release;
+    pool->ticket_acquire = s_default_pool_ticket_acquire;
+    pool->ticket_release = s_default_pool_ticket_release;
     pool->trim = s_default_pool_trim;
 
     return pool;
@@ -1470,7 +1480,7 @@ static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, 
     uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     if (num_reqs_in_flight == 0) {
-        client->buffer_pool->trim(client->buffer_pool);
+        client->buffer_pool->trim(client->buffer_pool, client);
     }
 }
 
