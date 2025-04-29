@@ -41,11 +41,19 @@ static int s_starts_upload_retry(struct aws_s3_client *client, struct aws_s3_req
     AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
 
     s_init_mock_s3_request_upload_part_timeout(mock_request, 0, average_time_ns, average_time_ns);
-    for (size_t i = 0; i < 10; i++) {
-        /* Mock a number of requests completed with the large time for the request */
+    size_t init_count = client->ideal_connection_count;
+    size_t p90_count = init_count / 10 + 1;
+    for (size_t i = 0; i < init_count - p90_count; i++) {
+        /* With 90% of the average request time. */
         aws_s3_client_update_upload_part_timeout(client, mock_request, AWS_ERROR_SUCCESS);
     }
 
+    uint64_t one_sec_time_ns = aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL); /* 1 Secs */
+    s_init_mock_s3_request_upload_part_timeout(mock_request, 0, one_sec_time_ns, one_sec_time_ns);
+    for (size_t i = 0; i < p90_count; i++) {
+        /* 10 percent of the request takes 1 sec */
+        aws_s3_client_update_upload_part_timeout(client, mock_request, AWS_ERROR_SUCCESS);
+    }
     /* Check that retry should be turned off */
     ASSERT_FALSE(client->synced_data.upload_part_stats.stop_timeout);
     size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
@@ -78,7 +86,7 @@ TEST_CASE(client_update_upload_part_timeout) {
     uint64_t average_time_ns = aws_timestamp_convert(
         250, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL); /* 0.25 Secs, close to average for upload a part */
 
-    size_t init_count = 10;
+    size_t init_count = client->ideal_connection_count;
     {
         /* 1. If the request time is larger than 5 secs, we don't do retry */
         AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
@@ -91,10 +99,62 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
 
-        /* Check that retry should be turned off */
         ASSERT_TRUE(client->synced_data.upload_part_stats.stop_timeout);
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         ASSERT_UINT_EQUALS(0, current_timeout_ms);
+        /* clean up */
+        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
+        }
+    }
+    {
+        /* 2.1. Test that the P90 of the init samples are used correctly and at least 1 sec */
+        AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
+        /* Hack around to set the ideal connection time for testing. */
+        size_t test_init_connection = 1000;
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)test_init_connection;
+        for (size_t i = 0; i < test_init_connection; i++) {
+            /* Mock a number of requests completed with the large time for the request */
+            uint64_t time_ns = aws_timestamp_convert(i, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+            s_init_mock_s3_request_upload_part_timeout(&mock_request, 0, time_ns, time_ns);
+            aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
+        }
+
+        size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        /* the P90 of the results is 900, but it has to be at least 1000 */
+        ASSERT_UINT_EQUALS(1000, current_timeout_ms);
+        /* clean up */
+        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
+        }
+        /* Change it back */
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)init_count;
+    }
+    {
+        /* 2.2. Test that the P90 of the init samples are used correctly */
+        AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
+        /* Hack around to set the ideal connection time for testing. */
+        size_t test_init_connection = 10000;
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)test_init_connection;
+        for (size_t i = 0; i < test_init_connection; i++) {
+            /* Mock a number of requests completed with the large time for the request */
+            uint64_t time_ns = aws_timestamp_convert(i, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+            s_init_mock_s3_request_upload_part_timeout(&mock_request, 0, time_ns, time_ns);
+            aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
+        }
+
+        size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        /* P90 is 9000 */
+        ASSERT_UINT_EQUALS(9000, current_timeout_ms);
+        /* clean up */
+        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
+        }
+        /* Change it back */
+        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)init_count;
     }
 
     {
@@ -137,6 +197,11 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_timestamp_convert(average_time_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL) +
                 g_expect_timeout_offset_ms,
             current_timeout_ms);
+        /* clean up */
+        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
+        }
     }
 
     {
@@ -162,6 +227,11 @@ TEST_CASE(client_update_upload_part_timeout) {
         current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         /* 1.1 secs, still */
         ASSERT_UINT_EQUALS(1100, current_timeout_ms);
+        /* clean up */
+        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
+        }
     }
 
     {
@@ -224,6 +294,11 @@ TEST_CASE(client_update_upload_part_timeout) {
         current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         ASSERT_UINT_EQUALS(3000, current_timeout_ms);
         ASSERT_FALSE(client->synced_data.upload_part_stats.stop_timeout);
+        /* clean up */
+        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
+        }
     }
 
     {

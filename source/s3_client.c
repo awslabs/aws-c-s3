@@ -22,6 +22,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
 #include <aws/common/json.h>
+#include <aws/common/priority_queue.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/http/connection.h>
@@ -768,6 +769,9 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
     aws_s3_buffer_pool_destroy(client->buffer_pool);
+    if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
+        aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
+    }
 
     aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
     for (size_t i = 0; i < client->num_network_interface_names; i++) {
@@ -2481,6 +2485,13 @@ static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
 const size_t g_expect_timeout_offset_ms =
     700; /* 0.7 Secs. From experiments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
 
+static int s_compare_uint64_min_heap(const void *a, const void *b) {
+    uint64_t arg1 = *(const uint64_t *)a;
+    uint64_t arg2 = *(const uint64_t *)b;
+    /* Use a min-heap to get the P90, which will be the min of the largest 10% of data. */
+    return arg1 > arg2;
+}
+
 /**
  * The upload timeout optimization: explained.
  *
@@ -2501,10 +2512,10 @@ const size_t g_expect_timeout_offset_ms =
  * would be better off waiting 5sec for the response, vs re-uploading the whole request.
  *
  * The current algorithm:
- * 1. Start without a timeout value. After 10 requests completed, we know the average of how long the
- *      request takes. We decide if it's worth to set a timeout value or not. (If the average of request takes more than
- *      5 secs or not) TODO: if the client have different part size, this doesn't make sense
- * 2. If it is worth to retry, start with a default timeout value, 1 sec.
+ * 1. Start without a timeout value. After max(10, # of ideal connections) requests completed, we know the average of
+ *      how long the request takes. We decide if it's worth to set a timeout value or not. (If the average of request
+ *      takes more than 5 secs or not).
+ * 2. If it is worth to retry, start with a timeout value from max(1 sec, P90 of the initial samples).
  * 3. If a request finishes successfully, use the average response_to_first_byte_time + g_expect_timeout_offset_ms as
  *      our expected timeout value. (TODO: The real expected timeout value should be a P99 of all the requests.)
  *  3.1 Adjust the current timeout value against the expected timeout value, via 0.99 * <current timeout> + 0.01 *
@@ -2537,19 +2548,50 @@ void aws_s3_client_update_upload_part_timeout(
     uint64_t updated_timeout_ns = 0;
     uint64_t expect_timeout_offset_ns =
         aws_timestamp_convert(g_expect_timeout_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+    // Default to ideal connection count, but at least collect 10 samples.
+    uint32_t num_samples_to_collect = aws_max_u32(client->ideal_connection_count, 10);
 
     switch (finished_error_code) {
         case AWS_ERROR_SUCCESS:
             /* We only interested in request succeed */
             stats->num_successful_upload_requests = aws_add_u64_saturating(stats->num_successful_upload_requests, 1);
-            if (stats->num_successful_upload_requests <= 10) {
+            if (stats->num_successful_upload_requests <= num_samples_to_collect) {
                 /* Gether the data */
                 uint64_t request_time_ns =
                     metrics->time_metrics.receive_end_timestamp_ns - metrics->time_metrics.send_start_timestamp_ns;
                 stats->initial_request_time.sum_ns =
                     aws_add_u64_saturating(stats->initial_request_time.sum_ns, request_time_ns);
                 ++stats->initial_request_time.num_samples;
-                if (stats->num_successful_upload_requests == 10) {
+                if (!stats->initial_request_time.collecting_p90) {
+                    /* Initialize the priority queue to collect the p90 of the initial requests. */
+                    stats->initial_request_time.collecting_p90 = true;
+                    size_t queue_size = num_samples_to_collect / 10;
+                    AWS_ASSERT(queue_size > 0);
+                    aws_priority_queue_init_dynamic(
+                        &stats->initial_request_time.p90_samples,
+                        client->allocator,
+                        queue_size,
+                        sizeof(uint64_t),
+                        s_compare_uint64_min_heap);
+                } else {
+                    /* check if the queue is full, if full pop and top and push the next. */
+                    size_t current_size = aws_priority_queue_size(&stats->initial_request_time.p90_samples);
+                    size_t current_capacity = aws_priority_queue_capacity(&stats->initial_request_time.p90_samples);
+                    if (current_size == current_capacity) {
+                        uint64_t *min = NULL;
+                        aws_priority_queue_top(&stats->initial_request_time.p90_samples, (void **)&min);
+                        if (request_time_ns > *min) {
+                            /* Push the data into the queue if it's larger than the min of the queue. */
+                            uint64_t pop_val = 0;
+                            aws_priority_queue_pop(&stats->initial_request_time.p90_samples, &pop_val);
+                            aws_priority_queue_push(&stats->initial_request_time.p90_samples, &request_time_ns);
+                        }
+                    } else {
+                        aws_priority_queue_push(&stats->initial_request_time.p90_samples, &request_time_ns);
+                    }
+                }
+
+                if (stats->num_successful_upload_requests == client->ideal_connection_count) {
                     /* Decide we need a timeout or not */
                     uint64_t average_request_time_ns =
                         stats->initial_request_time.sum_ns / stats->initial_request_time.num_samples;
@@ -2557,8 +2599,16 @@ void aws_s3_client_update_upload_part_timeout(
                         /* We don't need a timeout, as retry will be slower than just wait for the server to response */
                         stats->stop_timeout = true;
                     } else {
-                        /* Start the timeout at 1 secs */
-                        aws_atomic_store_int(&client->upload_timeout_ms, 1000);
+                        /* Start the timeout at th p90 of the initial samples. */
+                        uint64_t *p90_ns = NULL;
+                        aws_priority_queue_top(&stats->initial_request_time.p90_samples, (void **)&p90_ns);
+                        uint64_t p90_ms =
+                            aws_timestamp_convert(*p90_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL);
+                        uint64_t init_upload_timeout_ms = aws_max_u64(p90_ms, 1000 /*1sec*/);
+                        aws_atomic_store_int(&client->upload_timeout_ms, (size_t)init_upload_timeout_ms);
+                        /* Clean up the queue now, as not needed anymore. */
+                        aws_priority_queue_clean_up(&stats->initial_request_time.p90_samples);
+                        stats->initial_request_time.collecting_p90 = false;
                     }
                 }
                 goto unlock;
