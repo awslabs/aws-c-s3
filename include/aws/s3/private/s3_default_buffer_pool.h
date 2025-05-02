@@ -31,8 +31,8 @@
 
 AWS_EXTERN_C_BEGIN
 
-struct aws_s3_buffer_pool;
-struct aws_s3_buffer_ticket;
+struct aws_s3_default_buffer_pool;
+struct aws_s3_default_buffer_ticket;
 
 struct aws_s3_default_buffer_pool_usage_stats {
     /* Effective Max memory limit. Memory limit value provided during construction minus
@@ -108,21 +108,7 @@ AWS_S3_API struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserv
  */
 AWS_S3_API struct aws_byte_buf aws_s3_default_buffer_pool_acquire_buffer(
     struct aws_s3_default_buffer_pool *buffer_pool,
-    struct aws_s3_buffer_ticket *ticket);
-
-/*
- * Acquires ticket.
- * Increases ref count by 1.
- */
-AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_acquire_ticket(
-    struct aws_s3_buffer_ticket *ticket);
-
-/*
- * Releases the ticket.
- * Once ref count reaches 0 any buffers associated with the ticket are invalidated.
- */
-AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_default_buffer_pool_release_ticket(
-    struct aws_s3_buffer_ticket *ticket);
+    struct aws_s3_default_buffer_ticket *ticket);
 
 /*
  * Get pool memory usage stats.

@@ -1,6 +1,7 @@
 #ifndef AWS_S3_BUFFER_POOL_H
 #define AWS_S3_BUFFER_POOL_H
 
+#include <aws/common/ref_count.h>
 #include <aws/io/future.h>
 #include <aws/s3/s3.h>
 
@@ -15,7 +16,7 @@ struct aws_s3_buffer_ticket;
 /**
  * aws_future<aws_s3_buffer_ticket*>
  */
-AWS_FUTURE_T_POINTER_DECLARATION(aws_future_s3_buffer_ticket, struct aws_s3_buffer_ticket, AWS_S3_API)
+AWS_FUTURE_T_POINTER_WITH_RELEASE_DECLARATION(aws_future_s3_buffer_ticket, struct aws_s3_buffer_ticket, AWS_S3_API)
 
 struct aws_s3_buffer_pool_reserve_meta {
     struct aws_s3_client *client;
@@ -24,23 +25,47 @@ struct aws_s3_buffer_pool_reserve_meta {
     bool can_block;
 };
 
-struct aws_s3_buffer_pool {
-    void (*destroy)(struct aws_s3_buffer_pool *pool);
+struct aws_s3_buffer_ticket;
+
+struct aws_s3_buffer_ticket_vtable {
+    struct aws_byte_buf (* claim)(struct aws_s3_buffer_ticket *ticket);
+
+    struct aws_s3_buffer_ticket *(* acquire)(struct aws_s3_buffer_ticket *ticket);
+    struct aws_s3_buffer_ticket *(* release)(struct aws_s3_buffer_ticket *ticket);
+};
+
+struct aws_s3_buffer_ticket {
+    struct aws_s3_buffer_ticket_vtable *vtable;
+    struct aws_ref_count ref_count;
+    void *impl;
+};
+
+struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_acquire(struct aws_s3_buffer_ticket *ticket);
+struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_release(struct aws_s3_buffer_ticket *ticket);
+
+struct aws_s3_buffer_pool;
+
+struct aws_s3_buffer_pool_vtable {
+    void (*acquire)(struct aws_s3_buffer_pool *pool);
+    void (*release)(struct aws_s3_buffer_pool *pool);
 
     struct aws_future_s3_buffer_ticket *(*reserve)(struct aws_s3_buffer_pool *pool, 
         struct aws_s3_buffer_pool_reserve_meta meta);
-    struct aws_byte_buf (*claim)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
 
-    struct aws_s3_buffer_ticket *(*ticket_acquire)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
-    struct aws_s3_buffer_ticket *(*ticket_release)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket);
-
-    void (*trim)(struct aws_s3_buffer_pool *pool, struct aws_s3_client *client);
-
-    struct aws_allocator *allocator;
-    void *user_data;
+    void (*trim)(struct aws_s3_buffer_pool *pool);
 };
 
+struct aws_s3_buffer_pool {
+    struct aws_s3_buffer_pool_vtable *vtable;
+    struct aws_ref_count ref_count;
+    void *impl;
+};
+
+struct aws_s3_buffer_pool *aws_s3_buffer_pool_acquire(struct aws_s3_buffer_pool *buffer_pool);
+struct aws_s3_buffer_pool *aws_s3_buffer_pool_release(struct aws_s3_buffer_pool *buffer_pool);
+
 typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,
+                                                                    struct aws_s3_client *client,
                                                                    uint64_t part_size,
                                                                    uint64_t mem_limit);
 

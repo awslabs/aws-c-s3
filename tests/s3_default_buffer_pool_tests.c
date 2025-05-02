@@ -52,16 +52,16 @@ static void s_threaded_alloc_worker(void *user_data) {
         AWS_FATAL_ASSERT(future != NULL);
         AWS_FATAL_ASSERT(aws_future_s3_buffer_ticket_is_done(future));
         AWS_FATAL_ASSERT(aws_future_s3_buffer_ticket_get_error(future) == AWS_OP_SUCCESS);
-        struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result(future);
+        struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
 
-        struct aws_byte_buf buf = aws_s3_default_buffer_pool_acquire_buffer(pool, ticket);
+        struct aws_byte_buf buf = ticket->vtable->claim(ticket);
         AWS_FATAL_ASSERT(buf.buffer);
         memset(buf.buffer, 0, buf.capacity);
         tickets[count] = ticket;
     }
 
     for (size_t count = 0; count < NUM_TEST_ALLOCS / NUM_TEST_THREADS; ++count) {
-        aws_s3_default_buffer_pool_release_ticket(tickets[count]);
+        aws_s3_buffer_ticket_release(tickets[count]);
     }
 }
 
@@ -112,9 +112,9 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     ASSERT_NOT_NULL(future1);
     ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future1));
     ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(future1), AWS_OP_SUCCESS);
-    struct aws_s3_buffer_ticket *ticket1 = aws_future_s3_buffer_ticket_get_result(future1);
+    struct aws_s3_buffer_ticket *ticket1 = aws_future_s3_buffer_ticket_get_result_by_move(future1);
     ASSERT_NOT_NULL(ticket1);
-    struct aws_byte_buf buf1 = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, ticket1);
+    struct aws_byte_buf buf1 = ticket1->vtable->claim(ticket1);
     ASSERT_NOT_NULL(buf1.buffer);
 
     struct aws_s3_buffer_ticket *tickets[6];
@@ -125,9 +125,9 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
         ASSERT_NOT_NULL(ticket_futures[i]);
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
-        tickets[i] = aws_future_s3_buffer_ticket_get_result(ticket_futures[i]);
+        tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
         ASSERT_NOT_NULL(tickets[i]);
-        struct aws_byte_buf buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
+        struct aws_byte_buf buf = tickets[i]->vtable->claim(tickets[i]);
         ASSERT_NOT_NULL(buf.buffer);
     }
 
@@ -144,27 +144,27 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     ASSERT_NOT_NULL(future2);
     ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future2));
     ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(future2), AWS_OP_SUCCESS);
-    struct aws_s3_buffer_ticket *ticket2 = aws_future_s3_buffer_ticket_get_result(future2);
+    struct aws_s3_buffer_ticket *ticket2 = aws_future_s3_buffer_ticket_get_result_by_move(future2);
     ASSERT_NOT_NULL(ticket2);
-    struct aws_byte_buf buf2 = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, ticket2);
+    struct aws_byte_buf buf2 = ticket2->vtable->claim(ticket2);
     ASSERT_NOT_NULL(buf2.buffer);
 
     for (size_t i = 0; i < 6; ++i) {
-        aws_s3_default_buffer_pool_release_ticket(tickets[i]);
+        aws_s3_buffer_ticket_release(tickets[i]);
         aws_future_s3_buffer_ticket_release(ticket_futures[i]);
     }
 
-    aws_s3_default_buffer_pool_release_ticket(ticket1);
+    aws_s3_buffer_ticket_release(ticket1);
     aws_future_s3_buffer_ticket_release(future1);
-    aws_s3_default_buffer_pool_release_ticket(ticket2);
+    aws_s3_buffer_ticket_release(ticket2);
     aws_future_s3_buffer_ticket_release(future2);
 
     if (aws_future_s3_buffer_ticket_is_done(overallocated_future)) {
-        aws_s3_default_buffer_pool_release_ticket(aws_future_s3_buffer_ticket_get_result(overallocated_future));
+        aws_s3_buffer_ticket_release(aws_future_s3_buffer_ticket_get_result_by_move(overallocated_future));
     }
     aws_future_s3_buffer_ticket_release(overallocated_future);
     if (aws_future_s3_buffer_ticket_is_done(overallocated_future2)) {
-        aws_s3_default_buffer_pool_release_ticket(aws_future_s3_buffer_ticket_get_result(overallocated_future2));
+        aws_s3_buffer_ticket_release(aws_future_s3_buffer_ticket_get_result_by_move(overallocated_future2));
     }
     aws_future_s3_buffer_ticket_release(overallocated_future2);
 
@@ -189,15 +189,15 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
         ASSERT_NOT_NULL(ticket_futures[i]);
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
-        tickets[i] = aws_future_s3_buffer_ticket_get_result(ticket_futures[i]);
-        struct aws_byte_buf buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
+        tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
+        struct aws_byte_buf buf = tickets[i]->vtable->claim(tickets[i]);
         ASSERT_NOT_NULL(buf.buffer);
     }
 
     struct aws_s3_default_buffer_pool_usage_stats stats_before = aws_s3_default_buffer_pool_get_usage(buffer_pool);
 
     for (size_t i = 0; i < 20; ++i) {
-        aws_s3_default_buffer_pool_release_ticket(tickets[i]);
+        aws_s3_buffer_ticket_release(tickets[i]);
     }
 
     aws_s3_default_buffer_pool_trim(buffer_pool);
@@ -208,7 +208,7 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
     ASSERT_TRUE(stats_before.primary_allocated > stats_after.primary_allocated);
 
     for (size_t i = 20; i < 40; ++i) {
-        aws_s3_default_buffer_pool_release_ticket(tickets[i]);
+        aws_s3_buffer_ticket_release(tickets[i]);
     }
 
     aws_s3_default_buffer_pool_destroy(buffer_pool);
@@ -226,7 +226,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     struct s_reserve_state *state = user_data;
 
     if (aws_future_s3_buffer_ticket_get_error(state->future) == AWS_OP_SUCCESS) {
-        state->ticket = aws_future_s3_buffer_ticket_get_result(state->future);
+        state->ticket = aws_future_s3_buffer_ticket_get_result_by_move(state->future);
     }
 }
 
@@ -244,8 +244,8 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
             (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
-        tickets[i] = aws_future_s3_buffer_ticket_get_result(ticket_futures[i]);
-        struct aws_byte_buf buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
+        tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
+        struct aws_byte_buf buf = tickets[i]->vtable->claim(tickets[i]);
         ASSERT_NOT_NULL(buf.buffer);
     }
 
@@ -261,12 +261,12 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
     aws_future_s3_buffer_ticket_register_callback(over_future, s_on_pool_buffer_reserved, &state);
 
     for (size_t i = 0; i < 112; ++i) {
-        aws_s3_default_buffer_pool_release_ticket(tickets[i]);
+        aws_s3_buffer_ticket_release(tickets[i]);
     }
 
     ASSERT_NOT_NULL(state.ticket);
 
-    aws_s3_default_buffer_pool_release_ticket(state.ticket);
+    aws_s3_buffer_ticket_release(state.ticket);
 
     aws_s3_default_buffer_pool_destroy(buffer_pool);
 
@@ -301,8 +301,8 @@ static int s_test_s3_buffer_pool_forced_buffer(struct aws_allocator *allocator, 
             (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8), .can_block = true});
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(forced_future));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(forced_future), AWS_OP_SUCCESS);
-        forced_ticket = aws_future_s3_buffer_ticket_get_result(forced_future);
-        struct aws_byte_buf forced_buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, forced_ticket);
+        forced_ticket = aws_future_s3_buffer_ticket_get_result_by_move(forced_future);
+        struct aws_byte_buf forced_buf = forced_ticket->vtable->claim(forced_ticket);
         ASSERT_NOT_NULL(forced_buf.buffer);
         ASSERT_UINT_EQUALS(acquire_size, forced_buf.capacity);
         ASSERT_UINT_EQUALS(0, forced_buf.len);
@@ -311,7 +311,7 @@ static int s_test_s3_buffer_pool_forced_buffer(struct aws_allocator *allocator, 
         ASSERT_UINT_EQUALS(acquire_size, stats.forced_used);
         ASSERT_UINT_EQUALS(acquire_size, stats.primary_used);
         ASSERT_UINT_EQUALS(0, stats.primary_reserved);
-        aws_s3_default_buffer_pool_release_ticket(forced_ticket);
+        aws_s3_buffer_ticket_release(forced_ticket);
     }
 
     { /* Acquire forced buffer from secondary storage */
@@ -321,8 +321,8 @@ static int s_test_s3_buffer_pool_forced_buffer(struct aws_allocator *allocator, 
             (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8), .can_block = true});
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(forced_future));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(forced_future), AWS_OP_SUCCESS);
-        forced_ticket = aws_future_s3_buffer_ticket_get_result(forced_future);
-        struct aws_byte_buf forced_buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, forced_ticket);
+        forced_ticket = aws_future_s3_buffer_ticket_get_result_by_move(forced_future);
+        struct aws_byte_buf forced_buf = forced_ticket->vtable->claim(forced_ticket);
         ASSERT_NOT_NULL(forced_buf.buffer);
         ASSERT_UINT_EQUALS(acquire_size, forced_buf.capacity);
         ASSERT_UINT_EQUALS(0, forced_buf.len);
@@ -331,7 +331,7 @@ static int s_test_s3_buffer_pool_forced_buffer(struct aws_allocator *allocator, 
         ASSERT_UINT_EQUALS(acquire_size, stats.forced_used);
         ASSERT_UINT_EQUALS(acquire_size, stats.secondary_used);
         ASSERT_UINT_EQUALS(0, stats.secondary_reserved);
-        aws_s3_default_buffer_pool_release_ticket(forced_ticket);
+        aws_s3_buffer_ticket_release(forced_ticket);
     }
 
     /* Assert stats go back down after tickets released */
@@ -360,7 +360,7 @@ static int s_test_s3_buffer_pool_forced_buffer_after_limit_hit(struct aws_alloca
             (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
-        tickets[i] = aws_future_s3_buffer_ticket_get_result(ticket_futures[i]);
+        tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
     }
 
     /* Assert we can still get a forced-buffer */
@@ -369,14 +369,14 @@ static int s_test_s3_buffer_pool_forced_buffer_after_limit_hit(struct aws_alloca
         (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8), .can_block = true});
     ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(forced_future_1));
     ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(forced_future_1), AWS_OP_SUCCESS);
-    forced_ticket_1 = aws_future_s3_buffer_ticket_get_result(forced_future_1);
-    struct aws_byte_buf forced_buf_1 = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, forced_ticket_1);
+    forced_ticket_1 = aws_future_s3_buffer_ticket_get_result_by_move(forced_future_1);
     ASSERT_NOT_NULL(forced_ticket_1);
+    struct aws_byte_buf forced_buf_1 = forced_ticket_1->vtable->claim(forced_ticket_1);
     ASSERT_UINT_EQUALS(chunk_size, forced_buf_1.capacity);
 
     /* Assert we can still acquire buffers for all those normal reservations */
     for (size_t i = 0; i < 112; ++i) {
-        struct aws_byte_buf normal_buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, tickets[i]);
+        struct aws_byte_buf normal_buf =  tickets[i]->vtable->claim( tickets[i]);
         ASSERT_UINT_EQUALS(chunk_size, normal_buf.capacity);
     }
 
@@ -386,18 +386,18 @@ static int s_test_s3_buffer_pool_forced_buffer_after_limit_hit(struct aws_alloca
         (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8), .can_block = true});
     ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(forced_future_2));
     ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(forced_future_2), AWS_OP_SUCCESS);
-    forced_ticket_2 = aws_future_s3_buffer_ticket_get_result(forced_future_2);
-    struct aws_byte_buf forced_buf_2 = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, forced_ticket_2);
+    forced_ticket_2 = aws_future_s3_buffer_ticket_get_result_by_move(forced_future_2);
     ASSERT_NOT_NULL(forced_ticket_2);
+    struct aws_byte_buf forced_buf_2 = forced_ticket_2->vtable->claim(forced_ticket_2);
     ASSERT_UINT_EQUALS(chunk_size, forced_buf_2.capacity);
 
     /* Cleanup */
     for (size_t i = 0; i < 112; ++i) {
-        aws_s3_default_buffer_pool_release_ticket(tickets[i]);
+        aws_s3_buffer_ticket_release(tickets[i]);
     }
 
-    aws_s3_default_buffer_pool_release_ticket(forced_ticket_1);
-    aws_s3_default_buffer_pool_release_ticket(forced_ticket_2);
+    aws_s3_buffer_ticket_release(forced_ticket_1);
+    aws_s3_buffer_ticket_release(forced_ticket_2);
     aws_s3_default_buffer_pool_destroy(buffer_pool);
     return 0;
 }
@@ -427,8 +427,8 @@ static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws
         (struct aws_s3_buffer_pool_reserve_meta){.size = chunk_size, .can_block = true});
     ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(forced_future));
     ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(forced_future), AWS_OP_SUCCESS);
-    forced_ticket = aws_future_s3_buffer_ticket_get_result(forced_future);
-    struct aws_byte_buf forced_buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, forced_ticket);
+    forced_ticket = aws_future_s3_buffer_ticket_get_result_by_move(forced_future);
+    struct aws_byte_buf forced_buf = forced_ticket->vtable->claim(forced_ticket);
     ASSERT_NOT_NULL(forced_ticket);
     ASSERT_UINT_EQUALS(chunk_size, forced_buf.capacity);
 
@@ -438,13 +438,13 @@ static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws
         (struct aws_s3_buffer_pool_reserve_meta){.size =chunk_size});
     ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(normal_future));
     ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(normal_future), AWS_OP_SUCCESS);
-    normal_ticket = aws_future_s3_buffer_ticket_get_result(normal_future);
-    struct aws_byte_buf normal_buf = aws_s3_default_buffer_pool_acquire_buffer(buffer_pool, normal_ticket);
-        ASSERT_UINT_EQUALS(chunk_size, normal_buf.capacity);
-    aws_s3_default_buffer_pool_release_ticket(normal_ticket);
+    normal_ticket = aws_future_s3_buffer_ticket_get_result_by_move(normal_future);
+    struct aws_byte_buf normal_buf = normal_ticket->vtable->claim(normal_ticket);
+    ASSERT_UINT_EQUALS(chunk_size, normal_buf.capacity);
+    aws_s3_buffer_ticket_release(normal_ticket);
 
     /* Cleanup */
-    aws_s3_default_buffer_pool_release_ticket(forced_ticket);
+    aws_s3_buffer_ticket_release(forced_ticket);
     aws_s3_default_buffer_pool_destroy(buffer_pool);
     return 0;
 }

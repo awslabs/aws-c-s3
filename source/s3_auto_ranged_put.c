@@ -989,8 +989,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
         if (request->request_body.capacity == 0) {
             AWS_FATAL_ASSERT(request->ticket);
-            request->request_body = request->meta_request->client->buffer_pool->claim(
-                request->meta_request->client->buffer_pool, request->ticket);
+            request->request_body = request->ticket->vtable->claim(request->ticket);
             request->request_body.capacity = request_body_size;
         }
 

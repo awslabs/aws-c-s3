@@ -844,7 +844,7 @@ static void s_s3_mock_client_start_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_ASSERT(client);
 
-    client->buffer_pool->destroy(client->buffer_pool);
+    aws_s3_buffer_pool_release(client->buffer_pool);
     client->buffer_pool = NULL;
     aws_mem_release(client->allocator, client);
 }

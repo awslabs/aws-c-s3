@@ -514,9 +514,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
-        meta_request->client->buffer_pool->ticket_release(
-            meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
-
+        aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }
 
@@ -740,7 +738,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
         return;
     }
 
-    request->ticket = aws_future_s3_buffer_ticket_get_result(future_ticket);
+    request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
     
     s_kick_off_prepare_request(payload);
     return;
@@ -774,7 +772,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
             .size = request->part_range_end - request->part_range_start
         };
 
-        payload->async_buffer_reserve = meta_request->client->buffer_pool->reserve(meta_request->client->buffer_pool, meta);
+        payload->async_buffer_reserve = meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
 
         aws_future_s3_buffer_ticket_register_event_loop_callback(payload->async_buffer_reserve, payload->event_loop, s_on_pool_buffer_reserved, payload);
         return;
@@ -1476,8 +1474,7 @@ static int s_s3_meta_request_incoming_body(
 
     if (request->send_data.response_body.capacity == 0) {
         if (request->ticket != NULL) {
-            request->send_data.response_body = request->meta_request->client->buffer_pool->claim(
-                request->meta_request->client->buffer_pool, request->ticket);
+            request->send_data.response_body = request->ticket->vtable->claim(request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
@@ -2411,7 +2408,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
             };
 
             meta_request->synced_data.async_write.buffered_ticket_future =
-                meta_request->client->buffer_pool->reserve(meta_request->client->buffer_pool, meta);
+                meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
 
             AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_ticket_future);
         }
@@ -2425,9 +2422,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                     illegal_usage_terminate_meta_request = true;
                 } else {
                     meta_request->synced_data.async_write.buffered_data_ticket = 
-                        aws_future_s3_buffer_ticket_get_result(meta_request->synced_data.async_write.buffered_ticket_future);
-                    meta_request->synced_data.async_write.buffered_data = meta_request->client->buffer_pool->claim(
-                        meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
+                        aws_future_s3_buffer_ticket_get_result_by_move(meta_request->synced_data.async_write.buffered_ticket_future);
+                    meta_request->synced_data.async_write.buffered_data = meta_request->synced_data.async_write.buffered_data_ticket->vtable->claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
             } else {
                 /* Memory acquire pending. Store waker */

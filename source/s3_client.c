@@ -225,46 +225,23 @@ static void s_s3express_provider_finish_destroy(void *user_data) {
     /* END CRITICAL SECTION */
 }
 
-static void s_default_buffer_pool_destroy(struct aws_s3_buffer_pool *pool) {
-    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
-
-    aws_s3_default_buffer_pool_destroy(default_pool);
-    aws_mem_release(pool->allocator, pool);
-}
-
 struct aws_future_s3_buffer_ticket *s_default_pool_reserve(struct aws_s3_buffer_pool *pool, 
         struct aws_s3_buffer_pool_reserve_meta meta) {
-    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->impl;
 
     return aws_s3_default_buffer_pool_reserve(default_pool, meta);
 }
 
-struct aws_byte_buf s_default_pool_claim(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_ticket *ticket) {
-    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
-
-    return aws_s3_default_buffer_pool_acquire_buffer(default_pool, ticket);
-}
-
-struct aws_s3_buffer_ticket *s_default_pool_ticket_acquire(struct aws_s3_buffer_pool *pool, 
-    struct aws_s3_buffer_ticket *ticket) {
-    (void)pool;
-
-    return aws_s3_default_buffer_pool_acquire_ticket(ticket);
-}
-
-struct aws_s3_buffer_ticket *s_default_pool_ticket_release(struct aws_s3_buffer_pool *pool,
-    struct aws_s3_buffer_ticket *ticket) {
-    (void)pool;
-
-    return aws_s3_default_buffer_pool_release_ticket(ticket);
-}
-
 void s_default_pool_trim(struct aws_s3_buffer_pool *pool, struct aws_s3_client *client) {
     (void)client;
-    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->user_data;
+    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->impl;
 
     aws_s3_default_buffer_pool_trim(default_pool);
 }
+
+static struct aws_s3_buffer_pool_vtable s_default_tpool_vtable = {
+    .reserve = s_default_pool_reserve
+};
 
 static struct aws_s3_buffer_pool *s_create_default_buffer_pool(
     struct aws_allocator *allocator,
@@ -272,14 +249,9 @@ static struct aws_s3_buffer_pool *s_create_default_buffer_pool(
     uint64_t mem_limit) {
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
 
-    pool->allocator = allocator;
-    pool->user_data = aws_s3_default_buffer_pool_new(allocator, part_size, mem_limit);
-    pool->destroy = s_default_buffer_pool_destroy;
-    pool->claim = s_default_pool_claim;
-    pool->reserve = s_default_pool_reserve;
-    pool->ticket_acquire = s_default_pool_ticket_acquire;
-    pool->ticket_release = s_default_pool_ticket_release;
-    pool->trim = s_default_pool_trim;
+    pool->impl = aws_s3_default_buffer_pool_new(allocator, part_size, mem_limit);
+    pool->vtable = &s_default_tpool_vtable;
+    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
 
     return pool;
 }
@@ -408,7 +380,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     if (client_config->buffer_pool_factory_fn) {
-        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, part_size, mem_limit);
+        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, client, part_size, mem_limit);
     } else {
         client->buffer_pool = s_create_default_buffer_pool(allocator, part_size, mem_limit);
     }
@@ -724,7 +696,7 @@ on_error:
     }
 
     aws_array_list_clean_up(&client->network_interface_names);
-    client->buffer_pool->destroy(client->buffer_pool);
+    aws_s3_buffer_pool_release(client->buffer_pool);
     client->buffer_pool = NULL;
 
     aws_mem_release(client->allocator, client);
@@ -835,7 +807,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
-    client->buffer_pool->destroy(client->buffer_pool);
+    aws_s3_buffer_pool_release(client->buffer_pool);
     client->buffer_pool = NULL;
 
     aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
@@ -1480,7 +1452,7 @@ static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, 
     uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     if (num_reqs_in_flight == 0) {
-        client->buffer_pool->trim(client->buffer_pool, client);
+        client->buffer_pool->vtable->trim(client->buffer_pool);
     }
 }
 
