@@ -3,9 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
- #include "aws/s3/s3_buffer_pool.h"
+#include "aws/s3/s3_buffer_pool.h"
 
- AWS_FUTURE_T_POINTER_WITH_RELEASE_IMPLEMENTATION(aws_future_s3_buffer_ticket, struct aws_s3_buffer_ticket, aws_s3_buffer_ticket_release)
+AWS_FUTURE_T_POINTER_WITH_RELEASE_IMPLEMENTATION(
+    aws_future_s3_buffer_ticket,
+    struct aws_s3_buffer_ticket,
+    aws_s3_buffer_ticket_release)
 
 struct aws_s3_buffer_pool *aws_s3_buffer_pool_acquire(struct aws_s3_buffer_pool *buffer_pool) {
     if (buffer_pool != NULL) {

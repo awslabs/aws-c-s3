@@ -657,7 +657,6 @@ void aws_s3_meta_request_prepare_request(
 static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 static void s_s3_meta_request_on_request_prepared(void *user_data);
 
-
 void aws_s3_meta_request_schedule_prepare_request_default_impl(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -739,7 +738,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     }
 
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
-    
+
     s_kick_off_prepare_request(payload);
     return;
 }
@@ -769,12 +768,13 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = meta_request->client,
             .meta_request = meta_request,
-            .size = request->part_range_end - request->part_range_start
-        };
+            .size = request->part_range_end - request->part_range_start};
 
-        payload->async_buffer_reserve = meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
+        payload->async_buffer_reserve =
+            meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
 
-        aws_future_s3_buffer_ticket_register_event_loop_callback(payload->async_buffer_reserve, payload->event_loop, s_on_pool_buffer_reserved, payload);
+        aws_future_s3_buffer_ticket_register_event_loop_callback(
+            payload->async_buffer_reserve, payload->event_loop, s_on_pool_buffer_reserved, payload);
         return;
     }
 
@@ -1979,12 +1979,12 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         } else if (
                             meta_request->body_callback_ex != NULL &&
                             meta_request->body_callback_ex(
-                                meta_request, &response_body, 
-                                (struct aws_s3_meta_request_receive_body_extra_info) {
+                                meta_request,
+                                &response_body,
+                                (struct aws_s3_meta_request_receive_body_extra_info){
                                     .range_start = request->part_range_start,
                                     .ticket = request->ticket,
-                                    .user_data = meta_request->user_data
-                                })) {
+                                    .user_data = meta_request->user_data})) {
                             error_code = aws_last_error_or_unknown();
                             AWS_LOGF_ERROR(
                                 AWS_LS_S3_META_REQUEST,
@@ -2404,8 +2404,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 .size = meta_request->part_size,
                 .can_block = true,
                 .meta_request = meta_request,
-                .client = meta_request->client
-            };
+                .client = meta_request->client};
 
             meta_request->synced_data.async_write.buffered_ticket_future =
                 meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
@@ -2415,19 +2414,24 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
 
         if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
             if (aws_future_s3_buffer_ticket_is_done(meta_request->synced_data.async_write.buffered_ticket_future)) {
-                if (aws_future_s3_buffer_ticket_get_error(meta_request->synced_data.async_write.buffered_ticket_future) 
-                    != AWS_OP_SUCCESS) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST, "id=%p: Failed to acquire buffer.", (void *)meta_request);
+                if (aws_future_s3_buffer_ticket_get_error(
+                        meta_request->synced_data.async_write.buffered_ticket_future) != AWS_OP_SUCCESS) {
+                    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p: Failed to acquire buffer.", (void *)meta_request);
                     illegal_usage_terminate_meta_request = true;
                 } else {
-                    meta_request->synced_data.async_write.buffered_data_ticket = 
-                        aws_future_s3_buffer_ticket_get_result_by_move(meta_request->synced_data.async_write.buffered_ticket_future);
-                    meta_request->synced_data.async_write.buffered_data = meta_request->synced_data.async_write.buffered_data_ticket->vtable->claim(meta_request->synced_data.async_write.buffered_data_ticket);
+                    meta_request->synced_data.async_write.buffered_data_ticket =
+                        aws_future_s3_buffer_ticket_get_result_by_move(
+                            meta_request->synced_data.async_write.buffered_ticket_future);
+                    meta_request->synced_data.async_write.buffered_data =
+                        meta_request->synced_data.async_write.buffered_data_ticket->vtable->claim(
+                            meta_request->synced_data.async_write.buffered_data_ticket);
                 }
             } else {
                 /* Memory acquire pending. Store waker */
-                AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: memory acquire pending, waker registered ...", (void *)meta_request);
+                AWS_LOGF_TRACE(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: memory acquire pending, waker registered ...",
+                    (void *)meta_request);
                 meta_request->synced_data.async_write.waker = waker;
                 meta_request->synced_data.async_write.waker_user_data = user_data;
                 result.is_pending = true;

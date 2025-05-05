@@ -841,7 +841,7 @@ struct aws_s3_meta_request_options {
     /**
      * Invoked to provide the response body as it is received.
      * Provides extra information as compared to regular callback.
-     * Note: if both body_callback and body_callback_ex are specified, 
+     * Note: if both body_callback and body_callback_ex are specified,
      * only body_callback_ex will be called.
      * See `aws_s3_meta_request_receive_body_callback_ex_fn`.
      */

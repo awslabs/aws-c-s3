@@ -225,8 +225,9 @@ static void s_s3express_provider_finish_destroy(void *user_data) {
     /* END CRITICAL SECTION */
 }
 
-struct aws_future_s3_buffer_ticket *s_default_pool_reserve(struct aws_s3_buffer_pool *pool, 
-        struct aws_s3_buffer_pool_reserve_meta meta) {
+struct aws_future_s3_buffer_ticket *s_default_pool_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
     struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->impl;
 
     return aws_s3_default_buffer_pool_reserve(default_pool, meta);
@@ -239,9 +240,7 @@ void s_default_pool_trim(struct aws_s3_buffer_pool *pool, struct aws_s3_client *
     aws_s3_default_buffer_pool_trim(default_pool);
 }
 
-static struct aws_s3_buffer_pool_vtable s_default_tpool_vtable = {
-    .reserve = s_default_pool_reserve
-};
+static struct aws_s3_buffer_pool_vtable s_default_tpool_vtable = {.reserve = s_default_pool_reserve};
 
 static struct aws_s3_buffer_pool *s_create_default_buffer_pool(
     struct aws_allocator *allocator,

@@ -28,10 +28,10 @@ struct aws_s3_buffer_pool_reserve_meta {
 struct aws_s3_buffer_ticket;
 
 struct aws_s3_buffer_ticket_vtable {
-    struct aws_byte_buf (* claim)(struct aws_s3_buffer_ticket *ticket);
+    struct aws_byte_buf (*claim)(struct aws_s3_buffer_ticket *ticket);
 
-    struct aws_s3_buffer_ticket *(* acquire)(struct aws_s3_buffer_ticket *ticket);
-    struct aws_s3_buffer_ticket *(* release)(struct aws_s3_buffer_ticket *ticket);
+    struct aws_s3_buffer_ticket *(*acquire)(struct aws_s3_buffer_ticket *ticket);
+    struct aws_s3_buffer_ticket *(*release)(struct aws_s3_buffer_ticket *ticket);
 };
 
 struct aws_s3_buffer_ticket {
@@ -49,8 +49,8 @@ struct aws_s3_buffer_pool_vtable {
     void (*acquire)(struct aws_s3_buffer_pool *pool);
     void (*release)(struct aws_s3_buffer_pool *pool);
 
-    struct aws_future_s3_buffer_ticket *(*reserve)(struct aws_s3_buffer_pool *pool, 
-        struct aws_s3_buffer_pool_reserve_meta meta);
+    struct aws_future_s3_buffer_ticket *(
+        *reserve)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_pool_reserve_meta meta);
 
     void (*trim)(struct aws_s3_buffer_pool *pool);
 };
@@ -65,11 +65,11 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_acquire(struct aws_s3_buffer_pool 
 struct aws_s3_buffer_pool *aws_s3_buffer_pool_release(struct aws_s3_buffer_pool *buffer_pool);
 
 typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,
-                                                                    struct aws_s3_client *client,
+                                                                   struct aws_s3_client *client,
                                                                    uint64_t part_size,
                                                                    uint64_t mem_limit);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
- 
- #endif /* AWS_S3_BUFFER_POOL_H */
+
+#endif /* AWS_S3_BUFFER_POOL_H */
