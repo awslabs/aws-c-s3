@@ -64,10 +64,17 @@ struct aws_s3_buffer_pool {
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_acquire(struct aws_s3_buffer_pool *buffer_pool);
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_release(struct aws_s3_buffer_pool *buffer_pool);
 
-typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,
-                                                                   struct aws_s3_client *client,
-                                                                   uint64_t part_size,
-                                                                   uint64_t mem_limit);
+struct aws_s3_buffer_pool_config {
+    struct aws_s3_client *client;
+    uint64_t part_size;
+    uint64_t max_part_size;
+    uint64_t memory_limit;
+};
+
+typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator, struct aws_s3_buffer_pool_config config);
+
+AWS_S3_API struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_factory(struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

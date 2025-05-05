@@ -225,36 +225,6 @@ static void s_s3express_provider_finish_destroy(void *user_data) {
     /* END CRITICAL SECTION */
 }
 
-struct aws_future_s3_buffer_ticket *s_default_pool_reserve(
-    struct aws_s3_buffer_pool *pool,
-    struct aws_s3_buffer_pool_reserve_meta meta) {
-    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->impl;
-
-    return aws_s3_default_buffer_pool_reserve(default_pool, meta);
-}
-
-void s_default_pool_trim(struct aws_s3_buffer_pool *pool, struct aws_s3_client *client) {
-    (void)client;
-    struct aws_s3_default_buffer_pool *default_pool = (struct aws_s3_default_buffer_pool *)pool->impl;
-
-    aws_s3_default_buffer_pool_trim(default_pool);
-}
-
-static struct aws_s3_buffer_pool_vtable s_default_tpool_vtable = {.reserve = s_default_pool_reserve};
-
-static struct aws_s3_buffer_pool *s_create_default_buffer_pool(
-    struct aws_allocator *allocator,
-    uint64_t part_size,
-    uint64_t mem_limit) {
-    struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
-
-    pool->impl = aws_s3_default_buffer_pool_new(allocator, part_size, mem_limit);
-    pool->vtable = &s_default_tpool_vtable;
-    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
-
-    return pool;
-}
-
 struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -378,28 +348,22 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
+    struct aws_s3_buffer_pool_config buffer_pool_config = {
+        .client = client,
+        .part_size = part_size,
+        .memory_limit = mem_limit,
+        .max_part_size = client_config->max_part_size
+    };
+
     if (client_config->buffer_pool_factory_fn) {
-        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, client, part_size, mem_limit);
+        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);
     } else {
-        client->buffer_pool = s_create_default_buffer_pool(allocator, part_size, mem_limit);
+        client->buffer_pool = aws_s3_default_buffer_pool_factory(allocator, buffer_pool_config);
     }
 
     if (client->buffer_pool == NULL) {
         goto on_error;
     }
-
-    /* TODO: bring this back?
-    struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
-
-    if (client_config->max_part_size > pool_usage.mem_limit) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "Cannot create client from client_config; configured max part size should not exceed memory limit."
-            "size.");
-        aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
-        goto on_error;
-    }
-    */
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -444,12 +408,6 @@ struct aws_s3_client *aws_s3_client_new(
     } else {
         *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
     }
-
-    /*
-    if (client_config->max_part_size > pool_usage.mem_limit) {
-        *((uint64_t *)&client->max_part_size) = pool_usage.mem_limit;
-    }
-    */
 
     if (client->max_part_size > SIZE_MAX) {
         /* For the 32bit max part size to be SIZE_MAX */
