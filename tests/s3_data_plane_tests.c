@@ -8055,3 +8055,62 @@ static int s_test_s3_upload_review_checksum_location_none_async_noop_part(struct
     aws_s3_tester_clean_up(&tester);
     return 0;
 }
+
+static struct aws_http_stream *s_http_connection_make_request_patch(
+    struct aws_http_connection *client_connection,
+    const struct aws_http_make_request_options *options) {
+
+    struct aws_http_message *message = options->request;
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    struct aws_byte_cursor out_value;
+    int e = aws_http_headers_get(headers, aws_byte_cursor_from_c_str("Content-Length"), &out_value);
+    AWS_FATAL_ASSERT(e == AWS_OP_ERR); // Assert that the header is not present
+    AWS_FATAL_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
+
+    return aws_http_connection_make_request(client_connection, options);
+}
+
+AWS_TEST_CASE(test_s3_default_get_without_content_length, s_test_s3_default_get_without_content_length)
+static int s_test_s3_default_get_without_content_length(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->http_connection_make_request = s_http_connection_make_request_patch;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_public_bucket_name, &g_test_s3_region);
+
+    /* Put together a simple S3 Get Object request. */
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+    /* Send default type */
+    options.type = AWS_S3_META_REQUEST_TYPE_DEFAULT;
+    options.message = message;
+    options.operation_name = aws_byte_cursor_from_c_str("GetObject");
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
+        &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_string_destroy(host_name);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}

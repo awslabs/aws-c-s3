@@ -402,6 +402,8 @@ add_net_test_case(client_update_upload_part_timeout)
 add_net_test_case(client_meta_request_override_part_size)
 add_net_test_case(client_meta_request_override_multipart_upload_threshold)
 
+add_net_test_case(test_s3_default_get_without_content_length)
+
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
 
