@@ -334,7 +334,8 @@ struct aws_s3_default_buffer_ticket *s_try_reserve(
 static void s_aws_ticket_wrapper_destroy(void *data) {
     struct aws_s3_buffer_ticket *ticket_wrapper = data;
     struct aws_s3_default_buffer_ticket *ticket = ticket_wrapper->impl;
-    struct aws_s3_default_buffer_pool *buffer_pool = ticket->pool->impl;
+    struct aws_s3_buffer_pool *pool = ticket->pool;
+    struct aws_s3_default_buffer_pool *buffer_pool = pool->impl;
 
     if (ticket->ptr == NULL) {
         /* Ticket was never used, make sure to clean up reserved count. */
@@ -391,7 +392,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
         struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
         struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
 
-        struct aws_s3_default_buffer_ticket *new_ticket = s_try_reserve(ticket->pool, pending_reserve->meta);
+        struct aws_s3_default_buffer_ticket *new_ticket = s_try_reserve(pool, pending_reserve->meta);
 
         if (new_ticket != NULL) {
             struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(new_ticket);
