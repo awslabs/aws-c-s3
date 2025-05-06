@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
+#include "aws/s3/private/s3_default_buffer_pool.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
@@ -844,6 +845,7 @@ static void s_s3_mock_client_start_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_ASSERT(client);
 
+    AWS_LOGF_DEBUG(0, "Destroying client 1");
     aws_s3_buffer_pool_release(client->buffer_pool);
     client->buffer_pool = NULL;
     aws_mem_release(client->allocator, client);
@@ -855,8 +857,8 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
 
     mock_client->allocator = allocator;
 
-    mock_client->buffer_pool = aws_s3_default_buffer_pool_factory(allocator, 
-        (struct aws_s3_buffer_pool_config) {.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+    mock_client->buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
     mock_client->vtable = &g_aws_s3_client_mock_vtable;
 
     aws_ref_count_init(

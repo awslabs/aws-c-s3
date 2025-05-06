@@ -14,14 +14,11 @@
 #define NUM_TEST_THREADS 8
 
 struct pool_thread_test_data {
-    struct aws_s3_default_buffer_pool *pool;
+    struct aws_s3_buffer_pool *pool;
     uint32_t thread_idx;
 };
 
-static void s_thread_test(
-    struct aws_allocator *allocator,
-    void (*thread_fn)(void *),
-    struct aws_s3_default_buffer_pool *pool) {
+static void s_thread_test(struct aws_allocator *allocator, void (*thread_fn)(void *), struct aws_s3_buffer_pool *pool) {
     const struct aws_thread_options *thread_options = aws_default_thread_options();
     struct aws_thread threads[NUM_TEST_THREADS];
     struct pool_thread_test_data thread_data[NUM_TEST_THREADS];
@@ -43,7 +40,7 @@ static void s_thread_test(
 }
 
 static void s_threaded_alloc_worker(void *user_data) {
-    struct aws_s3_default_buffer_pool *pool = ((struct pool_thread_test_data *)user_data)->pool;
+    struct aws_s3_buffer_pool *pool = ((struct pool_thread_test_data *)user_data)->pool;
 
     struct aws_s3_buffer_ticket *tickets[NUM_TEST_ALLOCS];
     for (size_t count = 0; count < NUM_TEST_ALLOCS / NUM_TEST_THREADS; ++count) {
@@ -70,8 +67,8 @@ static int s_test_s3_buffer_pool_threaded_allocs_and_frees(struct aws_allocator 
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(2));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(2)});
 
     s_thread_test(allocator, s_threaded_alloc_worker, buffer_pool);
 
@@ -85,8 +82,8 @@ static int s_test_s3_buffer_pool_large_chunk_threaded_allocs_and_frees(struct aw
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, MB_TO_BYTES(65), GB_TO_BYTES(2));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(65), .memory_limit = GB_TO_BYTES(2)});
 
     struct aws_s3_default_buffer_pool_usage_stats stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
     ASSERT_INT_EQUALS(0, stats.primary_cutoff);
@@ -105,8 +102,8 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
 
     struct aws_s3_buffer_pool_reserve_meta meta = {.size = MB_TO_BYTES(64)};
     struct aws_future_s3_buffer_ticket *future1 = aws_s3_default_buffer_pool_reserve(buffer_pool, meta);
@@ -175,8 +172,8 @@ static int s_test_s3_buffer_pool_trim(struct aws_allocator *allocator, void *ctx
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
 
     struct aws_s3_buffer_ticket *tickets[40];
     struct aws_future_s3_buffer_ticket *ticket_futures[40];
@@ -233,8 +230,8 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, MB_TO_BYTES(8), GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
 
     struct aws_s3_buffer_ticket *tickets[112];
     struct aws_future_s3_buffer_ticket *ticket_futures[112];
@@ -277,8 +274,8 @@ static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void
     (void)allocator;
     (void)ctx;
 
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, MB_TO_BYTES(8), MB_TO_BYTES(512));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = MB_TO_BYTES(512)});
     ASSERT_NULL(buffer_pool);
     ASSERT_INT_EQUALS(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, aws_last_error());
 
@@ -290,14 +287,14 @@ AWS_TEST_CASE(test_s3_buffer_pool_too_small, s_test_s3_buffer_pool_too_small)
 static int s_test_s3_buffer_pool_forced_buffer(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     const size_t chunk_size = MB_TO_BYTES(8);
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, chunk_size, GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = chunk_size, .memory_limit = GB_TO_BYTES(1)});
 
     { /* Acquire forced buffer from primary storage */
         size_t acquire_size = chunk_size;
         struct aws_s3_buffer_ticket *forced_ticket = NULL;
         struct aws_future_s3_buffer_ticket *forced_future = aws_s3_default_buffer_pool_reserve(
-            buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8), .can_block = true});
+            buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = acquire_size, .can_block = true});
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(forced_future));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(forced_future), AWS_OP_SUCCESS);
         forced_ticket = aws_future_s3_buffer_ticket_get_result_by_move(forced_future);
@@ -350,8 +347,8 @@ AWS_TEST_CASE(test_s3_buffer_pool_forced_buffer, s_test_s3_buffer_pool_forced_bu
 static int s_test_s3_buffer_pool_forced_buffer_after_limit_hit(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     const size_t chunk_size = MB_TO_BYTES(8);
-    struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_s3_default_buffer_pool_new(allocator, chunk_size, GB_TO_BYTES(1));
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = chunk_size, .memory_limit = GB_TO_BYTES(1)});
 
     /* Reserve normal tickets until pool has reservation-hold */
     struct aws_s3_buffer_ticket *tickets[112];
@@ -413,7 +410,8 @@ static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws
     (void)ctx;
     const size_t chunk_size = MB_TO_BYTES(8);
     const size_t mem_limit = GB_TO_BYTES(1);
-    struct aws_s3_default_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(allocator, chunk_size, mem_limit);
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = chunk_size, .memory_limit = mem_limit});
 
     /* Skip test if this machine can't do enormous allocations */
     void *try_large_alloc = malloc(mem_limit);

@@ -48,7 +48,7 @@ struct aws_s3_default_buffer_ticket {
     uint8_t *ptr;
     size_t chunks_used;
     bool forced;
-    struct aws_s3_default_buffer_pool *pool;
+    struct aws_s3_buffer_pool *pool;
 };
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
@@ -164,8 +164,9 @@ struct aws_byte_buf s_default_ticket_claim(struct aws_s3_buffer_ticket *ticket_w
 static struct aws_s3_buffer_ticket_vtable s_default_ticket_vtable = {.claim = s_default_ticket_claim};
 
 struct aws_s3_buffer_ticket *s_wrap_default_ticket(struct aws_s3_default_buffer_ticket *ticket) {
+    struct aws_s3_default_buffer_pool *pool = ticket->pool->impl;
     struct aws_s3_buffer_ticket *ticket_wrapper =
-        aws_mem_calloc(ticket->pool->base_allocator, 1, sizeof(struct aws_s3_buffer_ticket));
+        aws_mem_calloc(pool->base_allocator, 1, sizeof(struct aws_s3_buffer_ticket));
 
     ticket_wrapper->impl = ticket;
     ticket_wrapper->vtable = &s_default_ticket_vtable;
@@ -175,12 +176,28 @@ struct aws_s3_buffer_ticket *s_wrap_default_ticket(struct aws_s3_default_buffer_
     return ticket_wrapper;
 }
 
-struct aws_s3_default_buffer_pool *aws_s3_default_buffer_pool_new(
-    struct aws_allocator *allocator,
-    size_t chunk_size,
-    size_t mem_limit) {
+struct aws_future_s3_buffer_ticket *s_default_pool_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
 
-    if (mem_limit < GB_TO_BYTES(1)) {
+    return aws_s3_default_buffer_pool_reserve(pool, meta);
+}
+
+void s_default_pool_trim(struct aws_s3_buffer_pool *pool) {
+    aws_s3_default_buffer_pool_trim(pool);
+}
+
+static struct aws_s3_buffer_pool_vtable s_default_tpool_vtable = {
+    .reserve = s_default_pool_reserve,
+    .trim = s_default_pool_trim};
+
+struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config) {
+
+    size_t chunk_size = config.part_size;
+
+    if (config.memory_limit < GB_TO_BYTES(1)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Failed to initialize buffer pool. "
@@ -198,7 +215,16 @@ struct aws_s3_default_buffer_pool *aws_s3_default_buffer_pool_new(
             "if its not sufficient to transfer data within the maximum number of parts");
     }
 
-    size_t adjusted_mem_lim = mem_limit - s_buffer_pool_reserved_mem;
+    size_t adjusted_mem_lim = config.memory_limit - s_buffer_pool_reserved_mem;
+
+    if (config.max_part_size > adjusted_mem_lim) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot create client from client_config; configured max part size should not exceed memory limit."
+            "size.");
+        aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
+        return NULL;
+    }
 
     /*
      * TODO: There is several things we can consider tweaking here:
@@ -238,13 +264,22 @@ struct aws_s3_default_buffer_pool *aws_s3_default_buffer_pool_new(
 
     aws_linked_list_init(&buffer_pool->pending_reserves);
 
-    return buffer_pool;
+    struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
+    pool->impl = buffer_pool;
+    pool->vtable = &s_default_tpool_vtable;
+    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
+
+    return pool;
 }
 
-void aws_s3_default_buffer_pool_destroy(struct aws_s3_default_buffer_pool *buffer_pool) {
-    if (buffer_pool == NULL) {
+void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper) {
+    if (buffer_pool_wrapper == NULL) {
         return;
     }
+    AWS_FATAL_ASSERT(buffer_pool_wrapper->impl);
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+    aws_mem_release(buffer_pool->base_allocator, buffer_pool_wrapper);
 
     for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
         struct s3_buffer_pool_block *block;
@@ -285,20 +320,21 @@ void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
     }
 }
 
-void aws_s3_default_buffer_pool_trim(struct aws_s3_default_buffer_pool *buffer_pool) {
-    aws_mutex_lock(&buffer_pool->mutex);
-    s_buffer_pool_trim_synced(buffer_pool);
-    aws_mutex_unlock(&buffer_pool->mutex);
+void aws_s3_default_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
+    struct aws_s3_default_buffer_pool *pool = buffer_pool->impl;
+    aws_mutex_lock(&pool->mutex);
+    s_buffer_pool_trim_synced(pool);
+    aws_mutex_unlock(&pool->mutex);
 }
 
 struct aws_s3_default_buffer_ticket *s_try_reserve(
-    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_reserve_meta meta);
 
 static void s_aws_ticket_wrapper_destroy(void *data) {
     struct aws_s3_buffer_ticket *ticket_wrapper = data;
     struct aws_s3_default_buffer_ticket *ticket = ticket_wrapper->impl;
-    struct aws_s3_default_buffer_pool *buffer_pool = ticket->pool;
+    struct aws_s3_default_buffer_pool *buffer_pool = ticket->pool->impl;
 
     if (ticket->ptr == NULL) {
         /* Ticket was never used, make sure to clean up reserved count. */
@@ -355,7 +391,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
         struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
         struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
 
-        struct aws_s3_default_buffer_ticket *new_ticket = s_try_reserve(buffer_pool, pending_reserve->meta);
+        struct aws_s3_default_buffer_ticket *new_ticket = s_try_reserve(ticket->pool, pending_reserve->meta);
 
         if (new_ticket != NULL) {
             struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(new_ticket);
@@ -370,9 +406,11 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 }
 
 struct aws_s3_default_buffer_ticket *s_try_reserve(
-    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_buffer_pool_reserve_meta meta) {
     struct aws_s3_default_buffer_ticket *ticket = NULL;
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+
     size_t overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
                            buffer_pool->secondary_reserved;
 
@@ -399,7 +437,7 @@ struct aws_s3_default_buffer_ticket *s_try_reserve(
     if ((meta.size + overall_taken) <= buffer_pool->mem_limit) {
         ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_default_buffer_ticket));
         ticket->size = meta.size;
-        ticket->pool = buffer_pool;
+        ticket->pool = buffer_pool_wrapper;
 
         if (meta.size <= buffer_pool->primary_size_cutoff) {
             buffer_pool->primary_reserved += meta.size;
@@ -412,9 +450,11 @@ struct aws_s3_default_buffer_ticket *s_try_reserve(
 }
 
 struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
-    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_buffer_pool_reserve_meta meta) {
     AWS_PRECONDITION(buffer_pool);
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     AWS_FATAL_ASSERT(meta.size != 0);
     AWS_FATAL_ASSERT(meta.size <= buffer_pool->mem_limit);
@@ -426,10 +466,10 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
         ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_default_buffer_ticket));
         ticket->size = meta.size;
         ticket->forced = true;
-        ticket->pool = buffer_pool;
+        ticket->pool = buffer_pool_wrapper;
 
     } else {
-        ticket = s_try_reserve(buffer_pool, meta);
+        ticket = s_try_reserve(buffer_pool_wrapper, meta);
     }
 
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(buffer_pool->base_allocator);
@@ -500,15 +540,17 @@ on_allocated:
 }
 
 static struct aws_byte_buf s_acquire_buffer_synced(
-    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_default_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_default_buffer_ticket *ticket);
 
 struct aws_byte_buf aws_s3_default_buffer_pool_acquire_buffer(
-    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_default_buffer_ticket *ticket) {
 
     AWS_PRECONDITION(buffer_pool);
     AWS_PRECONDITION(ticket);
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     if (ticket->ptr != NULL) {
         return aws_byte_buf_from_empty_array(ticket->ptr, ticket->size);
@@ -547,7 +589,9 @@ static struct aws_byte_buf s_acquire_buffer_synced(
 }
 
 struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usage(
-    struct aws_s3_default_buffer_pool *buffer_pool) {
+    struct aws_s3_buffer_pool *buffer_pool_wrapper) {
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
     aws_mutex_lock(&buffer_pool->mutex);
 
     struct aws_s3_default_buffer_pool_usage_stats ret = (struct aws_s3_default_buffer_pool_usage_stats){

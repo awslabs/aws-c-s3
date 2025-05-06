@@ -352,13 +352,13 @@ struct aws_s3_client *aws_s3_client_new(
         .client = client,
         .part_size = part_size,
         .memory_limit = mem_limit,
-        .max_part_size = client_config->max_part_size
-    };
+        .max_part_size = client_config->max_part_size};
 
     if (client_config->buffer_pool_factory_fn) {
         client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);
     } else {
-        client->buffer_pool = aws_s3_default_buffer_pool_factory(allocator, buffer_pool_config);
+
+        client->buffer_pool = aws_s3_default_buffer_pool_new(allocator, buffer_pool_config);
     }
 
     if (client->buffer_pool == NULL) {
@@ -764,6 +764,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
+    AWS_LOGF_DEBUG(0, "Destroy buffer pool 2");
     aws_s3_buffer_pool_release(client->buffer_pool);
     client->buffer_pool = NULL;
 

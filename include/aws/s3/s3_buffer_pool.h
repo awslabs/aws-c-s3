@@ -71,10 +71,8 @@ struct aws_s3_buffer_pool_config {
     uint64_t memory_limit;
 };
 
-typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator, struct aws_s3_buffer_pool_config config);
-
-AWS_S3_API struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_factory(struct aws_allocator *allocator,
-    struct aws_s3_buffer_pool_config config);
+typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,
+                                                                   struct aws_s3_buffer_pool_config config);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
