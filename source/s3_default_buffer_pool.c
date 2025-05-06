@@ -453,7 +453,7 @@ struct aws_s3_default_buffer_ticket *s_try_reserve(
 struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_buffer_pool_reserve_meta meta) {
-    AWS_PRECONDITION(buffer_pool);
+    AWS_PRECONDITION(buffer_pool_wrapper);
 
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
@@ -548,7 +548,7 @@ struct aws_byte_buf aws_s3_default_buffer_pool_acquire_buffer(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_default_buffer_ticket *ticket) {
 
-    AWS_PRECONDITION(buffer_pool);
+    AWS_PRECONDITION(buffer_pool_wrapper);
     AWS_PRECONDITION(ticket);
 
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
