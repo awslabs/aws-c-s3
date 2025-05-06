@@ -768,7 +768,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = meta_request->client,
             .meta_request = meta_request,
-            .size = (request->part_range_end - request->part_range_start)};
+            .size = (size_t)(request->part_range_end - request->part_range_start)};
 
         payload->async_buffer_reserve =
             meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
