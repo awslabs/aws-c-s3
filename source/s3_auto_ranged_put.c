@@ -571,9 +571,9 @@ static bool s_s3_auto_ranged_put_update(
 
                 if (ticket != NULL) {
                     /* Allocate a request for another part. */
-                    uint32_t flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
+                    uint32_t new_flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
                     if (meta_request->synced_data.async_write.ready_to_send) {
-                        flags |= AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL;
+                        new_flags |= AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL;
                     }
 
                     request = aws_s3_request_new(
@@ -581,7 +581,7 @@ static bool s_s3_auto_ranged_put_update(
                         AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
                         AWS_S3_REQUEST_TYPE_UPLOAD_PART,
                         0 /*part_number*/,
-                        flags);
+                        new_flags);
 
                     request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
