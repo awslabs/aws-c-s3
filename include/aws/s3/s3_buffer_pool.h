@@ -66,9 +66,9 @@ AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_release(struct aws_s3_b
 
 struct aws_s3_buffer_pool_config {
     struct aws_s3_client *client;
-    uint64_t part_size;
-    uint64_t max_part_size;
-    uint64_t memory_limit;
+    size_t part_size;
+    size_t max_part_size;
+    size_t memory_limit;
 };
 
 typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,

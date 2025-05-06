@@ -195,7 +195,7 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     struct aws_allocator *allocator,
     struct aws_s3_buffer_pool_config config) {
 
-    size_t chunk_size = (size_t)config.part_size;
+    size_t chunk_size = config.part_size;
 
     if (config.memory_limit < GB_TO_BYTES(1)) {
         AWS_LOGF_ERROR(
