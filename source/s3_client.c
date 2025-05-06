@@ -348,11 +348,20 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
+    size_t max_part_size = s_default_max_part_size;
+    if (client_config->max_part_size != 0) {
+        if (client_config->max_part_size > SIZE_MAX) {
+            max_part_size = SIZE_MAX;
+        } else {
+            max_part_size = (size_t)client_config->max_part_size;
+        }
+    }
+
     struct aws_s3_buffer_pool_config buffer_pool_config = {
         .client = client,
         .part_size = part_size,
         .memory_limit = mem_limit,
-        .max_part_size = client_config->max_part_size};
+        .max_part_size = max_part_size};
 
     if (client_config->buffer_pool_factory_fn) {
         client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);
@@ -403,11 +412,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((size_t *)&client->part_size) = part_size;
 
-    if (client_config->max_part_size != 0) {
-        *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
-    } else {
-        *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
-    }
+    *((uint64_t *)&client->max_part_size) = max_part_size;
 
     if (client->max_part_size > SIZE_MAX) {
         /* For the 32bit max part size to be SIZE_MAX */
