@@ -348,7 +348,8 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    size_t max_part_size = s_default_max_part_size;
+    /* default max part size is the smallest of either half of mem limit or default max part size */
+    size_t max_part_size = aws_min_size(mem_limit / 2, s_default_max_part_size);
     if (client_config->max_part_size != 0) {
         if (client_config->max_part_size > SIZE_MAX) {
             max_part_size = SIZE_MAX;
@@ -413,11 +414,6 @@ struct aws_s3_client *aws_s3_client_new(
     *((size_t *)&client->part_size) = part_size;
 
     *((uint64_t *)&client->max_part_size) = max_part_size;
-
-    if (client->max_part_size > SIZE_MAX) {
-        /* For the 32bit max part size to be SIZE_MAX */
-        *((uint64_t *)&client->max_part_size) = SIZE_MAX;
-    }
 
     if (client_config->multipart_upload_threshold != 0) {
         *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
