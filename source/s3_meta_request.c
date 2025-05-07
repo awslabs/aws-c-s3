@@ -706,6 +706,11 @@ static void s_kick_off_prepare_request(struct aws_s3_prepare_request_payload *pa
     const struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
+    if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
+        s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_CANCELED);
+        return;
+    }
+
     /* Kick off the async vtable->prepare_request()
      * Each subclass has its own implementation of this. */
     payload->asyncstep_prepare_request = vtable->prepare_request(request);
@@ -739,7 +744,6 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     }
     
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
-    AWS_LOGF_DEBUG(0, "done waiting");
 
     s_kick_off_prepare_request(payload);
     return;
@@ -761,13 +765,6 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
-    if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
-        s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_CANCELED);
-        return;
-    }
-
-    AWS_LOGF_DEBUG(0, "got here");
-
     if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = meta_request->client,
@@ -779,7 +776,6 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
         aws_future_s3_buffer_ticket_register_event_loop_callback(
             payload->async_buffer_reserve, payload->event_loop, s_on_pool_buffer_reserved, payload);
-        AWS_LOGF_DEBUG(0, "waiting on reserve");
         return;
     }
 
