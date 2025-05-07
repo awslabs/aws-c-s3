@@ -625,6 +625,7 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
         payload->callback(meta_request, payload->request, error_code, payload->user_data);
     }
 
+    aws_future_s3_buffer_ticket_release(payload->async_buffer_reserve);
     aws_future_void_release(payload->asyncstep_prepare_request);
     aws_mem_release(payload->allocator, payload);
 }
@@ -736,7 +737,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
         return;
     }
-
+    
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
 
     s_kick_off_prepare_request(payload);
@@ -764,7 +765,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
         return;
     }
 
-    if (request->should_allocate_buffer_from_pool) {
+    if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = meta_request->client,
             .meta_request = meta_request,

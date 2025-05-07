@@ -765,7 +765,6 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
-    AWS_LOGF_DEBUG(0, "Destroy buffer pool 2");
     aws_s3_buffer_pool_release(client->buffer_pool);
     client->buffer_pool = NULL;
 

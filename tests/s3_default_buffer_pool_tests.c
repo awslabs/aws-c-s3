@@ -157,8 +157,6 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     aws_s3_buffer_ticket_release(ticket2);
     aws_future_s3_buffer_ticket_release(future2);
 
-    AWS_LOGF_DEBUG(0, "Done releasing regular");
-
     aws_future_s3_buffer_ticket_release(overallocated_future);
     aws_future_s3_buffer_ticket_release(overallocated_future2);
 
