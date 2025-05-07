@@ -329,6 +329,7 @@ static void s_s3_default_prepare_request_finish(
 
     struct aws_s3_request *request = request_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_meta_request_default *meta_request_default = meta_request->impl;
 
     if (error_code != AWS_ERROR_SUCCESS) {
         goto finish;
@@ -347,13 +348,17 @@ static void s_s3_default_prepare_request_finish(
         struct aws_http_headers *headers = aws_http_message_get_headers(message);
         aws_http_headers_set(headers, g_request_validation_mode, g_enabled);
     }
-    aws_s3_message_util_assign_body(
-        meta_request->allocator,
-        &request->request_body,
-        message,
-        &meta_request->checksum_config,
-        NULL /* out_checksum */);
-
+    if (meta_request_default->request_type == AWS_S3_REQUEST_TYPE_PUT_OBJECT ||
+        meta_request_default->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART || request->request_body.len > 0) {
+        /* Only PUT Object and Upload part support trailing checksum, that needs the special encoding even if the body
+         * has 0 length. */
+        aws_s3_message_util_assign_body(
+            meta_request->allocator,
+            &request->request_body,
+            message,
+            &meta_request->checksum_config,
+            NULL /* out_checksum */);
+    }
     aws_s3_request_setup_send_data(request, message);
 
     aws_http_message_release(message);

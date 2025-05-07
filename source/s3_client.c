@@ -1236,7 +1236,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                                 client->allocator,
                                 client,
                                 AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                                content_length,
+                                0, /* Content length for request */
                                 false /*should_compute_content_md5*/,
                                 options);
                         }
