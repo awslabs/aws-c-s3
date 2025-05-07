@@ -739,6 +739,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     }
     
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
+    AWS_LOGF_DEBUG(0, "done waiting");
 
     s_kick_off_prepare_request(payload);
     return;
@@ -765,6 +766,8 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
         return;
     }
 
+    AWS_LOGF_DEBUG(0, "got here");
+
     if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = meta_request->client,
@@ -776,6 +779,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
 
         aws_future_s3_buffer_ticket_register_event_loop_callback(
             payload->async_buffer_reserve, payload->event_loop, s_on_pool_buffer_reserved, payload);
+        AWS_LOGF_DEBUG(0, "waiting on reserve");
         return;
     }
 
@@ -2394,6 +2398,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
         meta_request->synced_data.async_write.waker_user_data = user_data;
         result.is_pending = true;
     } else {
+        AWS_LOGF_DEBUG(0, "here1");
         /* write call is OK */
 
         /* If we don't already have a buffer, grab one from the pool. */
@@ -2440,7 +2445,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
             }
         }
 
-        if (!illegal_usage_terminate_meta_request || result.is_pending == true) {
+        AWS_LOGF_DEBUG(0, "here");
+        if (!illegal_usage_terminate_meta_request && result.is_pending != true) {
             /* Copy as much data as we can into the buffer */
             struct aws_byte_cursor processed_data =
                 aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
@@ -2457,6 +2463,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 meta_request->synced_data.async_write.ready_to_send = true;
                 ready_to_send = true;
             }
+
+            AWS_LOGF_DEBUG(0, "not here");
 
             AWS_LOGF_TRACE(
                 AWS_LS_S3_META_REQUEST,

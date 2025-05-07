@@ -561,6 +561,8 @@ static bool s_s3_auto_ranged_put_update(
 
             if (should_create_next_part_request) {
 
+                AWS_LOGF_DEBUG(0, "Creating next part");
+
                 struct aws_s3_buffer_ticket *ticket = NULL;
                 if (meta_request->synced_data.async_write.ready_to_send) {
                     /* Async-write already has a ticket, take ownership */
@@ -568,45 +570,43 @@ static bool s_s3_auto_ranged_put_update(
                     ticket = meta_request->synced_data.async_write.buffered_data_ticket;
                     meta_request->synced_data.async_write.buffered_data_ticket = NULL;
                 }
-
-                if (ticket != NULL) {
-                    /* Allocate a request for another part. */
-                    uint32_t new_flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
-                    if (meta_request->synced_data.async_write.ready_to_send) {
-                        new_flags |= AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL;
-                    }
-
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
-                        AWS_S3_REQUEST_TYPE_UPLOAD_PART,
-                        0 /*part_number*/,
-                        new_flags);
-
-                    request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
-
-                    /* If request was previously uploaded, we prepare it to ensure checksums still match,
-                     * but ultimately it gets marked no-op and we don't send it */
-                    request->was_previously_uploaded = request_previously_uploaded;
-
-                    request->ticket = ticket;
-
-                    if (meta_request->synced_data.async_write.ready_to_send) {
-                        /* Async-write already has a buffer */
-                        request->request_body = meta_request->synced_data.async_write.buffered_data;
-                    }
-
-                    ++auto_ranged_put->threaded_update_data.next_part_number;
-                    ++auto_ranged_put->synced_data.num_parts_started;
-                    ++auto_ranged_put->synced_data.num_parts_pending_read;
-
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: Returning request %p for part %d",
-                        (void *)meta_request,
-                        (void *)request,
-                        request->part_number);
+                
+                /* Allocate a request for another part. */
+                uint32_t new_flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
+                if (!meta_request->synced_data.async_write.ready_to_send) {
+                    new_flags |= AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL;
                 }
+
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
+                    AWS_S3_REQUEST_TYPE_UPLOAD_PART,
+                    0 /*part_number*/,
+                    new_flags);
+
+                request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
+
+                /* If request was previously uploaded, we prepare it to ensure checksums still match,
+                    * but ultimately it gets marked no-op and we don't send it */
+                request->was_previously_uploaded = request_previously_uploaded;
+
+                request->ticket = ticket;
+
+                if (meta_request->synced_data.async_write.ready_to_send) {
+                    /* Async-write already has a buffer */
+                    request->request_body = meta_request->synced_data.async_write.buffered_data;
+                }
+
+                ++auto_ranged_put->threaded_update_data.next_part_number;
+                ++auto_ranged_put->synced_data.num_parts_started;
+                ++auto_ranged_put->synced_data.num_parts_pending_read;
+
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Returning request %p for part %d",
+                    (void *)meta_request,
+                    (void *)request,
+                    request->part_number);
 
                 goto has_work_remaining;
             }
