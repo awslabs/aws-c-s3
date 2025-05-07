@@ -769,7 +769,7 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = meta_request->client,
             .meta_request = meta_request,
-            .size = (size_t)(request->part_range_end - request->part_range_start)};
+            .size = meta_request->part_size};
 
         payload->async_buffer_reserve =
             meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
@@ -1487,11 +1487,12 @@ static int s_s3_meta_request_incoming_body(
     if (s_response_body_append(&request->send_data.response_body, data)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Request %p could not append to response body due to error %d (%s)",
+            "id=%p: Request %p could not append to response body due to error %d (%s).",
             (void *)meta_request,
             (void *)request,
             aws_last_error_or_unknown(),
-            aws_error_str(aws_last_error_or_unknown()));
+            aws_error_str(aws_last_error_or_unknown())
+        );
 
         return AWS_OP_ERR;
     }
