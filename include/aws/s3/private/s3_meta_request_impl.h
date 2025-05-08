@@ -46,7 +46,9 @@ typedef void(aws_s3_meta_request_prepare_request_callback_fn)(
 struct aws_s3_prepare_request_payload {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
+    struct aws_event_loop *event_loop;
     struct aws_task task;
+    struct aws_future_s3_buffer_ticket *async_buffer_reserve;
     /* async step: wait for vtable->prepare_request() call to complete */
     struct aws_future_void *asyncstep_prepare_request;
     /* callback to invoke when all request preparation work is complete */
@@ -170,6 +172,7 @@ struct aws_s3_meta_request {
     /* Customer specified callbacks. */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    aws_s3_meta_request_receive_body_callback_ex_fn *body_callback_ex;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
@@ -227,7 +230,7 @@ struct aws_s3_meta_request {
         struct aws_linked_list cancellable_http_streams_list;
 
         /* Data for async-writes. */
-        struct {
+        struct aws_s3_async_write_data {
             /* Whether a part request can be sent (we have 1 part's worth of data, or EOF) */
             bool ready_to_send;
 
@@ -237,7 +240,8 @@ struct aws_s3_meta_request {
             /* Holds buffered data we can't immediately send.
              * The length will always be less than part-size */
             struct aws_byte_buf buffered_data;
-            struct aws_s3_buffer_pool_ticket *buffered_data_ticket;
+            struct aws_s3_buffer_ticket *buffered_data_ticket;
+            struct aws_future_s3_buffer_ticket *buffered_ticket_future;
 
             /* Waker callback.
              * Stored if a poll_write() call returns result.is_pending
