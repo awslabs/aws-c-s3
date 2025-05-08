@@ -33,6 +33,18 @@ struct aws_s3_buffer_pool *aws_s3_buffer_pool_release(struct aws_s3_buffer_pool 
     return NULL;
 }
 
+struct aws_future_s3_buffer_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffer_pool *buffer_pool, struct aws_s3_buffer_pool_reserve_meta meta) {
+    AWS_PRECONDITION(buffer_pool);
+
+    return buffer_pool->vtable->reserve(buffer_pool, meta);
+}
+
+void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
+    AWS_PRECONDITION(buffer_pool);
+
+    buffer_pool->vtable->trim(buffer_pool);
+}
+
 struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_acquire(struct aws_s3_buffer_ticket *ticket) {
     if (ticket != NULL) {
         if (ticket->vtable->acquire) {
@@ -53,4 +65,10 @@ struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_release(struct aws_s3_buffer_t
         }
     }
     return NULL;
+}
+
+struct aws_byte_buf aws_s3_buffer_ticket_claim(struct aws_s3_buffer_ticket *ticket) {
+    AWS_PRECONDITION(ticket);
+    
+    return ticket->vtable->claim(ticket);
 }

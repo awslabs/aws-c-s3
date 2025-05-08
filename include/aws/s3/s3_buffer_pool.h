@@ -71,7 +71,8 @@ struct aws_s3_buffer_ticket {
     void *impl;
 };
 
-/* TODO: helpers to call polymorphic functions. */
+AWS_S3_API struct aws_byte_buf aws_s3_buffer_ticket_claim(struct aws_s3_buffer_ticket *ticket);
+
 AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_acquire(struct aws_s3_buffer_ticket *ticket);
 AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_release(struct aws_s3_buffer_ticket *ticket);
 
@@ -101,6 +102,10 @@ struct aws_s3_buffer_pool {
     struct aws_ref_count ref_count;
     void *impl;
 };
+
+AWS_S3_API struct aws_future_s3_buffer_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffer_pool *buffer_pool, 
+    struct aws_s3_buffer_pool_reserve_meta meta);
+AWS_S3_API void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool);
 
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_acquire(struct aws_s3_buffer_pool *buffer_pool);
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_release(struct aws_s3_buffer_pool *buffer_pool);

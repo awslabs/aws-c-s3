@@ -1412,7 +1412,7 @@ static void s_s3_client_trim_buffer_pool_task(struct aws_task *task, void *arg, 
     uint32_t num_reqs_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
 
     if (num_reqs_in_flight == 0) {
-        client->buffer_pool->vtable->trim(client->buffer_pool);
+        aws_s3_buffer_pool_trim(client->buffer_pool);
     }
 }
 
