@@ -359,10 +359,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
-        .client = client,
-        .part_size = part_size,
-        .memory_limit = mem_limit,
-        .max_part_size = max_part_size};
+        .client = client, .part_size = part_size, .memory_limit = mem_limit, .max_part_size = max_part_size};
 
     if (client_config->buffer_pool_factory_fn) {
         client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);

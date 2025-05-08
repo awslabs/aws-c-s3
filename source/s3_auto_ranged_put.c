@@ -570,7 +570,7 @@ static bool s_s3_auto_ranged_put_update(
                     ticket = meta_request->synced_data.async_write.buffered_data_ticket;
                     meta_request->synced_data.async_write.buffered_data_ticket = NULL;
                 }
-                
+
                 /* Allocate a request for another part. */
                 uint32_t new_flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
                 if (!meta_request->synced_data.async_write.ready_to_send) {
@@ -587,7 +587,7 @@ static bool s_s3_auto_ranged_put_update(
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
                 /* If request was previously uploaded, we prepare it to ensure checksums still match,
-                    * but ultimately it gets marked no-op and we don't send it */
+                 * but ultimately it gets marked no-op and we don't send it */
                 request->was_previously_uploaded = request_previously_uploaded;
 
                 request->ticket = ticket;

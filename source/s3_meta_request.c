@@ -742,7 +742,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
         s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
         return;
     }
-    
+
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
 
     s_kick_off_prepare_request(payload);
@@ -765,11 +765,15 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
+    /**
+     * TODO: is this always safe?
+     * can we get into situation where we are waiting on mem on a req, which cannot be allocated until something else
+     * finishes? i.e. you allocated mem for parts 2..n for get, but they cannot be delivered until part 1 finishes, but
+     * part 1 is waiting on mem allocation?
+     */
     if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
         struct aws_s3_buffer_pool_reserve_meta meta = {
-            .client = meta_request->client,
-            .meta_request = meta_request,
-            .size = meta_request->part_size};
+            .client = meta_request->client, .meta_request = meta_request, .size = meta_request->part_size};
 
         payload->async_buffer_reserve =
             meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
@@ -1491,8 +1495,7 @@ static int s_s3_meta_request_incoming_body(
             (void *)meta_request,
             (void *)request,
             aws_last_error_or_unknown(),
-            aws_error_str(aws_last_error_or_unknown())
-        );
+            aws_error_str(aws_last_error_or_unknown()));
 
         return AWS_OP_ERR;
     }
@@ -2396,7 +2399,6 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
     } else {
         /* write call is OK */
 
-        
         /* If we don't already have a buffer, grab one from the pool. */
         if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
 
@@ -2405,16 +2407,16 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
                  * waited for a normal ticket reservation, respecting the pool's memory limit.
                  * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
-    
+
                 struct aws_s3_buffer_pool_reserve_meta meta = {
                     .size = meta_request->part_size,
                     .can_block = true,
                     .meta_request = meta_request,
                     .client = meta_request->client};
-    
+
                 meta_request->synced_data.async_write.buffered_ticket_future =
                     meta_request->client->buffer_pool->vtable->reserve(meta_request->client->buffer_pool, meta);
-    
+
                 AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_ticket_future);
             }
 
@@ -2429,8 +2431,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                         aws_future_s3_buffer_ticket_get_result_by_move(
                             meta_request->synced_data.async_write.buffered_ticket_future);
 
-                    meta_request->synced_data.async_write.buffered_ticket_future = 
-                        aws_future_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_ticket_future);
+                    meta_request->synced_data.async_write.buffered_ticket_future = aws_future_s3_buffer_ticket_release(
+                        meta_request->synced_data.async_write.buffered_ticket_future);
 
                     meta_request->synced_data.async_write.buffered_data =
                         meta_request->synced_data.async_write.buffered_data_ticket->vtable->claim(

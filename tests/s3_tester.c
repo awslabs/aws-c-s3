@@ -844,7 +844,7 @@ struct aws_s3_client_vtable g_aws_s3_client_mock_vtable = {
 static void s_s3_mock_client_start_destroy(void *user_data) {
     struct aws_s3_client *client = user_data;
     AWS_ASSERT(client);
-    
+
     aws_s3_buffer_pool_release(client->buffer_pool);
     client->buffer_pool = NULL;
     aws_mem_release(client->allocator, client);
