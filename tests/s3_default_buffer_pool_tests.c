@@ -372,7 +372,7 @@ static int s_test_s3_buffer_pool_forced_buffer_after_limit_hit(struct aws_alloca
 
     /* Assert we can still acquire buffers for all those normal reservations */
     for (size_t i = 0; i < 112; ++i) {
-        struct aws_byte_buf normal_buf =aws_s3_buffer_ticket_claim(tickets[i]);
+        struct aws_byte_buf normal_buf = aws_s3_buffer_ticket_claim(tickets[i]);
         ASSERT_UINT_EQUALS(chunk_size, normal_buf.capacity);
     }
 

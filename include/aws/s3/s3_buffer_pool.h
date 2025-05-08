@@ -103,7 +103,8 @@ struct aws_s3_buffer_pool {
     void *impl;
 };
 
-AWS_S3_API struct aws_future_s3_buffer_ticket *aws_s3_buffer_pool_reserve(struct aws_s3_buffer_pool *buffer_pool, 
+AWS_S3_API struct aws_future_s3_buffer_ticket *aws_s3_buffer_pool_reserve(
+    struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_reserve_meta meta);
 AWS_S3_API void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool);
 

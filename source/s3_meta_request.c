@@ -2413,7 +2413,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                     .meta_request = meta_request,
                     .client = meta_request->client};
 
-                meta_request->synced_data.async_write.buffered_ticket_future = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta);
+                meta_request->synced_data.async_write.buffered_ticket_future =
+                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta);
 
                 AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_ticket_future);
             }
@@ -2432,7 +2433,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                     meta_request->synced_data.async_write.buffered_ticket_future = aws_future_s3_buffer_ticket_release(
                         meta_request->synced_data.async_write.buffered_ticket_future);
 
-                    meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
+                    meta_request->synced_data.async_write.buffered_data =
+                        aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
             } else {
                 /* Memory acquire pending. Store waker */
