@@ -180,6 +180,7 @@ struct aws_s3_tester_meta_request_options {
     bool use_s3express_signing;
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
+    aws_s3_meta_request_should_continue_fn *continue_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
@@ -247,6 +248,7 @@ struct aws_s3_meta_request_test_results {
     struct aws_s3_tester *tester;
 
     aws_s3_meta_request_headers_callback_fn *headers_callback;
+    aws_s3_meta_request_should_continue_fn *continue_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
