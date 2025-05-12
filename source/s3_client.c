@@ -5,9 +5,9 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
-#include "aws/s3/private/s3_buffer_pool.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
+#include "aws/s3/private/s3_default_buffer_pool.h"
 #include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_parallel_input_stream.h"
@@ -349,20 +349,27 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
-
-    if (client->buffer_pool == NULL) {
-        goto on_error;
+    /* default max part size is the smallest of either half of mem limit or default max part size */
+    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)s_default_max_part_size);
+    if (client_config->max_part_size != 0) {
+        if (client_config->max_part_size > SIZE_MAX) {
+            max_part_size = SIZE_MAX;
+        } else {
+            max_part_size = (size_t)client_config->max_part_size;
+        }
     }
 
-    struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+    struct aws_s3_buffer_pool_config buffer_pool_config = {
+        .client = client, .part_size = part_size, .memory_limit = mem_limit, .max_part_size = max_part_size};
 
-    if (client_config->max_part_size > pool_usage.mem_limit) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "Cannot create client from client_config; configured max part size should not exceed memory limit."
-            "size.");
-        aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
+    if (client_config->buffer_pool_factory_fn) {
+        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);
+    } else {
+
+        client->buffer_pool = aws_s3_default_buffer_pool_new(allocator, buffer_pool_config);
+    }
+
+    if (client->buffer_pool == NULL) {
         goto on_error;
     }
 
@@ -404,20 +411,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((size_t *)&client->part_size) = part_size;
 
-    if (client_config->max_part_size != 0) {
-        *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
-    } else {
-        *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
-    }
-
-    if (client_config->max_part_size > pool_usage.mem_limit) {
-        *((uint64_t *)&client->max_part_size) = pool_usage.mem_limit;
-    }
-
-    if (client->max_part_size > SIZE_MAX) {
-        /* For the 32bit max part size to be SIZE_MAX */
-        *((uint64_t *)&client->max_part_size) = SIZE_MAX;
-    }
+    *((uint64_t *)&client->max_part_size) = max_part_size;
 
     if (client_config->multipart_upload_threshold != 0) {
         *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
@@ -658,7 +652,8 @@ on_error:
     }
 
     aws_array_list_clean_up(&client->network_interface_names);
-    aws_s3_buffer_pool_destroy(client->buffer_pool);
+    aws_s3_buffer_pool_release(client->buffer_pool);
+    client->buffer_pool = NULL;
 
     aws_mem_release(client->allocator, client);
     return NULL;
@@ -768,7 +763,9 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
-    aws_s3_buffer_pool_destroy(client->buffer_pool);
+    aws_s3_buffer_pool_release(client->buffer_pool);
+    client->buffer_pool = NULL;
+
     if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
         aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
     }
@@ -1814,13 +1811,11 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
-    aws_s3_buffer_pool_remove_reservation_hold(client->buffer_pool);
-
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /**
          * Iterate through the meta requests to update meta requests and get new requests that can then be prepared
-+         * (reading from any streams, signing, etc.) for sending.
+         * (reading from any streams, signing, etc.) for sending.
          */
         while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 

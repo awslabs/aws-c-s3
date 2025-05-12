@@ -946,7 +946,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         if (checksum_config->location == AWS_SCL_TRAILER) {
             /* aws-chunked encode the payload and add related headers */
 
-            /* set Content-Encoding header. If the header already exists, append the exisiting value to aws-chunked
+            /* set Content-Encoding header. If the header already exists, append the existing value to aws-chunked
              * We already made sure that the existing value is not 'aws_chunked' in 'aws_s3_client_make_meta_request'
              * function.
              */
