@@ -187,7 +187,7 @@ void s_default_pool_trim(struct aws_s3_buffer_pool *pool) {
     aws_s3_default_buffer_pool_trim(pool);
 }
 
-static struct aws_s3_buffer_pool_vtable s_default_tpool_vtable = {
+static struct aws_s3_buffer_pool_vtable s_default_pool_vtable = {
     .reserve = s_default_pool_reserve,
     .trim = s_default_pool_trim};
 
@@ -266,7 +266,7 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
 
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = buffer_pool;
-    pool->vtable = &s_default_tpool_vtable;
+    pool->vtable = &s_default_pool_vtable;
     aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
 
     return pool;
