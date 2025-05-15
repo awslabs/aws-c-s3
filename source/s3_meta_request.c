@@ -2425,7 +2425,6 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                     AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p: Failed to acquire buffer.", (void *)meta_request);
                     illegal_usage_terminate_meta_request = true;
                 } else {
-
                     meta_request->synced_data.async_write.buffered_data_ticket =
                         aws_future_s3_buffer_ticket_get_result_by_move(
                             meta_request->synced_data.async_write.buffered_ticket_future);
@@ -2437,19 +2436,19 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
             } else {
-                /* Memory acquire pending. Store waker */
+                /* Failing to acquire memory is a hard error for now. Consider relaxing this in future. */
+                meta_request->synced_data.async_write.buffered_ticket_future 
+                    = aws_future_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_ticket_future);
+
                 AWS_LOGF_TRACE(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p: memory acquire pending, waker registered ...",
+                    "id=%p: Illegal call to write(). Failed to acquire buffer memory.",
                     (void *)meta_request);
-                meta_request->synced_data.async_write.waker = waker;
-                meta_request->synced_data.async_write.waker_user_data = user_data;
-                result.is_pending = true;
+                illegal_usage_terminate_meta_request = true;
             }
         }
 
-        AWS_LOGF_DEBUG(0, "here");
-        if (!illegal_usage_terminate_meta_request && result.is_pending != true) {
+        if (!illegal_usage_terminate_meta_request && !result.is_pending) {
             /* Copy as much data as we can into the buffer */
             struct aws_byte_cursor processed_data =
                 aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
@@ -2466,8 +2465,6 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 meta_request->synced_data.async_write.ready_to_send = true;
                 ready_to_send = true;
             }
-
-            AWS_LOGF_DEBUG(0, "not here");
 
             AWS_LOGF_TRACE(
                 AWS_LS_S3_META_REQUEST,

@@ -90,8 +90,8 @@ struct aws_s3_buffer_pool_vtable {
     void (*trim)(struct aws_s3_buffer_pool *pool);
 
     /* Implement below for custom ref count behavior. Alternatively set those to null and init the ref count. */
-    void (*acquire)(struct aws_s3_buffer_pool *pool);
-    void (*release)(struct aws_s3_buffer_pool *pool);
+    struct aws_s3_buffer_pool *(*acquire)(struct aws_s3_buffer_pool *pool);
+    struct aws_s3_buffer_pool *(*release)(struct aws_s3_buffer_pool *pool);
 };
 
 /**
