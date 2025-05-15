@@ -683,11 +683,6 @@ int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_b
         return AWS_ERROR_S3_REQUEST_TIMEOUT;
     }
 
-    if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "ExpiredToken") ||
-        aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "TokenRefreshRequired")) {
-        return AWS_ERROR_S3_TOKEN_EXPIRED;
-    }
-
     return AWS_ERROR_UNKNOWN;
 }
 
