@@ -8114,3 +8114,52 @@ static int s_test_s3_default_get_without_content_length(struct aws_allocator *al
 
     return AWS_OP_SUCCESS;
 }
+
+struct aws_string *test_helper(struct aws_allocator *allocator) {
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_public_bucket_name, &g_test_s3_region);
+    return host_name;
+}
+
+AWS_TEST_CASE(test_s3_default_get, aws_test_s3_default_get)
+static int aws_test_s3_default_get(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->http_connection_make_request = s_http_connection_make_request_patch;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_string *hsot_name = test_helper(allocator);
+
+    /* Put together a simple S3 Get Object request. */
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(hsot_name), g_pre_existing_object_1MB);
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+    /* Send default type */
+    options.type = AWS_S3_META_REQUEST_TYPE_DEFAULT;
+    options.message = message;
+    options.operation_name = aws_byte_cursor_from_c_str("GetObject");
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
+        &tester, client, &options, &meta_request_test_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+    ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
