@@ -12,10 +12,10 @@
 
 /**
  * Generic memory pool interface.
- * Allows consumers of s3 crt to override how buffer allocation for part buffers is done.
+ * Allows consumers of aws-c-s3 to override how buffer allocation for part buffers is done.
  * Refer to docs/memory_aware_request_execution.md for details on how default implementation works.
- * WARNING: this is currently experimental feature and should be used with caution.
- * At highlevel the flow is as follows:
+ * WARNING: this is currently experimental feature and does not provide API stability guarantees so should be used with
+ * caution. At highlevel the flow is as follows:
  * - crt scheduler queues up requests to be prepared
  * - requests being prepared will try to reserve mem (i.e. obtain a ticket) and wait until they get it before proceeding
  * - once mem is reserved requests will proceed with the pipeline
@@ -40,11 +40,17 @@ AWS_FUTURE_T_POINTER_WITH_RELEASE_DECLARATION(aws_future_s3_buffer_ticket, struc
  * Meta information about ticket reservation request.
  */
 struct aws_s3_buffer_pool_reserve_meta {
-    struct aws_s3_client
-        *client; /* client reserving the ticket. accounts for buffer pool being shared between clients. */
-    struct aws_s3_meta_request *meta_request; /* meta request ticket is being reserved for. */
-    size_t size;                              /* size of the buffer to reserve. */
-    bool can_block;                           /* whether not granting the reservation can block. */
+    /* client reserving the ticket. accounts for buffer pool being shared between clients. */
+    struct aws_s3_client *client;
+
+    /* meta request ticket is being reserved for. */
+    struct aws_s3_meta_request *meta_request;
+
+    /* size of the buffer to reserve. */
+    size_t size;
+
+    /* whether not granting the reservation can block. */
+    bool can_block;
 };
 
 struct aws_s3_buffer_ticket;

@@ -652,8 +652,7 @@ on_error:
     }
 
     aws_array_list_clean_up(&client->network_interface_names);
-    aws_s3_buffer_pool_release(client->buffer_pool);
-    client->buffer_pool = NULL;
+    client->buffer_pool = aws_s3_buffer_pool_release(client->buffer_pool);
 
     aws_mem_release(client->allocator, client);
     return NULL;
@@ -763,8 +762,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
-    aws_s3_buffer_pool_release(client->buffer_pool);
-    client->buffer_pool = NULL;
+    client->buffer_pool = aws_s3_buffer_pool_release(client->buffer_pool);
 
     if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
         aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);

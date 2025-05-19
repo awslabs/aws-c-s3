@@ -186,6 +186,15 @@ int aws_s3_meta_request_init_base(
         goto error;
     }
 
+    if (options->body_callback != NULL && options->body_callback_ex != NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Invalid meta request configuration - body and body_ex callbacks cannot be both set at the same time",
+            (void *)meta_request);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+
     if (aws_mutex_init(&meta_request->synced_data.lock)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST, "id=%p Could not initialize mutex for meta request", (void *)meta_request);
@@ -1986,9 +1995,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                 meta_request,
                                 &response_body,
                                 (struct aws_s3_meta_request_receive_body_extra_info){
-                                    .range_start = request->part_range_start,
-                                    .ticket = request->ticket,
-                                    .user_data = meta_request->user_data})) {
+                                    .range_start = request->part_range_start, .ticket = request->ticket},
+                                meta_request->user_data)) {
                             error_code = aws_last_error_or_unknown();
                             AWS_LOGF_ERROR(
                                 AWS_LS_S3_META_REQUEST,
@@ -2437,8 +2445,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 }
             } else {
                 /* Failing to acquire memory is a hard error for now. Consider relaxing this in future. */
-                meta_request->synced_data.async_write.buffered_ticket_future 
-                    = aws_future_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_ticket_future);
+                meta_request->synced_data.async_write.buffered_ticket_future =
+                    aws_future_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_ticket_future);
 
                 AWS_LOGF_TRACE(
                     AWS_LS_S3_META_REQUEST,
