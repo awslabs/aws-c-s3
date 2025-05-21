@@ -2402,7 +2402,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
             } else {
-                /* Failing to acquire memory is a hard error for now. Consider relaxing this in future. */
+                /* Failing to acquire memory synchronously is a hard error for now. Consider relaxing this in future. */
                 meta_request->synced_data.async_write.buffered_ticket_future =
                     aws_future_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_ticket_future);
 
