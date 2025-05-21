@@ -360,7 +360,11 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
-        .client = client, .part_size = part_size, .memory_limit = mem_limit, .max_part_size = max_part_size};
+        .client = client,
+        .part_size = part_size,
+        .memory_limit = mem_limit,
+        .max_part_size = max_part_size,
+    };
 
     if (client_config->buffer_pool_factory_fn) {
         client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);
@@ -1807,8 +1811,6 @@ static void s_s3_prepare_acquire_mem_callback_and_destroy(
 
     struct aws_s3_meta_request *meta_request = payload->request->meta_request;
     AWS_PRECONDITION(meta_request);
-
-    ++payload->request->num_times_prepared;
 
     if (error_code) {
         AWS_LOGF_ERROR(

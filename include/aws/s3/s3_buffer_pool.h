@@ -49,7 +49,11 @@ struct aws_s3_buffer_pool_reserve_meta {
     /* size of the buffer to reserve. */
     size_t size;
 
-    /* whether not granting the reservation can block. */
+    /* whether not granting reservation can result in request pipeline being blocked.
+     * Note: blocking is currently a terminal condition and that cannot be recovered from,
+     * i.e. meta request will be stuck and not make any process.
+     * As such buffer pool should either grant or error out reservation in sync.
+     * This scenario currently only occurs in the async_write flows. */
     bool can_block;
 };
 

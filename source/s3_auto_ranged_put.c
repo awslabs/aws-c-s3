@@ -560,9 +560,6 @@ static bool s_s3_auto_ranged_put_update(
             }
 
             if (should_create_next_part_request) {
-
-                AWS_LOGF_DEBUG(0, "Creating next part");
-
                 struct aws_s3_buffer_ticket *ticket = NULL;
                 if (meta_request->synced_data.async_write.ready_to_send) {
                     /* Async-write already has a ticket, take ownership */
