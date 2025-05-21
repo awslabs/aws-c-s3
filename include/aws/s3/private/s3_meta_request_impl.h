@@ -46,9 +46,7 @@ typedef void(aws_s3_meta_request_prepare_request_callback_fn)(
 struct aws_s3_prepare_request_payload {
     struct aws_allocator *allocator;
     struct aws_s3_request *request;
-    struct aws_event_loop *event_loop;
     struct aws_task task;
-    struct aws_future_s3_buffer_ticket *async_buffer_reserve;
     /* async step: wait for vtable->prepare_request() call to complete */
     struct aws_future_void *asyncstep_prepare_request;
     /* callback to invoke when all request preparation work is complete */

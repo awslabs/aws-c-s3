@@ -634,7 +634,6 @@ static void s_s3_prepare_request_payload_callback_and_destroy(
         payload->callback(meta_request, payload->request, error_code, payload->user_data);
     }
 
-    aws_future_s3_buffer_ticket_release(payload->async_buffer_reserve);
     aws_future_void_release(payload->asyncstep_prepare_request);
     aws_mem_release(payload->allocator, payload);
 }
@@ -697,65 +696,10 @@ void aws_s3_meta_request_schedule_prepare_request_default_impl(
         /* To support reading in parallel, schedule task on any I/O thread in the streaming elg.
          * Otherwise, we wouldn't get any parallelism. */
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
-        payload->event_loop = loop;
         aws_event_loop_schedule_task_now(loop, &payload->task);
     } else {
-        payload->event_loop = meta_request->io_event_loop;
         aws_event_loop_schedule_task_now(meta_request->io_event_loop, &payload->task);
     }
-}
-
-static void s_kick_off_prepare_request(struct aws_s3_prepare_request_payload *payload) {
-    struct aws_s3_request *request = payload->request;
-    AWS_PRECONDITION(request);
-
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
-    const struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
-    AWS_PRECONDITION(vtable);
-
-    if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
-        s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_CANCELED);
-        return;
-    }
-
-    /* Kick off the async vtable->prepare_request()
-     * Each subclass has its own implementation of this. */
-    payload->asyncstep_prepare_request = vtable->prepare_request(request);
-    aws_future_void_register_callback(
-        payload->asyncstep_prepare_request, s_s3_meta_request_on_request_prepared, payload);
-    return;
-}
-
-static void s_on_pool_buffer_reserved(void *user_data) {
-    struct aws_s3_prepare_request_payload *payload = user_data;
-    AWS_PRECONDITION(payload);
-
-    struct aws_s3_request *request = payload->request;
-    AWS_PRECONDITION(request);
-
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
-    struct aws_future_s3_buffer_ticket *future_ticket = payload->async_buffer_reserve;
-
-    int error_code = aws_future_s3_buffer_ticket_get_error(future_ticket);
-    if (error_code != AWS_ERROR_SUCCESS) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not allocate buffer for request with tag %d for the meta request.",
-            (void *)meta_request,
-            request->request_tag);
-
-        s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
-        return;
-    }
-
-    request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
-
-    s_kick_off_prepare_request(payload);
-    return;
 }
 
 static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -771,27 +715,22 @@ static void s_s3_meta_request_prepare_request_task(struct aws_task *task, void *
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    const struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
+    AWS_PRECONDITION(vtable);
+
     /* Client owns this event loop group. A cancel should not be possible. */
     AWS_ASSERT(task_status == AWS_TASK_STATUS_RUN_READY);
 
-    /**
-     * TODO: is this always safe?
-     * can we get into situation where we are waiting on mem on a req, which cannot be allocated until something else
-     * finishes? i.e. you allocated mem for parts 2..n for get, but they cannot be delivered until part 1 finishes, but
-     * part 1 is waiting on mem allocation?
-     */
-    if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
-        struct aws_s3_buffer_pool_reserve_meta meta = {
-            .client = meta_request->client, .meta_request = meta_request, .size = meta_request->part_size};
-
-        payload->async_buffer_reserve = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta);
-
-        aws_future_s3_buffer_ticket_register_event_loop_callback(
-            payload->async_buffer_reserve, payload->event_loop, s_on_pool_buffer_reserved, payload);
+    if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
+        s_s3_prepare_request_payload_callback_and_destroy(payload, AWS_ERROR_S3_CANCELED);
         return;
     }
 
-    s_kick_off_prepare_request(payload);
+    /* Kick off the async vtable->prepare_request()
+     * Each subclass has its own implementation of this. */
+    payload->asyncstep_prepare_request = vtable->prepare_request(request);
+    aws_future_void_register_callback(
+        payload->asyncstep_prepare_request, s_s3_meta_request_on_request_prepared, payload);
     return;
 }
 
