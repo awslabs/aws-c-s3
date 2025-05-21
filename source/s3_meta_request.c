@@ -180,6 +180,7 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
+    aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -377,6 +378,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
+    aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 
@@ -537,6 +539,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
 
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
@@ -1822,6 +1825,22 @@ void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_r
 
         aws_http_stream_cancel(request->synced_data.cancellable_http_stream, error_code);
         request->synced_data.cancellable_http_stream = NULL;
+    }
+}
+
+void aws_s3_meta_request_cancel_pending_buffer_futures_synced(
+    struct aws_s3_meta_request *meta_request,
+    int error_code) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+    while (!aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures)) {
+
+        struct aws_linked_list_node *request_node =
+            aws_linked_list_pop_front(&meta_request->synced_data.pending_buffer_futures);
+
+        struct aws_s3_request *request =
+            AWS_CONTAINER_OF(request_node, struct aws_s3_request, pending_buffer_future_list_node);
+
+        aws_future_s3_buffer_ticket_set_error(request->synced_data.buffer_future, error_code);
     }
 }
 

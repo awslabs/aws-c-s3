@@ -1860,16 +1860,26 @@ static void s_on_pool_buffer_reserved(void *user_data) {
 
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
 
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        AWS_FATAL_ASSERT(request->synced_data.buffer_future);
+        aws_linked_list_remove(&request->pending_buffer_future_list_node);
+        request->synced_data.buffer_future = aws_future_s3_buffer_ticket_release(request->synced_data.buffer_future);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
+
     aws_future_s3_buffer_ticket_release(payload->buffer_future);
     aws_mem_release(payload->allocator, payload);
 
-    aws_s3_meta_request_prepare_request(request->meta_request, 
-        request, payload->callback, payload->user_data);
+    aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
     return;
 }
 
-void s_acquire_mem_and_prepare_request(struct aws_s3_client *client, 
-    struct aws_s3_request *request, 
+void s_acquire_mem_and_prepare_request(
+    struct aws_s3_client *client,
+    struct aws_s3_request *request,
     aws_s3_meta_request_prepare_request_callback_fn *callback,
     void *user_data) {
 
@@ -1879,13 +1889,24 @@ void s_acquire_mem_and_prepare_request(struct aws_s3_client *client,
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client, .meta_request = meta_request, .size = meta_request->part_size};
 
-        struct aws_s3_reserve_memory_payload *payload = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_reserve_memory_payload));
+        struct aws_s3_reserve_memory_payload *payload =
+            aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_reserve_memory_payload));
 
         payload->allocator = allocator;
         payload->request = request;
         payload->callback = callback;
         payload->user_data = user_data;
         payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+
+        /* BEGIN CRITICAL SECTION */
+        {
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            aws_linked_list_push_back(
+                &meta_request->synced_data.pending_buffer_futures, &request->pending_buffer_future_list_node);
+            request->synced_data.buffer_future = aws_future_s3_buffer_ticket_acquire(payload->buffer_future);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+        }
+        /* END CRITICAL SECTION */
 
         aws_future_s3_buffer_ticket_register_callback(payload->buffer_future, s_on_pool_buffer_reserved, payload);
         return;

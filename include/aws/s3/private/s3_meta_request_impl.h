@@ -227,6 +227,9 @@ struct aws_s3_meta_request {
         /* To track aws_s3_requests with cancellable HTTP streams */
         struct aws_linked_list cancellable_http_streams_list;
 
+        /* To track aws_future_s3_buffers that might need to be cleaned up on cancel */
+        struct aws_linked_list pending_buffer_futures;
+
         /* Data for async-writes. */
         struct aws_s3_async_write_data {
             /* Whether a part request can be sent (we have 1 part's worth of data, or EOF) */
@@ -402,6 +405,9 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
 
 /* Cancel the requests with cancellable HTTP stream for the meta request */
 void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
+
+/* Cancel the pending buffer futures for the meta request */
+void aws_s3_meta_request_cancel_pending_buffer_futures_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
  * as reading from the stream could cause user code to call back into aws-c-s3.

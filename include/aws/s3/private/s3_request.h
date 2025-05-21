@@ -114,10 +114,16 @@ struct aws_s3_request {
     /* Linked list node used for tracking the request is active from HTTP level. */
     struct aws_linked_list_node cancellable_http_streams_list_node;
 
+    /* Linked list node used for tracking buffer acquire futures. */
+    struct aws_linked_list_node pending_buffer_future_list_node;
+
     /* The meta request lock must be held to access the data */
     struct {
         /* The underlying http stream, only valid when the request is active from HTTP level */
         struct aws_http_stream *cancellable_http_stream;
+
+        /* Buffer future. */
+        struct aws_future_s3_buffer_ticket *buffer_future;
     } synced_data;
 
     /* TODO Ref count on the request is no longer needed--only one part of code should ever be holding onto a request,
