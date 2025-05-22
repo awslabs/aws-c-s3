@@ -560,51 +560,50 @@ static bool s_s3_auto_ranged_put_update(
             }
 
             if (should_create_next_part_request) {
-
-                struct aws_s3_buffer_pool_ticket *ticket = NULL;
+                struct aws_s3_buffer_ticket *ticket = NULL;
                 if (meta_request->synced_data.async_write.ready_to_send) {
                     /* Async-write already has a ticket, take ownership */
                     AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket);
                     ticket = meta_request->synced_data.async_write.buffered_data_ticket;
                     meta_request->synced_data.async_write.buffered_data_ticket = NULL;
-                } else {
-                    /* Try to reserve a ticket */
-                    ticket = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta_request->part_size);
                 }
 
-                if (ticket != NULL) {
-                    /* Allocate a request for another part. */
-                    request = aws_s3_request_new(
-                        meta_request,
-                        AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
-                        AWS_S3_REQUEST_TYPE_UPLOAD_PART,
-                        0 /*part_number*/,
-                        AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS | AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY);
-
-                    request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
-
-                    /* If request was previously uploaded, we prepare it to ensure checksums still match,
-                     * but ultimately it gets marked no-op and we don't send it */
-                    request->was_previously_uploaded = request_previously_uploaded;
-
-                    request->ticket = ticket;
-
-                    if (meta_request->synced_data.async_write.ready_to_send) {
-                        /* Async-write already has a buffer */
-                        request->request_body = meta_request->synced_data.async_write.buffered_data;
-                    }
-
-                    ++auto_ranged_put->threaded_update_data.next_part_number;
-                    ++auto_ranged_put->synced_data.num_parts_started;
-                    ++auto_ranged_put->synced_data.num_parts_pending_read;
-
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: Returning request %p for part %d",
-                        (void *)meta_request,
-                        (void *)request,
-                        request->part_number);
+                /* Allocate a request for another part. */
+                uint32_t new_flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
+                if (!meta_request->synced_data.async_write.ready_to_send) {
+                    new_flags |= AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL;
                 }
+
+                request = aws_s3_request_new(
+                    meta_request,
+                    AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART,
+                    AWS_S3_REQUEST_TYPE_UPLOAD_PART,
+                    0 /*part_number*/,
+                    new_flags);
+
+                request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
+
+                /* If request was previously uploaded, we prepare it to ensure checksums still match,
+                 * but ultimately it gets marked no-op and we don't send it */
+                request->was_previously_uploaded = request_previously_uploaded;
+
+                request->ticket = ticket;
+
+                if (meta_request->synced_data.async_write.ready_to_send) {
+                    /* Async-write already has a buffer */
+                    request->request_body = meta_request->synced_data.async_write.buffered_data;
+                }
+
+                ++auto_ranged_put->threaded_update_data.next_part_number;
+                ++auto_ranged_put->synced_data.num_parts_started;
+                ++auto_ranged_put->synced_data.num_parts_pending_read;
+
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Returning request %p for part %d",
+                    (void *)meta_request,
+                    (void *)request,
+                    request->part_number);
 
                 goto has_work_remaining;
             }
@@ -987,8 +986,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
         if (request->request_body.capacity == 0) {
             AWS_FATAL_ASSERT(request->ticket);
-            request->request_body =
-                aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
+            request->request_body = aws_s3_buffer_ticket_claim(request->ticket);
             request->request_body.capacity = request_body_size;
         }
 
@@ -1742,6 +1740,7 @@ static int s_s3_auto_ranged_put_pause(
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
 
     aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_PAUSED);
 
     /* unlock */
     aws_s3_meta_request_unlock_synced_data(meta_request);

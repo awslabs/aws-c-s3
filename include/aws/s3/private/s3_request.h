@@ -12,7 +12,6 @@
 #include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
-#include <aws/s3/private/s3_buffer_pool.h>
 #include <aws/s3/private/s3_checksums.h>
 
 struct aws_http_message;
@@ -21,9 +20,8 @@ struct aws_s3_meta_request;
 
 enum aws_s3_request_flags {
     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS = 0x00000001,
-    AWS_S3_REQUEST_FLAG_PART_SIZE_RESPONSE_BODY = 0x00000002,
-    AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000004,
-    AWS_S3_REQUEST_FLAG_PART_SIZE_REQUEST_BODY = 0x00000008,
+    AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000002,
+    AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL = 0x00000004,
 };
 
 /**
@@ -116,10 +114,16 @@ struct aws_s3_request {
     /* Linked list node used for tracking the request is active from HTTP level. */
     struct aws_linked_list_node cancellable_http_streams_list_node;
 
+    /* Linked list node used for tracking buffer acquire futures. */
+    struct aws_linked_list_node pending_buffer_future_list_node;
+
     /* The meta request lock must be held to access the data */
     struct {
         /* The underlying http stream, only valid when the request is active from HTTP level */
         struct aws_http_stream *cancellable_http_stream;
+
+        /* Buffer future. */
+        struct aws_future_s3_buffer_ticket *buffer_future;
     } synced_data;
 
     /* TODO Ref count on the request is no longer needed--only one part of code should ever be holding onto a request,
@@ -135,7 +139,7 @@ struct aws_s3_request {
      * retried.*/
     struct aws_byte_buf request_body;
 
-    struct aws_s3_buffer_pool_ticket *ticket;
+    struct aws_s3_buffer_ticket *ticket;
 
     /* Beginning range of this part. */
     /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
@@ -225,11 +229,8 @@ struct aws_s3_request {
     /* When true, response headers from the request will be stored in the request's response_headers variable. */
     uint32_t record_response_headers : 1;
 
-    /* When true, the response body buffer will be allocated in the size of a part. */
-    uint32_t has_part_size_response_body : 1;
-
-    /* When true, the request body buffer will be allocated in the size of a part. */
-    uint32_t has_part_size_request_body : 1;
+    /* Indicates whether buffer should be allocated for the request from the pool. */
+    uint32_t should_allocate_buffer_from_pool : 1;
 
     /* When true, this request is being tracked by the client for limiting the amount of in-flight-requests/stats. */
     uint32_t tracked_by_client : 1;

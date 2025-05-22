@@ -10,6 +10,7 @@
 #include <aws/common/ref_count.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
+#include <aws/s3/s3_buffer_pool.h>
 
 AWS_PUSH_SANE_WARNING_LEVEL
 
@@ -186,6 +187,30 @@ typedef int(aws_s3_meta_request_receive_body_callback_fn)(
 typedef void(aws_s3_meta_request_finish_fn)(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data);
+
+struct aws_s3_meta_request_receive_body_extra_info {
+    /* The byte index of the object that this refers to. For example, for an HTTP message that has a range header, the
+       first chunk received will have a range_start that matches the range header's range-start.*/
+    uint64_t range_start;
+
+    /* Associated buffer
+     */
+    struct aws_s3_buffer_ticket *ticket;
+};
+
+typedef int(aws_s3_meta_request_receive_body_callback_ex_fn)(
+
+    /* The meta request that the callback is being issued for. */
+    struct aws_s3_meta_request *meta_request,
+
+    /* The body data for this chunk of the object. */
+    const struct aws_byte_cursor *body,
+
+    /* Extra information associated with the delivered body */
+    const struct aws_s3_meta_request_receive_body_extra_info info,
+
+    /* User data specified by aws_s3_meta_request_options.*/
     void *user_data);
 
 /**
@@ -573,6 +598,14 @@ struct aws_s3_client_config {
      */
     const struct aws_byte_cursor *network_interface_names_array;
     size_t num_network_interface_names;
+
+    /**
+     * Experimental (touch at your own risk).
+     * (Optional)
+     * Factory function to create buffer pool.
+     * if not set creates default implementation of the buffer pool.
+     */
+    aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
 };
 
 struct aws_s3_checksum_config {
@@ -810,6 +843,15 @@ struct aws_s3_meta_request_options {
      * See `aws_s3_meta_request_receive_body_callback_fn`.
      */
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+
+    /**
+     * Invoked to provide the response body as it is received.
+     * Provides extra information as compared to regular callback.
+     * Note: setting both body_callback and body_callback_ex is not
+     * considered valid and meta request creation will fail.
+     * See `aws_s3_meta_request_receive_body_callback_ex_fn`.
+     */
+    aws_s3_meta_request_receive_body_callback_ex_fn *body_callback_ex;
 
     /**
      * Invoked when the entire meta request execution is complete.

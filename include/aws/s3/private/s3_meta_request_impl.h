@@ -170,6 +170,7 @@ struct aws_s3_meta_request {
     /* Customer specified callbacks. */
     aws_s3_meta_request_headers_callback_fn *headers_callback;
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
+    aws_s3_meta_request_receive_body_callback_ex_fn *body_callback_ex;
     aws_s3_meta_request_finish_fn *finish_callback;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
@@ -226,8 +227,11 @@ struct aws_s3_meta_request {
         /* To track aws_s3_requests with cancellable HTTP streams */
         struct aws_linked_list cancellable_http_streams_list;
 
+        /* To track aws_future_s3_buffers that might need to be cleaned up on cancel */
+        struct aws_linked_list pending_buffer_futures;
+
         /* Data for async-writes. */
-        struct {
+        struct aws_s3_async_write_data {
             /* Whether a part request can be sent (we have 1 part's worth of data, or EOF) */
             bool ready_to_send;
 
@@ -237,7 +241,8 @@ struct aws_s3_meta_request {
             /* Holds buffered data we can't immediately send.
              * The length will always be less than part-size */
             struct aws_byte_buf buffered_data;
-            struct aws_s3_buffer_pool_ticket *buffered_data_ticket;
+            struct aws_s3_buffer_ticket *buffered_data_ticket;
+            struct aws_future_s3_buffer_ticket *buffered_ticket_future;
 
             /* Waker callback.
              * Stored if a poll_write() call returns result.is_pending
@@ -400,6 +405,9 @@ bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_r
 
 /* Cancel the requests with cancellable HTTP stream for the meta request */
 void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
+
+/* Cancel the pending buffer futures for the meta request */
+void aws_s3_meta_request_cancel_pending_buffer_futures_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
  * as reading from the stream could cause user code to call back into aws-c-s3.

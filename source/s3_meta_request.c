@@ -180,8 +180,18 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
+    aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
 
     if (part_size == SIZE_MAX) {
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+
+    if (options->body_callback != NULL && options->body_callback_ex != NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Invalid meta request configuration - body and body_ex callbacks cannot be both set at the same time",
+            (void *)meta_request);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         goto error;
     }
@@ -319,6 +329,7 @@ int aws_s3_meta_request_init_base(
 
     meta_request->headers_callback = options->headers_callback;
     meta_request->body_callback = options->body_callback;
+    meta_request->body_callback_ex = options->body_callback_ex;
     meta_request->finish_callback = options->finish_callback;
 
     /* Nothing can fail after here. Leave the impl not affected by failure of initializing base. */
@@ -367,6 +378,7 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
     aws_s3_meta_request_lock_synced_data(meta_request);
     aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
+    aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_CANCELED);
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
 
@@ -513,9 +525,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
-        aws_s3_buffer_pool_release_ticket(
-            meta_request->client->buffer_pool, meta_request->synced_data.async_write.buffered_data_ticket);
-
+        aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }
 
@@ -529,6 +539,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
 
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
@@ -1417,9 +1428,8 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->has_part_size_response_body && request->ticket != NULL) {
-            request->send_data.response_body =
-                aws_s3_buffer_pool_acquire_buffer(request->meta_request->client->buffer_pool, request->ticket);
+        if (request->ticket != NULL) {
+            request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
@@ -1431,7 +1441,7 @@ static int s_s3_meta_request_incoming_body(
     if (s_response_body_append(&request->send_data.response_body, data)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Request %p could not append to response body due to error %d (%s)",
+            "id=%p: Request %p could not append to response body due to error %d (%s).",
             (void *)meta_request,
             (void *)request,
             aws_last_error_or_unknown(),
@@ -1818,6 +1828,22 @@ void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_r
     }
 }
 
+void aws_s3_meta_request_cancel_pending_buffer_futures_synced(
+    struct aws_s3_meta_request *meta_request,
+    int error_code) {
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+    while (!aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures)) {
+
+        struct aws_linked_list_node *request_node =
+            aws_linked_list_pop_front(&meta_request->synced_data.pending_buffer_futures);
+
+        struct aws_s3_request *request =
+            AWS_CONTAINER_OF(request_node, struct aws_s3_request, pending_buffer_future_list_node);
+
+        aws_future_s3_buffer_ticket_set_error(request->synced_data.buffer_future, error_code);
+    }
+}
+
 static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics(
     struct aws_s3_request_metrics *metrics,
     struct aws_s3_meta_request *meta_request) {
@@ -1921,6 +1947,21 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             if (meta_request->client->enable_read_backpressure) {
                                 aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
                             }
+                        } else if (
+                            meta_request->body_callback_ex != NULL &&
+                            meta_request->body_callback_ex(
+                                meta_request,
+                                &response_body,
+                                (struct aws_s3_meta_request_receive_body_extra_info){
+                                    .range_start = request->part_range_start, .ticket = request->ticket},
+                                meta_request->user_data)) {
+                            error_code = aws_last_error_or_unknown();
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p Response body callback raised error %d (%s).",
+                                (void *)meta_request,
+                                error_code,
+                                aws_error_str(error_code));
                         } else if (
                             meta_request->body_callback != NULL &&
                             meta_request->body_callback(
@@ -2320,51 +2361,91 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
         meta_request->synced_data.async_write.waker = waker;
         meta_request->synced_data.async_write.waker_user_data = user_data;
         result.is_pending = true;
-
     } else {
         /* write call is OK */
 
         /* If we don't already have a buffer, grab one from the pool. */
         if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
-            /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
-             * waited for a normal ticket reservation, respecting the pool's memory limit.
-             * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
-            meta_request->synced_data.async_write.buffered_data = aws_s3_buffer_pool_acquire_forced_buffer(
-                meta_request->client->buffer_pool,
-                meta_request->part_size,
-                &meta_request->synced_data.async_write.buffered_data_ticket /*out_new_ticket*/);
+
+            if (meta_request->synced_data.async_write.buffered_data_ticket == NULL &&
+                meta_request->synced_data.async_write.buffered_ticket_future == NULL) {
+                /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
+                 * waited for a normal ticket reservation, respecting the pool's memory limit.
+                 * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
+
+                struct aws_s3_buffer_pool_reserve_meta meta = {
+                    .size = meta_request->part_size,
+                    .can_block = true,
+                    .meta_request = meta_request,
+                    .client = meta_request->client};
+
+                meta_request->synced_data.async_write.buffered_ticket_future =
+                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta);
+
+                AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_ticket_future);
+            }
+
+            if (aws_future_s3_buffer_ticket_is_done(meta_request->synced_data.async_write.buffered_ticket_future)) {
+                if (aws_future_s3_buffer_ticket_get_error(
+                        meta_request->synced_data.async_write.buffered_ticket_future) != AWS_OP_SUCCESS) {
+                    AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p: Failed to acquire buffer.", (void *)meta_request);
+                    illegal_usage_terminate_meta_request = true;
+                } else {
+                    meta_request->synced_data.async_write.buffered_data_ticket =
+                        aws_future_s3_buffer_ticket_get_result_by_move(
+                            meta_request->synced_data.async_write.buffered_ticket_future);
+
+                    meta_request->synced_data.async_write.buffered_ticket_future = aws_future_s3_buffer_ticket_release(
+                        meta_request->synced_data.async_write.buffered_ticket_future);
+
+                    meta_request->synced_data.async_write.buffered_data =
+                        aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
+                }
+            } else {
+                /* Failing to acquire memory synchronously is a hard error for now. Consider relaxing this in future. */
+                meta_request->synced_data.async_write.buffered_ticket_future =
+                    aws_future_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_ticket_future);
+
+                AWS_LOGF_TRACE(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Illegal call to write(). Failed to acquire buffer memory.",
+                    (void *)meta_request);
+                illegal_usage_terminate_meta_request = true;
+            }
         }
 
-        /* Copy as much data as we can into the buffer */
-        struct aws_byte_cursor processed_data =
-            aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
+        if (!illegal_usage_terminate_meta_request && !result.is_pending) {
+            /* Copy as much data as we can into the buffer */
+            struct aws_byte_cursor processed_data =
+                aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
 
-        /* Don't store EOF unless we've consumed all data */
-        if ((data.len == 0) && eof) {
-            meta_request->synced_data.async_write.eof = true;
+            /* Don't store EOF unless we've consumed all data */
+            if ((data.len == 0) && eof) {
+                meta_request->synced_data.async_write.eof = true;
+            }
+
+            /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
+            if (meta_request->synced_data.async_write.eof ||
+                meta_request->synced_data.async_write.buffered_data.len == meta_request->part_size) {
+
+                meta_request->synced_data.async_write.ready_to_send = true;
+                ready_to_send = true;
+            }
+
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: write(data=%zu, eof=%d) processed=%zu remainder:%zu previously-buffered=%zu. %s"
+                "part...",
+                (void *)meta_request,
+                data.len + processed_data.len /*original data.len*/,
+                eof /*eof*/,
+                processed_data.len /*processed*/,
+                data.len /*remainder*/,
+                meta_request->synced_data.async_write.buffered_data.len - processed_data.len /*previously-buffered*/,
+                ready_to_send ? "Ready to upload part..." : "Not enough data to upload." /*msg*/);
+
+            result.bytes_processed = processed_data.len;
         }
-
-        /* This write makes us ready to send (EOF, or we have enough data now to send at least 1 part) */
-        if (meta_request->synced_data.async_write.eof ||
-            meta_request->synced_data.async_write.buffered_data.len == meta_request->part_size) {
-
-            meta_request->synced_data.async_write.ready_to_send = true;
-            ready_to_send = true;
-        }
-
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: write(data=%zu, eof=%d) processed=%zu remainder:%zu previously-buffered=%zu. %s"
-            "part...",
-            (void *)meta_request,
-            data.len + processed_data.len /*original data.len*/,
-            eof /*eof*/,
-            processed_data.len /*processed*/,
-            data.len /*remainder*/,
-            meta_request->synced_data.async_write.buffered_data.len - processed_data.len /*previously-buffered*/,
-            ready_to_send ? "Ready to upload part..." : "Not enough data to upload." /*msg*/);
-
-        result.bytes_processed = processed_data.len;
     }
 
     if (illegal_usage_terminate_meta_request) {

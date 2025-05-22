@@ -5,9 +5,9 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
-#include "aws/s3/private/s3_buffer_pool.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
+#include "aws/s3/private/s3_default_buffer_pool.h"
 #include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_parallel_input_stream.h"
@@ -349,20 +349,31 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    client->buffer_pool = aws_s3_buffer_pool_new(allocator, part_size, mem_limit);
-
-    if (client->buffer_pool == NULL) {
-        goto on_error;
+    /* default max part size is the smallest of either half of mem limit or default max part size */
+    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)s_default_max_part_size);
+    if (client_config->max_part_size != 0) {
+        if (client_config->max_part_size > SIZE_MAX) {
+            max_part_size = SIZE_MAX;
+        } else {
+            max_part_size = (size_t)client_config->max_part_size;
+        }
     }
 
-    struct aws_s3_buffer_pool_usage_stats pool_usage = aws_s3_buffer_pool_get_usage(client->buffer_pool);
+    struct aws_s3_buffer_pool_config buffer_pool_config = {
+        .client = client,
+        .part_size = part_size,
+        .memory_limit = mem_limit,
+        .max_part_size = max_part_size,
+    };
 
-    if (client_config->max_part_size > pool_usage.mem_limit) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "Cannot create client from client_config; configured max part size should not exceed memory limit."
-            "size.");
-        aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
+    if (client_config->buffer_pool_factory_fn) {
+        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);
+    } else {
+
+        client->buffer_pool = aws_s3_default_buffer_pool_new(allocator, buffer_pool_config);
+    }
+
+    if (client->buffer_pool == NULL) {
         goto on_error;
     }
 
@@ -404,20 +415,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((size_t *)&client->part_size) = part_size;
 
-    if (client_config->max_part_size != 0) {
-        *((uint64_t *)&client->max_part_size) = client_config->max_part_size;
-    } else {
-        *((uint64_t *)&client->max_part_size) = s_default_max_part_size;
-    }
-
-    if (client_config->max_part_size > pool_usage.mem_limit) {
-        *((uint64_t *)&client->max_part_size) = pool_usage.mem_limit;
-    }
-
-    if (client->max_part_size > SIZE_MAX) {
-        /* For the 32bit max part size to be SIZE_MAX */
-        *((uint64_t *)&client->max_part_size) = SIZE_MAX;
-    }
+    *((uint64_t *)&client->max_part_size) = max_part_size;
 
     if (client_config->multipart_upload_threshold != 0) {
         *((uint64_t *)&client->multipart_upload_threshold) = client_config->multipart_upload_threshold;
@@ -658,7 +656,7 @@ on_error:
     }
 
     aws_array_list_clean_up(&client->network_interface_names);
-    aws_s3_buffer_pool_destroy(client->buffer_pool);
+    client->buffer_pool = aws_s3_buffer_pool_release(client->buffer_pool);
 
     aws_mem_release(client->allocator, client);
     return NULL;
@@ -768,7 +766,8 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_s3_client_shutdown_complete_callback_fn *shutdown_callback = client->shutdown_callback;
     void *shutdown_user_data = client->shutdown_callback_user_data;
 
-    aws_s3_buffer_pool_destroy(client->buffer_pool);
+    client->buffer_pool = aws_s3_buffer_pool_release(client->buffer_pool);
+
     if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
         aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
     }
@@ -1796,6 +1795,127 @@ static bool s_s3_client_should_update_meta_request(
     return true;
 }
 
+struct aws_s3_reserve_memory_payload {
+    struct aws_allocator *allocator;
+    struct aws_s3_request *request;
+    struct aws_future_s3_buffer_ticket *buffer_future;
+    aws_s3_meta_request_prepare_request_callback_fn *callback;
+    void *user_data;
+};
+
+static void s_s3_prepare_acquire_mem_callback_and_destroy(
+    struct aws_s3_reserve_memory_payload *payload,
+    int error_code) {
+    AWS_PRECONDITION(payload);
+    AWS_PRECONDITION(payload->request);
+
+    struct aws_s3_meta_request *meta_request = payload->request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    if (error_code) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not prepare request %p due to error %d (%s).",
+            (void *)meta_request,
+            (void *)payload->request,
+            error_code,
+            aws_error_str(error_code));
+
+        /* BEGIN CRITICAL SECTION */
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_s3_meta_request_set_fail_synced(meta_request, payload->request, error_code);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* END CRITICAL SECTION */
+    }
+
+    if (payload->callback != NULL) {
+        payload->callback(meta_request, payload->request, error_code, payload->user_data);
+    }
+
+    aws_future_s3_buffer_ticket_release(payload->buffer_future);
+    aws_mem_release(payload->allocator, payload);
+}
+
+static void s_on_pool_buffer_reserved(void *user_data) {
+    struct aws_s3_reserve_memory_payload *payload = user_data;
+    AWS_PRECONDITION(payload);
+
+    struct aws_s3_request *request = payload->request;
+    AWS_PRECONDITION(request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_future_s3_buffer_ticket *future_ticket = payload->buffer_future;
+
+    int error_code = aws_future_s3_buffer_ticket_get_error(future_ticket);
+    if (error_code != AWS_ERROR_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not allocate buffer for request with tag %d for the meta request.",
+            (void *)meta_request,
+            request->request_tag);
+
+        s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+        return;
+    }
+
+    request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        AWS_FATAL_ASSERT(request->synced_data.buffer_future);
+        aws_linked_list_remove(&request->pending_buffer_future_list_node);
+        request->synced_data.buffer_future = aws_future_s3_buffer_ticket_release(request->synced_data.buffer_future);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
+
+    aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
+    aws_future_s3_buffer_ticket_release(payload->buffer_future);
+    aws_mem_release(payload->allocator, payload);
+    return;
+}
+
+void s_acquire_mem_and_prepare_request(
+    struct aws_s3_client *client,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+
+    if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
+        struct aws_allocator *allocator = request->allocator;
+        struct aws_s3_meta_request *meta_request = request->meta_request;
+        struct aws_s3_buffer_pool_reserve_meta meta = {
+            .client = client, .meta_request = meta_request, .size = meta_request->part_size};
+
+        struct aws_s3_reserve_memory_payload *payload =
+            aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_reserve_memory_payload));
+
+        payload->allocator = allocator;
+        payload->request = request;
+        payload->callback = callback;
+        payload->user_data = user_data;
+        payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+
+        /* BEGIN CRITICAL SECTION */
+        {
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            aws_linked_list_push_back(
+                &meta_request->synced_data.pending_buffer_futures, &request->pending_buffer_future_list_node);
+            request->synced_data.buffer_future = aws_future_s3_buffer_ticket_acquire(payload->buffer_future);
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+        }
+        /* END CRITICAL SECTION */
+
+        aws_future_s3_buffer_ticket_register_callback(payload->buffer_future, s_on_pool_buffer_reserved, payload);
+        return;
+    }
+
+    aws_s3_meta_request_prepare_request(request->meta_request, request, callback, user_data);
+}
+
 void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
@@ -1814,13 +1934,11 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
-    aws_s3_buffer_pool_remove_reservation_hold(client->buffer_pool);
-
     for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
 
         /**
          * Iterate through the meta requests to update meta requests and get new requests that can then be prepared
-+         * (reading from any streams, signing, etc.) for sending.
+         * (reading from any streams, signing, etc.) for sending.
          */
         while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 
@@ -1842,9 +1960,6 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             struct aws_s3_request *request = NULL;
 
             /* Try to grab the next request from the meta request. */
-            /* TODO: should we bail out if request fails to update due to mem or
-             * continue going and hopping that following reqs can fit into mem?
-             * check if avail space is at least part size? */
             bool work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
 
             if (work_remaining) {
@@ -1863,8 +1978,8 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     num_requests_in_flight =
                         (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
 
-                    aws_s3_meta_request_prepare_request(
-                        meta_request, request, s_s3_client_prepare_callback_queue_request, client);
+                    s_acquire_mem_and_prepare_request(
+                        client, request, s_s3_client_prepare_callback_queue_request, client);
                 }
             } else {
                 s_s3_client_remove_meta_request_threaded(client, meta_request);
