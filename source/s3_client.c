@@ -1872,10 +1872,9 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     }
     /* END CRITICAL SECTION */
 
+    aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
     aws_future_s3_buffer_ticket_release(payload->buffer_future);
     aws_mem_release(payload->allocator, payload);
-
-    aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
     return;
 }
 
