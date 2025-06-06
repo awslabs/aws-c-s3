@@ -3350,6 +3350,79 @@ static int s_test_s3_put_object_sse_c_aes256_multipart_with_checksum(struct aws_
     return 0;
 }
 
+struct aws_future_s3_buffer_ticket *s_failing_pool_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+
+    struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new((struct aws_allocator *)pool->impl);
+    aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+    return future;
+}
+
+static struct aws_s3_buffer_pool_vtable s_failing_pool_vtable = {
+    .reserve = s_failing_pool_reserve,
+    .trim = NULL, 
+};
+
+struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(struct aws_allocator *allocator,
+                                                        struct aws_s3_buffer_pool_config config) {
+    struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
+    pool->impl = allocator;
+    pool->vtable = &s_failing_pool_vtable;
+    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
+}
+
+AWS_TEST_CASE(
+    test_s3_put_object_buffer_acquire_error,
+    s_test_s3_put_object_buffer_acquire_error)
+static int test_s3_put_object_buffer_acquire_error(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 8 * 1024 * 1024,
+        .buffer_pool_factory_fn = s_always_error_buffer_pool_fn
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client != NULL);
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        tester.allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c_fc.txt")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .sse_type = AWS_S3_TESTER_SSE_C_AES256,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .object_path_override = object_path,
+            },
+    };
+
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED, aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    client = aws_s3_client_release(client);
+
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 static int s_test_s3_put_object_content_md5_helper(
     struct aws_allocator *allocator,
     bool multipart_upload,

@@ -189,7 +189,8 @@ void s_default_pool_trim(struct aws_s3_buffer_pool *pool) {
 
 static struct aws_s3_buffer_pool_vtable s_default_pool_vtable = {
     .reserve = s_default_pool_reserve,
-    .trim = s_default_pool_trim};
+    .trim = s_default_pool_trim, 
+};
 
 struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     struct aws_allocator *allocator,

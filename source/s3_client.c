@@ -1909,7 +1909,7 @@ void s_acquire_mem_and_prepare_request(
         }
         /* END CRITICAL SECTION */
 
-        /* Note: run callback async on event loop. this is done to avoid any race conditions between cancelling
+        /* Note: run callback async on event loop. this is done to avoid any deadlocks between cancelling
            which requires a lock on meta request and buffer acquire callback which also requires a lock. */
         aws_future_s3_buffer_ticket_register_event_loop_callback(
             payload->buffer_future, meta_request->io_event_loop, s_on_pool_buffer_reserved, payload);
