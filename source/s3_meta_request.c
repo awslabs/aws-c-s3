@@ -1832,13 +1832,12 @@ void aws_s3_meta_request_cancel_pending_buffer_futures_synced(
     struct aws_s3_meta_request *meta_request,
     int error_code) {
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
-    while (!aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures)) {
 
-        struct aws_linked_list_node *request_node =
-            aws_linked_list_pop_front(&meta_request->synced_data.pending_buffer_futures);
+    for (struct aws_linked_list_node *node = aws_linked_list_begin(&meta_request->synced_data.pending_buffer_futures);
+         node != aws_linked_list_end(&meta_request->synced_data.pending_buffer_futures);
+         node = aws_linked_list_next(node)) {
 
-        struct aws_s3_request *request =
-            AWS_CONTAINER_OF(request_node, struct aws_s3_request, pending_buffer_future_list_node);
+        struct aws_s3_request *request = AWS_CONTAINER_OF(node, struct aws_s3_request, pending_buffer_future_list_node);
 
         aws_future_s3_buffer_ticket_set_error(request->synced_data.buffer_future, error_code);
     }
