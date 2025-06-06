@@ -3371,6 +3371,8 @@ struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
     pool->impl = allocator;
     pool->vtable = &s_failing_pool_vtable;
     aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
+
+    return pool;
 }
 
 AWS_TEST_CASE(test_s3_put_object_buffer_acquire_error, s_test_s3_put_object_buffer_acquire_error)
