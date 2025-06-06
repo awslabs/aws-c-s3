@@ -3360,10 +3360,18 @@ struct aws_future_s3_buffer_ticket *s_failing_pool_reserve(
     return future;
 }
 
+void s_failing_pool_trim(struct aws_s3_buffer_pool *pool) {
+    (void)pool;
+}
+
 static struct aws_s3_buffer_pool_vtable s_failing_pool_vtable = {
     .reserve = s_failing_pool_reserve,
-    .trim = NULL,
+    .trim = s_failing_pool_trim,
 };
+
+void s_failing_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper) {
+    aws_mem_release((struct aws_allocator *)buffer_pool_wrapper->impl, buffer_pool_wrapper);
+}
 
 struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
     struct aws_allocator *allocator,
@@ -3372,7 +3380,7 @@ struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = allocator;
     pool->vtable = &s_failing_pool_vtable;
-    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
+    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)s_failing_pool_destroy);
 
     return pool;
 }
@@ -3398,7 +3406,7 @@ static int s_test_s3_put_object_buffer_acquire_error(struct aws_allocator *alloc
     AWS_ZERO_STRUCT(path_buf);
 
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        tester.allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_sse_c_fc.txt")));
+        tester.allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/test_acquire_buffer_error.txt")));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
@@ -3420,6 +3428,7 @@ static int s_test_s3_put_object_buffer_acquire_error(struct aws_allocator *alloc
     ASSERT_INT_EQUALS(AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED, meta_request_test_results.finished_error_code);
     client = aws_s3_client_release(client);
 
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     aws_byte_buf_clean_up(&path_buf);
     aws_s3_tester_clean_up(&tester);
 
