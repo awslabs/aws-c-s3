@@ -3353,6 +3353,7 @@ static int s_test_s3_put_object_sse_c_aes256_multipart_with_checksum(struct aws_
 struct aws_future_s3_buffer_ticket *s_failing_pool_reserve(
     struct aws_s3_buffer_pool *pool,
     struct aws_s3_buffer_pool_reserve_meta meta) {
+    (void)meta;
 
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new((struct aws_allocator *)pool->impl);
     aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
@@ -3367,6 +3368,7 @@ static struct aws_s3_buffer_pool_vtable s_failing_pool_vtable = {
 struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
     struct aws_allocator *allocator,
     struct aws_s3_buffer_pool_config config) {
+    (void)config;
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = allocator;
     pool->vtable = &s_failing_pool_vtable;
