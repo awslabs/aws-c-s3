@@ -3424,7 +3424,7 @@ static int s_test_s3_put_object_buffer_acquire_error(struct aws_allocator *alloc
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-    ASSERT_SUCCESS( aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
     ASSERT_INT_EQUALS(AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED, meta_request_test_results.finished_error_code);
     client = aws_s3_client_release(client);
 

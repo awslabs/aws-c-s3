@@ -1824,7 +1824,8 @@ static void s_s3_prepare_acquire_mem_callback_and_destroy(
         /* BEGIN CRITICAL SECTION */
         aws_s3_meta_request_lock_synced_data(meta_request);
         aws_linked_list_remove(&payload->request->pending_buffer_future_list_node);
-        payload->request->synced_data.buffer_future = aws_future_s3_buffer_ticket_release(payload->request->synced_data.buffer_future);
+        payload->request->synced_data.buffer_future =
+            aws_future_s3_buffer_ticket_release(payload->request->synced_data.buffer_future);
         aws_s3_meta_request_set_fail_synced(meta_request, payload->request, error_code);
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
