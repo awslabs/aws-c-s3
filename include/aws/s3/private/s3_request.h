@@ -144,9 +144,6 @@ struct aws_s3_request {
      */
     struct aws_s3_buffer_ticket *ticket;
 
-    /* Result of memory acquisition */
-    int buffer_acquire_result;
-
     /* Beginning range of this part. */
     /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
     uint64_t part_range_start;
