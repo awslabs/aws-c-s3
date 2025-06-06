@@ -3374,7 +3374,7 @@ struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
 }
 
 AWS_TEST_CASE(test_s3_put_object_buffer_acquire_error, s_test_s3_put_object_buffer_acquire_error)
-static int test_s3_put_object_buffer_acquire_error(struct aws_allocator *allocator, void *ctx) {
+static int s_test_s3_put_object_buffer_acquire_error(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
