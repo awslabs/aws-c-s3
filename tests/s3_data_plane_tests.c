@@ -3406,8 +3406,7 @@ static int s_test_s3_put_object_buffer_acquire_error(struct aws_allocator *alloc
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
-        .sse_type = AWS_S3_TESTER_SSE_C_AES256,
-        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
         .put_options =
             {
                 .object_size_mb = 10,
@@ -3415,9 +3414,8 @@ static int s_test_s3_put_object_buffer_acquire_error(struct aws_allocator *alloc
             },
     };
 
-    ASSERT_INT_EQUALS(
-        AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED,
-        aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED, meta_request_test_results.finished_error_code);
     client = aws_s3_client_release(client);
 
     aws_byte_buf_clean_up(&path_buf);
