@@ -3361,20 +3361,19 @@ struct aws_future_s3_buffer_ticket *s_failing_pool_reserve(
 
 static struct aws_s3_buffer_pool_vtable s_failing_pool_vtable = {
     .reserve = s_failing_pool_reserve,
-    .trim = NULL, 
+    .trim = NULL,
 };
 
-struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(struct aws_allocator *allocator,
-                                                        struct aws_s3_buffer_pool_config config) {
+struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config) {
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = allocator;
     pool->vtable = &s_failing_pool_vtable;
     aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
 }
 
-AWS_TEST_CASE(
-    test_s3_put_object_buffer_acquire_error,
-    s_test_s3_put_object_buffer_acquire_error)
+AWS_TEST_CASE(test_s3_put_object_buffer_acquire_error, s_test_s3_put_object_buffer_acquire_error)
 static int test_s3_put_object_buffer_acquire_error(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
@@ -3382,9 +3381,7 @@ static int test_s3_put_object_buffer_acquire_error(struct aws_allocator *allocat
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client_config client_config = {
-        .part_size = 8 * 1024 * 1024,
-        .buffer_pool_factory_fn = s_always_error_buffer_pool_fn
-    };
+        .part_size = 8 * 1024 * 1024, .buffer_pool_factory_fn = s_always_error_buffer_pool_fn};
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
@@ -3414,7 +3411,9 @@ static int test_s3_put_object_buffer_acquire_error(struct aws_allocator *allocat
             },
     };
 
-    ASSERT_INT_EQUALS(AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED, aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    ASSERT_INT_EQUALS(
+        AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED,
+        aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
     client = aws_s3_client_release(client);
 
     aws_byte_buf_clean_up(&path_buf);
