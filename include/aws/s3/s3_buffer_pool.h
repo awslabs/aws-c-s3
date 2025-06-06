@@ -24,6 +24,9 @@
  * Note: in some cases pipeline can stall if new buffer cannot be allocated (ex. async writes flow).
  * In this case reserve request will indicate that not granting the ticket can block and buffer pool should try to
  * allocate ticket right away (or wait and call waker when mem is allocated for the case of async writes).
+ * Note for custom pool implementations: Scheduler keeps track of all outstanding futures and will error them out when
+ * request is paused or cancelled. Its still fine for memory pool implementation to deliver ticket (it will just be
+ * released by future right away with no side effects) or just ignore the future if its already in error state.
  */
 
 AWS_PUSH_SANE_WARNING_LEVEL

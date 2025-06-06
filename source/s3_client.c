@@ -1823,6 +1823,9 @@ static void s_s3_prepare_acquire_mem_callback_and_destroy(
 
         /* BEGIN CRITICAL SECTION */
         aws_s3_meta_request_lock_synced_data(meta_request);
+        aws_linked_list_remove(&payload->request->pending_buffer_future_list_node);
+        payload->request->synced_data.buffer_future =
+            aws_future_s3_buffer_ticket_release(payload->request->synced_data.buffer_future);
         aws_s3_meta_request_set_fail_synced(meta_request, payload->request, error_code);
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
@@ -1909,7 +1912,10 @@ void s_acquire_mem_and_prepare_request(
         }
         /* END CRITICAL SECTION */
 
-        aws_future_s3_buffer_ticket_register_callback(payload->buffer_future, s_on_pool_buffer_reserved, payload);
+        /* Note: run callback async on event loop. this is done to avoid any deadlocks between cancelling
+           which requires a lock on meta request and buffer acquire callback which also requires a lock. */
+        aws_future_s3_buffer_ticket_register_event_loop_callback(
+            payload->buffer_future, meta_request->io_event_loop, s_on_pool_buffer_reserved, payload);
         return;
     }
 

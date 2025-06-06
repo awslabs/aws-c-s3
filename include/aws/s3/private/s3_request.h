@@ -139,6 +139,9 @@ struct aws_s3_request {
      * retried.*/
     struct aws_byte_buf request_body;
 
+    /**
+     * Ticket to acquire the buffer.
+     */
     struct aws_s3_buffer_ticket *ticket;
 
     /* Beginning range of this part. */
