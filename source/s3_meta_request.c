@@ -1848,7 +1848,7 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
     struct aws_s3_meta_request *meta_request) {
 
     if (metrics != NULL) {
-        /* Request is done streaming the body, complete the metrics for the request now. */
+        /* Request is done streaming the body,  the metrics for the request now. */
 
         if (metrics->time_metrics.end_timestamp_ns == -1) {
             aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
@@ -2413,7 +2413,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
             }
         }
 
-        if (!illegal_usage_terminate_meta_request && !result.is_pending) {
+        if (!illegal_usage_terminate_meta_request) {
             /* Copy as much data as we can into the buffer */
             struct aws_byte_cursor processed_data =
                 aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
