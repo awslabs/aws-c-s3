@@ -466,10 +466,20 @@ TEST_CASE(multipart_upload_checksum_with_retry_mock_server) {
         .mock_server = true,
     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
+
+    ASSERT_INT_EQUALS(meta_request_test_results.upload_review.part_count, 2);
+    /* Note: the data we currently generate is always the same,
+     * so make sure that retry does not mangle the data by checking the checksum value */
+    ASSERT_STR_EQUALS("7/xUXw==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[0]));
+    ASSERT_STR_EQUALS("PCOjcw==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[1]));
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     return AWS_OP_SUCCESS;
 }

@@ -1428,7 +1428,7 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (/*request->has_buffer_ticket_for_response &&*/ request->ticket != NULL) {
+        if (request->has_buffer_ticket_for_response && request->ticket != NULL) {
             request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
@@ -1436,7 +1436,8 @@ static int s_s3_meta_request_incoming_body(
         }
     }
 
-    AWS_FATAL_ASSERT(request->send_data.response_body.len == 0);
+    /* Sanity checking that we somehow haven't reused the same buffer for both upload and download*/
+    AWS_FATAL_ASSERT(request->send_data.response_body.buffer != request->request_body.buffer);
 
     /* Note: not having part sized response body means the buffer is dynamic and
      * can grow. */
@@ -2370,8 +2371,8 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
 
             struct aws_future_s3_buffer_ticket *buffered_ticket_future;
             /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
-            * waited for a normal ticket reservation, respecting the pool's memory limit.
-            * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
+             * waited for a normal ticket reservation, respecting the pool's memory limit.
+             * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
 
             struct aws_s3_buffer_pool_reserve_meta meta = {
                 .size = meta_request->part_size,
@@ -2394,7 +2395,6 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
 
                     meta_request->synced_data.async_write.buffered_data =
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
-                    
                 }
             } else {
                 AWS_LOGF_TRACE(
@@ -2404,7 +2404,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 illegal_usage_terminate_meta_request = true;
                 aws_future_s3_buffer_ticket_release(buffered_ticket_future);
             }
-        }   
+        }
 
         if (!illegal_usage_terminate_meta_request) {
             /* Copy as much data as we can into the buffer */
