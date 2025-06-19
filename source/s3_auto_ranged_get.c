@@ -252,8 +252,7 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_TYPE_GET_OBJECT,
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
-                                AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL |
-                                AWS_S3_REQUEST_FLAG_RESPONSE_ALLOCATED_FROM_POOL);
+                                AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
                         ++auto_ranged_get->synced_data.num_parts_requested;
 
                         break;
@@ -294,8 +293,7 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_TYPE_GET_OBJECT,
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
-                                AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL |
-                                AWS_S3_REQUEST_FLAG_RESPONSE_ALLOCATED_FROM_POOL);
+                                AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
                         request->part_range_start = part_range_start;
                         request->part_range_end = part_range_start + first_part_size - 1; /* range-end is inclusive */
                         ++auto_ranged_get->synced_data.num_parts_requested;
@@ -346,7 +344,7 @@ static bool s_s3_auto_ranged_get_update(
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
                     auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
-                    AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL | AWS_S3_REQUEST_FLAG_RESPONSE_ALLOCATED_FROM_POOL);
+                    AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
 
                 aws_s3_calculate_auto_ranged_get_part_range(
                     auto_ranged_get->synced_data.object_range_start,

@@ -22,7 +22,6 @@ enum aws_s3_request_flags {
     AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS = 0x00000001,
     AWS_S3_REQUEST_FLAG_ALWAYS_SEND = 0x00000002,
     AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL = 0x00000004,
-    AWS_S3_REQUEST_FLAG_RESPONSE_ALLOCATED_FROM_POOL = 0x00000008,
 };
 
 /**
@@ -258,9 +257,6 @@ struct aws_s3_request {
 
     /* When true, this request has already been uploaded. we still prepare the request to check the durability. */
     uint32_t was_previously_uploaded : 1;
-
-    /* When true, this request has buffer allocated to response */
-    uint32_t has_buffer_ticket_for_response : 1;
 };
 
 AWS_EXTERN_C_BEGIN

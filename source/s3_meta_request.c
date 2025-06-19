@@ -1428,7 +1428,8 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->has_buffer_ticket_for_response && request->ticket != NULL) {
+        /* Make sure that request is get, since puts can also have ticket allocated, which is used for request body. */
+        if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT && request->ticket != NULL) {
             request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
@@ -1851,7 +1852,7 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
     struct aws_s3_meta_request *meta_request) {
 
     if (metrics != NULL) {
-        /* Request is done streaming the body,  the metrics for the request now. */
+        /* Request is done streaming the body, complete the metrics for the request now. */
 
         if (metrics->time_metrics.end_timestamp_ns == -1) {
             aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
@@ -2397,7 +2398,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
             } else {
-                AWS_LOGF_TRACE(
+                AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: Illegal call to write(). Failed to acquire buffer memory.",
                     (void *)meta_request);
@@ -2424,7 +2425,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 ready_to_send = true;
             }
 
-            AWS_LOGF_DEBUG(
+            AWS_LOGF_TRACE(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p: write(data=%zu, eof=%d) processed=%zu remainder:%zu previously-buffered=%zu. %s"
                 "part...",
