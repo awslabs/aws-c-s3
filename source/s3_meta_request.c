@@ -1430,12 +1430,13 @@ static int s_s3_meta_request_incoming_body(
     if (request->send_data.response_body.capacity == 0) {
         if (/*request->has_buffer_ticket_for_response &&*/ request->ticket != NULL) {
             request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
-            AWS_FATAL_ASSERT(request->send_data.response_body.len == 0);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
         }
     }
+
+    AWS_FATAL_ASSERT(request->send_data.response_body.len == 0);
 
     /* Note: not having part sized response body means the buffer is dynamic and
      * can grow. */
