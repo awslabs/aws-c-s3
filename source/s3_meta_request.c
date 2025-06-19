@@ -1428,8 +1428,9 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->has_buffer_ticket_for_response && request->ticket != NULL) {
+        if (/*request->has_buffer_ticket_for_response &&*/ request->ticket != NULL) {
             request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
+            AWS_FATAL_ASSERT(request->send_data.response_body.len == 0);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
@@ -2356,7 +2357,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
 
     } else if (meta_request->synced_data.async_write.buffered_data.len == meta_request->part_size) {
         /* Can't write more until buffered data is sent. Store waker */
-        AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p: write() pending, waker registered ...", (void *)meta_request);
+        AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: write() pending, waker registered ...", (void *)meta_request);
         meta_request->synced_data.async_write.waker = waker;
         meta_request->synced_data.async_write.waker_user_data = user_data;
         result.is_pending = true;
@@ -2392,9 +2393,10 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
 
                     meta_request->synced_data.async_write.buffered_data =
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
+                    
                 }
             } else {
-                AWS_LOGF_DEBUG(
+                AWS_LOGF_TRACE(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: Illegal call to write(). Failed to acquire buffer memory.",
                     (void *)meta_request);

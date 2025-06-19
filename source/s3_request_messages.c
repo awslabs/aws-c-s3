@@ -777,7 +777,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
 
-        AWS_LOGF_DEBUG(
+        AWS_LOGF_TRACE(
             AWS_LS_S3_GENERAL, "Payload for Complete MPU is:\n" PRInSTR "\n", AWS_BYTE_BUF_PRI(*body_buffer));
         aws_s3_message_util_assign_body(
             allocator, body_buffer, message, NULL /* checksum_config */, NULL /* out_checksum */);
