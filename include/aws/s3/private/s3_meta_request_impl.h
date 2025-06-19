@@ -242,7 +242,6 @@ struct aws_s3_meta_request {
              * The length will always be less than part-size */
             struct aws_byte_buf buffered_data;
             struct aws_s3_buffer_ticket *buffered_data_ticket;
-            struct aws_future_s3_buffer_ticket *buffered_ticket_future;
 
             /* Waker callback.
              * Stored if a poll_write() call returns result.is_pending
