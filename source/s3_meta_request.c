@@ -1428,13 +1428,17 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (request->send_data.response_body.capacity == 0) {
-        if (request->ticket != NULL) {
+        /* Make sure that request is get, since puts can also have ticket allocated, which is used for request body. */
+        if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT && request->ticket != NULL) {
             request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
             aws_byte_buf_init(&request->send_data.response_body, meta_request->allocator, buffer_size);
         }
     }
+
+    /* Sanity checking that we somehow haven't reused the same buffer for both upload and download*/
+    AWS_FATAL_ASSERT(request->send_data.response_body.buffer != request->request_body.buffer);
 
     /* Note: not having part sized response body means the buffer is dynamic and
      * can grow. */
@@ -2366,54 +2370,44 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
         /* If we don't already have a buffer, grab one from the pool. */
         if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
 
-            if (meta_request->synced_data.async_write.buffered_data_ticket == NULL &&
-                meta_request->synced_data.async_write.buffered_ticket_future == NULL) {
-                /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
-                 * waited for a normal ticket reservation, respecting the pool's memory limit.
-                 * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
+            struct aws_future_s3_buffer_ticket *buffered_ticket_future;
+            /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
+             * waited for a normal ticket reservation, respecting the pool's memory limit.
+             * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
 
-                struct aws_s3_buffer_pool_reserve_meta meta = {
-                    .size = meta_request->part_size,
-                    .can_block = true,
-                    .meta_request = meta_request,
-                    .client = meta_request->client};
+            struct aws_s3_buffer_pool_reserve_meta meta = {
+                .size = meta_request->part_size,
+                .can_block = true,
+                .meta_request = meta_request,
+                .client = meta_request->client};
 
-                meta_request->synced_data.async_write.buffered_ticket_future =
-                    aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta);
+            buffered_ticket_future = aws_s3_buffer_pool_reserve(meta_request->client->buffer_pool, meta);
+            AWS_FATAL_ASSERT(buffered_ticket_future);
 
-                AWS_FATAL_ASSERT(meta_request->synced_data.async_write.buffered_ticket_future);
-            }
-
-            if (aws_future_s3_buffer_ticket_is_done(meta_request->synced_data.async_write.buffered_ticket_future)) {
-                if (aws_future_s3_buffer_ticket_get_error(
-                        meta_request->synced_data.async_write.buffered_ticket_future) != AWS_OP_SUCCESS) {
+            if (aws_future_s3_buffer_ticket_is_done(buffered_ticket_future)) {
+                if (aws_future_s3_buffer_ticket_get_error(buffered_ticket_future) != AWS_OP_SUCCESS) {
                     AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p: Failed to acquire buffer.", (void *)meta_request);
                     illegal_usage_terminate_meta_request = true;
                 } else {
                     meta_request->synced_data.async_write.buffered_data_ticket =
-                        aws_future_s3_buffer_ticket_get_result_by_move(
-                            meta_request->synced_data.async_write.buffered_ticket_future);
+                        aws_future_s3_buffer_ticket_get_result_by_move(buffered_ticket_future);
 
-                    meta_request->synced_data.async_write.buffered_ticket_future = aws_future_s3_buffer_ticket_release(
-                        meta_request->synced_data.async_write.buffered_ticket_future);
+                    aws_future_s3_buffer_ticket_release(buffered_ticket_future);
 
                     meta_request->synced_data.async_write.buffered_data =
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
             } else {
-                /* Failing to acquire memory synchronously is a hard error for now. Consider relaxing this in future. */
-                meta_request->synced_data.async_write.buffered_ticket_future =
-                    aws_future_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_ticket_future);
-
-                AWS_LOGF_TRACE(
+                AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: Illegal call to write(). Failed to acquire buffer memory.",
                     (void *)meta_request);
                 illegal_usage_terminate_meta_request = true;
+                aws_future_s3_buffer_ticket_release(buffered_ticket_future);
             }
         }
 
-        if (!illegal_usage_terminate_meta_request && !result.is_pending) {
+        if (!illegal_usage_terminate_meta_request) {
             /* Copy as much data as we can into the buffer */
             struct aws_byte_cursor processed_data =
                 aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
