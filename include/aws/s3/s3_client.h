@@ -606,6 +606,9 @@ struct aws_s3_client_config {
      * if not set creates default implementation of the buffer pool.
      */
     aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
+
+    /* User data thats passed into pool factory. */
+    void *buffer_pool_user_data;
 };
 
 struct aws_s3_checksum_config {

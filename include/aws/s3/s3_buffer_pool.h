@@ -141,7 +141,8 @@ struct aws_s3_buffer_pool_config {
  * by logging failure reason, returning null and raising aws_error.
  */
 typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,
-                                                                   struct aws_s3_buffer_pool_config config);
+                                                                   struct aws_s3_buffer_pool_config config,
+                                                                   void *user_data);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

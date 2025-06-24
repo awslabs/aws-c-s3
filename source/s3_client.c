@@ -367,7 +367,8 @@ struct aws_s3_client *aws_s3_client_new(
     };
 
     if (client_config->buffer_pool_factory_fn) {
-        client->buffer_pool = client_config->buffer_pool_factory_fn(allocator, buffer_pool_config);
+        client->buffer_pool =
+            client_config->buffer_pool_factory_fn(allocator, buffer_pool_config, client_config->buffer_pool_user_data);
     } else {
 
         client->buffer_pool = aws_s3_default_buffer_pool_new(allocator, buffer_pool_config);
