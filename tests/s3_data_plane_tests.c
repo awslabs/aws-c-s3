@@ -3375,7 +3375,8 @@ void s_failing_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper) {
 
 struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
     struct aws_allocator *allocator,
-    struct aws_s3_buffer_pool_config config) {
+    struct aws_s3_buffer_pool_config config,
+    void *user_data) {
     (void)config;
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = allocator;
