@@ -1115,6 +1115,7 @@ on_done:
 static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_job *part_prep, int error_code) {
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_client *client = meta_request->client;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     if (error_code != AWS_ERROR_SUCCESS) {
@@ -1141,8 +1142,10 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
             AWS_ASSERT(part != NULL);
             checksum_buf = &part->checksum_base64;
-            /* Clean up the buffer in case of it's initialized before and retry happens. */
-            aws_byte_buf_clean_up(checksum_buf);
+            /* If checksum buf is not empty, it means either the part being retried or the part resumed from list parts.
+             * Keep reusing the old checksum in case of the request body in memory mangled */
+            AWS_ASSERT(
+                checksum_buf->len == 0 || request->num_times_prepared > 0 || auto_ranged_put->resume_token != NULL);
             aws_s3_meta_request_unlock_synced_data(meta_request);
         }
         /* END CRITICAL SECTION */
@@ -1173,6 +1176,10 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
     aws_future_http_message_set_result_by_move(part_prep->on_complete, &message);
 
 on_done:
+    if (client->vtable->after_prepare_upload_part_finish) {
+        /* TEST ONLY, allow test to stub here. */
+        client->vtable->after_prepare_upload_part_finish(request);
+    }
     AWS_FATAL_ASSERT(aws_future_http_message_is_done(part_prep->on_complete));
     aws_future_bool_release(part_prep->asyncstep_read_part);
     aws_future_http_message_release(part_prep->on_complete);
