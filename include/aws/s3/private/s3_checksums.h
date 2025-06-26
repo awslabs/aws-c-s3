@@ -93,7 +93,9 @@ struct aws_input_stream *aws_checksum_stream_new(
  * @param existing_stream   The data to be chunkified prepended by information on the stream length followed by a final
  *                          chunk and a trailing chunk containing a checksum of the existing stream. Destroying the
  *                          chunk stream will destroy the existing stream.
- * @param checksum_buffer   Required.
+ * @param checksum_buffer   Optional.
+ *                          - If the checksum_buffer is NULL, the checksum will still be calculated to append as
+ *                          trailer.
  *                          - Empty buffer, the buffer will be initialized to the appropriate size and
  *                          filled with the checksum result when calculated. Callers responsibility to cleanup.
  *                          - Otherwise, the buffer will be used directly.
