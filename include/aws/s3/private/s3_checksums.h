@@ -93,15 +93,18 @@ struct aws_input_stream *aws_checksum_stream_new(
  * @param existing_stream   The data to be chunkified prepended by information on the stream length followed by a final
  *                          chunk and a trailing chunk containing a checksum of the existing stream. Destroying the
  *                          chunk stream will destroy the existing stream.
- * @param checksum_output   Optional argument, if provided the buffer will be initialized to the appropriate size and
+ * @param checksum_buffer   Required.
+ *                          - Empty buffer, the buffer will be initialized to the appropriate size and
  *                          filled with the checksum result when calculated. Callers responsibility to cleanup.
+ *                          - Otherwise, the buffer will be used directly.
+ *                          Caller takes the ownership of the buffer, error or not.
  */
 AWS_S3_API
 struct aws_input_stream *aws_chunk_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
     enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *checksum_output);
+    struct aws_byte_buf *checksum_buffer);
 
 /**
  * Get the size of the checksum output corresponding to the aws_s3_checksum_algorithm enum value.

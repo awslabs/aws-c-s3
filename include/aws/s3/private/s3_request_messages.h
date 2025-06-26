@@ -53,7 +53,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
     const struct checksum_config_storage *checksum_config,
-    struct aws_byte_buf *out_checksum);
+    struct aws_byte_buf *checksum_buf);
 
 /* Create an HTTP request for an S3 Ranged Get Object Request, using the given request as a basis */
 AWS_S3_API
@@ -90,7 +90,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
     const struct checksum_config_storage *checksum_config,
-    struct aws_byte_buf *encoded_checksum_output);
+    struct aws_byte_buf *encoded_checksum);
 
 /* Create an HTTP request for an S3 UploadPartCopy request, using the original request as a basis.
  * If multipart is not needed, part number and upload_id can be 0 and NULL,
