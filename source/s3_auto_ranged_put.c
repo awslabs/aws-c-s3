@@ -976,13 +976,46 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     part_prep->request = request;
     part_prep->on_complete = aws_future_http_message_acquire(message_future);
     if (request->parallel) {
-
+        printf("PARALLEL\n");
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
         request->request_stream = aws_input_stream_new_from_file(
             allocator, aws_parallel_input_stream_get_file_path(meta_request->request_body_parallel_stream));
         request->content_length = request_body_size;
         aws_input_stream_seek(request->request_stream, offset, AWS_SSB_BEGIN);
+        struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+        /* BEGIN CRITICAL SECTION */
+        aws_s3_meta_request_lock_synced_data(meta_request);
+
+        --auto_ranged_put->synced_data.num_parts_pending_read;
+
+        auto_ranged_put->synced_data.is_body_stream_at_end = false;
+        if (!request->is_noop) {
+            /* The part can finish out of order. Resize array-list to be long enough to hold this part,
+             * filling any intermediate slots with NULL. */
+            aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, request->part_number);
+            while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < request->part_number) {
+                struct aws_s3_mpu_part_info *null_part = NULL;
+                aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
+            }
+            /* Add part to array-list */
+            struct aws_s3_mpu_part_info *part =
+                aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
+            part->size = request->request_body.len;
+            aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
+        }
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* END CRITICAL SECTION */
+
+        /* We throttle the number of parts that can be "pending read"
+         * (e.g. only 1 at a time if reading from async-stream).
+         * Now that read is complete, poke the client to see if it can give us more work.
+         *
+         * Poking now gives measurable speedup (1%) for async streaming,
+         * vs waiting until all the part-prep steps are complete (still need to sign, etc) */
+        aws_s3_client_schedule_process_work(meta_request->client);
+
         s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
     } else if (request->num_times_prepared == 0) {
         /* Preparing request for the first time.
