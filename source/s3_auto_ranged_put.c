@@ -6,6 +6,7 @@
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_list_parts.h"
+#include "aws/s3/private/s3_parallel_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/clock.h>
@@ -841,7 +842,7 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
      * reading. */
     bool parallel_prepare =
         (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
-
+    request->parallel = parallel_prepare;
     aws_s3_meta_request_schedule_prepare_request_default_impl(
         meta_request, request, parallel_prepare /*parallel*/, callback, user_data);
 }
@@ -974,8 +975,16 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     part_prep->allocator = allocator;
     part_prep->request = request;
     part_prep->on_complete = aws_future_http_message_acquire(message_future);
+    if (request->parallel) {
 
-    if (request->num_times_prepared == 0) {
+        uint64_t offset = 0;
+        size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+        request->request_stream = aws_input_stream_new_from_file(
+            allocator, aws_parallel_input_stream_get_file_path(meta_request->request_body_parallel_stream));
+        request->content_length = request_body_size;
+        aws_input_stream_seek(request->request_stream, offset, AWS_SSB_BEGIN);
+        s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
+    } else if (request->num_times_prepared == 0) {
         /* Preparing request for the first time.
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
@@ -1155,15 +1164,26 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
     }
 
     /* Create a new put-object message to upload a part. */
-    struct aws_http_message *message = aws_s3_upload_part_message_new(
-        meta_request->allocator,
-        meta_request->initial_request_message,
-        &request->request_body,
-        request->part_number,
-        auto_ranged_put->upload_id,
-        meta_request->should_compute_content_md5,
-        &meta_request->checksum_config,
-        checksum_buf);
+    struct aws_http_message *message = NULL;
+    if (request->parallel) {
+        message = aws_s3_upload_part_message_new_streaming(
+            meta_request->allocator,
+            meta_request->initial_request_message,
+            request->part_number,
+            request->request_stream,
+            request->content_length,
+            auto_ranged_put->upload_id);
+    } else {
+        message = aws_s3_upload_part_message_new(
+            meta_request->allocator,
+            meta_request->initial_request_message,
+            &request->request_body,
+            request->part_number,
+            auto_ranged_put->upload_id,
+            meta_request->should_compute_content_md5,
+            &meta_request->checksum_config,
+            checksum_buf);
+    }
     if (message == NULL) {
         aws_future_http_message_set_error(part_prep->on_complete, aws_last_error());
         goto on_done;

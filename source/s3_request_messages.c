@@ -354,6 +354,58 @@ error_clean_up:
 
 /* Create a new put object request from an existing put object request.  Currently just optionally adds part information
  * for a multipart upload. */
+struct aws_http_message *aws_s3_upload_part_message_new_streaming(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    uint32_t part_number,
+    struct aws_input_stream *input_stream,
+    int64_t stream_length,
+    const struct aws_string *upload_id) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(base_message);
+    AWS_PRECONDITION(part_number > 0);
+
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+        allocator,
+        base_message,
+        g_s3_upload_part_excluded_headers,
+        AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
+        true /*exclude_x_amz_meta*/);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, false, message)) {
+        goto error_clean_up;
+    }
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+
+    if (headers == NULL) {
+        return NULL;
+    }
+
+    char content_length_buffer[64] = "";
+    snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, (uint64_t)stream_length);
+    struct aws_byte_cursor content_length_cursor =
+        aws_byte_cursor_from_array(content_length_buffer, strlen(content_length_buffer));
+    if (aws_http_headers_set(headers, g_content_length_header_name, content_length_cursor)) {
+        goto error_clean_up;
+    }
+
+    aws_http_message_set_body_stream(message, input_stream);
+    /* Let the message take the full ownership */
+    aws_input_stream_release(input_stream);
+
+    return message;
+
+error_clean_up:
+    aws_http_message_release(message);
+    return NULL;
+}
+
+/* Create a new put object request from an existing put object request.  Currently just optionally adds part information
+ * for a multipart upload. */
 struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,

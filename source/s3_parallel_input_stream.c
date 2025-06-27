@@ -138,3 +138,8 @@ error:
     s_para_from_file_destroy(&impl->base);
     return NULL;
 }
+
+const char *aws_parallel_input_stream_get_file_path(struct aws_parallel_input_stream *stream) {
+    struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
+    return aws_string_c_str(impl->file_path);
+}

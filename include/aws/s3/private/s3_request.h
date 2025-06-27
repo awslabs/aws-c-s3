@@ -138,6 +138,9 @@ struct aws_s3_request {
     /* Request body to use when sending the request. The contents of this body will be re-used if a request is
      * retried.*/
     struct aws_byte_buf request_body;
+    struct aws_input_stream *request_stream;
+    bool parallel;
+    int64_t content_length;
 
     /**
      * Ticket to acquire the buffer.

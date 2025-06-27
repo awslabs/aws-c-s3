@@ -78,11 +78,18 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_http_message *base_message,
     const struct checksum_config_storage *checksum_config);
 
-/* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns a
- * body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and NULL,
- * respectively. */
-AWS_S3_API
-struct aws_http_message *aws_s3_upload_part_message_new(
+struct aws_http_message *aws_s3_upload_part_message_new_streaming(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    uint32_t part_number,
+    struct aws_input_stream *input_stream,
+    int64_t stream_length,
+    const struct aws_string *upload_id);
+
+/* Create an HTTP request for an S3 Put Object request, using the original request as a basis.  Creates and assigns
+ * a body stream using the passed in buffer.  If multipart is not needed, part number and upload_id can be 0 and
+ * NULL, respectively. */
+AWS_S3_API struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,

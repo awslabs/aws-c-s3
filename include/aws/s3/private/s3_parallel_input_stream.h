@@ -99,6 +99,8 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name);
 
+const char *aws_parallel_input_stream_get_file_path(struct aws_parallel_input_stream *stream);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
