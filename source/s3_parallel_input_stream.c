@@ -143,3 +143,100 @@ const char *aws_parallel_input_stream_get_file_path(struct aws_parallel_input_st
     struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
     return aws_string_c_str(impl->file_path);
 }
+
+struct aws_s3_part_streaming_input_stream_impl {
+    struct aws_input_stream base;
+    struct aws_input_stream *base_stream;
+    size_t offset;
+    size_t total_length;
+    size_t length_read;
+    struct aws_allocator *allocator;
+};
+
+static int s_aws_s3_part_streaming_input_stream_seek(
+    struct aws_input_stream *stream,
+    int64_t offset,
+    enum aws_stream_seek_basis basis) {
+    struct aws_s3_part_streaming_input_stream_impl *test_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
+    aws_input_stream_seek(test_input_stream->base_stream, offset + test_input_stream->offset, basis);
+    return AWS_OP_ERR;
+}
+
+static int s_aws_s3_part_streaming_input_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
+    struct aws_s3_part_streaming_input_stream_impl *test_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
+    int rt = aws_input_stream_read(test_input_stream->base_stream, dest);
+    test_input_stream->length_read += dest->len;
+    return rt;
+}
+
+static int s_aws_s3_part_streaming_input_stream_get_status(
+    struct aws_input_stream *stream,
+    struct aws_stream_status *status) {
+    (void)stream;
+    (void)status;
+
+    struct aws_s3_part_streaming_input_stream_impl *test_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
+
+    status->is_end_of_stream = test_input_stream->length_read == test_input_stream->total_length;
+    status->is_valid = true;
+
+    return AWS_OP_SUCCESS;
+}
+
+static int s_aws_s3_part_streaming_input_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
+    AWS_ASSERT(stream != NULL);
+    struct aws_s3_part_streaming_input_stream_impl *test_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
+    *out_length = (int64_t)test_input_stream->total_length;
+    return AWS_OP_SUCCESS;
+}
+
+static void s_aws_s3_part_streaming_input_stream_destroy(
+    struct aws_s3_part_streaming_input_stream_impl *test_input_stream) {
+    aws_input_stream_release(test_input_stream->base_stream);
+    aws_mem_release(test_input_stream->allocator, test_input_stream);
+}
+
+static struct aws_input_stream_vtable s_aws_s3_part_streaming_input_stream_vtable = {
+    .seek = s_aws_s3_part_streaming_input_stream_seek,
+    .read = s_aws_s3_part_streaming_input_stream_read,
+    .get_status = s_aws_s3_part_streaming_input_stream_get_status,
+    .get_length = s_aws_s3_part_streaming_input_stream_get_length,
+};
+
+void aws_s3_part_streaming_input_stream_reset(struct aws_input_stream *stream) {
+    struct aws_s3_part_streaming_input_stream_impl *test_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
+    test_input_stream->length_read = 0;
+    aws_input_stream_seek(test_input_stream->base_stream, test_input_stream->offset, AWS_SSB_BEGIN);
+}
+
+struct aws_input_stream *aws_input_stream_new_from_parallel(
+    struct aws_allocator *allocator,
+    struct aws_parallel_input_stream *parallel_stream,
+    uint64_t offset,
+    size_t request_body_size) {
+
+    struct aws_s3_part_streaming_input_stream_impl *test_input_stream =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_part_streaming_input_stream_impl));
+    aws_ref_count_init(
+        &test_input_stream->base.ref_count,
+        test_input_stream,
+        (aws_simple_completion_callback *)s_aws_s3_part_streaming_input_stream_destroy);
+
+    test_input_stream->base.vtable = &s_aws_s3_part_streaming_input_stream_vtable;
+    struct aws_parallel_input_stream_from_file_impl *impl = parallel_stream->impl;
+    aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
+    aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
+
+    test_input_stream->base_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(impl->file_path));
+    test_input_stream->total_length = request_body_size;
+    test_input_stream->offset = offset;
+    test_input_stream->length_read = 0;
+    aws_input_stream_seek(test_input_stream->base_stream, offset, AWS_SSB_BEGIN);
+
+    return &test_input_stream->base;
+}
