@@ -168,6 +168,12 @@ static int s_aws_s3_part_streaming_input_stream_read(struct aws_input_stream *st
         AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
     int rt = aws_input_stream_read(test_input_stream->base_stream, dest);
     test_input_stream->length_read += dest->len;
+    if (test_input_stream->length_read > test_input_stream->total_length) {
+        size_t gap = test_input_stream->length_read - test_input_stream->total_length;
+        size_t new_len = dest->len - gap;
+        dest->len = new_len;
+        test_input_stream->length_read = test_input_stream->total_length;
+    }
     return rt;
 }
 
@@ -226,13 +232,12 @@ struct aws_input_stream *aws_input_stream_new_from_parallel(
         &test_input_stream->base.ref_count,
         test_input_stream,
         (aws_simple_completion_callback *)s_aws_s3_part_streaming_input_stream_destroy);
-
+    test_input_stream->allocator = allocator;
     test_input_stream->base.vtable = &s_aws_s3_part_streaming_input_stream_vtable;
-    struct aws_parallel_input_stream_from_file_impl *impl = parallel_stream->impl;
-    aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
-    aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
 
+    struct aws_parallel_input_stream_from_file_impl *impl = parallel_stream->impl;
     test_input_stream->base_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(impl->file_path));
+    AWS_FATAL_ASSERT(test_input_stream->base_stream != NULL);
     test_input_stream->total_length = request_body_size;
     test_input_stream->offset = offset;
     test_input_stream->length_read = 0;

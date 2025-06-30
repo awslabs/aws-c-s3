@@ -394,9 +394,6 @@ struct aws_http_message *aws_s3_upload_part_message_new_streaming(
     }
 
     aws_http_message_set_body_stream(message, input_stream);
-    /* Let the message take the full ownership */
-    aws_input_stream_release(input_stream);
-
     return message;
 
 error_clean_up:
@@ -660,12 +657,13 @@ static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT
 static const struct aws_byte_cursor s_complete_payload_end =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</CompleteMultipartUpload>");
 
-static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
-                                                                                                    "        <ETag>");
+static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+    "    <Part>\n"
+    "        <ETag>");
 
-static const struct aws_byte_cursor s_part_section_string_1 =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag>\n"
-                                          "         <PartNumber>");
+static const struct aws_byte_cursor s_part_section_string_1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+    "</ETag>\n"
+    "         <PartNumber>");
 
 static const struct aws_byte_cursor s_close_part_number_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n");
 static const struct aws_byte_cursor s_close_part_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    </Part>\n");

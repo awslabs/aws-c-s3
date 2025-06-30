@@ -37,7 +37,9 @@ struct aws_s3_request *aws_s3_request_new(
 
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
-    request->should_allocate_buffer_from_pool = (flags & AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL) != 0;
+    /* TODO: if the request is streaming, we are not allocating buffer from pool/ This will avoid the allocation buffer
+     * to be the bottleneck when streaming. */
+    request->should_allocate_buffer_from_pool = false;
     request->always_send = (flags & AWS_S3_REQUEST_FLAG_ALWAYS_SEND) != 0;
 
     return request;
@@ -132,6 +134,7 @@ static void s_s3_request_destroy(void *user_data) {
     aws_byte_buf_clean_up(&request->request_body);
     aws_s3_buffer_ticket_release(request->ticket);
     aws_string_destroy(request->operation_name);
+    aws_input_stream_release(request->request_stream);
     aws_s3_meta_request_release(request->meta_request);
 
     aws_mem_release(request->allocator, request);
