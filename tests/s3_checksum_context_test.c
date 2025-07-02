@@ -8,19 +8,19 @@
 #include <aws/common/byte_buf.h>
 #include <aws/testing/aws_test_harness.h>
 
-static int s_test_checksum_context_creation(struct aws_allocator *allocator, void *ctx) {
+static int s_test_upload_request_checksum_context_creation(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     /* Test 1: Create context with no checksum config */
-    struct aws_s3_checksum_context *context = aws_s3_checksum_context_new(allocator, NULL, NULL);
+    struct aws_s3_upload_request_checksum_context *context =
+        aws_s3_upload_request_checksum_context_new(allocator, NULL);
     ASSERT_NOT_NULL(context);
-    ASSERT_TRUE(context->is_valid);
     ASSERT_INT_EQUALS(AWS_SCA_NONE, context->algorithm);
     ASSERT_INT_EQUALS(AWS_SCL_NONE, context->location);
-    ASSERT_INT_EQUALS(AWS_S3_CHECKSUM_BUFFER_NONE, context->buffer_state);
-    aws_s3_checksum_context_destroy(context);
+    ASSERT_FALSE(context->checksum_calculated);
+    aws_s3_upload_request_checksum_context_release(context);
 
-    /* Test 2: Create context with checksum config but no buffer */
+    /* Test 2: Create context with checksum config */
     struct aws_s3_meta_request_checksum_config_storage config = {
         .allocator = allocator,
         .checksum_algorithm = AWS_SCA_CRC32,
@@ -29,31 +29,27 @@ static int s_test_checksum_context_creation(struct aws_allocator *allocator, voi
     };
     AWS_ZERO_STRUCT(config.full_object_checksum);
 
-    context = aws_s3_checksum_context_new(allocator, &config, NULL);
+    context = aws_s3_upload_request_checksum_context_new(allocator, &config);
     ASSERT_NOT_NULL(context);
-    ASSERT_TRUE(context->is_valid);
     ASSERT_INT_EQUALS(AWS_SCA_CRC32, context->algorithm);
     ASSERT_INT_EQUALS(AWS_SCL_HEADER, context->location);
-    ASSERT_INT_EQUALS(AWS_S3_CHECKSUM_BUFFER_NONE, context->buffer_state);
+    ASSERT_FALSE(context->checksum_calculated);
     ASSERT_TRUE(context->encoded_checksum_size > 0);
-    aws_s3_checksum_context_destroy(context);
+    aws_s3_upload_request_checksum_context_release(context);
 
-    /* Test 3: Create context with empty buffer */
-    struct aws_byte_buf empty_buffer;
-    aws_byte_buf_init(&empty_buffer, allocator, 16);
-
-    context = aws_s3_checksum_context_new(allocator, &config, &empty_buffer);
+    /* Test 3: Create context with existing checksum */
+    struct aws_byte_cursor existing_checksum = aws_byte_cursor_from_c_str("test_checksum");
+    context = aws_s3_upload_request_checksum_context_new_with_exist_checksum(allocator, &config, existing_checksum);
     ASSERT_NOT_NULL(context);
-    ASSERT_TRUE(context->is_valid);
-    ASSERT_INT_EQUALS(AWS_S3_CHECKSUM_BUFFER_CALCULATE, context->buffer_state);
-    ASSERT_PTR_EQUALS(&empty_buffer, context->checksum_buffer);
-    aws_s3_checksum_context_destroy(context);
-    aws_byte_buf_clean_up(&empty_buffer);
+    ASSERT_INT_EQUALS(AWS_SCA_CRC32, context->algorithm);
+    ASSERT_INT_EQUALS(AWS_SCL_HEADER, context->location);
+    ASSERT_TRUE(context->checksum_calculated);
+    aws_s3_upload_request_checksum_context_release(context);
 
     return AWS_OP_SUCCESS;
 }
 
-static int s_test_checksum_context_helper_functions(struct aws_allocator *allocator, void *ctx) {
+static int s_test_upload_request_checksum_context_helper_functions(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     /* Test helper functions with header checksum */
@@ -65,41 +61,42 @@ static int s_test_checksum_context_helper_functions(struct aws_allocator *alloca
     };
     AWS_ZERO_STRUCT(config.full_object_checksum);
 
-    struct aws_s3_checksum_context *context = aws_s3_checksum_context_new(allocator, &config, NULL);
+    struct aws_s3_upload_request_checksum_context *context =
+        aws_s3_upload_request_checksum_context_new(allocator, &config);
     ASSERT_NOT_NULL(context);
 
-    ASSERT_TRUE(aws_s3_checksum_context_should_add_header(context));
-    ASSERT_FALSE(aws_s3_checksum_context_should_add_trailer(context));
-    ASSERT_TRUE(aws_s3_checksum_context_should_calculate(context));
+    ASSERT_TRUE(aws_s3_upload_request_checksum_context_should_add_header(context));
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_add_trailer(context));
+    ASSERT_TRUE(aws_s3_upload_request_checksum_context_should_calculate(context));
 
-    aws_s3_checksum_context_destroy(context);
+    aws_s3_upload_request_checksum_context_release(context);
 
     /* Test helper functions with trailer checksum */
     config.location = AWS_SCL_TRAILER;
-    context = aws_s3_checksum_context_new(allocator, &config, NULL);
+    context = aws_s3_upload_request_checksum_context_new(allocator, &config);
     ASSERT_NOT_NULL(context);
 
-    ASSERT_FALSE(aws_s3_checksum_context_should_add_header(context));
-    ASSERT_TRUE(aws_s3_checksum_context_should_add_trailer(context));
-    ASSERT_TRUE(aws_s3_checksum_context_should_calculate(context));
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_add_header(context));
+    ASSERT_TRUE(aws_s3_upload_request_checksum_context_should_add_trailer(context));
+    ASSERT_TRUE(aws_s3_upload_request_checksum_context_should_calculate(context));
 
-    aws_s3_checksum_context_destroy(context);
+    aws_s3_upload_request_checksum_context_release(context);
 
     /* Test helper functions with no checksum */
     config.location = AWS_SCL_NONE;
-    context = aws_s3_checksum_context_new(allocator, &config, NULL);
+    context = aws_s3_upload_request_checksum_context_new(allocator, &config);
     ASSERT_NOT_NULL(context);
 
-    ASSERT_FALSE(aws_s3_checksum_context_should_add_header(context));
-    ASSERT_FALSE(aws_s3_checksum_context_should_add_trailer(context));
-    ASSERT_FALSE(aws_s3_checksum_context_should_calculate(context));
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_add_header(context));
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_add_trailer(context));
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_calculate(context));
 
-    aws_s3_checksum_context_destroy(context);
+    aws_s3_upload_request_checksum_context_release(context);
 
     return AWS_OP_SUCCESS;
 }
 
-static int s_test_checksum_context_buffer_management(struct aws_allocator *allocator, void *ctx) {
+static int s_test_upload_request_checksum_context_reference_counting(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_meta_request_checksum_config_storage config = {
@@ -110,33 +107,26 @@ static int s_test_checksum_context_buffer_management(struct aws_allocator *alloc
     };
     AWS_ZERO_STRUCT(config.full_object_checksum);
 
-    /* Test getting output buffer when none provided */
-    struct aws_s3_checksum_context *context = aws_s3_checksum_context_new(allocator, &config, NULL);
+    /* Test reference counting */
+    struct aws_s3_upload_request_checksum_context *context =
+        aws_s3_upload_request_checksum_context_new(allocator, &config);
     ASSERT_NOT_NULL(context);
 
-    struct aws_byte_buf *output_buffer = aws_s3_checksum_context_get_output_buffer(context);
-    ASSERT_NOT_NULL(output_buffer);
-    ASSERT_TRUE(context->owns_internal_buffer);
+    /* Acquire additional reference */
+    struct aws_s3_upload_request_checksum_context *context2 = aws_s3_upload_request_checksum_context_acquire(context);
+    ASSERT_PTR_EQUALS(context, context2);
 
-    aws_s3_checksum_context_destroy(context);
-
-    /* Test getting output buffer when user buffer provided */
-    struct aws_byte_buf user_buffer;
-    aws_byte_buf_init(&user_buffer, allocator, 16);
-
-    context = aws_s3_checksum_context_new(allocator, &config, &user_buffer);
-    ASSERT_NOT_NULL(context);
-
-    output_buffer = aws_s3_checksum_context_get_output_buffer(context);
-    ASSERT_PTR_EQUALS(&user_buffer, output_buffer);
-    ASSERT_FALSE(context->owns_internal_buffer);
-
-    aws_s3_checksum_context_destroy(context);
-    aws_byte_buf_clean_up(&user_buffer);
+    /* Release both references */
+    aws_s3_upload_request_checksum_context_release(context);
+    aws_s3_upload_request_checksum_context_release(context2);
 
     return AWS_OP_SUCCESS;
 }
 
-AWS_TEST_CASE(test_checksum_context_creation, s_test_checksum_context_creation)
-AWS_TEST_CASE(test_checksum_context_helper_functions, s_test_checksum_context_helper_functions)
-AWS_TEST_CASE(test_checksum_context_buffer_management, s_test_checksum_context_buffer_management)
+AWS_TEST_CASE(test_upload_request_checksum_context_creation, s_test_upload_request_checksum_context_creation)
+AWS_TEST_CASE(
+    test_upload_request_checksum_context_helper_functions,
+    s_test_upload_request_checksum_context_helper_functions)
+AWS_TEST_CASE(
+    test_upload_request_checksum_context_reference_counting,
+    s_test_upload_request_checksum_context_reference_counting)

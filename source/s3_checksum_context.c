@@ -129,3 +129,12 @@ struct aws_byte_buf *aws_s3_upload_request_checksum_context_get_output_buffer(
     }
     return &context->base64_checksum;
 }
+
+struct aws_byte_cursor aws_s3_upload_request_checksum_context_get_checksum_cursor(
+    const struct aws_s3_upload_request_checksum_context *context) {
+    struct aws_byte_cursor checksum_cursor = {0};
+    if (!context || !context->checksum_calculated) {
+        return checksum_cursor;
+    }
+    return aws_byte_cursor_from_buf(&context->base64_checksum);
+}

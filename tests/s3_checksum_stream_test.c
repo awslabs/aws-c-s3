@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "s3_tester.h"
 #include <aws/common/byte_buf.h>
@@ -111,9 +112,27 @@ static int s_stream_chunk(
     struct aws_byte_buf *output,
     enum aws_s3_checksum_algorithm algorithm,
     struct aws_byte_buf *checksum_result) {
+
+    /* Create checksum config for the context */
+    struct aws_s3_meta_request_checksum_config_storage config = {
+        .allocator = allocator,
+        .checksum_algorithm = algorithm,
+        .location = AWS_SCL_TRAILER,
+        .has_full_object_checksum = false,
+    };
+    AWS_ZERO_STRUCT(config.full_object_checksum);
+
+    /* Create checksum context */
+    struct aws_s3_upload_request_checksum_context *context =
+        aws_s3_upload_request_checksum_context_new(allocator, &config);
+    if (!context) {
+        return AWS_OP_ERR;
+    }
+
     struct aws_input_stream *cursor_stream = aws_input_stream_new_from_cursor(allocator, input);
-    struct aws_input_stream *stream = aws_chunk_stream_new(allocator, cursor_stream, algorithm, checksum_result);
+    struct aws_input_stream *stream = aws_chunk_stream_new(allocator, cursor_stream, context);
     aws_input_stream_release(cursor_stream);
+
     struct aws_stream_status status;
     AWS_ZERO_STRUCT(status);
     while (!status.is_end_of_stream) {
@@ -123,7 +142,19 @@ static int s_stream_chunk(
         read_buf->len = 0;
         ASSERT_TRUE(aws_input_stream_get_status(stream, &status) == 0);
     }
+
+    /* Copy checksum result if requested */
+    if (checksum_result) {
+        struct aws_byte_cursor checksum_cursor = aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
+        if (aws_byte_buf_append_dynamic(checksum_result, &checksum_cursor) != AWS_OP_SUCCESS) {
+            aws_input_stream_release(stream);
+            aws_s3_upload_request_checksum_context_release(context);
+            return AWS_OP_ERR;
+        }
+    }
+
     aws_input_stream_release(stream);
+    aws_s3_upload_request_checksum_context_release(context);
     return AWS_OP_SUCCESS;
 }
 

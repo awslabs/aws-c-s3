@@ -839,7 +839,7 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_ASSERT(checksum_context);
     AWS_ASSERT(!checksum_context->checksum_calculated);
-    AWS_ASSERT(!checksum_context->algorithm != AWS_SCA_NONE);
+    AWS_ASSERT(checksum_context->algorithm != AWS_SCA_NONE);
 
     int ret_code = AWS_OP_ERR;
     /* Calculate checksum for output buffer only (no header/trailer) */
