@@ -146,7 +146,7 @@ static int s_stream_chunk(
     /* Copy checksum result if requested */
     if (checksum_result) {
         struct aws_byte_cursor checksum_cursor = aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
-        if (aws_byte_buf_append_dynamic(checksum_result, &checksum_cursor) != AWS_OP_SUCCESS) {
+        if (aws_byte_buf_init_copy_from_cursor(checksum_result, allocator, checksum_cursor) != AWS_OP_SUCCESS) {
             aws_input_stream_release(stream);
             aws_s3_upload_request_checksum_context_release(context);
             return AWS_OP_ERR;

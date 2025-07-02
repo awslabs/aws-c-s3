@@ -61,8 +61,11 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     }
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor colon_cursor = aws_byte_cursor_from_string(s_colon);
+    /* After the checksum stream released, the checksum will be calculated. */
+    parent_stream->checksum_context->checksum_calculated = true;
     struct aws_byte_cursor checksum_result_cursor =
         aws_byte_cursor_from_buf(&parent_stream->checksum_context->base64_checksum);
+    AWS_ASSERT(parent_stream->checksum_context->encoded_checksum_size == checksum_result_cursor.len);
 
     if (aws_byte_buf_init(
             &parent_stream->post_chunk_buffer,
