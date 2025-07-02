@@ -103,7 +103,7 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
 
 bool aws_s3_upload_request_checksum_context_should_calculate(
     const struct aws_s3_upload_request_checksum_context *context) {
-    if (!context || context->algorithm == AWS_SCA_NONE || context->location == AWS_SCL_NONE) {
+    if (!context || context->algorithm == AWS_SCA_NONE) {
         return false;
     }
 
