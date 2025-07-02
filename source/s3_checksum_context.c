@@ -68,7 +68,14 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
     if (context) {
         /* Initial the buffer for checksum from the exist checksum */
         if (context->encoded_checksum_size != exist_checksum.len) {
-            AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Checksum size mismatch");
+            struct aws_byte_cursor algo_name = aws_get_checksum_algorithm_name(context->algorithm);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Encoded checksum size mismatch during creating the context for algorithm " PRInSTR
+                ": expected %zu bytes, got %zu bytes",
+                AWS_BYTE_CURSOR_PRI(algo_name),
+                context->encoded_checksum_size,
+                exist_checksum.len);
             aws_s3_upload_request_checksum_context_release(context);
             return NULL;
         }
@@ -96,7 +103,7 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
 
 bool aws_s3_upload_request_checksum_context_should_calculate(
     const struct aws_s3_upload_request_checksum_context *context) {
-    if (!context || context->algorithm == AWS_SCA_NONE) {
+    if (!context || context->algorithm == AWS_SCA_NONE || context->location == AWS_SCL_NONE) {
         return false;
     }
 
