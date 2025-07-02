@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_checksums.h"
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
@@ -25,14 +26,9 @@ struct aws_chunk_stream {
     /* aws_input_stream_byte_cursor provides our actual functionality  */
     /* Pointing to the stream we read from */
     struct aws_input_stream *current_stream;
-
-    /* The passed-in buffer, owned by the caller. If passed-in buffer is empty
-     * it will be created by the chunk stream, but still caller owns its lifetime. Error or not. */
-    struct aws_byte_buf *passed_in_checksum_buffer;
-    /* If there is no passed in checksum buffer, we still calculate the checksum. This stores the checksum. */
-    struct aws_byte_buf checksum_buffer;
-
     struct aws_input_stream *chunk_body_stream;
+
+    struct aws_s3_upload_request_checksum_context *checksum_context;
     struct aws_byte_buf pre_chunk_buffer;
     struct aws_byte_buf post_chunk_buffer;
     struct aws_byte_cursor checksum_header_name;
@@ -65,22 +61,8 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     }
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor colon_cursor = aws_byte_cursor_from_string(s_colon);
-    struct aws_byte_cursor checksum_result_cursor;
-    if (!parent_stream->passed_in_checksum_buffer || parent_stream->passed_in_checksum_buffer->len == 0) {
-        if (parent_stream->checksum_buffer.len == 0) {
-            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "Failed to extract base64 encoded checksum of stream");
-            return aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
-        }
-        checksum_result_cursor = aws_byte_cursor_from_buf(&parent_stream->checksum_buffer);
-        if (parent_stream->passed_in_checksum_buffer) {
-            /* the passed in checksum buffer is empty, initialize it with the calculated checksum */
-            aws_byte_buf_init_copy(
-                parent_stream->passed_in_checksum_buffer, parent_stream->allocator, &parent_stream->checksum_buffer);
-        }
-    } else {
-        /* The passed-in checksum buffer already have the checksum. */
-        checksum_result_cursor = aws_byte_cursor_from_buf(parent_stream->passed_in_checksum_buffer);
-    }
+    struct aws_byte_cursor checksum_result_cursor =
+        aws_byte_cursor_from_buf(&parent_stream->checksum_context->base64_checksum);
 
     if (aws_byte_buf_init(
             &parent_stream->post_chunk_buffer,
@@ -182,7 +164,7 @@ static void s_aws_input_chunk_stream_destroy(struct aws_chunk_stream *impl) {
         }
         aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
         aws_byte_buf_clean_up(&impl->post_chunk_buffer);
-        aws_byte_buf_clean_up(&impl->checksum_buffer);
+        aws_s3_upload_request_checksum_context_release(impl->checksum_context);
         aws_mem_release(impl->allocator, impl);
     }
 }
@@ -197,16 +179,25 @@ static struct aws_input_stream_vtable s_aws_input_chunk_stream_vtable = {
 struct aws_input_stream *aws_chunk_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
-    enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *checksum_buffer) {
+    struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(existing_stream);
+    AWS_PRECONDITION(checksum_context);
 
     struct aws_chunk_stream *impl = aws_mem_calloc(allocator, 1, sizeof(struct aws_chunk_stream));
 
     impl->allocator = allocator;
     impl->base.vtable = &s_aws_input_chunk_stream_vtable;
-    impl->passed_in_checksum_buffer = checksum_buffer;
+
+    /* Extract algorithm and buffer from context */
+    enum aws_s3_checksum_algorithm algorithm = AWS_SCA_NONE;
+    struct aws_byte_buf *checksum_buffer = NULL;
+
+    impl->checksum_context = aws_s3_upload_request_checksum_context_acquire(checksum_context);
+
+    algorithm = checksum_context->algorithm;
+    checksum_buffer = &checksum_context->base64_checksum;
+    bool checksum_calculated = checksum_context->checksum_calculated;
 
     int64_t stream_length = 0;
     int64_t final_chunk_len = 0;
@@ -229,34 +220,13 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_byte_buf_append(&impl->pre_chunk_buffer, &pre_chunk_cursor)) {
         goto error;
     }
-
-    size_t checksum_len = aws_get_digest_size_from_checksum_algorithm(algorithm);
-
-    size_t encoded_checksum_len = 0;
-    if (aws_base64_compute_encoded_len(checksum_len, &encoded_checksum_len)) {
-        goto error;
-    }
-    if (!checksum_buffer || checksum_buffer->len == 0) {
-        /* Empty passed-in buffer or no passed-in, calculate the checksum during reading from the stream. */
-        if (aws_byte_buf_init(&impl->checksum_buffer, allocator, encoded_checksum_len)) {
-            goto error;
-        }
+    if (!checksum_calculated) {
         /* Wrap the existing stream with checksum stream to calculate the checksum when reading from it. */
-        impl->chunk_body_stream =
-            aws_checksum_stream_new(allocator, existing_stream, algorithm, &impl->checksum_buffer);
+        impl->chunk_body_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, checksum_buffer);
         if (impl->chunk_body_stream == NULL) {
             goto error;
         }
     } else {
-        if (checksum_buffer->len != encoded_checksum_len) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_GENERAL,
-                "Mismatched checksum buffer and algorithm. checksum_buf->len is %zu, but encoded_checksum_len is %zu",
-                checksum_buffer->len,
-                encoded_checksum_len);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            goto error;
-        }
         /* No need to calculate the checksum during read, use the existing stream directly. */
         impl->chunk_body_stream = aws_input_stream_acquire(existing_stream);
     }
@@ -287,7 +257,7 @@ struct aws_input_stream *aws_chunk_stream_new(
     }
 
     impl->length = prechunk_stream_len + stream_length + final_chunk_len + impl->checksum_header_name.len + colon_len +
-                   encoded_checksum_len + post_trailer_len;
+                   checksum_context->encoded_checksum_size + post_trailer_len;
 
     AWS_ASSERT(impl->current_stream);
     aws_ref_count_init(&impl->base.ref_count, impl, (aws_simple_completion_callback *)s_aws_input_chunk_stream_destroy);
@@ -297,7 +267,6 @@ error:
     aws_input_stream_release(impl->chunk_body_stream);
     aws_input_stream_release(impl->current_stream);
     aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
-    aws_byte_buf_clean_up(&impl->checksum_buffer);
     aws_mem_release(impl->allocator, impl);
     return NULL;
 }

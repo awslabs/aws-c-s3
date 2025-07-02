@@ -10,6 +10,7 @@
  * aws-c-sdkutil. */
 
 struct aws_s3_checksum;
+struct aws_s3_upload_request_checksum_context;
 
 /* List to check the checksum algorithm to use based on the priority. */
 static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
@@ -40,7 +41,7 @@ struct aws_s3_checksum {
     } impl;
 };
 
-struct checksum_config_storage {
+struct aws_s3_meta_request_checksum_config_storage {
     struct aws_allocator *allocator;
     struct aws_byte_buf full_object_checksum;
     bool has_full_object_checksum;
@@ -105,8 +106,7 @@ AWS_S3_API
 struct aws_input_stream *aws_chunk_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
-    enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *checksum_buffer);
+    struct aws_s3_upload_request_checksum_context *context);
 
 /**
  * Get the size of the checksum output corresponding to the aws_s3_checksum_algorithm enum value.
@@ -171,14 +171,15 @@ AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output);
 
 AWS_S3_API
-int aws_checksum_config_storage_init(
+int aws_aws_s3_meta_request_checksum_config_storage_init(
     struct aws_allocator *allocator,
-    struct checksum_config_storage *internal_config,
+    struct aws_s3_meta_request_checksum_config_storage *internal_config,
     const struct aws_s3_checksum_config *config,
     const struct aws_http_message *message,
     const void *log_id);
 
 AWS_S3_API
-void aws_checksum_config_storage_cleanup(struct checksum_config_storage *internal_config);
+void aws_aws_s3_meta_request_checksum_config_storage_cleanup(
+    struct aws_s3_meta_request_checksum_config_storage *internal_config);
 
 #endif /* AWS_S3_CHECKSUMS_H */

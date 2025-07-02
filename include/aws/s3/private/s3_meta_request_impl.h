@@ -25,7 +25,7 @@ struct aws_s3_request;
 struct aws_http_headers;
 struct aws_http_make_request_options;
 struct aws_retry_strategy;
-
+struct aws_s3_upload_request_checksum_context;
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
     AWS_S3_META_REQUEST_STATE_FINISHED,
@@ -276,7 +276,7 @@ struct aws_s3_meta_request {
     const bool should_compute_content_md5;
 
     /* deep copy of the checksum config. */
-    struct checksum_config_storage checksum_config;
+    struct aws_s3_meta_request_checksum_config_storage checksum_config;
 
     /* checksum found in either a default get request, or in the initial head request of a multipart get */
     struct aws_byte_buf meta_request_level_response_header_checksum;
@@ -294,7 +294,7 @@ struct aws_s3_meta_request {
 struct aws_s3_mpu_part_info {
     uint64_t size;
     struct aws_string *etag;
-    struct aws_byte_buf checksum_base64;
+    struct aws_s3_upload_request_checksum_context *checksum_context;
     bool was_previously_uploaded;
 };
 
