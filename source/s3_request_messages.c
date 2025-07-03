@@ -746,7 +746,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
             if (mpu_algorithm_checksum_name.len) {
                 struct aws_byte_cursor checksum =
-                    aws_s3_upload_request_checksum_context_get_checksum_cursor(part->checksum_context);
+                    aws_s3_upload_request_checksum_context_get_checksum_cursor(&part->checksum_context);
 
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
                     goto error_clean_up;

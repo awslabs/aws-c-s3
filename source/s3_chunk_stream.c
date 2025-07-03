@@ -167,7 +167,6 @@ static void s_aws_input_chunk_stream_destroy(struct aws_chunk_stream *impl) {
         }
         aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
         aws_byte_buf_clean_up(&impl->post_chunk_buffer);
-        aws_s3_upload_request_checksum_context_release(impl->checksum_context);
         aws_mem_release(impl->allocator, impl);
     }
 }
@@ -196,7 +195,7 @@ struct aws_input_stream *aws_chunk_stream_new(
     enum aws_s3_checksum_algorithm algorithm = AWS_SCA_NONE;
     struct aws_byte_buf *checksum_buffer = NULL;
 
-    impl->checksum_context = aws_s3_upload_request_checksum_context_acquire(checksum_context);
+    impl->checksum_context = checksum_context;
 
     algorithm = checksum_context->algorithm;
     checksum_buffer = &checksum_context->base64_checksum;

@@ -154,16 +154,22 @@ static int s_process_part_info_synced(const struct aws_s3_part_info *info, void 
     }
 
     if ((checksum_cur != NULL) && (checksum_cur->len > 0)) {
-        /* Create checksum context with pre-calculated checksum */
-        part->checksum_context = aws_s3_upload_request_checksum_context_new_with_existing_checksum(
-            auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config, *checksum_cur);
+        /* Initialize checksum context with pre-calculated checksum */
+        if (aws_s3_upload_request_checksum_context_init_with_existing_checksum(
+                auto_ranged_put->base.allocator,
+                &part->checksum_context,
+                &auto_ranged_put->base.checksum_config,
+                *checksum_cur)) {
+            aws_mem_release(meta_request->allocator, part);
+            return AWS_OP_ERR;
+        }
     } else {
-        part->checksum_context = aws_s3_upload_request_checksum_context_new(
-            auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config);
-    }
-    if (!part->checksum_context) {
-        aws_mem_release(meta_request->allocator, part);
-        return AWS_OP_ERR;
+        /* Initialize checksum context */
+        if (aws_s3_upload_request_checksum_context_init(
+                auto_ranged_put->base.allocator, &part->checksum_context, &auto_ranged_put->base.checksum_config)) {
+            aws_mem_release(meta_request->allocator, part);
+            return AWS_OP_ERR;
+        }
     }
     /* Parts might be out of order or have gaps in them.
      * Resize array-list to be long enough to hold this part,
@@ -415,7 +421,7 @@ static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request
         struct aws_s3_mpu_part_info *part;
         aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, part_index);
         if (part != NULL) {
-            aws_s3_upload_request_checksum_context_release(part->checksum_context);
+            aws_s3_upload_request_checksum_context_clean_up(&part->checksum_context);
             aws_string_destroy(part->etag);
             aws_mem_release(auto_ranged_put->base.allocator, part);
         }
@@ -1076,8 +1082,13 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         /* Add part to array-list */
         struct aws_s3_mpu_part_info *part =
             aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
-        part->checksum_context =
-            aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+        if (aws_s3_upload_request_checksum_context_init(
+                meta_request->allocator, &part->checksum_context, &meta_request->checksum_config)) {
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            aws_mem_release(meta_request->allocator, part);
+            error_code = aws_last_error_or_unknown();
+            goto on_done;
+        }
         part->size = request->request_body.len;
         aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
     }
@@ -1098,14 +1109,13 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
                 (void *)meta_request);
             goto on_done;
         }
-        struct aws_s3_upload_request_checksum_context *context = previously_uploaded_info->checksum_context;
         /* if previously uploaded part had a checksum, compare it to what we just skipped */
-        if (context != NULL && context->checksum_calculated == true &&
+        if (previously_uploaded_info->checksum_context.checksum_calculated == true &&
             s_verify_part_matches_checksum(
                 meta_request->allocator,
                 aws_byte_cursor_from_buf(&request->request_body),
                 meta_request->checksum_config.checksum_algorithm,
-                aws_byte_cursor_from_buf(&context->base64_checksum))) {
+                aws_byte_cursor_from_buf(&previously_uploaded_info->checksum_context.base64_checksum))) {
             error_code = aws_last_error_or_unknown();
             goto on_done;
         }
@@ -1152,9 +1162,9 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
             aws_s3_meta_request_lock_synced_data(meta_request);
             struct aws_s3_mpu_part_info *part = NULL;
             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
-            AWS_ASSERT(part != NULL && part->checksum_context != NULL);
+            AWS_ASSERT(part != NULL);
             /* Use checksum context if available, otherwise NULL for new parts */
-            checksum_context = part->checksum_context;
+            checksum_context = &part->checksum_context;
             /* If checksum already calculated, it means either the part being retried or the part resumed from list
              * parts. Keep reusing the old checksum in case of the request body in memory mangled */
             AWS_ASSERT(
@@ -1229,12 +1239,7 @@ static int s_s3_review_multipart_upload(struct aws_s3_request *request) {
 
             struct aws_s3_upload_part_review *part_review = &review.part_array[part_index];
             part_review->size = part->size;
-            if (part->checksum_context != NULL) {
-                part_review->checksum =
-                    aws_s3_upload_request_checksum_context_get_checksum_cursor(part->checksum_context);
-            } else {
-                part_review->checksum = (struct aws_byte_cursor){.ptr = NULL, .len = 0};
-            }
+            part_review->checksum = aws_s3_upload_request_checksum_context_get_checksum_cursor(&part->checksum_context);
         }
     }
 

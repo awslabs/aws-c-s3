@@ -125,7 +125,7 @@ static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *me
         struct aws_s3_mpu_part_info *part = NULL;
         aws_array_list_get_at(&copy_object->synced_data.part_list, &part, part_index);
         aws_string_destroy(part->etag);
-        aws_s3_upload_request_checksum_context_release(part->checksum_context);
+        aws_s3_upload_request_checksum_context_clean_up(&part->checksum_context);
         aws_mem_release(meta_request->allocator, part);
     }
 
