@@ -394,7 +394,7 @@ static int s_init_and_verify_checksum_config_from_headers(
     return AWS_OP_SUCCESS;
 }
 
-int aws_aws_s3_meta_request_checksum_config_storage_init(
+int aws_s3_meta_request_checksum_config_storage_init(
     struct aws_allocator *allocator,
     struct aws_s3_meta_request_checksum_config_storage *internal_config,
     const struct aws_s3_checksum_config *config,
@@ -488,7 +488,7 @@ int aws_aws_s3_meta_request_checksum_config_storage_init(
     return AWS_OP_SUCCESS;
 }
 
-void aws_aws_s3_meta_request_checksum_config_storage_cleanup(
+void aws_s3_meta_request_checksum_config_storage_cleanup(
     struct aws_s3_meta_request_checksum_config_storage *internal_config) {
     if (internal_config->has_full_object_checksum) {
         aws_byte_buf_clean_up(&internal_config->full_object_checksum);

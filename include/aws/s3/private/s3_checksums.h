@@ -192,7 +192,7 @@ AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output);
 
 AWS_S3_API
-int aws_aws_s3_meta_request_checksum_config_storage_init(
+int aws_s3_meta_request_checksum_config_storage_init(
     struct aws_allocator *allocator,
     struct aws_s3_meta_request_checksum_config_storage *internal_config,
     const struct aws_s3_checksum_config *config,
@@ -200,7 +200,7 @@ int aws_aws_s3_meta_request_checksum_config_storage_init(
     const void *log_id);
 
 AWS_S3_API
-void aws_aws_s3_meta_request_checksum_config_storage_cleanup(
+void aws_s3_meta_request_checksum_config_storage_cleanup(
     struct aws_s3_meta_request_checksum_config_storage *internal_config);
 
 #endif /* AWS_S3_CHECKSUMS_H */

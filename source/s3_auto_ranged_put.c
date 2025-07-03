@@ -155,13 +155,16 @@ static int s_process_part_info_synced(const struct aws_s3_part_info *info, void 
 
     if ((checksum_cur != NULL) && (checksum_cur->len > 0)) {
         /* Create checksum context with pre-calculated checksum */
-        part->checksum_context = aws_s3_upload_request_checksum_context_new_with_exist_checksum(
+        part->checksum_context = aws_s3_upload_request_checksum_context_new_with_existing_checksum(
             auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config, *checksum_cur);
     } else {
         part->checksum_context = aws_s3_upload_request_checksum_context_new(
             auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config);
     }
-
+    if (!part->checksum_context) {
+        aws_mem_release(meta_request->allocator, part);
+        return AWS_OP_ERR;
+    }
     /* Parts might be out of order or have gaps in them.
      * Resize array-list to be long enough to hold this part,
      * filling any intermediate slots with NULL. */
@@ -1095,14 +1098,14 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
                 (void *)meta_request);
             goto on_done;
         }
+        struct aws_s3_upload_request_checksum_context *context = previously_uploaded_info->checksum_context;
         /* if previously uploaded part had a checksum, compare it to what we just skipped */
-        if (previously_uploaded_info->checksum_context != NULL &&
-            previously_uploaded_info->checksum_context->checksum_calculated == true &&
+        if (context != NULL && context->checksum_calculated == true &&
             s_verify_part_matches_checksum(
                 meta_request->allocator,
                 aws_byte_cursor_from_buf(&request->request_body),
                 meta_request->checksum_config.checksum_algorithm,
-                aws_byte_cursor_from_buf(&previously_uploaded_info->checksum_context->base64_checksum))) {
+                aws_byte_cursor_from_buf(&context->base64_checksum))) {
             error_code = aws_last_error_or_unknown();
             goto on_done;
         }
