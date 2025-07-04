@@ -14,7 +14,6 @@
 #include <aws/common/task_scheduler.h>
 #include <aws/http/request_response.h>
 
-#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_request.h"
@@ -26,6 +25,7 @@ struct aws_s3_request;
 struct aws_http_headers;
 struct aws_http_make_request_options;
 struct aws_retry_strategy;
+struct aws_s3_upload_request_checksum_context;
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
     AWS_S3_META_REQUEST_STATE_FINISHED,
@@ -294,7 +294,7 @@ struct aws_s3_meta_request {
 struct aws_s3_mpu_part_info {
     uint64_t size;
     struct aws_string *etag;
-    struct aws_s3_upload_request_checksum_context checksum_context;
+    struct aws_s3_upload_request_checksum_context *checksum_context;
     bool was_previously_uploaded;
 };
 

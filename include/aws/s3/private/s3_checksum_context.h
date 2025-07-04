@@ -22,6 +22,7 @@ AWS_EXTERN_C_BEGIN
  */
 struct aws_s3_upload_request_checksum_context {
     struct aws_allocator *allocator;
+    struct aws_ref_count ref_count;
 
     /* Configuration */
     enum aws_s3_checksum_algorithm algorithm;
@@ -36,45 +37,56 @@ struct aws_s3_upload_request_checksum_context {
 };
 
 /**
- * Initialize an upload request checksum context from configuration and buffer parameters.
+ * Create a new upload request checksum context from configuration and buffer parameters.
  * This function encapsulates all the complex logic for determining buffer state.
+ * Returns with reference count of 1.
  *
- * @param context Pointer to the checksum context to initialize
  * @param allocator Memory allocator
  * @param checksum_config Meta request level checksum configuration (can be NULL)
- * @return AWS_OP_SUCCESS or AWS_OP_ERR
+ * @return New checksum context or NULL on error
  */
 AWS_S3_API
-int aws_s3_upload_request_checksum_context_init(
+struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new(
     struct aws_allocator *allocator,
-    struct aws_s3_upload_request_checksum_context *context,
     const struct aws_s3_meta_request_checksum_config_storage *checksum_config);
 
 /**
- * Initialize an upload request checksum context with an existing checksum value.
+ * Create a new upload request checksum context with an existing checksum value.
  * This is useful when resuming uploads or when the checksum is pre-calculated.
+ * Returns with reference count of 1.
  *
- * @param context Pointer to the checksum context to initialize
  * @param allocator Memory allocator
  * @param checksum_config Meta request level checksum configuration (can be NULL)
  * @param existing_checksum Pre-calculated checksum value as a byte cursor
- * @return AWS_OP_SUCCESS or AWS_OP_ERR (e.g., if checksum size doesn't match algorithm)
+ * @return New checksum context or NULL on error (e.g., if checksum size doesn't match algorithm)
  */
 AWS_S3_API
-int aws_s3_upload_request_checksum_context_init_with_existing_checksum(
+struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new_with_existing_checksum(
     struct aws_allocator *allocator,
-    struct aws_s3_upload_request_checksum_context *context,
     const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
     struct aws_byte_cursor existing_checksum);
 
 /**
- * Clean up resources associated with an upload request checksum context.
- * This does not free the context itself, just its internal resources.
+ * Acquire a reference to the upload request checksum context.
+ * Use this when transferring ownership to another function/structure.
  *
- * @param context Pointer to the checksum context to clean up
+ * @param context The checksum context to acquire
+ * @return The same context pointer (for convenience)
  */
 AWS_S3_API
-void aws_s3_upload_request_checksum_context_clean_up(struct aws_s3_upload_request_checksum_context *context);
+struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_acquire(
+    struct aws_s3_upload_request_checksum_context *context);
+
+/**
+ * Release a reference to the upload request checksum context.
+ * When the reference count reaches zero, the context will be destroyed.
+ * Always returns NULL.
+ *
+ * @param context The checksum context to release
+ */
+AWS_S3_API
+struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_release(
+    struct aws_s3_upload_request_checksum_context *context);
 
 /**
  * Check if checksum calculation is needed based on context state.

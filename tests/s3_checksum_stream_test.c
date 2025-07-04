@@ -112,7 +112,7 @@ static int s_stream_chunk(
     struct aws_byte_buf *output,
     enum aws_s3_checksum_algorithm algorithm,
     struct aws_byte_buf *checksum_result) {
-    int rt_code = AWS_OP_ERR;
+
     /* Create checksum config for the context */
     struct aws_s3_meta_request_checksum_config_storage config = {
         .allocator = allocator,
@@ -123,11 +123,14 @@ static int s_stream_chunk(
     AWS_ZERO_STRUCT(config.full_object_checksum);
 
     /* Create checksum context */
-    struct aws_s3_upload_request_checksum_context context;
-    ASSERT_SUCCESS(aws_s3_upload_request_checksum_context_init(allocator, &context, &config));
+    struct aws_s3_upload_request_checksum_context *context =
+        aws_s3_upload_request_checksum_context_new(allocator, &config);
+    if (!context) {
+        return AWS_OP_ERR;
+    }
 
     struct aws_input_stream *cursor_stream = aws_input_stream_new_from_cursor(allocator, input);
-    struct aws_input_stream *stream = aws_chunk_stream_new(allocator, cursor_stream, &context);
+    struct aws_input_stream *stream = aws_chunk_stream_new(allocator, cursor_stream, context);
     aws_input_stream_release(cursor_stream);
 
     struct aws_stream_status status;
@@ -142,17 +145,17 @@ static int s_stream_chunk(
 
     /* Copy checksum result if requested */
     if (checksum_result) {
-        struct aws_byte_cursor checksum_cursor = aws_s3_upload_request_checksum_context_get_checksum_cursor(&context);
-        if (aws_byte_buf_init_copy_from_cursor(checksum_result, allocator, checksum_cursor)) {
-            goto done;
+        struct aws_byte_cursor checksum_cursor = aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
+        if (aws_byte_buf_init_copy_from_cursor(checksum_result, allocator, checksum_cursor) != AWS_OP_SUCCESS) {
+            aws_input_stream_release(stream);
+            aws_s3_upload_request_checksum_context_release(context);
+            return AWS_OP_ERR;
         }
     }
 
-    rt_code = AWS_OP_SUCCESS;
-done:
     aws_input_stream_release(stream);
-    aws_s3_upload_request_checksum_context_clean_up(&context);
-    return rt_code;
+    aws_s3_upload_request_checksum_context_release(context);
+    return AWS_OP_SUCCESS;
 }
 
 static int compare_chunk_stream(
