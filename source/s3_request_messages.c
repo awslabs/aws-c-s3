@@ -4,6 +4,7 @@
  */
 
 #include "aws/s3/private/s3_request_messages.h"
+#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
@@ -286,7 +287,7 @@ struct aws_http_message *aws_s3_ranged_get_object_message_new(
 struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
-    const struct checksum_config_storage *checksum_config) {
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
     AWS_PRECONDITION(allocator);
 
     /* For multipart upload, some headers should ONLY be in the initial create-multipart request.
@@ -352,8 +353,10 @@ error_clean_up:
     return NULL;
 }
 
-/* Create a new put object request from an existing put object request.  Currently just optionally adds part information
- * for a multipart upload. */
+/**
+ * Create a new put object request from an existing put object request.  Currently just optionally adds part information
+ * for a multipart upload.
+ **/
 struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
@@ -361,8 +364,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
-    const struct checksum_config_storage *checksum_config,
-    struct aws_byte_buf *encoded_checksum_output) {
+    struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(part_number > 0);
@@ -383,12 +385,12 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         goto error_clean_up;
     }
 
-    if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_config, encoded_checksum_output) == NULL) {
+    if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_context) == NULL) {
         goto error_clean_up;
     }
 
     if (should_compute_content_md5) {
-        if (!checksum_config || checksum_config->location == AWS_SCL_NONE) {
+        if (!checksum_context || checksum_context->location == AWS_SCL_NONE) {
             /* MD5 will be skipped if flexible checksum used */
             if (aws_s3_message_util_add_content_md5_header(allocator, buffer, message)) {
                 goto error_clean_up;
@@ -434,8 +436,7 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     if (buffer != NULL) {
         /* part copy does not have a ChecksumAlgorithm member, it will use the same algorithm as the create
          * multipart upload request specifies */
-        if (aws_s3_message_util_assign_body(
-                allocator, buffer, message, NULL /* checksum_config */, NULL /* out_checksum */) == NULL) {
+        if (aws_s3_message_util_assign_body(allocator, buffer, message, NULL /*checksum_context*/) == NULL) {
             goto error_clean_up;
         }
 
@@ -628,7 +629,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *parts,
-    const struct checksum_config_storage *checksum_config) {
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
@@ -744,7 +745,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             }
 
             if (mpu_algorithm_checksum_name.len) {
-                struct aws_byte_cursor checksum = aws_byte_cursor_from_buf(&part->checksum_base64);
+                struct aws_byte_cursor checksum =
+                    aws_s3_upload_request_checksum_context_get_checksum_cursor(part->checksum_context);
 
                 if (aws_byte_buf_append_dynamic(body_buffer, &s_open_start_bracket)) {
                     goto error_clean_up;
@@ -779,8 +781,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
         AWS_LOGF_TRACE(
             AWS_LS_S3_GENERAL, "Payload for Complete MPU is:\n" PRInSTR "\n", AWS_BYTE_BUF_PRI(*body_buffer));
-        aws_s3_message_util_assign_body(
-            allocator, body_buffer, message, NULL /* checksum_config */, NULL /* out_checksum */);
+        aws_s3_message_util_assign_body(allocator, body_buffer, message, NULL);
     }
 
     return message;
@@ -835,36 +836,36 @@ error_clean_up:
 static int s_calculate_in_memory_checksum_helper(
     struct aws_allocator *allocator,
     struct aws_byte_cursor data,
-    const struct checksum_config_storage *checksum_config,
-    struct aws_byte_buf *out_checksum) {
-    AWS_ASSERT(checksum_config->checksum_algorithm != AWS_SCA_NONE);
-    AWS_ASSERT(out_checksum != NULL);
-    AWS_ZERO_STRUCT(*out_checksum);
+    struct aws_s3_upload_request_checksum_context *checksum_context) {
+    AWS_ASSERT(checksum_context);
+    if (checksum_context->checksum_calculated) {
+        return AWS_OP_SUCCESS;
+    }
 
     int ret_code = AWS_OP_ERR;
-    size_t digest_size = aws_get_digest_size_from_checksum_algorithm(checksum_config->checksum_algorithm);
-    size_t encoded_checksum_len = 0;
-    if (aws_base64_compute_encoded_len(digest_size, &encoded_checksum_len)) {
-        return AWS_OP_ERR;
-    }
-
-    aws_byte_buf_init(out_checksum, allocator, encoded_checksum_len);
-
+    /* Calculate checksum for output buffer only (no header/trailer) */
+    struct aws_byte_buf *output_buffer = aws_s3_upload_request_checksum_context_get_output_buffer(checksum_context);
     struct aws_byte_buf raw_checksum;
+    size_t digest_size = aws_get_digest_size_from_checksum_algorithm(checksum_context->algorithm);
     aws_byte_buf_init(&raw_checksum, allocator, digest_size);
 
-    if (aws_checksum_compute(allocator, checksum_config->checksum_algorithm, &data, &raw_checksum)) {
+    if (aws_checksum_compute(allocator, checksum_context->algorithm, &data, &raw_checksum)) {
+        aws_byte_buf_clean_up(&raw_checksum);
         goto done;
     }
+
     struct aws_byte_cursor raw_checksum_cursor = aws_byte_cursor_from_buf(&raw_checksum);
-    if (aws_base64_encode(&raw_checksum_cursor, out_checksum)) {
+    if (aws_base64_encode(&raw_checksum_cursor, output_buffer)) {
+        aws_byte_buf_clean_up(&raw_checksum);
         goto done;
     }
+    aws_byte_buf_clean_up(&raw_checksum);
+    checksum_context->checksum_calculated = true;
 
     ret_code = AWS_OP_SUCCESS;
 done:
     if (ret_code) {
-        aws_byte_buf_clean_up(out_checksum);
+        aws_byte_buf_clean_up(output_buffer);
     }
     aws_byte_buf_clean_up(&raw_checksum);
     return ret_code;
@@ -878,29 +879,18 @@ done:
 static int s_calculate_and_add_checksum_to_header_helper(
     struct aws_allocator *allocator,
     struct aws_byte_cursor data,
-    const struct checksum_config_storage *checksum_config,
     struct aws_http_message *out_message,
-    struct aws_byte_buf *out_checksum) {
-    AWS_ASSERT(checksum_config->checksum_algorithm != AWS_SCA_NONE);
+    struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_ASSERT(out_message != NULL);
     int ret_code = AWS_OP_ERR;
-
-    struct aws_byte_buf local_encoded_checksum_buf;
-    struct aws_byte_buf *local_encoded_checksum;
-    if (out_checksum == NULL) {
-        local_encoded_checksum = &local_encoded_checksum_buf;
-    } else {
-        local_encoded_checksum = out_checksum;
-    }
-    AWS_ZERO_STRUCT(*local_encoded_checksum);
-    if (s_calculate_in_memory_checksum_helper(allocator, data, checksum_config, local_encoded_checksum)) {
+    if (s_calculate_in_memory_checksum_helper(allocator, data, checksum_context)) {
         goto done;
     }
 
     /* Add the encoded checksum to header. */
     const struct aws_byte_cursor header_name =
-        aws_get_http_header_name_from_checksum_algorithm(checksum_config->checksum_algorithm);
-    struct aws_byte_cursor encoded_checksum_val = aws_byte_cursor_from_buf(local_encoded_checksum);
+        aws_get_http_header_name_from_checksum_algorithm(checksum_context->algorithm);
+    struct aws_byte_cursor encoded_checksum_val = aws_byte_cursor_from_buf(&checksum_context->base64_checksum);
     struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
     if (aws_http_headers_set(headers, header_name, encoded_checksum_val)) {
         goto done;
@@ -908,11 +898,6 @@ static int s_calculate_and_add_checksum_to_header_helper(
 
     ret_code = AWS_OP_SUCCESS;
 done:
-    if (ret_code || out_checksum == NULL) {
-        /* In case of error happen or out_checksum is not set, clean up the encoded checksum. Otherwise, the caller will
-         * own the encoded checksum. */
-        aws_byte_buf_clean_up(local_encoded_checksum);
-    }
     return ret_code;
 }
 
@@ -921,8 +906,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
     struct aws_http_message *out_message,
-    const struct checksum_config_storage *checksum_config,
-    struct aws_byte_buf *out_checksum) {
+    struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
     AWS_PRECONDITION(byte_buf);
@@ -942,8 +926,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         goto error_clean_up;
     }
 
-    if (checksum_config) {
-        if (checksum_config->location == AWS_SCL_TRAILER) {
+    if (checksum_context && checksum_context->algorithm != AWS_SCA_NONE) {
+        if (aws_s3_upload_request_checksum_context_should_add_trailer(checksum_context)) {
             /* aws-chunked encode the payload and add related headers */
 
             /* set Content-Encoding header. If the header already exists, append the existing value to aws-chunked
@@ -975,7 +959,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             if (aws_http_headers_set(
                     headers,
                     g_trailer_header_name,
-                    aws_get_http_header_name_from_checksum_algorithm(checksum_config->checksum_algorithm))) {
+                    aws_get_http_header_name_from_checksum_algorithm(checksum_context->algorithm))) {
                 goto error_clean_up;
             }
             /* set x-amz-decoded-content-length header */
@@ -991,28 +975,28 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
                 goto error_clean_up;
             }
             /* set input stream to chunk stream */
-            struct aws_input_stream *chunk_stream =
-                aws_chunk_stream_new(allocator, input_stream, checksum_config->checksum_algorithm, out_checksum);
+            struct aws_input_stream *chunk_stream = aws_chunk_stream_new(allocator, input_stream, checksum_context);
             if (!chunk_stream) {
                 goto error_clean_up;
             }
             aws_input_stream_release(input_stream);
             input_stream = chunk_stream;
-        } else if (checksum_config->location == AWS_SCL_HEADER) {
+        } else if (aws_s3_upload_request_checksum_context_should_add_header(checksum_context)) {
             /* Calculate the checksum directly from memory and add it to the header. */
             if (s_calculate_and_add_checksum_to_header_helper(
-                    allocator, buffer_byte_cursor, checksum_config, out_message, out_checksum)) {
+                    allocator, buffer_byte_cursor, out_message, checksum_context)) {
                 goto error_clean_up;
             }
-
-        } else if (checksum_config->checksum_algorithm != AWS_SCA_NONE && out_checksum != NULL) {
+        } else if (aws_s3_upload_request_checksum_context_should_calculate(checksum_context)) {
             /* In case checksums still wanted, and we can calculate it directly from the buffer in memory to
              * out_checksum */
-            if (s_calculate_in_memory_checksum_helper(allocator, buffer_byte_cursor, checksum_config, out_checksum)) {
+            if (s_calculate_in_memory_checksum_helper(allocator, buffer_byte_cursor, checksum_context)) {
                 goto error_clean_up;
             }
         }
     }
+
+    /* Set content-length header */
     int64_t stream_length = 0;
     if (aws_input_stream_get_length(input_stream, &stream_length)) {
         goto error_clean_up;

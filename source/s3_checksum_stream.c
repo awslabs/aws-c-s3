@@ -122,9 +122,10 @@ struct aws_input_stream *aws_checksum_stream_new(
     enum aws_s3_checksum_algorithm algorithm,
     struct aws_byte_buf *checksum_output) {
     AWS_PRECONDITION(existing_stream);
+    AWS_PRECONDITION(checksum_output);
+    AWS_PRECONDITION(checksum_output->len == 0 && "Checksum output buffer is not empty");
 
     struct aws_checksum_stream *impl = aws_mem_calloc(allocator, 1, sizeof(struct aws_checksum_stream));
-
     impl->allocator = allocator;
     impl->base.vtable = &s_aws_input_checksum_stream_vtable;
 

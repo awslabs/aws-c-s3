@@ -1,4 +1,5 @@
 #include "aws/s3/private/s3_default_meta_request.h"
+#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
@@ -352,12 +353,14 @@ static void s_s3_default_prepare_request_finish(
         meta_request_default->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART || request->request_body.len > 0) {
         /* Only PUT Object and Upload part support trailing checksum, that needs the special encoding even if the body
          * has 0 length. */
-        aws_s3_message_util_assign_body(
-            meta_request->allocator,
-            &request->request_body,
-            message,
-            &meta_request->checksum_config,
-            NULL /* out_checksum */);
+        /* Create checksum context from config if needed */
+        struct aws_s3_upload_request_checksum_context *checksum_context =
+            aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+
+        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, checksum_context);
+
+        /* Release the context reference */
+        aws_s3_upload_request_checksum_context_release(checksum_context);
     }
     aws_s3_request_setup_send_data(request, message);
 
