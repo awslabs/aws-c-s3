@@ -70,6 +70,26 @@ struct aws_s3_request_metrics {
         /* The time duration for the request from start signing to finish signing (sign_end_timestamp_ns -
          * sign_start_timestamp_ns). When sign_end_timestamp_ns is 0, means data not available. */
         int64_t signing_duration_ns;
+
+        /* The time stamp when the request started to acquire memory. -1 means data not
+         * available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t mem_acquire_start_timestamp_ns;
+        /* The time stamp when the response to acquire memory. -1 means data not
+         * available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t mem_acquire_end_timestamp_ns;
+        /* The time duration for the request from start mem acquire to finish mem acquire (mem_acquire_end_timestamp_ns
+         * - mem_acquire_start_timestamp_ns). When sign_end_timestamp_ns is 0, means data not available. */
+        int64_t mem_acquire_duration_ns;
+
+        /* The time stamp when the request started to be delivered (i.e. on body callback is invoked or write to file
+         * initiated). -1 means data not available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t deliver_start_timestamp_ns;
+        /* The time stamp when the response finished to be delivered. -1 means data not
+         * available. Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t deliver_end_timestamp_ns;
+        /* The time duration for the request from start of delivery to finish of delivery (deliver_end_timestamp_ns -
+         * deliver_start_timestamp_ns). When deliver_duration_ns is 0, means data not available. */
+        int64_t deliver_duration_ns;
     } time_metrics;
 
     struct {

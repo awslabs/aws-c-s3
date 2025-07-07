@@ -1933,6 +1933,11 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         }
                     }
                     if (error_code == AWS_ERROR_SUCCESS) {
+                        if (request->send_data.metrics) {
+                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
+                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_start_timestamp_ns);
+                        }
+
                         if (meta_request->recv_file) {
                             /* Write the data directly to the file. No need to seek, since the event will always be
                              * delivered with the right order. */
@@ -1977,6 +1982,14 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                 (void *)meta_request,
                                 error_code,
                                 aws_error_str(error_code));
+                        }
+
+                        if (request->send_data.metrics) {
+                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
+                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_end_timestamp_ns);
+                            AWS_ASSERT(metric->time_metrics.deliver_start_timestamp_ns != 0);
+                            metric->time_metrics.deliver_duration_ns = metric->time_metrics.deliver_end_timestamp_ns -
+                                                                       metric->time_metrics.deliver_start_timestamp_ns;
                         }
                     }
                 }
