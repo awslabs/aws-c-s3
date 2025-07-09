@@ -1021,7 +1021,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             /* Not the first time preparing request (e.g. retry).
              * We can skip over the async steps that read the body stream */
             /* Seek back to beginning of the stream. */
-            aws_s3_part_streaming_input_stream_reset(request->request_stream);
+            aws_s3_mmap_part_streaming_input_stream_reset(request->request_stream);
             s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
         }
     } else if (request->num_times_prepared == 0) {

@@ -526,7 +526,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     }
     aws_string_destroy(meta_request->recv_filepath);
     aws_string_destroy(meta_request->send_filepath);
-    aws_mmap_context_release(&meta_request->send_file_mmap_context);
+    aws_mmap_context_release(meta_request->send_file_mmap_context);
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {

@@ -315,7 +315,6 @@ static int s_aws_s3_mmap_part_streaming_input_stream_get_length(struct aws_input
 
 static void s_aws_s3_mmap_part_streaming_input_stream_destroy(
     struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream) {
-    aws_mmap_context_release(mmap_input_stream->mmap_context);
     aws_mem_release(mmap_input_stream->allocator, mmap_input_stream);
 }
 
@@ -350,7 +349,6 @@ struct aws_input_stream *aws_input_stream_new_from_mmap_context(
     mmap_input_stream->total_length = request_body_size;
     mmap_input_stream->offset = offset;
     mmap_input_stream->length_read = 0;
-    mmap_input_stream->mmap_context = aws_mmap_context_acquire(mmap_context);
-
+    mmap_input_stream->mmap_context = mmap_context;
     return &mmap_input_stream->base;
 }
