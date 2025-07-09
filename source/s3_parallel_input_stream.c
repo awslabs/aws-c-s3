@@ -4,6 +4,7 @@
  */
 
 #include "aws/s3/private/s3_parallel_input_stream.h"
+#include "aws/s3/private/aws_mmap.h"
 
 #include <aws/common/file.h>
 
@@ -139,10 +140,7 @@ error:
     return NULL;
 }
 
-const char *aws_parallel_input_stream_get_file_path(struct aws_parallel_input_stream *stream) {
-    struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
-    return aws_string_c_str(impl->file_path);
-}
+/****************** Open the file descriptor every time ***************************/
 
 struct aws_s3_part_streaming_input_stream_impl {
     struct aws_input_stream base;
@@ -157,10 +155,10 @@ static int s_aws_s3_part_streaming_input_stream_seek(
     struct aws_input_stream *stream,
     int64_t offset,
     enum aws_stream_seek_basis basis) {
-    struct aws_s3_part_streaming_input_stream_impl *test_input_stream =
-        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
-    aws_input_stream_seek(test_input_stream->base_stream, offset + test_input_stream->offset, basis);
-    return AWS_OP_ERR;
+    (void)stream;
+    (void)offset;
+    (void)basis;
+    return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
 }
 
 static int s_aws_s3_part_streaming_input_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
@@ -244,4 +242,115 @@ struct aws_input_stream *aws_input_stream_new_from_parallel(
     aws_input_stream_seek(test_input_stream->base_stream, offset, AWS_SSB_BEGIN);
 
     return &test_input_stream->base;
+}
+
+/****************** Take mmap context ***************************/
+
+struct aws_s3_mmap_part_streaming_input_stream_impl {
+    struct aws_input_stream base;
+    struct aws_allocator *allocator;
+
+    struct aws_mmap_context *mmap_context;
+    size_t offset;
+    size_t total_length;
+    size_t length_read;
+};
+
+static int s_aws_s3_mmap_part_streaming_input_stream_seek(
+    struct aws_input_stream *stream,
+    int64_t offset,
+    enum aws_stream_seek_basis basis) {
+    (void)stream;
+    (void)offset;
+    (void)basis;
+    return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+}
+
+static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
+    struct aws_s3_mmap_part_streaming_input_stream_impl *test_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
+    /* Map the content */
+    void *out_start_addr = NULL;
+    size_t read_length =
+        aws_min_size(dest->capacity - dest->len, test_input_stream->total_length - test_input_stream->length_read);
+
+    void *content = aws_mmap_context_map_content(
+        test_input_stream->mmap_context,
+        read_length,
+        test_input_stream->offset + test_input_stream->length_read,
+        &out_start_addr);
+
+    test_input_stream->length_read += read_length;
+    AWS_FATAL_ASSERT(test_input_stream->length_read <= test_input_stream->total_length);
+    struct aws_byte_cursor content_cursor = aws_byte_cursor_from_array((const uint8_t *)content, read_length);
+    int rt = aws_byte_buf_append(dest, &content_cursor);
+    /* Release the content */
+    rt |= aws_mmap_context_unmap_content(out_start_addr, read_length);
+
+    return rt;
+}
+
+static int s_aws_s3_mmap_part_streaming_input_stream_get_status(
+    struct aws_input_stream *stream,
+    struct aws_stream_status *status) {
+    (void)stream;
+    (void)status;
+
+    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
+
+    status->is_end_of_stream = mmap_input_stream->length_read == mmap_input_stream->total_length;
+    status->is_valid = true;
+
+    return AWS_OP_SUCCESS;
+}
+
+static int s_aws_s3_mmap_part_streaming_input_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
+    AWS_ASSERT(stream != NULL);
+    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
+    *out_length = (int64_t)mmap_input_stream->total_length;
+    return AWS_OP_SUCCESS;
+}
+
+static void s_aws_s3_mmap_part_streaming_input_stream_destroy(
+    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream) {
+    aws_mmap_context_release(mmap_input_stream->mmap_context);
+    aws_mem_release(mmap_input_stream->allocator, mmap_input_stream);
+}
+
+static struct aws_input_stream_vtable s_aws_s3_mmap_part_streaming_input_stream_vtable = {
+    .seek = s_aws_s3_mmap_part_streaming_input_stream_seek,
+    .read = s_aws_s3_mmap_part_streaming_input_stream_read,
+    .get_status = s_aws_s3_mmap_part_streaming_input_stream_get_status,
+    .get_length = s_aws_s3_mmap_part_streaming_input_stream_get_length,
+};
+
+void aws_s3_mmap_part_streaming_input_stream_reset(struct aws_input_stream *stream) {
+    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+        AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
+    mmap_input_stream->length_read = 0;
+}
+
+struct aws_input_stream *aws_input_stream_new_from_mmap_context(
+    struct aws_allocator *allocator,
+    struct aws_mmap_context *mmap_context,
+    uint64_t offset,
+    size_t request_body_size) {
+
+    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_part_streaming_input_stream_impl));
+    aws_ref_count_init(
+        &mmap_input_stream->base.ref_count,
+        mmap_input_stream,
+        (aws_simple_completion_callback *)s_aws_s3_mmap_part_streaming_input_stream_destroy);
+    mmap_input_stream->allocator = allocator;
+    mmap_input_stream->base.vtable = &s_aws_s3_mmap_part_streaming_input_stream_vtable;
+
+    mmap_input_stream->total_length = request_body_size;
+    mmap_input_stream->offset = offset;
+    mmap_input_stream->length_read = 0;
+    mmap_input_stream->mmap_context = aws_mmap_context_acquire(mmap_context);
+
+    return &mmap_input_stream->base;
 }

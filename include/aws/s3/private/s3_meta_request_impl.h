@@ -25,6 +25,7 @@ struct aws_s3_request;
 struct aws_http_headers;
 struct aws_http_make_request_options;
 struct aws_retry_strategy;
+struct aws_mmap_context;
 
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
@@ -283,6 +284,10 @@ struct aws_s3_meta_request {
 
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
+
+    /* The sending file context */
+    struct aws_string *send_filepath;
+    struct aws_mmap_context *send_file_mmap_context;
 
     /* The receiving file handler */
     FILE *recv_file;

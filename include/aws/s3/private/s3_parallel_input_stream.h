@@ -17,6 +17,7 @@ struct aws_future_bool;
 struct aws_input_stream;
 
 struct aws_event_loop_group;
+struct aws_mmap_context;
 
 struct aws_parallel_input_stream {
     const struct aws_parallel_input_stream_vtable *vtable;
@@ -99,13 +100,21 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name);
 
-const char *aws_parallel_input_stream_get_file_path(struct aws_parallel_input_stream *stream);
+/****************** Open the file descriptor every time ***************************/
 struct aws_input_stream *aws_input_stream_new_from_parallel(
     struct aws_allocator *allocator,
     struct aws_parallel_input_stream *parallel_stream,
     uint64_t offset,
     size_t request_body_size);
 void aws_s3_part_streaming_input_stream_reset(struct aws_input_stream *stream);
+
+/****************** Take mmap context ***************************/
+struct aws_input_stream *aws_input_stream_new_from_mmap_context(
+    struct aws_allocator *allocator,
+    struct aws_mmap_context *mmap_context,
+    uint64_t offset,
+    size_t request_body_size);
+void aws_s3_mmap_part_streaming_input_stream_reset(struct aws_input_stream *stream);
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
