@@ -254,6 +254,9 @@ struct aws_s3_mmap_part_streaming_input_stream_impl {
     size_t offset;
     size_t total_length;
     size_t length_read;
+
+    void *content;
+    void *page_address;
 };
 
 static int s_aws_s3_mmap_part_streaming_input_stream_seek(
@@ -274,18 +277,12 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     size_t read_length =
         aws_min_size(dest->capacity - dest->len, test_input_stream->total_length - test_input_stream->length_read);
 
-    void *content = aws_mmap_context_map_content(
-        test_input_stream->mmap_context,
-        read_length,
-        test_input_stream->offset + test_input_stream->length_read,
-        &out_start_addr);
-
+    struct aws_byte_cursor content_cursor = aws_byte_cursor_from_array(
+        (const uint8_t *)test_input_stream->content + test_input_stream->length_read, read_length);
     test_input_stream->length_read += read_length;
     AWS_FATAL_ASSERT(test_input_stream->length_read <= test_input_stream->total_length);
-    struct aws_byte_cursor content_cursor = aws_byte_cursor_from_array((const uint8_t *)content, read_length);
+
     int rt = aws_byte_buf_append(dest, &content_cursor);
-    /* Release the content */
-    rt |= aws_mmap_context_unmap_content(out_start_addr, read_length);
 
     return rt;
 }
@@ -315,6 +312,8 @@ static int s_aws_s3_mmap_part_streaming_input_stream_get_length(struct aws_input
 
 static void s_aws_s3_mmap_part_streaming_input_stream_destroy(
     struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream) {
+    aws_mmap_context_unmap_content(mmap_input_stream->page_address, mmap_input_stream->total_length);
+    aws_mmap_context_release(mmap_input_stream->mmap_context);
     aws_mem_release(mmap_input_stream->allocator, mmap_input_stream);
 }
 
@@ -338,7 +337,7 @@ struct aws_input_stream *aws_input_stream_new_from_mmap_context(
     size_t request_body_size) {
 
     struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_part_streaming_input_stream_impl));
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mmap_part_streaming_input_stream_impl));
     aws_ref_count_init(
         &mmap_input_stream->base.ref_count,
         mmap_input_stream,
@@ -349,6 +348,17 @@ struct aws_input_stream *aws_input_stream_new_from_mmap_context(
     mmap_input_stream->total_length = request_body_size;
     mmap_input_stream->offset = offset;
     mmap_input_stream->length_read = 0;
-    mmap_input_stream->mmap_context = mmap_context;
+    mmap_input_stream->mmap_context = aws_mmap_context_acquire(mmap_context);
+
+    mmap_input_stream->content = aws_mmap_context_map_content(
+        mmap_input_stream->mmap_context,
+        mmap_input_stream->total_length,
+        mmap_input_stream->offset + mmap_input_stream->length_read,
+        &mmap_input_stream->page_address);
+    if (mmap_input_stream->content == NULL) {
+        printf("Failed to map the content\n");
+        s_aws_s3_mmap_part_streaming_input_stream_destroy(mmap_input_stream);
+        return NULL;
+    }
     return &mmap_input_stream->base;
 }

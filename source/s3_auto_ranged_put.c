@@ -999,8 +999,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
                     aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
                 }
                 /* Add part to array-list */
-                struct aws_s3_mpu_part_info *part =
-                    aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
+                struct aws_s3_mpu_part_info *part = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mpu_part_info));
                 part->size = request->request_body.len;
                 aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
             }
