@@ -251,17 +251,42 @@ int aws_mmap_context_unmap_content(void *mapped_addr, size_t len) {
     if (!mapped_addr) {
         return AWS_OP_SUCCESS;
     }
-    if (munmap(mapped_addr, len)) {
-        /**
-         * Remove any mappings for those entire pages containing any part of the address space of the process starting
-         * at addr and continuing for len bytes.
-         *
-         * So, even if the len is not the exact match of the length of bytes we mapped, we will still free the number of
-         * pages we allocated.
-         **/
-        int error_code = errno;
-        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to unmap memory with error code %d", error_code);
-        return aws_translate_and_raise_io_error(error_code);
+    long page_size = sysconf(_SC_PAGE_SIZE);
+    if (len > page_size) {
+        size_t repeat = len / page_size;
+        size_t reminder = len % page_size;
+        for (size_t i = 0; i < repeat; i++) {
+            if (munmap(mapped_addr + (i * page_size), page_size)) {
+                int error_code = errno;
+                AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to unmap memory with error code %d", error_code);
+                return aws_translate_and_raise_io_error(error_code);
+            }
+        }
+        if (reminder && (mapped_addr + repeat * page_size, reminder)) {
+            /**
+             * Remove any mappings for those entire pages containing any part of the address space of the process
+             *starting at addr and continuing for len bytes.
+             *
+             * So, even if the len is not the exact match of the length of bytes we mapped, we will still free the
+             *number of pages we allocated.
+             **/
+            int error_code = errno;
+            AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to unmap memory with error code %d", error_code);
+            return aws_translate_and_raise_io_error(error_code);
+        }
+    } else {
+        if (munmap(mapped_addr, len)) {
+            /**
+             * Remove any mappings for those entire pages containing any part of the address space of the process
+             *starting at addr and continuing for len bytes.
+             *
+             * So, even if the len is not the exact match of the length of bytes we mapped, we will still free the
+             *number of pages we allocated.
+             **/
+            int error_code = errno;
+            AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to unmap memory with error code %d", error_code);
+            return aws_translate_and_raise_io_error(error_code);
+        }
     }
     return AWS_OP_SUCCESS;
 }
