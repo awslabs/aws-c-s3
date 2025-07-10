@@ -61,6 +61,7 @@ AWS_S3_API void *aws_mmap_context_map_content(
  * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on error.
  **/
 AWS_S3_API int aws_mmap_context_unmap_content(void *mapped_addr, size_t len);
+AWS_S3_API int aws_mmap_context_get_fd(struct aws_mmap_context *context);
 
 AWS_EXTERN_C_END
 #endif /* AWS_MMAP_H */

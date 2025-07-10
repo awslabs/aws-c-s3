@@ -247,6 +247,12 @@ error:
     return NULL;
 }
 
+int aws_mmap_context_get_fd(struct aws_mmap_context *context) {
+    AWS_PRECONDITION(context);
+    struct aws_mmap_context_posix_impl *impl = context->impl;
+    return impl->fd;
+}
+
 int aws_mmap_context_unmap_content(void *mapped_addr, size_t len) {
     if (!mapped_addr) {
         return AWS_OP_SUCCESS;
