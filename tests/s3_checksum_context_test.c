@@ -64,7 +64,8 @@ static int s_test_upload_request_checksum_context_get_checksum_cursor(struct aws
 
     /* Test get checksum cursor with context that has calculated checksum */
     struct aws_byte_cursor existing_checksum = aws_byte_cursor_from_c_str("dGVzdA==");
-    context = aws_s3_upload_request_checksum_context_new_with_existing_checksum(allocator, &config, existing_checksum);
+    context =
+        aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(allocator, &config, existing_checksum);
     ASSERT_NOT_NULL(context);
 
     cursor = aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
@@ -98,7 +99,8 @@ static int s_test_upload_request_checksum_context_error_cases(struct aws_allocat
     /* Test creation with mismatched checksum size */
     struct aws_byte_cursor wrong_size_checksum = aws_byte_cursor_from_c_str("short");
     struct aws_s3_upload_request_checksum_context *context =
-        aws_s3_upload_request_checksum_context_new_with_existing_checksum(allocator, &config, wrong_size_checksum);
+        aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
+            allocator, &config, wrong_size_checksum);
     ASSERT_NULL(context);
 
     /* Test helper functions with NULL context */

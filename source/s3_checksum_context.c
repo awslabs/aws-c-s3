@@ -59,15 +59,15 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
     return context;
 }
 
-struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new_with_existing_checksum(
+struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
-    struct aws_byte_cursor existing_checksum) {
+    struct aws_byte_cursor existing_base64_checksum) {
     struct aws_s3_upload_request_checksum_context *context =
         s_s3_upload_request_checksum_context_new_base(allocator, checksum_config);
     if (context) {
         /* Initial the buffer for checksum from the exist checksum */
-        if (context->encoded_checksum_size != existing_checksum.len) {
+        if (context->encoded_checksum_size != existing_base64_checksum.len) {
             struct aws_byte_cursor algo_name = aws_get_checksum_algorithm_name(context->algorithm);
             AWS_LOGF_ERROR(
                 AWS_LS_S3_GENERAL,
@@ -75,11 +75,11 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
                 ": expected %zu bytes, got %zu bytes",
                 AWS_BYTE_CURSOR_PRI(algo_name),
                 context->encoded_checksum_size,
-                existing_checksum.len);
+                existing_base64_checksum.len);
             aws_s3_upload_request_checksum_context_release(context);
             return NULL;
         }
-        aws_byte_buf_init_copy_from_cursor(&context->base64_checksum, allocator, existing_checksum);
+        aws_byte_buf_init_copy_from_cursor(&context->base64_checksum, allocator, existing_base64_checksum);
         context->checksum_calculated = true;
     }
     return context;

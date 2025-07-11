@@ -155,7 +155,7 @@ static int s_process_part_info_synced(const struct aws_s3_part_info *info, void 
 
     if ((checksum_cur != NULL) && (checksum_cur->len > 0)) {
         /* Create checksum context with pre-calculated checksum */
-        part->checksum_context = aws_s3_upload_request_checksum_context_new_with_existing_checksum(
+        part->checksum_context = aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
             auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config, *checksum_cur);
     } else {
         part->checksum_context = aws_s3_upload_request_checksum_context_new(

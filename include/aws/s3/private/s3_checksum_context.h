@@ -51,20 +51,20 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
     const struct aws_s3_meta_request_checksum_config_storage *checksum_config);
 
 /**
- * Create a new upload request checksum context with an existing checksum value.
+ * Create a new upload request checksum context with an existing base64 encoded checksum value.
  * This is useful when resuming uploads or when the checksum is pre-calculated.
  * Returns with reference count of 1.
  *
  * @param allocator Memory allocator
  * @param checksum_config Meta request level checksum configuration (can be NULL)
- * @param existing_checksum Pre-calculated checksum value as a byte cursor
+ * @param existing_base64_checksum Pre-calculated checksum value as a byte cursor
  * @return New checksum context or NULL on error (e.g., if checksum size doesn't match algorithm)
  */
 AWS_S3_API
-struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new_with_existing_checksum(
+struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
-    struct aws_byte_cursor existing_checksum);
+    struct aws_byte_cursor existing_base64_checksum);
 
 /**
  * Acquire a reference to the upload request checksum context.
