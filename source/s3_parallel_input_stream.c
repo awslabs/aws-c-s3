@@ -377,7 +377,7 @@ struct aws_input_stream *aws_input_stream_new_from_mmap_context(
     size_t request_body_size) {
 
     struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_part_streaming_input_stream_impl));
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mmap_part_streaming_input_stream_impl));
     aws_ref_count_init(
         &mmap_input_stream->base.ref_count,
         mmap_input_stream,
