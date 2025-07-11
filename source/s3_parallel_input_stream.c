@@ -265,7 +265,7 @@ struct aws_s3_mmap_part_streaming_input_stream_impl {
     struct aws_mmap_context *mmap_context;
     size_t offset;
 
-    long page_size;
+    size_t load_size;
     void *page_address;
     int page_offset;
     size_t page_load_length;
@@ -294,9 +294,9 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
 
     if (test_input_stream->page_offset == -1) {
         test_input_stream->page_load_length = aws_min_size(
-            test_input_stream->page_size, test_input_stream->total_length - test_input_stream->length_read);
+            test_input_stream->load_size, test_input_stream->total_length - test_input_stream->length_read);
         size_t offset = test_input_stream->offset + test_input_stream->length_read;
-        long page_size = test_input_stream->page_size;
+        long page_size = sysconf(_SC_PAGE_SIZE);
         uint64_t number_pages = offset / page_size;
         uint64_t page_starts_offset = page_size * number_pages;
         uint64_t in_page_offset = offset - page_starts_offset;
@@ -311,9 +311,9 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         test_input_stream->page_address = mapped_data;
         test_input_stream->page_offset = in_page_offset;
     }
-    read_length = aws_min_size(read_length, test_input_stream->page_size - test_input_stream->page_offset);
-    struct aws_byte_cursor page_cursor =
-        aws_byte_cursor_from_array((const uint8_t *)test_input_stream->page_address, test_input_stream->page_size);
+    read_length = aws_min_size(read_length, test_input_stream->page_load_length - test_input_stream->page_offset);
+    struct aws_byte_cursor page_cursor = aws_byte_cursor_from_array(
+        (const uint8_t *)test_input_stream->page_address, test_input_stream->page_load_length);
     aws_byte_cursor_advance(&page_cursor, test_input_stream->page_offset);
     page_cursor.len = read_length;
     int rt = aws_byte_buf_append(dest, &page_cursor);
@@ -389,7 +389,7 @@ struct aws_input_stream *aws_input_stream_new_from_mmap_context(
     mmap_input_stream->offset = offset;
     mmap_input_stream->length_read = 0;
     mmap_input_stream->mmap_context = mmap_context;
-    mmap_input_stream->page_size = sysconf(_SC_PAGE_SIZE);
+    mmap_input_stream->load_size = 2 * 1024 * (size_t)sysconf(_SC_PAGE_SIZE);
     mmap_input_stream->page_address = NULL;
     mmap_input_stream->page_offset = -1;
     return &mmap_input_stream->base;
