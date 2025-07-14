@@ -257,7 +257,7 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
         switch (options->recv_file_option) {
             case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
-                meta_request->recv_file = aws_fopen_safe(meta_request->recv_filepath, "wb");
+                meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "wb");
                 break;
 
             case AWS_S3_RECV_FILE_CREATE_NEW:
@@ -269,11 +269,11 @@ int aws_s3_meta_request_init_base(
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
                     break;
                 } else {
-                    meta_request->recv_file = aws_fopen_safe(meta_request->recv_filepath, "wb");
+                    meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "wb");
                     break;
                 }
             case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
-                meta_request->recv_file = aws_fopen_safe(meta_request->recv_filepath, "ab");
+                meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "ab");
                 break;
             case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
                 if (!aws_path_exists(meta_request->recv_filepath)) {
@@ -284,7 +284,7 @@ int aws_s3_meta_request_init_base(
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
                     break;
                 } else {
-                    meta_request->recv_file = aws_fopen_safe(meta_request->recv_filepath, "r+");
+                    meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "r+");
                     if (meta_request->recv_file &&
                         aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
                         /* error out. */
@@ -310,7 +310,7 @@ int aws_s3_meta_request_init_base(
         meta_request->send_file_mmap_context = aws_mmap_context_new(allocator, meta_request->send_filepath);
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
-            client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
+            aws_parallel_input_stream_new_from_file(allocator, options->send_filepath, client->body_streaming_elg);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
@@ -2245,9 +2245,9 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     }
 
     /* If parallel-stream, simply call read(), which must fill the buffer and/or EOF */
-    if (meta_request->request_body_parallel_stream != NULL) {
-        return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
-    }
+    // if (meta_request->request_body_parallel_stream != NULL) {
+    //     return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
+    // }
 
     /* Further techniques are synchronous... */
     struct aws_future_bool *synchronous_read_future = aws_future_bool_new(meta_request->allocator);

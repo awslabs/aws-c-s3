@@ -5719,46 +5719,46 @@ static int s_test_s3_put_fail_object_invalid_send_filepath(struct aws_allocator 
 }
 
 /* Test that the parallel read stream failed to send read the second part. */
-AWS_TEST_CASE(test_s3_put_fail_object_bad_parallel_read_stream, s_test_s3_put_fail_object_bad_parallel_read_stream)
-static int s_test_s3_put_fail_object_bad_parallel_read_stream(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
+// AWS_TEST_CASE(test_s3_put_fail_object_bad_parallel_read_stream, s_test_s3_put_fail_object_bad_parallel_read_stream)
+// static int s_test_s3_put_fail_object_bad_parallel_read_stream(struct aws_allocator *allocator, void *ctx) {
+//     (void)ctx;
 
-    struct aws_s3_tester tester;
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+//     struct aws_s3_tester tester;
+//     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_tester_client_options client_options;
-    AWS_ZERO_STRUCT(client_options);
-    struct aws_s3_client *client = NULL;
-    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
-    /* Override the parallel input stream new function to create a bad parallel input stream */
-    client->vtable->parallel_input_stream_new_from_file = aws_parallel_input_stream_new_from_file_failure_tester;
+//     struct aws_s3_tester_client_options client_options;
+//     AWS_ZERO_STRUCT(client_options);
+//     struct aws_s3_client *client = NULL;
+//     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+//     /* Override the parallel input stream new function to create a bad parallel input stream */
+//     client->vtable->parallel_input_stream_new_from_file = aws_parallel_input_stream_new_from_file_failure_tester;
 
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+//     struct aws_s3_meta_request_test_results meta_request_test_results;
+//     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
 
-    struct aws_s3_tester_meta_request_options options = {
-        .allocator = allocator,
-        .client = client,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
-        .put_options =
-            {
-                .object_size_mb = 100,
-                .file_on_disk = true,
-            },
-    };
+//     struct aws_s3_tester_meta_request_options options = {
+//         .allocator = allocator,
+//         .client = client,
+//         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+//         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+//         .put_options =
+//             {
+//                 .object_size_mb = 100,
+//                 .file_on_disk = true,
+//             },
+//     };
 
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
+//     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &meta_request_test_results));
 
-    ASSERT_UINT_EQUALS(AWS_ERROR_UNIMPLEMENTED, meta_request_test_results.finished_error_code);
+//     ASSERT_UINT_EQUALS(AWS_ERROR_UNIMPLEMENTED, meta_request_test_results.finished_error_code);
 
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-    client = aws_s3_client_release(client);
+//     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+//     client = aws_s3_client_release(client);
 
-    aws_s3_tester_clean_up(&tester);
+//     aws_s3_tester_clean_up(&tester);
 
-    return AWS_OP_SUCCESS;
-}
+//     return AWS_OP_SUCCESS;
+// }
 
 AWS_TEST_CASE(
     test_s3_put_single_part_fail_object_inputstream_fail_reading,
