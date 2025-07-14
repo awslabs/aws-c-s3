@@ -389,6 +389,8 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
     aws_mem_release(buffer_pool->base_allocator, ticket);
     aws_mem_release(buffer_pool->base_allocator, ticket_wrapper);
 
+    struct aws_future_s3_buffer_ticket *pending_ticket_future = NULL;
+
     if (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
         struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
         struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
@@ -397,14 +399,15 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
         if (new_ticket != NULL) {
             struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(new_ticket);
-            aws_future_s3_buffer_ticket_set_result_by_move(pending_reserve->ticket_future, &new_ticket_wrapper);
-            aws_future_s3_buffer_ticket_release(pending_reserve->ticket_future);
+            pending_ticket_future = pending_reserve->ticket_future;
+            aws_future_s3_buffer_ticket_set_result_by_move(pending_ticket_future, &new_ticket_wrapper);
             aws_linked_list_pop_front(&buffer_pool->pending_reserves);
             aws_mem_release(buffer_pool->base_allocator, pending_reserve);
         }
     }
 
     aws_mutex_unlock(&buffer_pool->mutex);
+    aws_future_s3_buffer_ticket_release(pending_ticket_future);
 }
 
 struct aws_s3_default_buffer_ticket *s_try_reserve(
