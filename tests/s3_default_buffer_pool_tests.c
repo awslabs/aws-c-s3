@@ -274,10 +274,9 @@ static void s_on_pool_buffer_reserved_instant_release(void *user_data) {
     if (aws_future_s3_buffer_ticket_get_error(state->future) == AWS_OP_SUCCESS) {
         state->ticket = aws_future_s3_buffer_ticket_get_result_by_move(state->future);
     }
-    
+
     state->future = aws_future_s3_buffer_ticket_release(state->future);
 }
-
 
 /* release future in the callback right away to check for potential race conditions */
 static int s_test_s3_buffer_pool_reserve_over_limit_instant_release(struct aws_allocator *allocator, void *ctx) {
@@ -321,7 +320,9 @@ static int s_test_s3_buffer_pool_reserve_over_limit_instant_release(struct aws_a
 
     return 0;
 };
-AWS_TEST_CASE(test_s3_buffer_pool_reserve_over_limit_instant_release, s_test_s3_buffer_pool_reserve_over_limit_instant_release)
+AWS_TEST_CASE(
+    test_s3_buffer_pool_reserve_over_limit_instant_release,
+    s_test_s3_buffer_pool_reserve_over_limit_instant_release)
 
 static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
