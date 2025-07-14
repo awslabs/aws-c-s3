@@ -106,6 +106,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     if (actually_read == 0) {
         printf("############fread failed!");
     }
+    read_task->dest->len += actually_read;
 
     fclose(file_stream);
     struct aws_future_bool *end_future = read_task->end_future;
@@ -331,12 +332,14 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         impl->reading_chunk_buf = impl->loading_chunk_buf;
         impl->loading_chunk_buf = tmp;
         size_t new_offset = impl->offset + impl->total_length_read + impl->chunk_load_size;
+        size_t new_load_length = aws_min_size(
+            impl->chunk_load_size, impl->total_length - impl->total_length_read - impl->reading_chunk_buf->len);
         /* Kick off loading the next chunk. */
         impl->loading_future = aws_parallel_input_stream_read(
-            impl->stream, new_offset, new_offset + impl->chunk_load_size, impl->loading_chunk_buf);
+            impl->stream, new_offset, new_offset + new_load_length, impl->loading_chunk_buf);
         impl->in_chunk_offset = 0;
     }
-    read_length = aws_min_size(read_length, impl->chunk_load_size - impl->in_chunk_offset);
+    read_length = aws_min_size(read_length, impl->reading_chunk_buf->len - impl->in_chunk_offset);
     struct aws_byte_cursor chunk_cursor = aws_byte_cursor_from_buf(impl->reading_chunk_buf);
     aws_byte_cursor_advance(&chunk_cursor, impl->in_chunk_offset);
     chunk_cursor.len = read_length;
@@ -344,13 +347,13 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     impl->in_chunk_offset += read_length;
     impl->total_length_read += read_length;
 
-    if (impl->in_chunk_offset == impl->chunk_load_size) {
+    if (impl->in_chunk_offset == impl->reading_chunk_buf->len) {
         /* We finished reading the reading buffer, reset it. */
         aws_byte_buf_reset(impl->reading_chunk_buf, false);
         impl->in_chunk_offset = SIZE_MAX;
     }
 
-    return rt;
+    return AWS_OP_SUCCESS;
 }
 
 static int s_aws_s3_mmap_part_streaming_input_stream_get_status(
@@ -379,6 +382,8 @@ static int s_aws_s3_mmap_part_streaming_input_stream_get_length(struct aws_input
 static void s_aws_s3_mmap_part_streaming_input_stream_destroy(
     struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream) {
     aws_parallel_input_stream_release(mmap_input_stream->stream);
+    aws_byte_buf_clean_up(&mmap_input_stream->chunk_buf_1);
+    aws_byte_buf_clean_up(&mmap_input_stream->chunk_buf_2);
     aws_mem_release(mmap_input_stream->allocator, mmap_input_stream);
 }
 
@@ -421,11 +426,12 @@ struct aws_input_stream *aws_input_stream_new_from_mmap_context(
     aws_byte_buf_init(&mmap_input_stream->chunk_buf_2, allocator, mmap_input_stream->chunk_load_size);
 
     mmap_input_stream->loading_chunk_buf = &mmap_input_stream->chunk_buf_1;
-    mmap_input_stream->reading_chunk_buf = &mmap_input_stream->chunk_buf_1;
+    mmap_input_stream->reading_chunk_buf = &mmap_input_stream->chunk_buf_2;
+    size_t new_load_length = aws_min_size(mmap_input_stream->chunk_load_size, mmap_input_stream->total_length);
 
     /* Start to load into the loading buffer. */
-    mmap_input_stream->loading_future = aws_parallel_input_stream_read(
-        stream, offset, offset + mmap_input_stream->chunk_load_size, mmap_input_stream->loading_chunk_buf);
+    mmap_input_stream->loading_future =
+        aws_parallel_input_stream_read(stream, offset, offset + new_load_length, mmap_input_stream->loading_chunk_buf);
 
     return &mmap_input_stream->base;
 }
