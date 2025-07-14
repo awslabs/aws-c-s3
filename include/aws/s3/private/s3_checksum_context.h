@@ -111,7 +111,7 @@ bool aws_s3_upload_request_checksum_context_should_add_header(
     const struct aws_s3_upload_request_checksum_context *context);
 
 /**
- * Check if checksum should be added as trailer (chunked encoding).
+ * Check if checksum should be added as trailer (aws-chunked encoding).
  * Returns true if the context has a valid algorithm and the location is set to trailer.
  *
  * @param context The checksum context to check
@@ -133,7 +133,7 @@ struct aws_byte_buf *aws_s3_upload_request_checksum_context_get_output_buffer(
     struct aws_s3_upload_request_checksum_context *context);
 
 /**
- * Get a cursor to the current checksum value (for use in headers/trailers).
+ * Get a cursor to the current base64 encoded checksum value (for use in headers/trailers).
  * Returns an empty cursor if the checksum has not been calculated yet.
  *
  * @param context The checksum context

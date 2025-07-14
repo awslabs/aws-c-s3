@@ -161,7 +161,7 @@ static int s_process_part_info_synced(const struct aws_s3_part_info *info, void 
         part->checksum_context = aws_s3_upload_request_checksum_context_new(
             auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config);
     }
-    if (!part->checksum_context) {
+    if (part->checksum_context == NULL) {
         aws_mem_release(meta_request->allocator, part);
         return AWS_OP_ERR;
     }

@@ -87,31 +87,27 @@ struct aws_input_stream *aws_checksum_stream_new(
  * Creates a chunked encoding stream that wraps an existing stream and adds checksum trailers.
  *
  * This function creates a stream that:
- * 1. Encodes the input stream using HTTP chunked transfer encoding
+ * 1. Encodes the input stream wraps the existing_stream with aws-chunked encoded.
  * 2. Calculates a checksum of the stream content (if not already calculated)
- * 3. Appends the checksum as a trailer at the end of the chunked stream
- *
- * The output format follows HTTP chunked encoding with checksum trailers:
- * - For non-empty streams: [hex-length]\r\n[data]\r\n0\r\n[checksum-header]:[checksum-value]\r\n\r\n
- * - For empty streams: 0\r\n[checksum-header]:[checksum-value]\r\n\r\n
+ * 3. Appends the checksum as a trailer at the end of the aws-chunked stream
  *
  * Note: This stream does not support seeking operations, as seeking would prevent
  * accurate checksum calculation and corrupt the chunked encoding format.
  *
- * @param allocator Memory allocator to use for stream creation and internal buffers
- * @param existing_stream The input stream to be chunked and checksummed. This stream
- *                       will be acquired by the chunk stream and released when the
- *                       chunk stream is destroyed. Must not be NULL.
- * @param checksum_context Context containing checksum configuration and state. Must not be NULL.
- *                        The context contains:
- *                        - algorithm: The checksum algorithm to use (CRC32, CRC32C, etc.)
- *                        - base64_checksum: Buffer for the calculated checksum result
- *                        - checksum_calculated: Whether checksum is pre-calculated or needs calculation
- *                        - encoded_checksum_size: Expected size of the base64-encoded checksum
+ * @param allocator         Memory allocator to use for stream creation and internal buffers
+ * @param existing_stream   The input stream to be chunked and checksummed. This stream
+ *                          will be acquired by the chunk stream and released when the
+ *                          chunk stream is destroyed. Must not be NULL.
+ * @param checksum_context  Context containing checksum configuration and state. Must not be NULL.
+ *                          The context contains:
+ *                          - algorithm: The checksum algorithm to use (CRC32, CRC32C, etc.)
+ *                          - base64_checksum: Buffer for the calculated checksum result
+ *                          - checksum_calculated: Whether checksum is pre-calculated or needs calculation
+ *                          - encoded_checksum_size: Expected size of the base64-encoded checksum
  *
- *                        If checksum_calculated is false, the stream will wrap existing_stream
- *                        with a checksum stream to calculate the checksum during reading.
- *                        If checksum_calculated is true, the existing checksum value will be used.
+ *                          If checksum_calculated is false, the stream will wrap existing_stream
+ *                          with a checksum stream to calculate the checksum during reading.
+ *                          If checksum_calculated is true, the existing checksum value will be used.
  *
  * @return A new input stream that provides chunked encoding with checksum trailers,
  *         or NULL if creation fails. The returned stream must be released with
