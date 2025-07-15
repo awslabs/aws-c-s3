@@ -401,15 +401,17 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
     /* Capture all the pending reserves that are done (currently can only happen when request is canceled, which cancels
      * pending futures) */
-    while (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
-        struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
+    for (struct aws_linked_list_node *node = aws_linked_list_begin(&buffer_pool->pending_reserves);
+         node != aws_linked_list_end(&buffer_pool->pending_reserves);) {
         struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+        struct aws_linked_list_node *current_node = node;
+        node = aws_linked_list_next(node);
 
         if (aws_future_s3_buffer_ticket_is_done(pending_reserve->ticket_future)) {
             AWS_FATAL_ASSERT(aws_future_s3_buffer_ticket_get_error(pending_reserve->ticket_future) != AWS_OP_SUCCESS);
-            aws_linked_list_pop_front(&buffer_pool->pending_reserves);
+            aws_linked_list_remove(current_node);
 
-            aws_linked_list_push_back(&pending_nodes_to_remove, node);
+            aws_linked_list_push_back(&pending_nodes_to_remove, current_node);
         }
     }
 
