@@ -287,7 +287,6 @@ struct aws_s3_meta_request {
 
     /* The sending file context */
     struct aws_string *send_filepath;
-    struct aws_mmap_context *send_file_mmap_context;
 
     /* The receiving file handler */
     FILE *recv_file;

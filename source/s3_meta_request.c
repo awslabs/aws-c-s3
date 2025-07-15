@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/aws_mmap.h"
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_checksums.h"
@@ -257,7 +256,7 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
         switch (options->recv_file_option) {
             case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
-                meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "wb");
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                 break;
 
             case AWS_S3_RECV_FILE_CREATE_NEW:
@@ -269,11 +268,11 @@ int aws_s3_meta_request_init_base(
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
                     break;
                 } else {
-                    meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "wb");
+                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                     break;
                 }
             case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
-                meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "ab");
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
                 break;
             case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
                 if (!aws_path_exists(meta_request->recv_filepath)) {
@@ -284,7 +283,7 @@ int aws_s3_meta_request_init_base(
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
                     break;
                 } else {
-                    meta_request->recv_file = aws_fopen(meta_request->recv_filepath, "r+");
+                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
                     if (meta_request->recv_file &&
                         aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
                         /* error out. */
@@ -307,7 +306,6 @@ int aws_s3_meta_request_init_base(
      * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
         meta_request->send_filepath = aws_string_new_from_cursor(allocator, &options->send_filepath);
-        meta_request->send_file_mmap_context = aws_mmap_context_new(allocator, meta_request->send_filepath);
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
             aws_parallel_input_stream_new_from_file(allocator, options->send_filepath, client->body_streaming_elg);
@@ -526,7 +524,6 @@ static void s_s3_meta_request_destroy(void *user_data) {
     }
     aws_string_destroy(meta_request->recv_filepath);
     aws_string_destroy(meta_request->send_filepath);
-    aws_mmap_context_release(meta_request->send_file_mmap_context);
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {

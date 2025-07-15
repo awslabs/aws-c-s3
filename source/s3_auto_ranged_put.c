@@ -979,7 +979,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         if (request->num_times_prepared == 0) {
             uint64_t offset = 0;
             size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-            request->request_stream = aws_input_stream_new_from_mmap_context(
+            request->request_stream = aws_input_stream_new_from_parallel_stream(
                 allocator, meta_request->request_body_parallel_stream, offset, request_body_size);
             request->content_length = request_body_size;
             struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
@@ -1021,7 +1021,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             /* Not the first time preparing request (e.g. retry).
              * We can skip over the async steps that read the body stream */
             /* Seek back to beginning of the stream. */
-            aws_s3_mmap_part_streaming_input_stream_reset(request->request_stream);
+            aws_streaming_input_stream_reset(request->request_stream);
             s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
         }
     } else if (request->num_times_prepared == 0) {

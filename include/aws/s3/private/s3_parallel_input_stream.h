@@ -35,17 +35,11 @@ struct aws_parallel_input_stream_vtable {
     /**
      * Read into the buffer in parallel.
      * The stream will split into parts and read each part in parallel.
-     *
-     * TODO: error handling:
-     * - The stream reach end before all parts
-     * - Failed to create a elg task to read
-     * - Asyc related stuff as the original async stream (If we cannot fill the dest, we wait?)
-     * - etc.
      */
     struct aws_future_bool *(*read)(
         struct aws_parallel_input_stream *stream,
-        size_t start_position,
-        size_t end_position,
+        size_t offset,
+        size_t length,
         struct aws_byte_buf *dest);
 };
 
@@ -78,42 +72,64 @@ AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_parallel_input_stream *stream);
 
 /**
+ * Read data from the stream into the destination buffer.
  *
- * @param stream
- * @param start_position
- * @param end_position
- * @param dest
- * @param split_num
- * @return AWS_S3_API struct*
+ * @param stream The parallel input stream to read from
+ * @param offset The starting offset in the stream to read from
+ * @param length The number of bytes to read
+ * @param dest The destination buffer to read into
+ * @return A future that will be set to true when the read completes successfully,
+ *         or set to an error if the read fails
  */
 AWS_S3_API
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
-    size_t start_position,
-    size_t end_position,
+    size_t offset,
+    size_t length,
     struct aws_byte_buf *dest);
 
+/**
+ * Creates a new parallel input stream that reads from a file.
+ * This stream uses an event loop group to perform file I/O operations asynchronously.
+ *
+ * @param allocator The allocator to use for memory allocation
+ * @param file_name The name of the file to read from
+ * @param reading_elg The event loop group to use for file I/O operations
+ * @return A new parallel input stream that reads from the specified file
+ */
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
     struct aws_event_loop_group *reading_elg);
 
-/****************** Open the file descriptor every time ***************************/
-struct aws_input_stream *aws_input_stream_new_from_parallel(
-    struct aws_allocator *allocator,
-    struct aws_parallel_input_stream *parallel_stream,
-    uint64_t offset,
-    size_t request_body_size);
-void aws_s3_part_streaming_input_stream_reset(struct aws_input_stream *stream);
+/****************** Adapters to convert parallel input stream to standard input stream ***************************/
 
-/****************** Take mmap context ***************************/
-struct aws_input_stream *aws_input_stream_new_from_mmap_context(
+/**
+ * Creates a new streaming input stream that reads from a parallel input stream.
+ * This adapter allows using a parallel input stream with APIs that expect a standard input stream.
+ * The adapter uses double-buffering to read ahead and provide efficient streaming.
+ *
+ * @param allocator The allocator to use for memory allocation
+ * @param stream The parallel input stream to read from
+ * @param offset The starting offset in the stream
+ * @param request_body_size The total size to read
+ * @return A new input stream that reads from the parallel input stream
+ */
+struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     struct aws_allocator *allocator,
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
     size_t request_body_size);
-void aws_s3_mmap_part_streaming_input_stream_reset(struct aws_input_stream *stream);
+
+/**
+ * Resets the streaming input stream to start reading from the beginning again.
+ * This allows reusing the same stream for multiple read operations.
+ *
+ * @param stream The streaming input stream to reset
+ */
+void aws_streaming_input_stream_reset(struct aws_input_stream *stream);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
