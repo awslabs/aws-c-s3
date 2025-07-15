@@ -657,13 +657,12 @@ static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT
 static const struct aws_byte_cursor s_complete_payload_end =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</CompleteMultipartUpload>");
 
-static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
-    "    <Part>\n"
-    "        <ETag>");
+static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
+                                                                                                    "        <ETag>");
 
-static const struct aws_byte_cursor s_part_section_string_1 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
-    "</ETag>\n"
-    "         <PartNumber>");
+static const struct aws_byte_cursor s_part_section_string_1 =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag>\n"
+                                          "         <PartNumber>");
 
 static const struct aws_byte_cursor s_close_part_number_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n");
 static const struct aws_byte_cursor s_close_part_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    </Part>\n");

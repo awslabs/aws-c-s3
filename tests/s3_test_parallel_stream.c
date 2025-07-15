@@ -14,7 +14,7 @@ struct aws_parallel_input_stream_from_file_failure_impl {
 };
 
 static void s_para_from_file_failure_destroy(struct aws_parallel_input_stream *stream) {
-    struct aws_parallel_input_stream_from_file_failure_impl *impl = 
+    struct aws_parallel_input_stream_from_file_failure_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_failure_impl, base);
 
     aws_mem_release(stream->alloc, impl);
@@ -25,14 +25,14 @@ struct aws_future_bool *s_para_from_file_failure_read(
     uint64_t offset,
     size_t max_length,
     struct aws_byte_buf *dest) {
-    
+
     (void)offset;
     (void)max_length;
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
-    struct aws_parallel_input_stream_from_file_failure_impl *impl = 
+    struct aws_parallel_input_stream_from_file_failure_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_failure_impl, base);
-        
+
     size_t previous_number_read = aws_atomic_fetch_add(&impl->number_read, 1);
     if (previous_number_read == 1) {
         /* TODO: make the failure configurable */

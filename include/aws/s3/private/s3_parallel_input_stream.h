@@ -43,11 +43,8 @@ struct aws_parallel_input_stream_vtable {
      * @return                  a future, which will contain an error code if something went wrong,
      *                          or a result bool indicating whether EOF has been reached.
      */
-    struct aws_future_bool *(*read)(
-        struct aws_parallel_input_stream *stream,
-        uint64_t offset,
-        size_t max_length,
-        struct aws_byte_buf *dest);
+    struct aws_future_bool *(
+        *read)(struct aws_parallel_input_stream *stream, uint64_t offset, size_t max_length, struct aws_byte_buf *dest);
 };
 
 AWS_EXTERN_C_BEGIN

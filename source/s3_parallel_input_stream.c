@@ -100,6 +100,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     struct aws_future_bool *end_future = read_task->end_future;
     FILE *file_stream = NULL;
     int error_code = AWS_ERROR_SUCCESS;
+    size_t actually_read = 0;
 
     file_stream = aws_fopen(aws_string_c_str(impl->file_path), "rb");
     if (file_stream == NULL) {
@@ -124,7 +125,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         goto cleanup;
     }
 
-    size_t actually_read = fread(read_task->dest->buffer + read_task->dest->len, 1, read_task->length, file_stream);
+    actually_read = fread(read_task->dest->buffer + read_task->dest->len, 1, read_task->length, file_stream);
     if (actually_read == 0 && ferror(file_stream)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
@@ -255,6 +256,9 @@ struct aws_s3_mmap_part_streaming_input_stream_impl {
 
     struct aws_byte_buf chunk_buf_1;
     struct aws_byte_buf chunk_buf_2;
+
+    bool eos_loaded;
+    bool eos_reached;
 };
 
 static int s_aws_s3_mmap_part_streaming_input_stream_seek(
@@ -275,14 +279,18 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
 
     if (impl->in_chunk_offset == SIZE_MAX) {
         /* The reading buf is invalid. Block until the loading buf is available. */
-        AWS_ASSERT(impl->loading_future != NULL);
+        if (impl->loading_future == NULL) {
+            /* Nothing to read */
+            AWS_ASSERT(impl->eos_reached);
+            return AWS_OP_SUCCESS;
+        }
         aws_future_bool_wait(impl->loading_future, MAX_TIMEOUT_NS_P);
         int read_error = aws_future_bool_get_error(impl->loading_future);
         if (read_error != 0) {
             /* Read failed. */
             return aws_raise_error(read_error);
         }
-        bool eos = aws_future_bool_get_result(impl->loading_future);
+        impl->eos_loaded = aws_future_bool_get_result(impl->loading_future);
         impl->loading_future = aws_future_bool_release(impl->loading_future);
         /* Swap the reading the loading pointer. */
         AWS_ASSERT(impl->reading_chunk_buf->len == 0);
@@ -292,7 +300,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         size_t new_offset = impl->offset + impl->total_length_read + impl->chunk_load_size;
         size_t new_load_length = aws_min_size(
             impl->chunk_load_size, impl->total_length - impl->total_length_read - impl->reading_chunk_buf->len);
-        if (new_load_length > 0 && !eos) {
+        if (new_load_length > 0 && !impl->eos_loaded) {
             /* Kick off loading the next chunk. */
             impl->loading_future =
                 aws_parallel_input_stream_read(impl->stream, new_offset, new_load_length, impl->loading_chunk_buf);
@@ -311,6 +319,10 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         /* We finished reading the reading buffer, reset it. */
         aws_byte_buf_reset(impl->reading_chunk_buf, false);
         impl->in_chunk_offset = SIZE_MAX;
+        if (impl->eos_loaded) {
+            /* We reached the end of the stream. */
+            impl->eos_reached = true;
+        }
     }
 
     return AWS_OP_SUCCESS;
@@ -322,10 +334,10 @@ static int s_aws_s3_mmap_part_streaming_input_stream_get_status(
     (void)stream;
     (void)status;
 
-    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+    struct aws_s3_mmap_part_streaming_input_stream_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
 
-    status->is_end_of_stream = mmap_input_stream->total_length_read == mmap_input_stream->total_length;
+    status->is_end_of_stream = (impl->total_length_read == impl->total_length) || impl->eos_reached;
     status->is_valid = true;
 
     return AWS_OP_SUCCESS;
