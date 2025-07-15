@@ -1689,12 +1689,15 @@ void aws_s3_meta_request_send_request_finish_default(
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
+                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d, "
+                    "x-amz-request-id: %s, x-amz-id-2: %s)",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
                     (void *)request,
-                    response_status);
+                    response_status,
+                    request->send_data.request_id ? aws_string_c_str(request->send_data.request_id) : "N/A",
+                    request->send_data.amz_id_2 ? aws_string_c_str(request->send_data.amz_id_2) : "N/A");
             }
 
         } else {
@@ -1710,13 +1713,16 @@ void aws_s3_meta_request_send_request_finish_default(
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
+                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d, x-amz-request-id: %s, "
+                    "x-amz-id-2: %s). Try to setup a "
                     "retry.",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
                     (void *)request,
-                    response_status);
+                    response_status,
+                    request->send_data.request_id ? aws_string_c_str(request->send_data.request_id) : "N/A",
+                    request->send_data.amz_id_2 ? aws_string_c_str(request->send_data.amz_id_2) : "N/A");
             }
 
             /* Otherwise, set this up for a retry if the meta request is active. */
