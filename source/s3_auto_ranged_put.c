@@ -1017,7 +1017,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
 
             s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
         } else {
-            printf("PARALLEL retry\n");
+            printf("PARALLEL retry 8MB read\n");
             /* Not the first time preparing request (e.g. retry).
              * We can skip over the async steps that read the body stream */
             /* Seek back to beginning of the stream. */

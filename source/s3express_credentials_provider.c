@@ -26,7 +26,7 @@ static struct aws_byte_cursor s_create_session_path_query = AWS_BYTE_CUR_INIT_FR
 static const size_t s_default_cache_capacity = 100;
 
 /* Those number are from C++ SDK impl */
-static const uint64_t s_expired_threshold_secs = 5;
+static const uint64_t s_expired_threshold_secs = 60;
 static const uint64_t s_about_to_expire_threshold_secs = 60;
 static const uint64_t s_background_refresh_interval_secs = 60;
 
