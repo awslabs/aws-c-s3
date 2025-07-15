@@ -571,7 +571,9 @@ static bool s_s3_auto_ranged_put_update(
 
                 /* Allocate a request for another part. */
                 uint32_t new_flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
-                if (!meta_request->synced_data.async_write.ready_to_send) {
+                if (!meta_request->synced_data.async_write.ready_to_send &&
+                    meta_request->request_body_parallel_stream == NULL) {
+                    /* TODO: now get around the memory pool when streaming from file, but we can still hook it up. */
                     new_flags |= AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL;
                 }
 

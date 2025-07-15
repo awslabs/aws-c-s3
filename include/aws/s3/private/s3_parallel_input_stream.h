@@ -33,13 +33,20 @@ struct aws_parallel_input_stream_vtable {
     void (*destroy)(struct aws_parallel_input_stream *stream);
 
     /**
-     * Read into the buffer in parallel.
-     * The stream will split into parts and read each part in parallel.
+     * Read from the offset until fill the dest, or EOF reached.
+     * It's thread safe to be called from multiple threads without waiting for other read to complete
+     *
+     * @param stream            The stream to read from
+     * @param offset            The offset in the stream from beginning to start reading
+     * @param max_length        The maximum number of bytes to read
+     * @param dest              The output buffer read to
+     * @return                  a future, which will contain an error code if something went wrong,
+     *                          or a result bool indicating whether EOF has been reached.
      */
     struct aws_future_bool *(*read)(
         struct aws_parallel_input_stream *stream,
-        size_t offset,
-        size_t length,
+        uint64_t offset,
+        size_t max_length,
         struct aws_byte_buf *dest);
 };
 
@@ -72,20 +79,21 @@ AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_parallel_input_stream *stream);
 
 /**
- * Read data from the stream into the destination buffer.
+ * Read from the offset until fill the dest, or EOF reached.
+ * It's thread safe to be called from multiple threads without waiting for other read to complete
  *
- * @param stream The parallel input stream to read from
- * @param offset The starting offset in the stream to read from
- * @param length The number of bytes to read
- * @param dest The destination buffer to read into
- * @return A future that will be set to true when the read completes successfully,
- *         or set to an error if the read fails
+ * @param stream            The stream to read from
+ * @param offset            The offset in the stream from beginning to start reading
+ * @param max_length        The maximum number of bytes to read
+ * @param dest              The output buffer read to
+ * @return                  a future, which will contain an error code if something went wrong,
+ *                          or a result bool indicating whether EOF has been reached.
  */
 AWS_S3_API
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
-    size_t offset,
-    size_t length,
+    uint64_t offset,
+    size_t max_length,
     struct aws_byte_buf *dest);
 
 /**

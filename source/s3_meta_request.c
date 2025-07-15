@@ -2248,9 +2248,10 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     }
 
     /* If parallel-stream, simply call read(), which must fill the buffer and/or EOF */
-    // if (meta_request->request_body_parallel_stream != NULL) {
-    //     return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
-    // }
+    if (meta_request->request_body_parallel_stream != NULL) {
+        return aws_parallel_input_stream_read(
+            meta_request->request_body_parallel_stream, offset, buffer->capacity, buffer);
+    }
 
     /* Further techniques are synchronous... */
     struct aws_future_bool *synchronous_read_future = aws_future_bool_new(meta_request->allocator);

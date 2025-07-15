@@ -384,8 +384,8 @@ if(AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     add_test_case(test_s3_endpoint_resolver_resolve_endpoint_force_path_style)
 endif()
 
-# add_test_case(parallel_read_stream_from_file_sanity_test)
-# add_test_case(parallel_read_stream_from_large_file_test)
+add_test_case(parallel_read_stream_from_file_sanity_test)
+add_test_case(parallel_read_stream_from_large_file_test)
 
 add_test_case(test_s3_buffer_pool_threaded_allocs_and_frees)
 add_test_case(test_s3_buffer_pool_large_chunk_threaded_allocs_and_frees)

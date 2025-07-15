@@ -37,9 +37,7 @@ struct aws_s3_request *aws_s3_request_new(
 
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
-    /* TODO: if the request is streaming, we are not allocating buffer from pool/ This will avoid the allocation buffer
-     * to be the bottleneck when streaming. */
-    request->should_allocate_buffer_from_pool = false;
+    request->should_allocate_buffer_from_pool = (flags & AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL) != 0;
     request->always_send = (flags & AWS_S3_REQUEST_FLAG_ALWAYS_SEND) != 0;
 
     return request;

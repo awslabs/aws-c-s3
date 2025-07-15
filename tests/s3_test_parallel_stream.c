@@ -22,12 +22,12 @@ static void s_para_from_file_failure_destroy(struct aws_parallel_input_stream *s
 
 struct aws_future_bool *s_para_from_file_failure_read(
     struct aws_parallel_input_stream *stream,
-    size_t offset,
-    size_t length,
+    uint64_t offset,
+    size_t max_length,
     struct aws_byte_buf *dest) {
     
     (void)offset;
-    (void)length;
+    (void)max_length;
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
     struct aws_parallel_input_stream_from_file_failure_impl *impl = 

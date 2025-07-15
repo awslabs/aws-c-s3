@@ -15,6 +15,8 @@
 #include <aws/io/future.h>
 #include <aws/io/stream.h>
 
+#include <errno.h>
+
 #define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
 #define MAX_TIMEOUT_NS_P (600 * ONE_SEC_IN_NS_P)
 
@@ -47,8 +49,8 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
 
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
-    size_t offset,
-    size_t length,
+    uint64_t offset,
+    size_t max_length,
     struct aws_byte_buf *dest) {
     /* Ensure the buffer has space available */
     if (dest->len == dest->capacity) {
@@ -57,7 +59,7 @@ struct aws_future_bool *aws_parallel_input_stream_read(
         return future;
     }
 
-    struct aws_future_bool *future = stream->vtable->read(stream, offset, length, dest);
+    struct aws_future_bool *future = stream->vtable->read(stream, offset, max_length, dest);
     AWS_POSTCONDITION(future != NULL);
     return future;
 }
@@ -86,7 +88,7 @@ struct read_task_impl {
     struct aws_parallel_input_stream_from_file_impl *para_impl;
 
     struct aws_future_bool *end_future;
-    size_t offset;
+    uint64_t offset;
     size_t length;
     struct aws_byte_buf *dest;
 };
@@ -98,13 +100,13 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     struct aws_future_bool *end_future = read_task->end_future;
     FILE *file_stream = NULL;
     int error_code = AWS_ERROR_SUCCESS;
-    
+
     file_stream = aws_fopen(aws_string_c_str(impl->file_path), "rb");
     if (file_stream == NULL) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_GENERAL, 
-            "id=%p: Failed to open file %s for reading", 
-            (void *)&impl->base, 
+            AWS_LS_S3_GENERAL,
+            "id=%p: Failed to open file %s for reading",
+            (void *)&impl->base,
             aws_string_c_str(impl->file_path));
         error_code = aws_last_error();
         goto cleanup;
@@ -113,10 +115,10 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     /* seek to the right position and then read */
     if (aws_fseek(file_stream, (int64_t)read_task->offset, SEEK_SET)) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_GENERAL, 
-            "id=%p: Failed to seek to position %zu in file %s", 
-            (void *)&impl->base, 
-            read_task->offset, 
+            AWS_LS_S3_GENERAL,
+            "id=%p: Failed to seek to position %llu in file %s",
+            (void *)&impl->base,
+            (unsigned long long)read_task->offset,
             aws_string_c_str(impl->file_path));
         error_code = aws_last_error();
         goto cleanup;
@@ -125,36 +127,38 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     size_t actually_read = fread(read_task->dest->buffer + read_task->dest->len, 1, read_task->length, file_stream);
     if (actually_read == 0 && ferror(file_stream)) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_GENERAL, 
-            "id=%p: Failed to read %zu bytes from file %s", 
-            (void *)&impl->base, 
-            read_task->length, 
+            AWS_LS_S3_GENERAL,
+            "id=%p: Failed to read %zu bytes from file %s",
+            (void *)&impl->base,
+            read_task->length,
             aws_string_c_str(impl->file_path));
-        error_code = aws_last_error();
+        error_code = aws_translate_and_raise_io_error(errno);
         goto cleanup;
     }
-    
+
     read_task->dest->len += actually_read;
-    
+
     AWS_LOGF_TRACE(
-        AWS_LS_S3_GENERAL, 
-        "id=%p: Successfully read %zu bytes from file %s at position %zu", 
-        (void *)&impl->base, 
-        actually_read, 
-        aws_string_c_str(impl->file_path), 
-        read_task->offset);
+        AWS_LS_S3_GENERAL,
+        "id=%p: Successfully read %zu bytes from file %s at position %llu",
+        (void *)&impl->base,
+        actually_read,
+        aws_string_c_str(impl->file_path),
+        (unsigned long long)read_task->offset);
 
 cleanup:
     if (file_stream != NULL) {
         fclose(file_stream);
     }
-    
+
     if (error_code != AWS_ERROR_SUCCESS) {
         aws_future_bool_set_error(end_future, error_code);
     } else {
-        aws_future_bool_set_result(end_future, true);
+        /* Return true if we reached EOF */
+        bool eof_reached = (actually_read < read_task->length);
+        aws_future_bool_set_result(end_future, eof_reached);
     }
-    
+
     aws_future_bool_release(end_future);
     aws_mem_release(impl->base.alloc, task);
     aws_mem_release(impl->base.alloc, read_task);
@@ -162,29 +166,32 @@ cleanup:
 
 struct aws_future_bool *s_para_from_file_read(
     struct aws_parallel_input_stream *stream,
-    size_t offset,
-    size_t length,
+    uint64_t offset,
+    size_t max_length,
     struct aws_byte_buf *dest) {
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
     struct aws_parallel_input_stream_from_file_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
 
-    if (!length) {
+    /* Calculate how much we can read based on available buffer space and max_length */
+    size_t available_space = dest->capacity - dest->len;
+    size_t length = aws_min_size(available_space, max_length);
+
+    if (length == 0) {
         /* Nothing to read. Complete the read with success. */
-        aws_future_bool_set_result(future, true);
-        return future;
-    }
-    
-    if (length > dest->capacity - dest->len) {
-        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "id=%p: The buffer read to cannot fit the data.", (void *)stream);
-        aws_future_bool_set_error(future, AWS_ERROR_SHORT_BUFFER);
+        aws_future_bool_set_result(future, false);
         return future;
     }
 
     struct read_task_impl *read_task = aws_mem_calloc(impl->base.alloc, 1, sizeof(struct read_task_impl));
 
-    AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Read %zu bytes from offset %zu", (void *)stream, length, offset);
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_GENERAL,
+        "id=%p: Read %zu bytes from offset %llu",
+        (void *)stream,
+        length,
+        (unsigned long long)offset);
 
     /* Initialize for one read */
     read_task->dest = dest;
@@ -213,9 +220,17 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
 
     struct aws_parallel_input_stream_from_file_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
+
+    aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
     impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
     impl->reading_elg = aws_event_loop_group_acquire(reading_elg);
-    aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
+
+    if (!aws_path_exists(impl->file_path)) {
+        /* If file path not exists, raise error from errno. */
+        aws_translate_and_raise_io_error(errno);
+        s_para_from_file_destroy(&impl->base);
+        return NULL;
+    }
 
     return &impl->base;
 }
@@ -262,6 +277,12 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         /* The reading buf is invalid. Block until the loading buf is available. */
         AWS_ASSERT(impl->loading_future != NULL);
         aws_future_bool_wait(impl->loading_future, MAX_TIMEOUT_NS_P);
+        int read_error = aws_future_bool_get_error(impl->loading_future);
+        if (read_error != 0) {
+            /* Read failed. */
+            return aws_raise_error(read_error);
+        }
+        bool eos = aws_future_bool_get_result(impl->loading_future);
         impl->loading_future = aws_future_bool_release(impl->loading_future);
         /* Swap the reading the loading pointer. */
         AWS_ASSERT(impl->reading_chunk_buf->len == 0);
@@ -271,9 +292,11 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         size_t new_offset = impl->offset + impl->total_length_read + impl->chunk_load_size;
         size_t new_load_length = aws_min_size(
             impl->chunk_load_size, impl->total_length - impl->total_length_read - impl->reading_chunk_buf->len);
-        /* Kick off loading the next chunk. */
-        impl->loading_future = aws_parallel_input_stream_read(
-            impl->stream, new_offset, new_load_length, impl->loading_chunk_buf);
+        if (new_load_length > 0 && !eos) {
+            /* Kick off loading the next chunk. */
+            impl->loading_future =
+                aws_parallel_input_stream_read(impl->stream, new_offset, new_load_length, impl->loading_chunk_buf);
+        }
         impl->in_chunk_offset = 0;
     }
     read_length = aws_min_size(read_length, impl->reading_chunk_buf->len - impl->in_chunk_offset);

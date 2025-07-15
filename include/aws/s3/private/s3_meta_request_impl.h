@@ -25,7 +25,6 @@ struct aws_s3_request;
 struct aws_http_headers;
 struct aws_http_make_request_options;
 struct aws_retry_strategy;
-struct aws_mmap_context;
 
 enum aws_s3_meta_request_state {
     AWS_S3_META_REQUEST_STATE_ACTIVE,
