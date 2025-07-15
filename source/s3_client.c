@@ -1143,6 +1143,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(options);
+    printf("s_s3_client_meta_request_factory_default_fread\n");
 
     const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(options->message);
     AWS_ASSERT(initial_message_headers);
