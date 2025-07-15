@@ -319,7 +319,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         /* We finished reading the reading buffer, reset it. */
         aws_byte_buf_reset(impl->reading_chunk_buf, false);
         impl->in_chunk_offset = SIZE_MAX;
-        if (impl->eos_loaded) {
+        if (impl->eos_loaded || impl->total_length_read == impl->total_length) {
             /* We reached the end of the stream. */
             impl->eos_reached = true;
         }

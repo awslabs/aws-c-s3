@@ -140,7 +140,7 @@ struct aws_s3_request {
     struct aws_byte_buf request_body;
     struct aws_input_stream *request_stream;
     bool parallel;
-    int64_t content_length;
+    uint64_t content_length;
 
     /**
      * Ticket to acquire the buffer.

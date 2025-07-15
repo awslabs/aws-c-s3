@@ -1003,7 +1003,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
                 /* Add part to array-list */
                 struct aws_s3_mpu_part_info *part =
                     aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
-                part->size = request->request_body.len;
+                part->size = request->content_length;
                 aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
             }
             aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -1075,6 +1075,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             request->request_body.capacity);
         goto on_done;
     }
+    request->content_length = request->request_body.len;
     /* Reading succeeded. */
     bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
 
@@ -1666,7 +1667,7 @@ static void s_s3_auto_ranged_put_request_finished(
                     /* Send progress_callback for delivery on io_event_loop thread */
                     if (meta_request->progress_callback != NULL) {
                         struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
-                        event.u.progress.info.bytes_transferred = request->request_body.len;
+                        event.u.progress.info.bytes_transferred = request->content_length;
                         event.u.progress.info.content_length = auto_ranged_put->content_length;
                         aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
                     }
