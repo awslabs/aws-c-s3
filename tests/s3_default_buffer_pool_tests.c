@@ -324,18 +324,15 @@ AWS_TEST_CASE(
     test_s3_buffer_pool_reserve_over_limit_instant_release,
     s_test_s3_buffer_pool_reserve_over_limit_instant_release)
 
-
-static void s_on_pool_buffer_reserved_instant_release(void *user_data) {
+static void s_on_pool_buffer_reserved_cancel(void *user_data) {
     struct s_reserve_state *state = user_data;
 
     if (aws_future_s3_buffer_ticket_get_error(state->future) == AWS_OP_SUCCESS) {
         state->ticket = aws_future_s3_buffer_ticket_get_result_by_move(state->future);
     }
-
-    state->future = aws_future_s3_buffer_ticket_release(state->future);
 }
 
-/* release future in the callback right away to check for potential race conditions */
+/* make sure that cancelling pending futures does not break the pool */
 static int s_test_s3_buffer_pool_reserve_over_limit_cancel(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
@@ -362,25 +359,30 @@ static int s_test_s3_buffer_pool_reserve_over_limit_cancel(struct aws_allocator 
 
     struct s_reserve_state state = {.future = over_future};
 
-    aws_future_s3_buffer_ticket_register_callback(over_future, s_on_pool_buffer_reserved_instant_release, &state);
+    aws_future_s3_buffer_ticket_register_callback(over_future, s_on_pool_buffer_reserved_cancel, &state);
+
+    /* simulate request cancel by erroring out the future */
+    aws_future_s3_buffer_ticket_set_error(over_future, AWS_ERROR_S3_CANCELED);
 
     for (size_t i = 0; i < 112; ++i) {
-        aws_future_s3_buffer_ticket_set_error(ticket_futures[i], AWS_ERROR_S3_CANCELED);
+
         aws_s3_buffer_ticket_release(tickets[i]);
+
         aws_future_s3_buffer_ticket_release(ticket_futures[i]);
     }
 
-    ASSERT_NOT_NULL(state.ticket);
+    /* make sure that errored future was never filled */
+    ASSERT_NULL(state.ticket);
 
     aws_s3_buffer_ticket_release(state.ticket);
+
+    aws_future_s3_buffer_ticket_release(over_future);
 
     aws_s3_default_buffer_pool_destroy(buffer_pool);
 
     return 0;
 };
-AWS_TEST_CASE(
-    test_s3_buffer_pool_reserve_over_limit_cancel,
-    s_test_s3_buffer_pool_reserve_over_limit_cancel)
+AWS_TEST_CASE(test_s3_buffer_pool_reserve_over_limit_cancel, s_test_s3_buffer_pool_reserve_over_limit_cancel)
 
 static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;

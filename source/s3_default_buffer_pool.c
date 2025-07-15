@@ -292,12 +292,16 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
 
     aws_array_list_clean_up(&buffer_pool->blocks);
 
-    for (struct aws_linked_list_node *node = aws_linked_list_begin(&buffer_pool->pending_reserves);
-         node != aws_linked_list_end(&buffer_pool->pending_reserves);
-         node = aws_linked_list_next(node)) {
+    /* There should be no pending reserves */
+    AWS_FATAL_ASSERT(aws_linked_list_empty(&buffer_pool->pending_reserves));
+
+    while (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
+        struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
         struct s3_pending_reserve *pending = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+        AWS_FATAL_ASSERT(aws_future_s3_buffer_ticket_is_done(pending->ticket_future));
         aws_future_s3_buffer_ticket_release(pending->ticket_future);
-        aws_linked_list_remove(node);
+        aws_linked_list_pop_front(&buffer_pool->pending_reserves);
+        aws_mem_release(buffer_pool->base_allocator, pending);
     }
 
     aws_mutex_clean_up(&buffer_pool->mutex);
@@ -389,25 +393,57 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
     aws_mem_release(buffer_pool->base_allocator, ticket);
     aws_mem_release(buffer_pool->base_allocator, ticket_wrapper);
 
-    struct aws_future_s3_buffer_ticket *pending_ticket_future = NULL;
+    struct aws_future_s3_buffer_ticket *pending_ticket_future_to_fill = NULL;
+    struct aws_s3_default_buffer_ticket *new_ticket = NULL;
+
+    struct aws_linked_list pending_nodes_to_remove;
+    aws_linked_list_init(&pending_nodes_to_remove);
+
+    /* Capture all the pending reserves that are done (currently can only happen when request is canceled, which cancels
+     * pending futures) */
+    while (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
+        struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
+        struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+
+        if (aws_future_s3_buffer_ticket_is_done(pending_reserve->ticket_future)) {
+            AWS_FATAL_ASSERT(aws_future_s3_buffer_ticket_get_error(pending_reserve->ticket_future) != AWS_OP_SUCCESS);
+            aws_linked_list_pop_front(&buffer_pool->pending_reserves);
+
+            aws_linked_list_push_back(&pending_nodes_to_remove, node);
+        }
+    }
 
     if (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
         struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
         struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
 
-        struct aws_s3_default_buffer_ticket *new_ticket = s_try_reserve(pool, pending_reserve->meta);
+        new_ticket = s_try_reserve(pool, pending_reserve->meta);
 
         if (new_ticket != NULL) {
-            struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(new_ticket);
-            pending_ticket_future = pending_reserve->ticket_future;
-            aws_future_s3_buffer_ticket_set_result_by_move(pending_ticket_future, &new_ticket_wrapper);
+            pending_ticket_future_to_fill = pending_reserve->ticket_future;
             aws_linked_list_pop_front(&buffer_pool->pending_reserves);
             aws_mem_release(buffer_pool->base_allocator, pending_reserve);
         }
     }
 
     aws_mutex_unlock(&buffer_pool->mutex);
-    aws_future_s3_buffer_ticket_release(pending_ticket_future);
+
+    /* release completed pending nodes outside of lock to avoid any deadlocks */
+    while (!aws_linked_list_empty(&pending_nodes_to_remove)) {
+        struct aws_linked_list_node *node = aws_linked_list_front(&pending_nodes_to_remove);
+        struct s3_pending_reserve *pending = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+        aws_future_s3_buffer_ticket_release(pending->ticket_future);
+        aws_linked_list_pop_front(&pending_nodes_to_remove);
+        aws_mem_release(buffer_pool->base_allocator, pending);
+    }
+
+    /* fill the next pending future */
+    if (pending_ticket_future_to_fill != NULL) {
+        struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(new_ticket);
+        aws_future_s3_buffer_ticket_set_result_by_move(pending_ticket_future_to_fill, &new_ticket_wrapper);
+
+        aws_future_s3_buffer_ticket_release(pending_ticket_future_to_fill);
+    }
 }
 
 struct aws_s3_default_buffer_ticket *s_try_reserve(
