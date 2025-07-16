@@ -109,7 +109,7 @@ struct aws_s3_default_buffer_pool {
 struct s3_pending_reserve {
     struct aws_linked_list_node node;
     struct aws_future_s3_buffer_ticket *ticket_future;
-    struct aws_s3_buffer_ticket *ticket;
+    struct aws_s3_default_buffer_ticket *ticket;
     struct aws_s3_buffer_pool_reserve_meta meta;
 };
 
