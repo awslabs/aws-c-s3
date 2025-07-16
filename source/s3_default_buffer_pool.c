@@ -436,7 +436,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
     /* release completed pending nodes outside of lock to avoid any deadlocks */
     while (!aws_linked_list_empty(&pending_reserves_to_remove)) {
-        struct aws_linked_list_node *node = aws_linked_list_front(&pending_reserves_to_remove);
+        node = aws_linked_list_front(&pending_reserves_to_remove);
         struct s3_pending_reserve *pending = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
         aws_future_s3_buffer_ticket_release(pending->ticket_future);
         aws_linked_list_pop_front(&pending_reserves_to_remove);
@@ -445,7 +445,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
     /* fill the next pending future */
     while (!aws_linked_list_empty(&pending_reserves_to_complete)) {
-        struct aws_linked_list_node *node = aws_linked_list_front(&pending_reserves_to_complete);
+        node = aws_linked_list_front(&pending_reserves_to_complete);
         struct s3_pending_reserve *pending = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
 
         struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(pending->ticket);
