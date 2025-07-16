@@ -345,18 +345,18 @@ static int s_aws_s3_mmap_part_streaming_input_stream_get_status(
 
 static int s_aws_s3_mmap_part_streaming_input_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
     AWS_ASSERT(stream != NULL);
-    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+    struct aws_s3_mmap_part_streaming_input_stream_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
-    *out_length = (int64_t)mmap_input_stream->total_length;
+    *out_length = (int64_t)impl->total_length;
     return AWS_OP_SUCCESS;
 }
 
 static void s_aws_s3_mmap_part_streaming_input_stream_destroy(
-    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream) {
-    aws_parallel_input_stream_release(mmap_input_stream->stream);
-    aws_byte_buf_clean_up(&mmap_input_stream->chunk_buf_1);
-    aws_byte_buf_clean_up(&mmap_input_stream->chunk_buf_2);
-    aws_mem_release(mmap_input_stream->allocator, mmap_input_stream);
+    struct aws_s3_mmap_part_streaming_input_stream_impl *impl) {
+    aws_parallel_input_stream_release(impl->stream);
+    aws_byte_buf_clean_up(&impl->chunk_buf_1);
+    aws_byte_buf_clean_up(&impl->chunk_buf_2);
+    aws_mem_release(impl->allocator, impl);
 }
 
 static struct aws_input_stream_vtable s_aws_s3_mmap_part_streaming_input_stream_vtable = {
@@ -367,9 +367,18 @@ static struct aws_input_stream_vtable s_aws_s3_mmap_part_streaming_input_stream_
 };
 
 void aws_streaming_input_stream_reset(struct aws_input_stream *stream) {
-    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+    struct aws_s3_mmap_part_streaming_input_stream_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
-    mmap_input_stream->total_length_read = 0;
+    impl->total_length_read = 0;
+    impl->eos_loaded = false;
+    impl->eos_reached = false;
+    impl->in_chunk_offset = SIZE_MAX;
+    aws_byte_buf_reset(&impl->chunk_buf_1, false);
+    aws_byte_buf_reset(&impl->chunk_buf_2, false);
+    size_t new_load_length = aws_min_size(impl->chunk_load_size, impl->total_length);
+    /* Start to load into the loading buffer. */
+    impl->loading_future =
+        aws_parallel_input_stream_read(impl->stream, impl->offset, new_load_length, impl->loading_chunk_buf);
 }
 
 struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
@@ -378,32 +387,26 @@ struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     uint64_t offset,
     size_t request_body_size) {
 
-    struct aws_s3_mmap_part_streaming_input_stream_impl *mmap_input_stream =
+    struct aws_s3_mmap_part_streaming_input_stream_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mmap_part_streaming_input_stream_impl));
     aws_ref_count_init(
-        &mmap_input_stream->base.ref_count,
-        mmap_input_stream,
+        &impl->base.ref_count,
+        impl,
         (aws_simple_completion_callback *)s_aws_s3_mmap_part_streaming_input_stream_destroy);
-    mmap_input_stream->allocator = allocator;
-    mmap_input_stream->base.vtable = &s_aws_s3_mmap_part_streaming_input_stream_vtable;
+    impl->allocator = allocator;
+    impl->base.vtable = &s_aws_s3_mmap_part_streaming_input_stream_vtable;
 
-    mmap_input_stream->total_length = request_body_size;
-    mmap_input_stream->offset = offset;
+    impl->total_length = request_body_size;
+    impl->offset = offset;
+    impl->chunk_load_size = 8 * 1024 * 1024;
 
-    mmap_input_stream->in_chunk_offset = SIZE_MAX;
-    mmap_input_stream->chunk_load_size = 8 * 1024 * 1024;
+    impl->stream = aws_parallel_input_stream_acquire(stream);
+    aws_byte_buf_init(&impl->chunk_buf_1, allocator, impl->chunk_load_size);
+    aws_byte_buf_init(&impl->chunk_buf_2, allocator, impl->chunk_load_size);
+    impl->loading_chunk_buf = &impl->chunk_buf_1;
+    impl->reading_chunk_buf = &impl->chunk_buf_2;
 
-    mmap_input_stream->stream = aws_parallel_input_stream_acquire(stream);
-    aws_byte_buf_init(&mmap_input_stream->chunk_buf_1, allocator, mmap_input_stream->chunk_load_size);
-    aws_byte_buf_init(&mmap_input_stream->chunk_buf_2, allocator, mmap_input_stream->chunk_load_size);
-
-    mmap_input_stream->loading_chunk_buf = &mmap_input_stream->chunk_buf_1;
-    mmap_input_stream->reading_chunk_buf = &mmap_input_stream->chunk_buf_2;
-    size_t new_load_length = aws_min_size(mmap_input_stream->chunk_load_size, mmap_input_stream->total_length);
-
-    /* Start to load into the loading buffer. */
-    mmap_input_stream->loading_future =
-        aws_parallel_input_stream_read(stream, offset, new_load_length, mmap_input_stream->loading_chunk_buf);
-
-    return &mmap_input_stream->base;
+    /* Reset the input stream to start */
+    aws_streaming_input_stream_reset(&impl->base);
+    return &impl->base;
 }
