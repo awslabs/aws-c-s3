@@ -419,7 +419,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
     /* Capture all the pending reserves that can be completed. They will actually be completed once outside the mutex.
      */
     while (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
-        struct aws_linked_list_node *node = aws_linked_list_front(&buffer_pool->pending_reserves);
+        node = aws_linked_list_front(&buffer_pool->pending_reserves);
         struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
 
         pending_reserve->ticket = s_try_reserve(pool, pending_reserve->meta);
@@ -445,7 +445,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
     /* fill the next pending future */
     while (!aws_linked_list_empty(&pending_reserves_to_complete)) {
-        struct aws_linked_list_node *node = aws_linked_list_front(&pending_reserves_to_remove);
+        struct aws_linked_list_node *node = aws_linked_list_front(&pending_reserves_to_complete);
         struct s3_pending_reserve *pending = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
 
         struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(pending->ticket);
