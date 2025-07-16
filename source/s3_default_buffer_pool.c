@@ -450,7 +450,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
         struct aws_s3_buffer_ticket *new_ticket_wrapper = s_wrap_default_ticket(pending->ticket);
         aws_future_s3_buffer_ticket_set_result_by_move(pending->ticket_future, &new_ticket_wrapper);
-        
+
         aws_future_s3_buffer_ticket_release(pending->ticket_future);
         aws_linked_list_pop_front(&pending_reserves_to_complete);
         aws_mem_release(buffer_pool->base_allocator, pending);
