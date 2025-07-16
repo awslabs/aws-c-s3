@@ -334,11 +334,6 @@ struct aws_s3_default_buffer_ticket *s_try_reserve(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_reserve_meta meta);
 
-struct aws_s3_default_buffer_pool_pending_reservation {
-    struct aws_future_s3_buffer_ticket *future;
-    struct aws_s3_default_buffer_ticket *ticket;
-};
-
 static void s_aws_ticket_wrapper_destroy(void *data) {
     struct aws_s3_buffer_ticket *ticket_wrapper = data;
     struct aws_s3_default_buffer_ticket *ticket = ticket_wrapper->impl;
