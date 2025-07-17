@@ -305,9 +305,10 @@ int aws_s3_meta_request_init_base(
     /* If the request's body is being passed in some other way, set that up.
      * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
+        meta_request->send_filepath = aws_string_new_from_cursor(allocator, &options->send_filepath);
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream =
-            client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
+            aws_parallel_input_stream_new_from_file(allocator, options->send_filepath, client->body_streaming_elg);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
@@ -522,6 +523,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
         }
     }
     aws_string_destroy(meta_request->recv_filepath);
+    aws_string_destroy(meta_request->send_filepath);
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
@@ -1684,12 +1686,15 @@ void aws_s3_meta_request_send_request_finish_default(
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
+                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d, "
+                    "x-amz-request-id: %s, x-amz-id-2: %s)",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
                     (void *)request,
-                    response_status);
+                    response_status,
+                    request->send_data.request_id ? aws_string_c_str(request->send_data.request_id) : "N/A",
+                    request->send_data.amz_id_2 ? aws_string_c_str(request->send_data.amz_id_2) : "N/A");
             }
 
         } else {
@@ -1705,13 +1710,16 @@ void aws_s3_meta_request_send_request_finish_default(
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
+                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d, x-amz-request-id: %s, "
+                    "x-amz-id-2: %s). Try to setup a "
                     "retry.",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
                     (void *)request,
-                    response_status);
+                    response_status,
+                    request->send_data.request_id ? aws_string_c_str(request->send_data.request_id) : "N/A",
+                    request->send_data.amz_id_2 ? aws_string_c_str(request->send_data.amz_id_2) : "N/A");
             }
 
             /* Otherwise, set this up for a retry if the meta request is active. */
@@ -2254,7 +2262,8 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     /* If parallel-stream, simply call read(), which must fill the buffer and/or EOF */
     if (meta_request->request_body_parallel_stream != NULL) {
-        return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
+        return aws_parallel_input_stream_read(
+            meta_request->request_body_parallel_stream, offset, buffer->capacity, buffer);
     }
 
     /* Further techniques are synchronous... */

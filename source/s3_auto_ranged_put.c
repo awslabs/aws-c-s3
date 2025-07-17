@@ -6,6 +6,7 @@
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_list_parts.h"
+#include "aws/s3/private/s3_parallel_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/clock.h>
@@ -570,7 +571,9 @@ static bool s_s3_auto_ranged_put_update(
 
                 /* Allocate a request for another part. */
                 uint32_t new_flags = AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS;
-                if (!meta_request->synced_data.async_write.ready_to_send) {
+                if (!meta_request->synced_data.async_write.ready_to_send &&
+                    meta_request->request_body_parallel_stream == NULL) {
+                    /* TODO: now get around the memory pool when streaming from file, but we can still hook it up. */
                     new_flags |= AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL;
                 }
 
@@ -841,7 +844,7 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
      * reading. */
     bool parallel_prepare =
         (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
-
+    request->parallel = parallel_prepare;
     aws_s3_meta_request_schedule_prepare_request_default_impl(
         meta_request, request, parallel_prepare /*parallel*/, callback, user_data);
 }
@@ -974,8 +977,56 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     part_prep->allocator = allocator;
     part_prep->request = request;
     part_prep->on_complete = aws_future_http_message_acquire(message_future);
+    if (request->parallel) {
+        if (request->num_times_prepared == 0) {
+            uint64_t offset = 0;
+            size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+            request->request_stream = aws_input_stream_new_from_parallel_stream(
+                allocator, meta_request->request_body_parallel_stream, offset, request_body_size);
+            request->content_length = request_body_size;
+            struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
-    if (request->num_times_prepared == 0) {
+            /* BEGIN CRITICAL SECTION */
+            aws_s3_meta_request_lock_synced_data(meta_request);
+
+            --auto_ranged_put->synced_data.num_parts_pending_read;
+
+            auto_ranged_put->synced_data.is_body_stream_at_end = false;
+            if (!request->is_noop) {
+                /* The part can finish out of order. Resize array-list to be long enough to hold this part,
+                 * filling any intermediate slots with NULL. */
+                aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, request->part_number);
+                while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < request->part_number) {
+                    struct aws_s3_mpu_part_info *null_part = NULL;
+                    aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
+                }
+                /* Add part to array-list */
+                struct aws_s3_mpu_part_info *part =
+                    aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
+                part->size = request->content_length;
+                aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
+            }
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            /* END CRITICAL SECTION */
+
+            /* We throttle the number of parts that can be "pending read"
+             * (e.g. only 1 at a time if reading from async-stream).
+             * Now that read is complete, poke the client to see if it can give us more work.
+             *
+             * Poking now gives measurable speedup (1%) for async streaming,
+             * vs waiting until all the part-prep steps are complete (still need to sign, etc) */
+            aws_s3_client_schedule_process_work(meta_request->client);
+
+            s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
+        } else {
+            printf("PARALLEL retry 8MB read\n");
+            /* Not the first time preparing request (e.g. retry).
+             * We can skip over the async steps that read the body stream */
+            /* Seek back to beginning of the stream. */
+            aws_streaming_input_stream_reset(request->request_stream);
+            s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
+        }
+    } else if (request->num_times_prepared == 0) {
         /* Preparing request for the first time.
          * Next async step: read through the body stream until we've
          * skipped over parts that were already uploaded (in case we're resuming
@@ -1024,6 +1075,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             request->request_body.capacity);
         goto on_done;
     }
+    request->content_length = request->request_body.len;
     /* Reading succeeded. */
     bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
 
@@ -1155,15 +1207,26 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
     }
 
     /* Create a new put-object message to upload a part. */
-    struct aws_http_message *message = aws_s3_upload_part_message_new(
-        meta_request->allocator,
-        meta_request->initial_request_message,
-        &request->request_body,
-        request->part_number,
-        auto_ranged_put->upload_id,
-        meta_request->should_compute_content_md5,
-        &meta_request->checksum_config,
-        checksum_buf);
+    struct aws_http_message *message = NULL;
+    if (request->parallel) {
+        message = aws_s3_upload_part_message_new_streaming(
+            meta_request->allocator,
+            meta_request->initial_request_message,
+            request->part_number,
+            request->request_stream,
+            request->content_length,
+            auto_ranged_put->upload_id);
+    } else {
+        message = aws_s3_upload_part_message_new(
+            meta_request->allocator,
+            meta_request->initial_request_message,
+            &request->request_body,
+            request->part_number,
+            auto_ranged_put->upload_id,
+            meta_request->should_compute_content_md5,
+            &meta_request->checksum_config,
+            checksum_buf);
+    }
     if (message == NULL) {
         aws_future_http_message_set_error(part_prep->on_complete, aws_last_error());
         goto on_done;
@@ -1604,7 +1667,7 @@ static void s_s3_auto_ranged_put_request_finished(
                     /* Send progress_callback for delivery on io_event_loop thread */
                     if (meta_request->progress_callback != NULL) {
                         struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
-                        event.u.progress.info.bytes_transferred = request->request_body.len;
+                        event.u.progress.info.bytes_transferred = request->content_length;
                         event.u.progress.info.content_length = auto_ranged_put->content_length;
                         aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
                     }
