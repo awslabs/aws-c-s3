@@ -369,6 +369,12 @@ static struct aws_input_stream_vtable s_aws_s3_mmap_part_streaming_input_stream_
 void aws_streaming_input_stream_reset(struct aws_input_stream *stream) {
     struct aws_s3_mmap_part_streaming_input_stream_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
+    if (impl->loading_future) {
+        /* If there is a loading future, wait for it to complete. */
+        /* TODO: probably better to cancel the future, but we don't support cancel yet */
+        aws_future_bool_wait(impl->loading_future, MAX_TIMEOUT_NS_P);
+        aws_future_bool_release(impl->loading_future);
+    }
     impl->total_length_read = 0;
     impl->eos_loaded = false;
     impl->eos_reached = false;
