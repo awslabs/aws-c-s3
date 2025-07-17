@@ -16,6 +16,13 @@
 #include <aws/io/stream.h>
 
 #include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+/* O_DIRECT is not available on all platforms */
+#ifndef O_DIRECT
+#    define O_DIRECT 0
+#endif
 
 #define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
 #define MAX_TIMEOUT_NS_P (600 * ONE_SEC_IN_NS_P)
@@ -98,35 +105,35 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     struct read_task_impl *read_task = arg;
     struct aws_parallel_input_stream_from_file_impl *impl = read_task->para_impl;
     struct aws_future_bool *end_future = read_task->end_future;
-    FILE *file_stream = NULL;
+    int file_fd = -1;
     int error_code = AWS_ERROR_SUCCESS;
     size_t actually_read = 0;
 
-    file_stream = aws_fopen(aws_string_c_str(impl->file_path), "rb");
-    if (file_stream == NULL) {
+    file_fd = open(aws_string_c_str(impl->file_path), O_RDONLY | O_DIRECT);
+    if (file_fd == -1) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
-            "id=%p: Failed to open file %s for reading",
+            "id=%p: Failed to open file %s for reading with O_DIRECT",
             (void *)&impl->base,
             aws_string_c_str(impl->file_path));
-        error_code = aws_last_error();
+        error_code = aws_translate_and_raise_io_error(errno);
         goto cleanup;
     }
 
     /* seek to the right position and then read */
-    if (aws_fseek(file_stream, (int64_t)read_task->offset, SEEK_SET)) {
+    if (lseek(file_fd, (off_t)read_task->offset, SEEK_SET) == -1) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
             "id=%p: Failed to seek to position %llu in file %s",
             (void *)&impl->base,
             (unsigned long long)read_task->offset,
             aws_string_c_str(impl->file_path));
-        error_code = aws_last_error();
+        error_code = aws_translate_and_raise_io_error(errno);
         goto cleanup;
     }
 
-    actually_read = fread(read_task->dest->buffer + read_task->dest->len, 1, read_task->length, file_stream);
-    if (actually_read == 0 && ferror(file_stream)) {
+    ssize_t bytes_read = read(file_fd, read_task->dest->buffer + read_task->dest->len, read_task->length);
+    if (bytes_read == -1) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
             "id=%p: Failed to read %zu bytes from file %s",
@@ -137,6 +144,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         goto cleanup;
     }
 
+    actually_read = (size_t)bytes_read;
     read_task->dest->len += actually_read;
 
     AWS_LOGF_TRACE(
@@ -148,8 +156,8 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         (unsigned long long)read_task->offset);
 
 cleanup:
-    if (file_stream != NULL) {
-        fclose(file_stream);
+    if (file_fd != -1) {
+        close(file_fd);
     }
 
     if (error_code != AWS_ERROR_SUCCESS) {
