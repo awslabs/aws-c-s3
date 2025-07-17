@@ -268,6 +268,74 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
 };
 AWS_TEST_CASE(test_s3_buffer_pool_reserve_over_limit, s_test_s3_buffer_pool_reserve_over_limit)
 
+/* test that one big ticket release can complete several pending reserves*/
+static int s_test_s3_buffer_pool_reserve_over_limit_multi(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    struct aws_s3_buffer_ticket *tickets[109];
+    struct aws_future_s3_buffer_ticket *ticket_futures[109];
+
+    ticket_futures[0] = aws_s3_default_buffer_pool_reserve(
+        buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(32)});
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[0]));
+    ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[0]), AWS_OP_SUCCESS);
+    tickets[0] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[0]);
+    struct aws_byte_buf buf0 = aws_s3_buffer_ticket_claim(tickets[0]);
+    ASSERT_NOT_NULL(buf0.buffer);
+
+    for (size_t i = 1; i < 109; ++i) {
+        ticket_futures[i] = aws_s3_default_buffer_pool_reserve(
+            buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
+        ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
+        ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
+        tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
+        struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(tickets[i]);
+        ASSERT_NOT_NULL(buf.buffer);
+    }
+
+    struct aws_future_s3_buffer_ticket *over_future1 = aws_s3_default_buffer_pool_reserve(
+        buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
+
+    ASSERT_FALSE(aws_future_s3_buffer_ticket_is_done(over_future1));
+    struct s_reserve_state state1 = {.future = over_future1};
+    aws_future_s3_buffer_ticket_register_callback(over_future1, s_on_pool_buffer_reserved, &state1);
+
+    struct aws_future_s3_buffer_ticket *over_future2 = aws_s3_default_buffer_pool_reserve(
+        buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
+
+    ASSERT_FALSE(aws_future_s3_buffer_ticket_is_done(over_future2));
+    struct s_reserve_state state2 = {.future = over_future2};
+    aws_future_s3_buffer_ticket_register_callback(over_future2, s_on_pool_buffer_reserved, &state2);
+
+    /* Release big ticket */
+    aws_s3_buffer_ticket_release(tickets[0]);
+    aws_future_s3_buffer_ticket_release(ticket_futures[0]);
+
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(over_future1));
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(over_future2));
+    ASSERT_NOT_NULL(state1.ticket);
+    ASSERT_NOT_NULL(state2.ticket);
+
+    for (size_t i = 1; i < 109; ++i) {
+        aws_s3_buffer_ticket_release(tickets[i]);
+        aws_future_s3_buffer_ticket_release(ticket_futures[i]);
+    }
+
+    aws_s3_buffer_ticket_release(state1.ticket);
+    aws_s3_buffer_ticket_release(state2.ticket);
+    aws_future_s3_buffer_ticket_release(over_future1);
+    aws_future_s3_buffer_ticket_release(over_future2);
+
+    aws_s3_default_buffer_pool_destroy(buffer_pool);
+
+    return 0;
+};
+AWS_TEST_CASE(test_s3_buffer_pool_reserve_over_limit_multi, s_test_s3_buffer_pool_reserve_over_limit_multi)
+
 static void s_on_pool_buffer_reserved_instant_release(void *user_data) {
     struct s_reserve_state *state = user_data;
 
@@ -323,6 +391,66 @@ static int s_test_s3_buffer_pool_reserve_over_limit_instant_release(struct aws_a
 AWS_TEST_CASE(
     test_s3_buffer_pool_reserve_over_limit_instant_release,
     s_test_s3_buffer_pool_reserve_over_limit_instant_release)
+
+static void s_on_pool_buffer_reserved_cancel(void *user_data) {
+    struct s_reserve_state *state = user_data;
+
+    if (aws_future_s3_buffer_ticket_get_error(state->future) == AWS_OP_SUCCESS) {
+        state->ticket = aws_future_s3_buffer_ticket_get_result_by_move(state->future);
+    }
+}
+
+/* make sure that cancelling pending futures does not break the pool */
+static int s_test_s3_buffer_pool_reserve_over_limit_cancel(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    struct aws_s3_buffer_ticket *tickets[112];
+    struct aws_future_s3_buffer_ticket *ticket_futures[112];
+    for (size_t i = 0; i < 112; ++i) {
+        ticket_futures[i] = aws_s3_default_buffer_pool_reserve(
+            buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
+        ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
+        ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
+        tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
+        struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(tickets[i]);
+        ASSERT_NOT_NULL(buf.buffer);
+    }
+
+    struct aws_future_s3_buffer_ticket *over_future = aws_s3_default_buffer_pool_reserve(
+        buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
+
+    ASSERT_FALSE(aws_future_s3_buffer_ticket_is_done(over_future));
+
+    struct s_reserve_state state = {.future = over_future};
+
+    aws_future_s3_buffer_ticket_register_callback(over_future, s_on_pool_buffer_reserved_cancel, &state);
+
+    /* simulate request cancel by erroring out the future */
+    aws_future_s3_buffer_ticket_set_error(over_future, AWS_ERROR_S3_CANCELED);
+
+    for (size_t i = 0; i < 112; ++i) {
+
+        aws_s3_buffer_ticket_release(tickets[i]);
+
+        aws_future_s3_buffer_ticket_release(ticket_futures[i]);
+    }
+
+    /* make sure that errored future was never filled */
+    ASSERT_NULL(state.ticket);
+
+    aws_s3_buffer_ticket_release(state.ticket);
+
+    aws_future_s3_buffer_ticket_release(over_future);
+
+    aws_s3_default_buffer_pool_destroy(buffer_pool);
+
+    return 0;
+};
+AWS_TEST_CASE(test_s3_buffer_pool_reserve_over_limit_cancel, s_test_s3_buffer_pool_reserve_over_limit_cancel)
 
 static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
