@@ -10,6 +10,7 @@
  * aws-c-sdkutil. */
 
 struct aws_s3_checksum;
+struct aws_s3_upload_request_checksum_context;
 
 /* List to check the checksum algorithm to use based on the priority. */
 static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
@@ -40,7 +41,7 @@ struct aws_s3_checksum {
     } impl;
 };
 
-struct checksum_config_storage {
+struct aws_s3_meta_request_checksum_config_storage {
     struct aws_allocator *allocator;
     struct aws_byte_buf full_object_checksum;
     bool has_full_object_checksum;
@@ -83,25 +84,46 @@ struct aws_input_stream *aws_checksum_stream_new(
 
 /**
  * TODO: properly support chunked encoding.
+ * Creates a chunked encoding stream that wraps an existing stream and adds checksum trailers.
  *
- * A stream that takes in a stream, encodes it to aws_chunked. Computes a running checksum as it is read and add the
- * checksum as trailer at the end of the stream. All of the added bytes will be counted to the length of the stream.
- * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
- * checksum.
+ * This function creates a stream that:
+ * 1. Encodes the input stream wraps the existing_stream with aws-chunked encoded.
+ * 2. Calculates a checksum of the stream content (if not already calculated)
+ * 3. Appends the checksum as a trailer at the end of the aws-chunked stream
  *
- * @param allocator
- * @param existing_stream   The data to be chunkified prepended by information on the stream length followed by a final
- *                          chunk and a trailing chunk containing a checksum of the existing stream. Destroying the
- *                          chunk stream will destroy the existing stream.
- * @param checksum_output   Optional argument, if provided the buffer will be initialized to the appropriate size and
- *                          filled with the checksum result when calculated. Callers responsibility to cleanup.
+ * Note: This stream does not support seeking operations, as seeking would prevent
+ * accurate checksum calculation and corrupt the chunked encoding format.
+ *
+ * @param allocator         Memory allocator to use for stream creation and internal buffers
+ * @param existing_stream   The input stream to be chunked and checksummed. This stream
+ *                          will be acquired by the chunk stream and released when the
+ *                          chunk stream is destroyed. Must not be NULL.
+ * @param checksum_context  Context containing checksum configuration and state. Must not be NULL.
+ *                          The context contains:
+ *                          - algorithm: The checksum algorithm to use (CRC32, CRC32C, etc.)
+ *                          - base64_checksum: Buffer for the calculated checksum result
+ *                          - checksum_calculated: Whether checksum is pre-calculated or needs calculation
+ *                          - encoded_checksum_size: Expected size of the base64-encoded checksum
+ *
+ *                          If checksum_calculated is false, the stream will wrap existing_stream
+ *                          with a checksum stream to calculate the checksum during reading.
+ *                          If checksum_calculated is true, the existing checksum value will be used.
+ *
+ * @return A new input stream that provides chunked encoding with checksum trailers,
+ *         or NULL if creation fails. The returned stream must be released with
+ *         aws_input_stream_release() when no longer needed.
+ *
+ * @note The total length of the returned stream includes:
+ *       - Chunk size header (hex representation + \r\n)
+ *       - Original stream content
+ *       - Final chunk marker (0\r\n or \r\n0\r\n)
+ *       - Checksum trailer (header name + : + base64 checksum + \r\n\r\n)
  */
 AWS_S3_API
 struct aws_input_stream *aws_chunk_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
-    enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *checksum_output);
+    struct aws_s3_upload_request_checksum_context *context);
 
 /**
  * Get the size of the checksum output corresponding to the aws_s3_checksum_algorithm enum value.
@@ -166,14 +188,15 @@ AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output);
 
 AWS_S3_API
-int aws_checksum_config_storage_init(
+int aws_s3_meta_request_checksum_config_storage_init(
     struct aws_allocator *allocator,
-    struct checksum_config_storage *internal_config,
+    struct aws_s3_meta_request_checksum_config_storage *internal_config,
     const struct aws_s3_checksum_config *config,
     const struct aws_http_message *message,
     const void *log_id);
 
 AWS_S3_API
-void aws_checksum_config_storage_cleanup(struct checksum_config_storage *internal_config);
+void aws_s3_meta_request_checksum_config_storage_cleanup(
+    struct aws_s3_meta_request_checksum_config_storage *internal_config);
 
 #endif /* AWS_S3_CHECKSUMS_H */

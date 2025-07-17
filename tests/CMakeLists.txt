@@ -294,6 +294,11 @@ add_test_case(crc32c_test_invalid_buffer)
 add_test_case(crc32c_test_oneshot)
 add_test_case(crc32c_test_invalid_state)
 
+add_test_case(test_upload_request_checksum_context_get_output_buffer)
+add_test_case(test_upload_request_checksum_context_get_checksum_cursor)
+add_test_case(test_upload_request_checksum_context_error_cases)
+add_test_case(test_upload_request_checksum_context_different_algorithms)
+
 add_net_test_case(verify_checksum_stream)
 add_net_test_case(verify_chunk_stream)
 
