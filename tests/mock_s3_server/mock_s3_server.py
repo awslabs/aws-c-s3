@@ -377,25 +377,6 @@ async def send_mock_s3_response(wrapper, request_type, path, generate_body=False
     await send_response_from_json(wrapper, response_file, generate_body=generate_body, generate_body_size=generate_body_size, head_request=head_request)
 
 
-async def maybe_send_error_response(wrapper, exc):
-    if wrapper.conn.our_state not in {h11.IDLE, h11.SEND_RESPONSE}:
-        wrapper.info("...but I can't, because our state is",
-                     wrapper.conn.our_state)
-        return
-    try:
-        await wrapper.send(res)
-    except Exception as e:
-        print(e)
-
-    if not response.head_request:
-        if response.chunked:
-            await wrapper.send(h11.Data(data=b"%X\r\n%s\r\n" % (len(response.data), response.data.encode())))
-        else:
-            await wrapper.send(h11.Data(data=response.data.encode()))
-
-    await wrapper.send(h11.EndOfMessage())
-
-
 def get_request_header_value(request, header_name):
     for header in request.headers:
         if header[0].decode("utf-8").lower() == header_name.lower():
