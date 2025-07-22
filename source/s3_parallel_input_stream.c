@@ -69,7 +69,6 @@ struct aws_parallel_input_stream_from_file_impl {
 
     struct aws_string *file_path;
     struct aws_event_loop_group *reading_elg;
-    size_t num_of_thread;
 };
 
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
@@ -157,6 +156,7 @@ cleanup:
     } else {
         /* Return true if we reached EOF */
         bool eof_reached = (actually_read < read_task->length);
+        AWS_ASSERT(!eof_reached);
         aws_future_bool_set_result(end_future, eof_reached);
     }
 
@@ -297,7 +297,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         struct aws_byte_buf *tmp = impl->reading_chunk_buf;
         impl->reading_chunk_buf = impl->loading_chunk_buf;
         impl->loading_chunk_buf = tmp;
-        size_t new_offset = impl->offset + impl->total_length_read + impl->chunk_load_size;
+        size_t new_offset = impl->offset + impl->total_length_read + impl->reading_chunk_buf->len;
         size_t new_load_length = aws_min_size(
             impl->chunk_load_size, impl->total_length - impl->total_length_read - impl->reading_chunk_buf->len);
         if (new_load_length > 0 && !impl->eos_loaded) {
@@ -322,6 +322,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         if (impl->eos_loaded || impl->total_length_read == impl->total_length) {
             /* We reached the end of the stream. */
             impl->eos_reached = true;
+            AWS_ASSERT(impl->total_length_read == impl->total_length);
         }
     }
 
