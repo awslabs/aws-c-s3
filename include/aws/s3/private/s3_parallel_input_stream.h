@@ -102,7 +102,8 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
 const char *aws_parallel_input_stream_get_file_path(struct aws_parallel_input_stream *stream);
 struct aws_input_stream *aws_input_stream_new_from_parallel(
     struct aws_allocator *allocator,
-    struct aws_parallel_input_stream *parallel_stream,
+    struct aws_parallel_input_stream *stream,
+    struct aws_s3_meta_request *meta_request,
     uint64_t offset,
     size_t request_body_size);
 void aws_s3_part_streaming_input_stream_reset(struct aws_input_stream *stream);

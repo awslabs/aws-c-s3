@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_parallel_input_stream.h"
+#include <aws/s3/private/s3_meta_request_impl.h>
+#include <aws/s3/private/s3_parallel_input_stream.h>
 
 #include <aws/common/file.h>
 
@@ -150,6 +151,7 @@ struct aws_s3_part_streaming_input_stream_impl {
     size_t offset;
     size_t total_length;
     size_t length_read;
+    struct aws_s3_meta_request *meta_request;
     struct aws_allocator *allocator;
 };
 
@@ -222,7 +224,8 @@ void aws_s3_part_streaming_input_stream_reset(struct aws_input_stream *stream) {
 
 struct aws_input_stream *aws_input_stream_new_from_parallel(
     struct aws_allocator *allocator,
-    struct aws_parallel_input_stream *parallel_stream,
+    struct aws_parallel_input_stream *stream,
+    struct aws_s3_meta_request *meta_request,
     uint64_t offset,
     size_t request_body_size) {
 
@@ -235,12 +238,13 @@ struct aws_input_stream *aws_input_stream_new_from_parallel(
     test_input_stream->allocator = allocator;
     test_input_stream->base.vtable = &s_aws_s3_part_streaming_input_stream_vtable;
 
-    struct aws_parallel_input_stream_from_file_impl *impl = parallel_stream->impl;
+    struct aws_parallel_input_stream_from_file_impl *impl = stream->impl;
     test_input_stream->base_stream = aws_input_stream_new_from_file(allocator, aws_string_c_str(impl->file_path));
     AWS_FATAL_ASSERT(test_input_stream->base_stream != NULL);
     test_input_stream->total_length = request_body_size;
     test_input_stream->offset = offset;
     test_input_stream->length_read = 0;
+    test_input_stream->meta_request = meta_request;
     aws_input_stream_seek(test_input_stream->base_stream, offset, AWS_SSB_BEGIN);
 
     return &test_input_stream->base;
