@@ -7,6 +7,9 @@
 #include <aws/s3/private/s3_parallel_input_stream.h>
 
 #include <aws/common/file.h>
+#include <aws/common/string.h>
+#include <aws/common/task_scheduler.h>
+#include <aws/common/thread.h>
 
 #include <aws/io/future.h>
 #include <aws/io/stream.h>

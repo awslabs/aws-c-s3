@@ -12,6 +12,7 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/common/thread.h>
 #include <aws/http/request_response.h>
 
 #include "aws/s3/private/s3_checksums.h"
@@ -129,6 +130,7 @@ struct s3_data_read_metrics {
     uint64_t size;
     uint64_t start_timestamp;
     uint64_t end_timestamp;
+    aws_thread_id_t thread_id;
 };
 
 /**
