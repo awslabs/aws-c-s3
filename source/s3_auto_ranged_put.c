@@ -1022,19 +1022,12 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
              * We can skip over the async steps that read the body stream */
             /* Seek back to beginning of the stream. */
             char filename[256];
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            snprintf(
-                filename,
-                sizeof(filename),
-                "/tmp/s3_read_metrics_%p_%ld_%ld.csv",
-                (void *)meta_request,
-                ts.tv_sec,
-                ts.tv_nsec);
-
-            FILE *metrics_file = fopen(filename, "w");
             /* BEGIN CRITICAL SECTION */
             aws_s3_meta_request_lock_synced_data(meta_request);
+            meta_request->count++;
+            snprintf(filename, sizeof(filename), "/tmp/s3_read_metrics_%d.csv", meta_request->count);
+
+            FILE *metrics_file = fopen(filename, "w");
             /* write every read metric to a file */
             size_t metric_length = aws_array_list_length(&meta_request->read_metrics_list);
             /* write every read metric to a file */
@@ -1061,7 +1054,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
                         (unsigned long long)duration,
                         throughput_mbps);
                 }
-                aws_array_list_clean_up(&meta_request->read_metrics_list);
+                aws_array_list_clear(&meta_request->read_metrics_list);
                 fclose(metrics_file);
 
                 AWS_LOGF_INFO(
