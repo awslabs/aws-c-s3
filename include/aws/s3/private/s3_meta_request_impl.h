@@ -124,6 +124,13 @@ struct aws_s3_meta_request_vtable {
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 };
 
+struct s3_data_read_metrics {
+    uint64_t offset;
+    uint64_t size;
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+};
+
 /**
  * This represents one meta request, ie, one accelerated file transfer.  One S3 meta request can represent multiple S3
  * requests.
@@ -139,6 +146,7 @@ struct aws_s3_meta_request {
 
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
+    struct aws_array_list read_metrics_list;
 
     /* The meta request's outgoing body comes from one of these:
      * 1) request_body_async_stream: if set, then async stream 1 part at a time

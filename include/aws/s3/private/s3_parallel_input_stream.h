@@ -124,6 +124,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
 struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     struct aws_allocator *allocator,
     struct aws_parallel_input_stream *stream,
+    struct aws_s3_meta_request *meta_request,
     uint64_t offset,
     size_t request_body_size);
 

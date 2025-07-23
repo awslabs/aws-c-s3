@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/private/s3_parallel_input_stream.h>
 
 #include <aws/common/atomics.h>
@@ -259,6 +260,10 @@ struct aws_s3_mmap_part_streaming_input_stream_impl {
 
     bool eos_loaded;
     bool eos_reached;
+
+    struct s3_data_read_metrics metrics;
+
+    struct aws_s3_meta_request *meta_request;
 };
 
 static int s_aws_s3_mmap_part_streaming_input_stream_seek(
@@ -276,6 +281,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
     /* Map the content */
     size_t read_length = aws_min_size(dest->capacity - dest->len, impl->total_length - impl->total_length_read);
+    aws_high_res_clock_get_ticks(&impl->metrics.start_timestamp);
 
     if (impl->in_chunk_offset == SIZE_MAX) {
         /* The reading buf is invalid. Block until the loading buf is available. */
@@ -308,13 +314,22 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         impl->in_chunk_offset = 0;
     }
     read_length = aws_min_size(read_length, impl->reading_chunk_buf->len - impl->in_chunk_offset);
+    impl->metrics.offset = impl->offset + impl->total_length_read;
+    impl->metrics.size = read_length;
+
     struct aws_byte_cursor chunk_cursor = aws_byte_cursor_from_buf(impl->reading_chunk_buf);
     aws_byte_cursor_advance(&chunk_cursor, impl->in_chunk_offset);
     chunk_cursor.len = read_length;
     aws_byte_buf_append(dest, &chunk_cursor);
     impl->in_chunk_offset += read_length;
     impl->total_length_read += read_length;
+    aws_high_res_clock_get_ticks(&impl->metrics.end_timestamp);
 
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(impl->meta_request);
+    aws_array_list_push_back(&impl->meta_request->read_metrics_list, &impl->metrics);
+    aws_s3_meta_request_unlock_synced_data(impl->meta_request);
+    /* END CRITICAL SECTION */
     if (impl->in_chunk_offset == impl->reading_chunk_buf->len) {
         /* We finished reading the reading buffer, reset it. */
         aws_byte_buf_reset(impl->reading_chunk_buf, false);
@@ -391,6 +406,7 @@ void aws_streaming_input_stream_reset(struct aws_input_stream *stream) {
 struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     struct aws_allocator *allocator,
     struct aws_parallel_input_stream *stream,
+    struct aws_s3_meta_request *meta_request,
     uint64_t offset,
     size_t request_body_size) {
 
@@ -412,6 +428,7 @@ struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     aws_byte_buf_init(&impl->chunk_buf_2, allocator, impl->chunk_load_size);
     impl->loading_chunk_buf = &impl->chunk_buf_1;
     impl->reading_chunk_buf = &impl->chunk_buf_2;
+    impl->meta_request = meta_request;
 
     /* Reset the input stream to start */
     aws_streaming_input_stream_reset(&impl->base);

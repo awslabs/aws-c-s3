@@ -319,7 +319,7 @@ int aws_s3_meta_request_init_base(
     } else if (options->send_using_async_writes == true) {
         meta_request->request_body_using_async_writes = true;
     }
-
+    aws_array_list_init_dynamic(&meta_request->read_metrics_list, allocator, 2048, sizeof(struct s3_data_read_metrics));
     meta_request->synced_data.next_streaming_part = 1;
 
     meta_request->meta_request_level_running_response_sum = NULL;

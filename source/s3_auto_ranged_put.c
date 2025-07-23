@@ -982,7 +982,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             uint64_t offset = 0;
             size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
             request->request_stream = aws_input_stream_new_from_parallel_stream(
-                allocator, meta_request->request_body_parallel_stream, offset, request_body_size);
+                allocator, meta_request->request_body_parallel_stream, meta_request, offset, request_body_size);
             request->content_length = request_body_size;
             struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
@@ -1020,6 +1020,63 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
         } else {
             printf("PARALLEL retry 8MB read\n");
+            // Create unique filename with timestamp and meta_request pointer
+            char filename[256];
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            snprintf(
+                filename,
+                sizeof(filename),
+                "/tmp/s3_read_metrics_%p_%ld_%ld.csv",
+                (void *)meta_request,
+                ts.tv_sec,
+                ts.tv_nsec);
+
+            FILE *metrics_file = fopen(filename, "w");
+            /* BEGIN CRITICAL SECTION */
+            aws_s3_meta_request_lock_synced_data(meta_request);
+            /* write every read metric to a file */
+            size_t metric_length = aws_array_list_length(&meta_request->read_metrics_list);
+            /* write every read metric to a file */
+            if (metrics_file) {
+                // Write CSV header
+                fprintf(metrics_file, "index,offset,size,start_timestamp,end_timestamp,duration_ns,throughput_mbps\n");
+                // Write all metrics
+                for (size_t j = 0; j < metric_length; j++) {
+                    struct s3_data_read_metrics m;
+                    aws_array_list_get_at(&meta_request->read_metrics_list, &m, j);
+
+                    uint64_t duration = m.end_timestamp - m.start_timestamp;
+                    double throughput_mbps =
+                        duration > 0 ? (double)(m.size * 8) / (duration / 1000.0) / 1000000.0 : 0.0;
+
+                    fprintf(
+                        metrics_file,
+                        "%zu,%llu,%llu,%llu,%llu,%llu,%.2f\n",
+                        j,
+                        (unsigned long long)m.offset,
+                        (unsigned long long)m.size,
+                        (unsigned long long)m.start_timestamp,
+                        (unsigned long long)m.end_timestamp,
+                        (unsigned long long)duration,
+                        throughput_mbps);
+                }
+                aws_array_list_clean_up(&meta_request->read_metrics_list);
+                fclose(metrics_file);
+
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Wrote %zu read metrics to %s",
+                    (void *)meta_request,
+                    metric_length,
+                    filename);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST, "id=%p Failed to open metrics file %s", (void *)meta_request, filename);
+            }
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            /* END CRITICAL SECTION */
+
             /* Not the first time preparing request (e.g. retry).
              * We can skip over the async steps that read the body stream */
             /* Seek back to beginning of the stream. */
@@ -1027,7 +1084,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             uint64_t offset = 0;
             size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
             request->request_stream = aws_input_stream_new_from_parallel_stream(
-                allocator, meta_request->request_body_parallel_stream, offset, request_body_size);
+                allocator, meta_request->request_body_parallel_stream, meta_request, offset, request_body_size);
             s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
         }
     } else if (request->num_times_prepared == 0) {
