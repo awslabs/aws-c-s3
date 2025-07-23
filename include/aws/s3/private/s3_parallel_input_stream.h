@@ -15,6 +15,7 @@ AWS_PUSH_SANE_WARNING_LEVEL
 struct aws_byte_buf;
 struct aws_future_bool;
 struct aws_input_stream;
+struct aws_s3_meta_request;
 
 struct aws_event_loop_group;
 

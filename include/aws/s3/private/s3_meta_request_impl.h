@@ -139,6 +139,7 @@ struct aws_s3_meta_request {
     struct aws_allocator *allocator;
 
     struct aws_ref_count ref_count;
+    int count;
 
     void *impl;
 

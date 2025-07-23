@@ -511,6 +511,47 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_string_destroy(meta_request->s3express_session_host);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    char filename[256];
+    meta_request->count++;
+    snprintf(filename, sizeof(filename), "/tmp/s3_read_metrics_%d.csv", meta_request->count);
+    FILE *metrics_file = fopen(filename, "w");
+    /* write every read metric to a file */
+    size_t metric_length = aws_array_list_length(&meta_request->read_metrics_list);
+    /* write every read metric to a file */
+    if (metrics_file) {
+        // Write CSV header
+        fprintf(metrics_file, "index,offset,size,start_timestamp,end_timestamp,duration_ns,throughput_mbps\n");
+        // Write all metrics
+        for (size_t j = 0; j < metric_length; j++) {
+            struct s3_data_read_metrics m;
+            aws_array_list_get_at(&meta_request->read_metrics_list, &m, j);
+
+            uint64_t duration = m.end_timestamp - m.start_timestamp;
+            double throughput_mbps = duration > 0 ? (double)(m.size * 8) / (duration / 1000.0) / 1000000.0 : 0.0;
+
+            fprintf(
+                metrics_file,
+                "%zu,%llu,%llu,%llu,%llu,%llu,%.2f\n",
+                j,
+                (unsigned long long)m.offset,
+                (unsigned long long)m.size,
+                (unsigned long long)m.start_timestamp,
+                (unsigned long long)m.end_timestamp,
+                (unsigned long long)duration,
+                throughput_mbps);
+        }
+        fclose(metrics_file);
+
+        AWS_LOGF_INFO(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Wrote %zu read metrics to %s",
+            (void *)meta_request,
+            metric_length,
+            filename);
+    } else {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Failed to open metrics file %s", (void *)meta_request, filename);
+    }
+    aws_array_list_clean_up(&meta_request->read_metrics_list);
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
