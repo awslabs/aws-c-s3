@@ -11,6 +11,7 @@
 #include <aws/common/file.h>
 #include <aws/common/string.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/common/thread.h>
 
 #include <aws/io/event_loop.h>
 #include <aws/io/future.h>
@@ -282,6 +283,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     /* Map the content */
     size_t read_length = aws_min_size(dest->capacity - dest->len, impl->total_length - impl->total_length_read);
     aws_high_res_clock_get_ticks(&impl->metrics.start_timestamp);
+    impl->metrics.thread_id = aws_thread_current_thread_id();
 
     if (impl->in_chunk_offset == SIZE_MAX) {
         /* The reading buf is invalid. Block until the loading buf is available. */
