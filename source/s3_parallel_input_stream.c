@@ -156,6 +156,7 @@ struct aws_s3_part_streaming_input_stream_impl {
     size_t length_read;
     struct aws_s3_meta_request *meta_request;
     struct aws_allocator *allocator;
+    struct aws_s3_request *request;
 };
 
 static int s_aws_s3_part_streaming_input_stream_seek(
@@ -229,6 +230,7 @@ struct aws_input_stream *aws_input_stream_new_from_parallel(
     struct aws_allocator *allocator,
     struct aws_parallel_input_stream *stream,
     struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
     uint64_t offset,
     size_t request_body_size) {
 

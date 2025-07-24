@@ -1462,6 +1462,18 @@ AWS_S3_API
 void aws_s3_request_metrics_get_request_type(
     const struct aws_s3_request_metrics *metrics,
     enum aws_s3_request_type *out_request_type);
+int aws_s3_request_metrics_get_body_read_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_start_timestamp_ns);
+int aws_s3_request_metrics_get_body_read_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_end_timestamp_ns);
+int aws_s3_request_metrics_get_body_read_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_duration_ns);
+int aws_s3_request_metrics_get_body_read_total_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_total_ns);
 
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API

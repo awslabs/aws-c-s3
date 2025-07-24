@@ -16,6 +16,7 @@ struct aws_byte_buf;
 struct aws_future_bool;
 struct aws_input_stream;
 struct aws_s3_meta_request;
+struct aws_s3_request;
 
 struct aws_event_loop_group;
 
@@ -105,6 +106,7 @@ struct aws_input_stream *aws_input_stream_new_from_parallel(
     struct aws_allocator *allocator,
     struct aws_parallel_input_stream *stream,
     struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
     uint64_t offset,
     size_t request_body_size);
 void aws_s3_part_streaming_input_stream_reset(struct aws_input_stream *stream);

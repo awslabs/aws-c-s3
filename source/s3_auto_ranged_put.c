@@ -1025,7 +1025,11 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             /* BEGIN CRITICAL SECTION */
             aws_s3_meta_request_lock_synced_data(meta_request);
             meta_request->count++;
-            snprintf(filename, sizeof(filename), "/tmp/s3_read_metrics_%d.csv", meta_request->count);
+            snprintf(
+                filename,
+                sizeof(filename),
+                "/data/aws-crt-s3-benchmarks/metrics/s3_read_metrics_%d.csv",
+                meta_request->count);
 
             FILE *metrics_file = fopen(filename, "w");
             /* write every read metric to a file */

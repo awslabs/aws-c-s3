@@ -512,7 +512,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_mutex_clean_up(&meta_request->synced_data.lock);
     char filename[256];
     meta_request->count++;
-    snprintf(filename, sizeof(filename), "/tmp/s3_read_metrics_%d.csv", meta_request->count);
+    snprintf(
+        filename, sizeof(filename), "/data/aws-crt-s3-benchmarks/metrics/s3_read_metrics_%d.csv", meta_request->count);
     FILE *metrics_file = fopen(filename, "w");
     /* write every read metric to a file */
     size_t metric_length = aws_array_list_length(&meta_request->read_metrics_list);
