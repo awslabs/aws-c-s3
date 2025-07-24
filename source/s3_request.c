@@ -437,19 +437,30 @@ int aws_s3_request_metrics_get_body_read_start_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
     int64_t *body_read_start_timestamp_ns) {
     *body_read_start_timestamp_ns = metrics->time_metrics.body_read_start_timestamp_ns;
+    return AWS_OP_SUCCESS;
 }
 int aws_s3_request_metrics_get_body_read_end_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
     int64_t *body_read_end_timestamp_ns) {
     *body_read_end_timestamp_ns = metrics->time_metrics.body_read_end_timestamp_ns;
+    return AWS_OP_SUCCESS;
 }
 int aws_s3_request_metrics_get_body_read_duration_ns(
     const struct aws_s3_request_metrics *metrics,
     int64_t *body_read_duration_ns) {
     *body_read_duration_ns = metrics->time_metrics.body_read_duration_ns;
+    return AWS_OP_SUCCESS;
 }
 int aws_s3_request_metrics_get_body_read_total_ns(
     const struct aws_s3_request_metrics *metrics,
     int64_t *body_read_total_ns) {
     *body_read_total_ns = metrics->time_metrics.body_read_total_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_body_read_total_without_reset_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_total_without_reset_ns) {
+    *body_read_total_without_reset_ns = metrics->time_metrics.body_read_total_without_reset_ns;
+    return AWS_OP_SUCCESS;
 }
