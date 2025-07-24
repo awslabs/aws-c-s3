@@ -74,6 +74,7 @@ struct aws_s3_request_metrics {
         int64_t body_read_start_timestamp_ns;
         int64_t body_read_end_timestamp_ns;
         int64_t body_read_duration_ns;
+        int64_t body_read_total_without_reset_ns;
         int64_t body_read_total_ns;
     } time_metrics;
 

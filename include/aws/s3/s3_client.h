@@ -1474,7 +1474,9 @@ int aws_s3_request_metrics_get_body_read_duration_ns(
 int aws_s3_request_metrics_get_body_read_total_ns(
     const struct aws_s3_request_metrics *metrics,
     int64_t *body_read_total_ns);
-
+int aws_s3_request_metrics_get_body_read_total_without_reset_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_total_without_reset_ns);
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);

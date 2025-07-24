@@ -345,6 +345,11 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     } else {
         impl->request->send_data.metrics->time_metrics.body_read_total_ns += duration;
     }
+    if (impl->request->send_data.metrics->time_metrics.body_read_total_without_reset_ns == -1) {
+        impl->request->send_data.metrics->time_metrics.body_read_total_without_reset_ns = duration;
+    } else {
+        impl->request->send_data.metrics->time_metrics.body_read_total_without_reset_ns += duration;
+    }
     aws_s3_meta_request_unlock_synced_data(impl->meta_request);
     /* END CRITICAL SECTION */
     if (impl->in_chunk_offset == impl->reading_chunk_buf->len) {
@@ -457,6 +462,9 @@ struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     impl->reading_chunk_buf = &impl->chunk_buf_2;
     impl->meta_request = meta_request;
     impl->request = request;
+    if (impl->request->send_data.metrics && impl->request->send_data.metrics->time_metrics.body_read_total_ns != -1) {
+        impl->request->send_data.metrics->time_metrics.body_read_total_ns = -1;
+    }
 
     /* Reset the input stream to start */
     aws_streaming_input_stream_reset(&impl->base);
