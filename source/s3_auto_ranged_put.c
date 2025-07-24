@@ -982,7 +982,12 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             uint64_t offset = 0;
             size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
             request->request_stream = aws_input_stream_new_from_parallel_stream(
-                allocator, meta_request->request_body_parallel_stream, meta_request, offset, request_body_size);
+                allocator,
+                meta_request->request_body_parallel_stream,
+                meta_request,
+                request,
+                offset,
+                request_body_size);
             request->content_length = request_body_size;
             struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
@@ -1025,7 +1030,11 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             /* BEGIN CRITICAL SECTION */
             aws_s3_meta_request_lock_synced_data(meta_request);
             meta_request->count++;
-            snprintf(filename, sizeof(filename), "/tmp/s3_read_metrics_%d.csv", meta_request->count);
+            snprintf(
+                filename,
+                sizeof(filename),
+                "/data/aws-crt-s3-benchmarks/metrics/s3_read_metrics_%d.csv",
+                meta_request->count);
 
             FILE *metrics_file = fopen(filename, "w");
             /* write every read metric to a file */
@@ -1074,7 +1083,12 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             uint64_t offset = 0;
             size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
             request->request_stream = aws_input_stream_new_from_parallel_stream(
-                allocator, meta_request->request_body_parallel_stream, meta_request, offset, request_body_size);
+                allocator,
+                meta_request->request_body_parallel_stream,
+                meta_request,
+                request,
+                offset,
+                request_body_size);
             s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
         }
     } else if (request->num_times_prepared == 0) {

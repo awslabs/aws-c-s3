@@ -70,6 +70,11 @@ struct aws_s3_request_metrics {
         /* The time duration for the request from start signing to finish signing (sign_end_timestamp_ns -
          * sign_start_timestamp_ns). When sign_end_timestamp_ns is 0, means data not available. */
         int64_t signing_duration_ns;
+
+        int64_t body_read_start_timestamp_ns;
+        int64_t body_read_end_timestamp_ns;
+        int64_t body_read_duration_ns;
+        int64_t body_read_total_ns;
     } time_metrics;
 
     struct {

@@ -193,6 +193,10 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->time_metrics.sign_start_timestamp_ns = -1;
     metrics->time_metrics.sign_end_timestamp_ns = -1;
     metrics->time_metrics.signing_duration_ns = -1;
+    metrics->time_metrics.body_read_start_timestamp_ns = -1;
+    metrics->time_metrics.body_read_end_timestamp_ns = -1;
+    metrics->time_metrics.body_read_duration_ns = -1;
+    metrics->time_metrics.body_read_total_ns = -1;
 
     metrics->req_resp_info_metrics.response_status = -1;
 
@@ -425,4 +429,25 @@ void aws_s3_request_metrics_get_request_type(
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics) {
     AWS_PRECONDITION(metrics);
     return metrics->crt_info_metrics.error_code;
+}
+
+int aws_s3_request_metrics_get_body_read_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_start_timestamp_ns) {
+    *body_read_start_timestamp_ns = metrics->time_metrics.body_read_start_timestamp_ns;
+}
+int aws_s3_request_metrics_get_body_read_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_end_timestamp_ns) {
+    *body_read_end_timestamp_ns = metrics->time_metrics.body_read_end_timestamp_ns;
+}
+int aws_s3_request_metrics_get_body_read_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_duration_ns) {
+    *body_read_duration_ns = metrics->time_metrics.body_read_duration_ns;
+}
+int aws_s3_request_metrics_get_body_read_total_ns(
+    const struct aws_s3_request_metrics *metrics,
+    int64_t *body_read_total_ns) {
+    *body_read_total_ns = metrics->time_metrics.body_read_total_ns;
 }
