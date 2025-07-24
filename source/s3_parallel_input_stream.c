@@ -284,10 +284,13 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     /* Map the content */
     size_t read_length = aws_min_size(dest->capacity - dest->len, impl->total_length - impl->total_length_read);
     uint64_t time = 0;
+
+    aws_s3_meta_request_lock_synced_data(impl->meta_request);
     if (impl->request->send_data.metrics->time_metrics.body_read_start_timestamp_ns == -1) {
         aws_high_res_clock_get_ticks(&time);
         impl->request->send_data.metrics->time_metrics.body_read_start_timestamp_ns = time;
     }
+    aws_s3_meta_request_unlock_synced_data(impl->meta_request);
     aws_high_res_clock_get_ticks(&impl->metrics.start_timestamp);
     impl->metrics.thread_id = aws_thread_current_thread_id();
 
@@ -333,15 +336,15 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     impl->total_length_read += read_length;
     aws_high_res_clock_get_ticks(&impl->metrics.end_timestamp);
     int64_t duration = impl->metrics.end_timestamp - impl->metrics.start_timestamp;
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(impl->meta_request);
+    aws_array_list_push_back(&impl->meta_request->read_metrics_list, &impl->metrics);
     if (impl->request->send_data.metrics->time_metrics.body_read_total_ns == -1) {
         impl->request->send_data.metrics->time_metrics.body_read_total_ns = duration;
     } else {
         impl->request->send_data.metrics->time_metrics.body_read_total_ns += duration;
     }
-
-    /* BEGIN CRITICAL SECTION */
-    aws_s3_meta_request_lock_synced_data(impl->meta_request);
-    aws_array_list_push_back(&impl->meta_request->read_metrics_list, &impl->metrics);
     aws_s3_meta_request_unlock_synced_data(impl->meta_request);
     /* END CRITICAL SECTION */
     if (impl->in_chunk_offset == impl->reading_chunk_buf->len) {
@@ -352,6 +355,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
             /* We reached the end of the stream. */
             impl->eos_reached = true;
             AWS_ASSERT(impl->total_length_read == impl->total_length);
+            aws_s3_meta_request_lock_synced_data(impl->meta_request);
             if (impl->request->send_data.metrics->time_metrics.body_read_end_timestamp_ns == -1) {
                 aws_high_res_clock_get_ticks(&time);
                 impl->request->send_data.metrics->time_metrics.body_read_end_timestamp_ns = time;
@@ -359,6 +363,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
             impl->request->send_data.metrics->time_metrics.body_read_duration_ns =
                 impl->request->send_data.metrics->time_metrics.body_read_end_timestamp_ns -
                 impl->request->send_data.metrics->time_metrics.body_read_start_timestamp_ns;
+            aws_s3_meta_request_unlock_synced_data(impl->meta_request);
         }
     }
 
