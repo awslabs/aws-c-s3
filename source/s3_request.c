@@ -181,6 +181,9 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->req_resp_info_metrics.request_type = request->request_type;
     metrics->req_resp_info_metrics.operation_name = aws_string_new_from_string(allocator, request->operation_name);
 
+    /* Set the request pointer */
+    metrics->crt_info_metrics.request_ptr = (void *)request;
+
     metrics->time_metrics.start_timestamp_ns = -1;
     metrics->time_metrics.end_timestamp_ns = -1;
     metrics->time_metrics.total_duration_ns = -1;
@@ -460,5 +463,15 @@ int aws_s3_request_metrics_get_body_read_total_without_reset_ns(
     const struct aws_s3_request_metrics *metrics,
     int64_t *body_read_total_without_reset_ns) {
     *body_read_total_without_reset_ns = metrics->time_metrics.body_read_total_without_reset_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, void **out_request_ptr) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_request_ptr);
+    if (metrics->crt_info_metrics.request_ptr == NULL) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_request_ptr = metrics->crt_info_metrics.request_ptr;
     return AWS_OP_SUCCESS;
 }

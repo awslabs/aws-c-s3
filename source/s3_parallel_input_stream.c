@@ -327,6 +327,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     read_length = aws_min_size(read_length, impl->reading_chunk_buf->len - impl->in_chunk_offset);
     impl->metrics.offset = impl->offset + impl->total_length_read;
     impl->metrics.size = read_length;
+    impl->metrics.request_ptr = impl->request;
 
     struct aws_byte_cursor chunk_cursor = aws_byte_cursor_from_buf(impl->reading_chunk_buf);
     aws_byte_cursor_advance(&chunk_cursor, impl->in_chunk_offset);
