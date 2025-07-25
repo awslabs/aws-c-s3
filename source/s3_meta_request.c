@@ -520,7 +520,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     /* write every read metric to a file */
     if (metrics_file) {
         // Write CSV header
-        fprintf(metrics_file, "index,offset,size,start_timestamp,duration_ns,threadid\n");
+        fprintf(metrics_file, "index,offset,size,start_timestamp,duration_ns,threadid,requestptr\n");
         // Write all metrics
         for (size_t j = 0; j < metric_length; j++) {
             struct s3_data_read_metrics m;
@@ -530,13 +530,14 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
             fprintf(
                 metrics_file,
-                "%zu,%llu,%llu,%llu,%llu,%zu\n",
+                "%zu,%llu,%llu,%llu,%llu,%zu,%p\n",
                 j,
                 (unsigned long long)m.offset,
                 (unsigned long long)m.size,
                 (unsigned long long)m.start_timestamp,
                 (unsigned long long)duration,
-                (size_t)m.thread_id);
+                (size_t)m.thread_id,
+                m.request_ptr);
         }
         fclose(metrics_file);
 

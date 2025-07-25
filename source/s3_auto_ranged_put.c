@@ -1037,7 +1037,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             /* write every read metric to a file */
             if (metrics_file) {
                 // Write CSV header
-                fprintf(metrics_file, "index,offset,size,start_timestamp,duration_ns,threadid\n");
+                fprintf(metrics_file, "index,offset,size,start_timestamp,duration_ns,threadid,requestptr\n");
                 // Write all metrics
                 for (size_t j = 0; j < metric_length; j++) {
                     struct s3_data_read_metrics m;
@@ -1047,13 +1047,14 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
 
                     fprintf(
                         metrics_file,
-                        "%zu,%llu,%llu,%llu,%llu,%zu\n",
+                        "%zu,%llu,%llu,%llu,%llu,%zu,%p\n",
                         j,
                         (unsigned long long)m.offset,
                         (unsigned long long)m.size,
                         (unsigned long long)m.start_timestamp,
                         (unsigned long long)duration,
-                        (size_t)m.thread_id);
+                        (size_t)m.thread_id,
+                        m.request_ptr);
                 }
                 aws_array_list_clear(&meta_request->read_metrics_list);
                 fclose(metrics_file);

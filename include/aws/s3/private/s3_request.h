@@ -100,6 +100,7 @@ struct aws_s3_request_metrics {
         struct aws_string *ip_address;
         /* The pointer to the connection that request was made from */
         void *connection_id;
+        void *request_ptr;
         /* The aws_thread_id_t to the thread that request ran on */
         aws_thread_id_t thread_id;
         /* The stream-id, which is the idex when the stream was activated. */

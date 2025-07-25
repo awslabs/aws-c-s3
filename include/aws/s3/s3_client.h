@@ -1481,6 +1481,11 @@ int aws_s3_request_metrics_get_body_read_total_without_reset_ns(
 AWS_S3_API
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
 
+/* Get the request pointer from request metrics. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available */
+AWS_S3_API
+int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, void **out_request_ptr);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 

@@ -131,6 +131,8 @@ struct s3_data_read_metrics {
     uint64_t start_timestamp;
     uint64_t end_timestamp;
     aws_thread_id_t thread_id;
+    /* The pointer to the connection that request was made from */
+    void *request_ptr;
 };
 
 /**
