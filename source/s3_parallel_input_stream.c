@@ -86,6 +86,7 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     for (size_t i = 0; i < elg_num; i++) {
         fclose(impl->file_stream[i]);
     }
+    aws_mem_release(stream->alloc, impl->file_stream);
     aws_event_loop_group_release(impl->reading_elg);
 
     aws_mem_release(stream->alloc, impl);
@@ -198,7 +199,7 @@ struct aws_future_bool *s_para_from_file_read(
     /* May need to keep the impl alive */
     read_task->para_impl = impl;
 
-    int index = aws_atomic_fetch_add_int(&impl->current_index, 1);
+    int index = aws_atomic_fetch_add(&impl->current_index, 1);
     index %= impl->elg_num;
     /*This is not 100% thread safe, but, it's fine. We only need to make sure the index is the same for ELG and fstream.
      */
@@ -229,8 +230,8 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
     impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
     impl->reading_elg = aws_event_loop_group_acquire(reading_elg);
-    size_t elg_num = aws_event_loop_group_get_loop_count(impl->reading_elg);
-    impl->file_stream = aws_mem_calloc(allocator, elg_num, sizeof(FILE *));
+    impl->elg_num = aws_event_loop_group_get_loop_count(impl->reading_elg);
+    impl->file_stream = aws_mem_calloc(allocator, impl->elg_num, sizeof(FILE *));
 
     if (!aws_path_exists(impl->file_path)) {
         /* If file path not exists, raise error from errno. */
@@ -238,7 +239,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
         s_para_from_file_destroy(&impl->base);
         return NULL;
     }
-    for (size_t i = 0; i < elg_num; i++) {
+    for (size_t i = 0; i < impl->elg_num; i++) {
         impl->file_stream[i] = aws_fopen(aws_string_c_str(impl->file_path), "rb");
     }
     aws_atomic_init_int(&impl->current_index, 0);
