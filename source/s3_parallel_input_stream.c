@@ -71,6 +71,10 @@ struct aws_parallel_input_stream_from_file_impl {
 
     struct aws_string *file_path;
     struct aws_event_loop_group *reading_elg;
+
+    FILE **file_stream;
+    size_t elg_num;
+    struct aws_atomic_var current_index;
 };
 
 static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
@@ -78,6 +82,10 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
 
     aws_string_destroy(impl->file_path);
+    size_t elg_num = aws_event_loop_group_get_loop_count(impl->reading_elg);
+    for (size_t i = 0; i < elg_num; i++) {
+        fclose(impl->file_stream[i]);
+    }
     aws_event_loop_group_release(impl->reading_elg);
 
     aws_mem_release(stream->alloc, impl);
@@ -92,6 +100,7 @@ struct read_task_impl {
     uint64_t offset;
     size_t length;
     struct aws_byte_buf *dest;
+    FILE *file_stream;
 };
 
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -99,21 +108,9 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     struct read_task_impl *read_task = arg;
     struct aws_parallel_input_stream_from_file_impl *impl = read_task->para_impl;
     struct aws_future_bool *end_future = read_task->end_future;
-    FILE *file_stream = NULL;
+    FILE *file_stream = read_task->file_stream;
     int error_code = AWS_ERROR_SUCCESS;
     size_t actually_read = 0;
-
-    file_stream = aws_fopen(aws_string_c_str(impl->file_path), "rb");
-    if (file_stream == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_GENERAL,
-            "id=%p: Failed to open file %s for reading",
-            (void *)&impl->base,
-            aws_string_c_str(impl->file_path));
-        error_code = aws_last_error();
-        goto cleanup;
-    }
-
     /* seek to the right position and then read */
     if (aws_fseek(file_stream, (int64_t)read_task->offset, SEEK_SET)) {
         AWS_LOGF_ERROR(
@@ -149,9 +146,6 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         (unsigned long long)read_task->offset);
 
 cleanup:
-    if (file_stream != NULL) {
-        fclose(file_stream);
-    }
 
     if (error_code != AWS_ERROR_SUCCESS) {
         aws_future_bool_set_error(end_future, error_code);
@@ -204,7 +198,15 @@ struct aws_future_bool *s_para_from_file_read(
     /* May need to keep the impl alive */
     read_task->para_impl = impl;
 
-    struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(impl->reading_elg);
+    int index = aws_atomic_fetch_add_int(&impl->current_index, 1);
+    index %= impl->elg_num;
+    /*This is not 100% thread safe, but, it's fine. We only need to make sure the index is the same for ELG and fstream.
+     */
+    aws_atomic_store_int(&impl->current_index, index);
+
+    struct aws_event_loop *loop = aws_event_loop_group_get_loop_at(impl->reading_elg, index);
+    read_task->file_stream = impl->file_stream[index];
+
     struct aws_task *task = aws_mem_calloc(impl->base.alloc, 1, sizeof(struct aws_task));
     aws_task_init(task, s_s3_parallel_from_file_read_task, read_task, "s3_parallel_read_task");
     aws_event_loop_schedule_task_now(loop, task);
@@ -227,6 +229,8 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
     impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
     impl->reading_elg = aws_event_loop_group_acquire(reading_elg);
+    size_t elg_num = aws_event_loop_group_get_loop_count(impl->reading_elg);
+    impl->file_stream = aws_mem_calloc(allocator, elg_num, sizeof(FILE *));
 
     if (!aws_path_exists(impl->file_path)) {
         /* If file path not exists, raise error from errno. */
@@ -234,7 +238,10 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
         s_para_from_file_destroy(&impl->base);
         return NULL;
     }
-
+    for (size_t i = 0; i < elg_num; i++) {
+        impl->file_stream[i] = aws_fopen(aws_string_c_str(impl->file_path), "rb");
+    }
+    aws_atomic_init_int(&impl->current_index, 0);
     return &impl->base;
 }
 
