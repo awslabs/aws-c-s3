@@ -40,7 +40,7 @@ static int s_finalize_checksum(struct aws_checksum_stream *impl) {
             AWS_LS_S3_CLIENT,
             "Failed to base64 encode checksum with error code %d (%s). Output capacity: %zu length %zu",
             aws_last_error(),
-            aws_error_str(aws_last_error()), 
+            aws_error_str(aws_last_error()),
             impl->encoded_checksum_output->capacity,
             impl->encoded_checksum_output->len);
         aws_byte_buf_reset(&impl->checksum_result, true);
