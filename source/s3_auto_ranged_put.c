@@ -1026,6 +1026,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         } else {
             printf("PARALLEL retry 8MB read\n");
             // Create unique filename with timestamp and meta_request pointer
+            meta_request->telemetry_callback(meta_request, request->send_data.metrics, meta_request->user_data);
             char filename[256];
             /* BEGIN CRITICAL SECTION */
             aws_s3_meta_request_lock_synced_data(meta_request);
@@ -1062,6 +1063,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
                         m.request_ptr);
                 }
                 aws_array_list_clear(&meta_request->read_metrics_list);
+                fflush(metrics_file);
                 fclose(metrics_file);
 
                 AWS_LOGF_INFO(
@@ -1070,6 +1072,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
                     (void *)meta_request,
                     metric_length,
                     filename);
+                AWS_FATAL_ASSERT(false);
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST, "id=%p Failed to open metrics file %s", (void *)meta_request, filename);
