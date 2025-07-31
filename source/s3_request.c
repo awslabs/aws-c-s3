@@ -198,6 +198,8 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->time_metrics.sign_start_timestamp_ns = -1;
     metrics->time_metrics.sign_end_timestamp_ns = -1;
     metrics->time_metrics.signing_duration_ns = -1;
+    metrics->time_metrics.start_get_connection_timestamp_ns = -1;
+    metrics->time_metrics.finish_get_connection_timestamp_ns = -1;
     metrics->time_metrics.body_read_start_timestamp_ns = -1;
     metrics->time_metrics.body_read_end_timestamp_ns = -1;
     metrics->time_metrics.body_read_duration_ns = -1;
@@ -465,6 +467,30 @@ int aws_s3_request_metrics_get_body_read_total_without_reset_ns(
     const struct aws_s3_request_metrics *metrics,
     int64_t *body_read_total_without_reset_ns) {
     *body_read_total_without_reset_ns = metrics->time_metrics.body_read_total_without_reset_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_start_get_connection_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *start_get_connection_timestamp_ns) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(start_get_connection_timestamp_ns);
+    if (metrics->time_metrics.start_get_connection_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *start_get_connection_timestamp_ns = metrics->time_metrics.start_get_connection_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_finish_get_connection_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *finish_get_connection_timestamp_ns) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(finish_get_connection_timestamp_ns);
+    if (metrics->time_metrics.finish_get_connection_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *finish_get_connection_timestamp_ns = metrics->time_metrics.finish_get_connection_timestamp_ns;
     return AWS_OP_SUCCESS;
 }
 
