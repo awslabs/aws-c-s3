@@ -31,7 +31,7 @@ struct aws_s3_request_metrics {
     struct aws_allocator *allocator;
 
     struct {
-        /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps
+        /* The time stamp when the request started by S3 client, which is after prepared time by the client. Timestamps
          * are from `aws_high_res_clock_get_ticks`. This will always be available. */
         int64_t start_timestamp_ns;
         /* The time stamp when the request finished by S3 client succeed or failed or to be retried. Timestamps
@@ -40,6 +40,9 @@ struct aws_s3_request_metrics {
         /* The time duration for the request from start to finish. end_timestamp_ns - start_timestamp_ns. This will
          * always be available. */
         int64_t total_duration_ns;
+
+        int64_t start_get_connection_timestamp_ns;
+        int64_t finish_get_connection_timestamp_ns;
 
         /* The time stamp when the request started to be encoded. -1 means data not available. Timestamp
          * are from `aws_high_res_clock_get_ticks` */
