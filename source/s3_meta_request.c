@@ -1783,7 +1783,6 @@ void aws_s3_meta_request_send_request_finish_default(
                     (void *)request,
                     response_status);
             } else {
-                aws_write_metrics(meta_request, request, error_code);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d, "
@@ -1808,6 +1807,7 @@ void aws_s3_meta_request_send_request_finish_default(
                     aws_error_str(error_code),
                     (void *)request);
             } else {
+                aws_write_metrics(meta_request, request, error_code);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Request failed from error %d (%s). (request=%p, response status=%d, x-amz-request-id: %s, "
