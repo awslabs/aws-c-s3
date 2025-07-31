@@ -1486,6 +1486,16 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 AWS_S3_API
 int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, void **out_request_ptr);
 
+AWS_S3_API
+int aws_s3_request_metrics_get_start_get_connection_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *start_get_connection_timestamp_ns);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_finish_get_connection_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *finish_get_connection_timestamp_ns);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
