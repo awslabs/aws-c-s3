@@ -1660,6 +1660,64 @@ static int s_s3_meta_request_error_code_from_response(struct aws_s3_request *req
     }
 }
 
+void aws_write_metrics(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request, int error_code) {
+    // Create unique filename with timestamp and meta_request pointer
+    meta_request->telemetry_callback(meta_request, request->send_data.metrics, meta_request->user_data);
+    char filename[256];
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    meta_request->count++;
+    snprintf(
+        filename,
+        sizeof(filename),
+        "/data/aws-crt-s3-benchmarks/metrics/s3_read_metrics_%p_%d_%d.csv",
+        (void *)request,
+        meta_request->count,
+        error_code);
+
+    FILE *metrics_file = fopen(filename, "w");
+    /* write every read metric to a file */
+    size_t metric_length = aws_array_list_length(&meta_request->read_metrics_list);
+    /* write every read metric to a file */
+    if (metrics_file) {
+        // Write CSV header
+        fprintf(metrics_file, "index,offset,size,start_timestamp,duration_ns,threadid,requestptr\n");
+        // Write all metrics
+        for (size_t j = 0; j < metric_length; j++) {
+            struct s3_data_read_metrics m;
+            aws_array_list_get_at(&meta_request->read_metrics_list, &m, j);
+
+            uint64_t duration = m.end_timestamp - m.start_timestamp;
+
+            fprintf(
+                metrics_file,
+                "%zu,%llu,%llu,%llu,%llu,%zu,%p\n",
+                j,
+                (unsigned long long)m.offset,
+                (unsigned long long)m.size,
+                (unsigned long long)m.start_timestamp,
+                (unsigned long long)duration,
+                (size_t)m.thread_id,
+                m.request_ptr);
+        }
+        aws_array_list_clear(&meta_request->read_metrics_list);
+        fflush(metrics_file);
+        fclose(metrics_file);
+
+        AWS_LOGF_INFO(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Wrote %zu read metrics to %s",
+            (void *)meta_request,
+            metric_length,
+            filename);
+        AWS_FATAL_ASSERT(false);
+    } else {
+        AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Failed to open metrics file %s", (void *)meta_request, filename);
+    }
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+}
+
 void aws_s3_meta_request_send_request_finish_default(
     struct aws_s3_connection *connection,
     struct aws_http_stream *stream,
@@ -1725,6 +1783,7 @@ void aws_s3_meta_request_send_request_finish_default(
                     (void *)request,
                     response_status);
             } else {
+                aws_write_metrics(meta_request, request, error_code);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d, "
