@@ -1744,6 +1744,7 @@ void aws_s3_meta_request_send_request_finish_default(
                     aws_error_str(error_code),
                     (void *)request);
             } else {
+                aws_write_metrics(meta_request, request, error_code);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p Request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
