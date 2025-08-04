@@ -151,7 +151,6 @@ struct aws_s3_meta_request {
 
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
-    struct aws_array_list read_metrics_list;
 
     /* The meta request's outgoing body comes from one of these:
      * 1) request_body_async_stream: if set, then async stream 1 part at a time
