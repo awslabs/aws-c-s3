@@ -1764,34 +1764,34 @@ static bool s_s3_client_should_update_meta_request(
         }
     }
 
-    /**
-     * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
-     * be in the preparation stage.
-     * Or total number of requests tracked by the client is more than the max tracked ("in flight")
-     * requests.
-     *
-     * We cannot create more requests for this meta request.
-     */
-    if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) >=
-        max_requests_prepare) {
-        return false;
-    }
-    if (num_requests_in_flight >= max_requests_in_flight) {
+    // /**
+    //  * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
+    //  * be in the preparation stage.
+    //  * Or total number of requests tracked by the client is more than the max tracked ("in flight")
+    //  * requests.
+    //  *
+    //  * We cannot create more requests for this meta request.
+    //  */
+    // if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) >=
+    //     max_requests_prepare) {
+    //     return false;
+    // }
+    if (num_requests_in_flight >= max_requests_prepare) {
         return false;
     }
 
-    /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
-     * ramping up requests just yet. If there is already enough in the queue for one address (even if those
-     * aren't for this particular endpoint) we skip over this meta request for now. */
-    struct aws_s3_endpoint *endpoint = meta_request->endpoint;
-    AWS_ASSERT(endpoint != NULL);
-    AWS_ASSERT(client->vtable->get_host_address_count);
-    size_t num_known_vips = client->vtable->get_host_address_count(
-        client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
-    if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
-                                client->threaded_data.request_queue_size) >= g_min_num_connections) {
-        return false;
-    }
+    // /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
+    //  * ramping up requests just yet. If there is already enough in the queue for one address (even if those
+    //  * aren't for this particular endpoint) we skip over this meta request for now. */
+    // struct aws_s3_endpoint *endpoint = meta_request->endpoint;
+    // AWS_ASSERT(endpoint != NULL);
+    // AWS_ASSERT(client->vtable->get_host_address_count);
+    // size_t num_known_vips = client->vtable->get_host_address_count(
+    //     client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
+    // if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
+    //                             client->threaded_data.request_queue_size) >= g_min_num_connections) {
+    //     return false;
+    // }
 
     /* Nothing blocks the meta request to create more requests */
     return true;

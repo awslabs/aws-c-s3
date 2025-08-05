@@ -71,3 +71,10 @@ benchmarks/dashboard-stack/package-lock.json
 
 # virtual environment
 .venv/
+
+*.csv
+*.png
+
+stats.txt
+
+*.py
