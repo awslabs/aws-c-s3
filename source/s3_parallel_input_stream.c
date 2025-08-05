@@ -340,7 +340,6 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(impl->meta_request);
-    aws_array_list_push_back(&impl->meta_request->read_metrics_list, &impl->metrics);
     if (impl->request->send_data.metrics->time_metrics.body_read_total_ns == -1) {
         impl->request->send_data.metrics->time_metrics.body_read_total_ns = duration;
     } else {
