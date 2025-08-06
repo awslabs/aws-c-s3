@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#define _GNU_SOURCE
 #include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/private/s3_parallel_input_stream.h>
 
@@ -19,6 +20,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* O_DIRECT is not available on all platforms */
@@ -121,6 +124,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         goto cleanup;
     }
 
+    // pid_t pid = getpid();
     /* seek to the right position and then read */
     if (lseek(file_fd, (off_t)read_task->offset, SEEK_SET) == -1) {
         AWS_LOGF_ERROR(
@@ -133,15 +137,16 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         goto cleanup;
     }
 
-    ssize_t bytes_read = read(file_fd, read_task->dest->buffer + read_task->dest->len, read_task->length);
+    ssize_t bytes_read = read(file_fd, read_task->dest->buffer, read_task->length);
     if (bytes_read == -1) {
+        int err = errno;
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
             "id=%p: Failed to read %zu bytes from file %s",
             (void *)&impl->base,
             read_task->length,
             aws_string_c_str(impl->file_path));
-        error_code = aws_translate_and_raise_io_error(errno);
+        error_code = aws_translate_and_raise_io_error(err);
         goto cleanup;
     }
 
@@ -166,7 +171,6 @@ cleanup:
     } else {
         /* Return true if we reached EOF */
         bool eof_reached = (actually_read < read_task->length);
-        AWS_ASSERT(!eof_reached);
         aws_future_bool_set_result(end_future, eof_reached);
     }
 
@@ -206,6 +210,8 @@ struct aws_future_bool *s_para_from_file_read(
 
     /* Initialize for one read */
     read_task->dest = dest;
+
+    AWS_FATAL_ASSERT(dest->buffer);
     read_task->offset = offset;
     read_task->length = length;
     read_task->end_future = aws_future_bool_acquire(future);
@@ -249,8 +255,10 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
 struct aws_s3_mmap_part_streaming_input_stream_impl {
     struct aws_input_stream base;
     struct aws_allocator *allocator;
+    struct aws_allocator *aligned_allocator;
 
     struct aws_parallel_input_stream *stream;
+    size_t page_algined_offset;
     size_t offset;
 
     size_t chunk_load_size;
@@ -322,15 +330,24 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
         struct aws_byte_buf *tmp = impl->reading_chunk_buf;
         impl->reading_chunk_buf = impl->loading_chunk_buf;
         impl->loading_chunk_buf = tmp;
+        if (impl->page_algined_offset > 0) {
+            impl->in_chunk_offset = impl->page_algined_offset;
+            impl->page_algined_offset = 0;
+        } else {
+            impl->in_chunk_offset = 0;
+        }
+
         size_t new_offset = impl->offset + impl->total_length_read + impl->reading_chunk_buf->len;
-        size_t new_load_length = aws_min_size(
-            impl->chunk_load_size, impl->total_length - impl->total_length_read - impl->reading_chunk_buf->len);
-        if (new_load_length > 0 && !impl->eos_loaded) {
+        long page_size = sysconf(_SC_PAGESIZE);
+        impl->page_algined_offset = new_offset % page_size;
+        new_offset -= impl->page_algined_offset;
+        size_t new_load_length = impl->chunk_load_size;
+
+        if (impl->total_length - impl->total_length_read - impl->reading_chunk_buf->len > 0 && !impl->eos_loaded) {
             /* Kick off loading the next chunk. */
             impl->loading_future =
                 aws_parallel_input_stream_read(impl->stream, new_offset, new_load_length, impl->loading_chunk_buf);
         }
-        impl->in_chunk_offset = 0;
     }
     read_length = aws_min_size(read_length, impl->reading_chunk_buf->len - impl->in_chunk_offset);
     impl->metrics.offset = impl->offset + impl->total_length_read;
@@ -360,7 +377,7 @@ static int s_aws_s3_mmap_part_streaming_input_stream_read(struct aws_input_strea
     }
     aws_s3_meta_request_unlock_synced_data(impl->meta_request);
     /* END CRITICAL SECTION */
-    if (impl->in_chunk_offset == impl->reading_chunk_buf->len) {
+    if (impl->in_chunk_offset == impl->reading_chunk_buf->len || impl->total_length_read == impl->total_length) {
         /* We finished reading the reading buffer, reset it. */
         aws_byte_buf_reset(impl->reading_chunk_buf, false);
         impl->in_chunk_offset = SIZE_MAX;
@@ -408,6 +425,12 @@ static int s_aws_s3_mmap_part_streaming_input_stream_get_length(struct aws_input
 
 static void s_aws_s3_mmap_part_streaming_input_stream_destroy(
     struct aws_s3_mmap_part_streaming_input_stream_impl *impl) {
+    if (impl->loading_future) {
+        /* If there is a loading future, wait for it to complete. */
+        /* TODO: probably better to cancel the future, but we don't support cancel yet */
+        aws_future_bool_wait(impl->loading_future, MAX_TIMEOUT_NS_P);
+        aws_future_bool_release(impl->loading_future);
+    }
     aws_parallel_input_stream_release(impl->stream);
     aws_byte_buf_clean_up(&impl->chunk_buf_1);
     aws_byte_buf_clean_up(&impl->chunk_buf_2);
@@ -452,22 +475,29 @@ struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
 
     struct aws_s3_mmap_part_streaming_input_stream_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mmap_part_streaming_input_stream_impl));
+
     aws_ref_count_init(
         &impl->base.ref_count,
         impl,
         (aws_simple_completion_callback *)s_aws_s3_mmap_part_streaming_input_stream_destroy);
     impl->allocator = allocator;
+    long page_size = sysconf(_SC_PAGESIZE);
+    impl->aligned_allocator = aws_explicit_aligned_allocator_new(page_size);
     impl->base.vtable = &s_aws_s3_mmap_part_streaming_input_stream_vtable;
 
+    impl->page_algined_offset = offset % page_size;
+    impl->offset = offset - impl->page_algined_offset;
     impl->total_length = request_body_size;
-    impl->offset = offset;
+
     impl->chunk_load_size = 8 * 1024 * 1024;
 
     impl->stream = aws_parallel_input_stream_acquire(stream);
-    aws_byte_buf_init(&impl->chunk_buf_1, allocator, impl->chunk_load_size);
-    aws_byte_buf_init(&impl->chunk_buf_2, allocator, impl->chunk_load_size);
+    aws_byte_buf_init(&impl->chunk_buf_1, impl->aligned_allocator, impl->chunk_load_size);
+    aws_byte_buf_init(&impl->chunk_buf_2, impl->aligned_allocator, impl->chunk_load_size);
     impl->loading_chunk_buf = &impl->chunk_buf_1;
     impl->reading_chunk_buf = &impl->chunk_buf_2;
+    AWS_FATAL_ASSERT(impl->chunk_buf_1.buffer);
+    AWS_FATAL_ASSERT(impl->chunk_buf_2.buffer);
     impl->meta_request = meta_request;
     impl->request = request;
     if (impl->request->send_data.metrics && impl->request->send_data.metrics->time_metrics.body_read_total_ns != -1) {
