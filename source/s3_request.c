@@ -63,6 +63,8 @@ void s_populate_metrics_from_message(struct aws_s3_request_metrics *metrics, str
     AWS_ASSERT(!err);
     metrics->req_resp_info_metrics.host_address = aws_string_new_from_cursor(metrics->allocator, &host_header_value);
     AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
+
+    (void)err;
 }
 
 void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message) {
