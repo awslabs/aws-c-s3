@@ -40,38 +40,66 @@ struct aws_s3_request *aws_s3_request_new(
     request->should_allocate_buffer_from_pool = (flags & AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL) != 0;
     request->always_send = (flags & AWS_S3_REQUEST_FLAG_ALWAYS_SEND) != 0;
 
+    request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, request);
+
     return request;
+}
+
+void s_populate_metrics_from_message(struct aws_s3_request_metrics *metrics, struct aws_http_message *message) {
+    struct aws_byte_cursor out_path;
+    AWS_ZERO_STRUCT(out_path);
+    int err = aws_http_message_get_request_path(message, &out_path);
+    /* If there is no path of the message, it should be a program error. */
+    AWS_ASSERT(!err);
+    metrics->req_resp_info_metrics.request_path_query = aws_string_new_from_cursor(metrics->allocator, &out_path);
+    AWS_ASSERT(metrics->req_resp_info_metrics.request_path_query != NULL);
+
+    /* Get the host header value */
+    struct aws_byte_cursor host_header_value;
+    AWS_ZERO_STRUCT(host_header_value);
+    struct aws_http_headers *message_headers = aws_http_message_get_headers(message);
+    AWS_ASSERT(message_headers);
+    err = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
+    AWS_ASSERT(!err);
+    metrics->req_resp_info_metrics.host_address = aws_string_new_from_cursor(metrics->allocator, &host_header_value);
+    AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
 }
 
 void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_http_message *message) {
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(message);
 
-    if (request != NULL && request->send_data.metrics != NULL) {
-        /* If there is a metrics from previous attempt, complete it now. */
-        struct aws_s3_request_metrics *metric = request->send_data.metrics;
-        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
-        metric->time_metrics.total_duration_ns =
-            metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
+    /* If this is not the first time request is prepared, e.g. this is a retry,
+     * send out previous metrics and reinitialize metrics structure.
+     */
+    if (request->num_times_prepared > 0) {
+        if (request != NULL && request->send_data.metrics != NULL) {
+            /* If there is a metrics from previous attempt, complete it now. */
+            struct aws_s3_request_metrics *metric = request->send_data.metrics;
+            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
+            metric->time_metrics.total_duration_ns =
+                metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
 
-        struct aws_s3_meta_request *meta_request = request->meta_request;
-        if (meta_request != NULL && meta_request->telemetry_callback != NULL) {
+            struct aws_s3_meta_request *meta_request = request->meta_request;
+            if (meta_request != NULL && meta_request->telemetry_callback != NULL) {
 
-            aws_s3_meta_request_lock_synced_data(meta_request);
-            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
-            event.u.telemetry.metrics = aws_s3_request_metrics_acquire(metric);
-            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
-            aws_s3_meta_request_unlock_synced_data(meta_request);
+                aws_s3_meta_request_lock_synced_data(meta_request);
+                struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
+                event.u.telemetry.metrics = aws_s3_request_metrics_acquire(metric);
+                aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+                aws_s3_meta_request_unlock_synced_data(meta_request);
+            }
+            request->send_data.metrics = aws_s3_request_metrics_release(metric);
         }
-        request->send_data.metrics = aws_s3_request_metrics_release(metric);
+        aws_s3_request_clean_up_send_data(request);
+
+        request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, request);
     }
-    aws_s3_request_clean_up_send_data(request);
 
     request->send_data.message = message;
-    request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, request, message);
+    s_populate_metrics_from_message(request->send_data.metrics, message);
     /* Start the timestamp */
     aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.start_timestamp_ns);
-
     aws_http_message_acquire(message);
 }
 
@@ -154,28 +182,10 @@ static void s_s3_request_metrics_destroy(void *arg) {
 
 struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_request *request,
-    const struct aws_http_message *message) {
+    const struct aws_s3_request *request) {
 
     struct aws_s3_request_metrics *metrics = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_request_metrics));
     metrics->allocator = allocator;
-    struct aws_byte_cursor out_path;
-    AWS_ZERO_STRUCT(out_path);
-    int err = aws_http_message_get_request_path(message, &out_path);
-    /* If there is no path of the message, it should be a program error. */
-    AWS_ASSERT(!err);
-    metrics->req_resp_info_metrics.request_path_query = aws_string_new_from_cursor(allocator, &out_path);
-    AWS_ASSERT(metrics->req_resp_info_metrics.request_path_query != NULL);
-
-    /* Get the host header value */
-    struct aws_byte_cursor host_header_value;
-    AWS_ZERO_STRUCT(host_header_value);
-    struct aws_http_headers *message_headers = aws_http_message_get_headers(message);
-    AWS_ASSERT(message_headers);
-    err = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
-    AWS_ASSERT(!err);
-    metrics->req_resp_info_metrics.host_address = aws_string_new_from_cursor(allocator, &host_header_value);
-    AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
 
     metrics->req_resp_info_metrics.request_type = request->request_type;
     metrics->req_resp_info_metrics.operation_name = aws_string_new_from_string(allocator, request->operation_name);
@@ -201,7 +211,6 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
 
     metrics->req_resp_info_metrics.response_status = -1;
 
-    (void)err;
     aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy);
 
     return metrics;
