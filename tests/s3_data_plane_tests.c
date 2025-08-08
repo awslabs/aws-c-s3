@@ -739,9 +739,12 @@ static int s_test_s3_client_queue_requests(struct aws_allocator *allocator, void
     ASSERT_TRUE(mock_client->threaded_data.request_queue_size == 0);
 
     for (uint32_t i = 0; i < num_requests; ++i) {
+        /* release metrics manually, because we are mocking flow here and metrics are actually not delivered */
+        requests[i]->send_data.metrics = aws_s3_request_metrics_release(requests[i]->send_data.metrics);
         aws_s3_request_release(requests[i]);
     }
 
+    pivot_request->send_data.metrics = aws_s3_request_metrics_release(pivot_request->send_data.metrics);
     aws_s3_request_release(pivot_request);
     aws_s3_meta_request_release(mock_meta_request);
     aws_s3_client_release(mock_client);

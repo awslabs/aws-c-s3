@@ -40,18 +40,20 @@ struct aws_s3_request *aws_s3_request_new(
     request->should_allocate_buffer_from_pool = (flags & AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL) != 0;
     request->always_send = (flags & AWS_S3_REQUEST_FLAG_ALWAYS_SEND) != 0;
 
-    request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, request);
+    request->send_data.metrics = aws_s3_request_metrics_new(request->allocator);
 
     return request;
 }
 
-void s_populate_metrics_from_message(struct aws_s3_request_metrics *metrics, struct aws_http_message *message) {
+void s_populate_metrics_from_message(struct aws_s3_request *request,
+    struct aws_http_message *message) {
     struct aws_byte_cursor out_path;
     AWS_ZERO_STRUCT(out_path);
     int err = aws_http_message_get_request_path(message, &out_path);
     /* If there is no path of the message, it should be a program error. */
     AWS_ASSERT(!err);
-    metrics->req_resp_info_metrics.request_path_query = aws_string_new_from_cursor(metrics->allocator, &out_path);
+    request->send_data.metrics->req_resp_info_metrics.request_path_query = 
+        aws_string_new_from_cursor(request->send_data.metrics->allocator, &out_path);
     AWS_ASSERT(metrics->req_resp_info_metrics.request_path_query != NULL);
 
     /* Get the host header value */
@@ -61,8 +63,13 @@ void s_populate_metrics_from_message(struct aws_s3_request_metrics *metrics, str
     AWS_ASSERT(message_headers);
     err = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
     AWS_ASSERT(!err);
-    metrics->req_resp_info_metrics.host_address = aws_string_new_from_cursor(metrics->allocator, &host_header_value);
+    request->send_data.metrics->req_resp_info_metrics.host_address = 
+        aws_string_new_from_cursor(request->send_data.metrics->allocator, &host_header_value);
     AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
+
+    request->send_data.metrics->req_resp_info_metrics.request_type = request->request_type;
+    request->send_data.metrics->req_resp_info_metrics.operation_name = 
+        aws_string_new_from_string(request->send_data.metrics->allocator, request->operation_name);
 
     (void)err;
 }
@@ -95,11 +102,11 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
         }
         aws_s3_request_clean_up_send_data(request);
 
-        request->send_data.metrics = aws_s3_request_metrics_new(request->allocator, request);
+        request->send_data.metrics = aws_s3_request_metrics_new(request->allocator);
     }
 
     request->send_data.message = message;
-    s_populate_metrics_from_message(request->send_data.metrics, message);
+    s_populate_metrics_from_message(request, message);
     /* Start the timestamp */
     aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.start_timestamp_ns);
     aws_http_message_acquire(message);
@@ -182,15 +189,10 @@ static void s_s3_request_metrics_destroy(void *arg) {
     aws_mem_release(metrics->allocator, metrics);
 }
 
-struct aws_s3_request_metrics *aws_s3_request_metrics_new(
-    struct aws_allocator *allocator,
-    const struct aws_s3_request *request) {
+struct aws_s3_request_metrics *aws_s3_request_metrics_new(struct aws_allocator *allocator) {
 
     struct aws_s3_request_metrics *metrics = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_request_metrics));
     metrics->allocator = allocator;
-
-    metrics->req_resp_info_metrics.request_type = request->request_type;
-    metrics->req_resp_info_metrics.operation_name = aws_string_new_from_string(allocator, request->operation_name);
 
     metrics->time_metrics.start_timestamp_ns = -1;
     metrics->time_metrics.end_timestamp_ns = -1;
@@ -213,10 +215,11 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
 
     metrics->req_resp_info_metrics.response_status = -1;
 
-    aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy);
+    aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy);/**/
 
     return metrics;
 }
+
 struct aws_s3_request_metrics *aws_s3_request_metrics_acquire(struct aws_s3_request_metrics *metrics) {
     if (!metrics) {
         return NULL;
