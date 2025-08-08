@@ -175,7 +175,7 @@ struct aws_s3_client_vtable {
         struct aws_http_connection *client_connection,
         const struct aws_http_make_request_options *options);
 
-    void (*after_prepare_upload_part_finish)(struct aws_s3_request *request);
+    void (*after_prepare_upload_part_finish)(struct aws_s3_request *request, struct aws_http_message *message);
 };
 
 struct aws_s3_upload_part_timeout_stats {

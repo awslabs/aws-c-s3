@@ -51,16 +51,33 @@ class Response:
 @dataclass
 class ResponseConfig:
     path: str
-    disconnect_after_headers = False
+    request: Optional[object] = None  # Add request as a field
+    disconnect_after_headers: bool = False
     generate_body_size: Optional[int] = None
-    json_path: str = None
-    throttle: bool = False
+    json_path: Optional[str] = None
+    forced_throttle: bool = False
     force_retry: bool = False
+    should_skip_wait: bool = False
     request_headers: Optional[List[Tuple[bytes, bytes]]] = None
+
+    def __post_init__(self):
+        """Called automatically after the dataclass __init__"""
+        if self.request is not None:
+            self.request_headers = self.request.headers
+            if get_request_header_value(self.request, "before_finish") is not None:
+                self.should_skip_wait = True
+            if get_request_header_value(self.request, "force_throttle") is not None:
+                self.forced_throttle = True
 
     def _resolve_file_path(self, wrapper, request_type):
         global SHOULD_THROTTLE
         if self.json_path is None:
+            if self.forced_throttle:
+                # force the throttle to happend, instead of just 50%.
+                response_file = os.path.join(
+                    base_dir, request_type.name, f"throttle.json")
+                self.json_path = response_file
+                return
             response_file = os.path.join(
                 base_dir, request_type.name, f"{self.path[1:]}.json")
             if os.path.exists(response_file) == False:
@@ -481,19 +498,20 @@ async def handle_mock_s3_request(wrapper, request):
         wrapper.info("unsupported request:", request)
         request_type = S3Opts.CreateMultipartUpload
 
-    while True:
-        event = await wrapper.next_event()
-        if type(event) is h11.EndOfMessage:
-            break
-        assert type(event) is h11.Data
-
     if response_config is None:
-        response_config = ResponseConfig(parsed_path.path)
-    response_config.request_headers = request.headers
+        response_config = ResponseConfig(parsed_path.path, request=request)
+
+    if not response_config.should_skip_wait:
+        while True:
+            event = await wrapper.next_event()
+            if type(event) is h11.EndOfMessage:
+                break
+            assert type(event) is h11.Data
+    else:
+        print("Skipping waiting for request body")
 
     response = response_config.resolve_response(
         wrapper, request_type, head_request=method == "HEAD")
-
     await send_response(wrapper, response)
 
 

@@ -884,7 +884,7 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Callback for reviewing an upload before it completes.
      * WARNING: experimental/unstable
-     * See `aws_s3_upload_review_fn`
+     * See `aws_s3_meta_request_upload_review_fn`
      */
     aws_s3_meta_request_upload_review_fn *upload_review_callback;
 

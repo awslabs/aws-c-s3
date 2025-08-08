@@ -1,0 +1,13 @@
+{
+    "status": 503,
+    "headers": {"ETag": "b54357faf0632cce46e942fa68356b38", "Connection": "keep-alive"},
+    "body": [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "",
+        "<Error>",
+         "<Code>SlowDown</Code>",
+         "<RequestId>656c76696e6727732072657175657374</RequestId>",
+         "<HostId>Uuag1LuByRx9e6j5Onimru9pO4ZVKnJ2Qz7/C1NPcfTWAtRPfTaOFg==</HostId>",
+        "</Error>"
+    ]
+  }
