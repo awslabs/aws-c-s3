@@ -45,14 +45,13 @@ struct aws_s3_request *aws_s3_request_new(
     return request;
 }
 
-void s_populate_metrics_from_message(struct aws_s3_request *request,
-    struct aws_http_message *message) {
+void s_populate_metrics_from_message(struct aws_s3_request *request, struct aws_http_message *message) {
     struct aws_byte_cursor out_path;
     AWS_ZERO_STRUCT(out_path);
     int err = aws_http_message_get_request_path(message, &out_path);
     /* If there is no path of the message, it should be a program error. */
     AWS_ASSERT(!err);
-    request->send_data.metrics->req_resp_info_metrics.request_path_query = 
+    request->send_data.metrics->req_resp_info_metrics.request_path_query =
         aws_string_new_from_cursor(request->send_data.metrics->allocator, &out_path);
     AWS_ASSERT(request->send_data.metrics->req_resp_info_metrics.request_path_query != NULL);
 
@@ -63,12 +62,12 @@ void s_populate_metrics_from_message(struct aws_s3_request *request,
     AWS_ASSERT(message_headers);
     err = aws_http_headers_get(message_headers, g_host_header_name, &host_header_value);
     AWS_ASSERT(!err);
-    request->send_data.metrics->req_resp_info_metrics.host_address = 
+    request->send_data.metrics->req_resp_info_metrics.host_address =
         aws_string_new_from_cursor(request->send_data.metrics->allocator, &host_header_value);
     AWS_ASSERT(request->send_data.metrics->req_resp_info_metrics.host_address != NULL);
 
     request->send_data.metrics->req_resp_info_metrics.request_type = request->request_type;
-    request->send_data.metrics->req_resp_info_metrics.operation_name = 
+    request->send_data.metrics->req_resp_info_metrics.operation_name =
         aws_string_new_from_string(request->send_data.metrics->allocator, request->operation_name);
 
     (void)err;
@@ -115,6 +114,8 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 static void s_s3_request_clean_up_send_data_message(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
 
+    request->send_data.metrics = aws_s3_request_metrics_release(request->send_data.metrics);
+
     struct aws_http_message *message = request->send_data.message;
 
     if (message == NULL) {
@@ -128,7 +129,8 @@ static void s_s3_request_clean_up_send_data_message(struct aws_s3_request *reque
 void aws_s3_request_clean_up_send_data(struct aws_s3_request *request) {
     AWS_PRECONDITION(request);
     /* The metrics should be collected and provided to user before reaching here */
-    AWS_FATAL_ASSERT(request->send_data.metrics == NULL);
+    AWS_FATAL_ASSERT(
+        request->send_data.metrics == NULL || request->send_data.metrics->time_metrics.start_timestamp_ns == -1);
 
     s_s3_request_clean_up_send_data_message(request);
 
@@ -215,7 +217,7 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(struct aws_allocator *
 
     metrics->req_resp_info_metrics.response_status = -1;
 
-    aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy);/**/
+    aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy); /**/
 
     return metrics;
 }
