@@ -120,6 +120,8 @@ struct aws_s3_request_metrics {
         uint32_t stream_id;
         /* CRT error code when the aws_s3_request finishes. */
         int error_code;
+        /* Retry attempt. */
+        uint32_t retry_attempt;
     } crt_info_metrics;
 
     struct aws_ref_count ref_count;

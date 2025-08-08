@@ -102,6 +102,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
         aws_s3_request_clean_up_send_data(request);
 
         request->send_data.metrics = aws_s3_request_metrics_new(request->allocator);
+        request->send_data.metrics->crt_info_metrics.retry_attempt = request->num_times_prepared;
     }
 
     request->send_data.message = message;
@@ -554,4 +555,9 @@ void aws_s3_request_metrics_get_request_type(
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics) {
     AWS_PRECONDITION(metrics);
     return metrics->crt_info_metrics.error_code;
+}
+
+uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics) {
+    AWS_PRECONDITION(metrics);
+    return metrics->crt_info_metrics.retry_attempt;
 }
