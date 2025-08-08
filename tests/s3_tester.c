@@ -1681,7 +1681,6 @@ int aws_s3_tester_send_meta_request_with_options(
                         .autogen_length = upload_size_bytes,
                         .eof_requires_extra_read = options->put_options.eof_requires_extra_read,
                         .max_bytes_per_read = options->put_options.max_bytes_per_read,
-                        .sleep_before_read_secs = options->put_options.sleep_before_read_secs,
                     },
             };
             if (options->put_options.invalid_input_stream) {

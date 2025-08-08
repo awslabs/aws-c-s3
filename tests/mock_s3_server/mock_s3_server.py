@@ -22,7 +22,6 @@ VERBOSE = False
 
 # Flags to keep between requests
 SHOULD_THROTTLE = True
-SHOULD_SKIP_WAIT = True
 RETRY_REQUEST_COUNT = 0
 
 
@@ -55,16 +54,37 @@ class ResponseConfig:
     disconnect_after_headers = False
     generate_body_size: Optional[int] = None
     json_path: str = None
-    throttle: bool = False
+    forced_throttle: bool = False
     force_retry: bool = False
+    should_skip_wait = False
     request_headers: Optional[List[Tuple[bytes, bytes]]] = None
+
+    def __init__(self, path, request=None):
+        self.path = path
+        self.request_headers = request.headers
+        self.json_path = None
+        self.generate_body_size = None
+        self.disconnect_after_headers = False
+        self.forced_throttle = False
+        self.force_retry = False
+        self.should_skip_wait = False
+
+        if get_request_header_value(request, "before_finish") is not None:
+            self.should_skip_wait = True
+        if get_request_header_value(request, "force_throttle") is not None:
+            self.forced_throttle = True
 
     def _resolve_file_path(self, wrapper, request_type):
         global SHOULD_THROTTLE
         if self.json_path is None:
+            if self.forced_throttle:
+                # force the throttle to happend, instead of just 50%.
+                response_file = os.path.join(
+                    base_dir, request_type.name, f"throttle.json")
+                self.json_path = response_file
+                return
             response_file = os.path.join(
                 base_dir, request_type.name, f"{self.path[1:]}.json")
-            print(response_file)
             if os.path.exists(response_file) == False:
                 wrapper.info(
                     response_file, "not exist, using the default response")
@@ -77,7 +97,6 @@ class ResponseConfig:
                     response_file = os.path.join(
                         base_dir, request_type.name, f"default.json")
                 else:
-                    print("throttle")
                     wrapper.info("Throttling")
                 # Flip the flag
                 SHOULD_THROTTLE = not SHOULD_THROTTLE
@@ -483,27 +502,21 @@ async def handle_mock_s3_request(wrapper, request):
         # TODO: support more type.
         wrapper.info("unsupported request:", request)
         request_type = S3Opts.CreateMultipartUpload
-    global SHOULD_SKIP_WAIT
-    if "before_finish" not in parsed_path.path or request_type is not S3Opts.UploadPart:
-        # restore the state
-        SHOULD_SKIP_WAIT = True
-    if "before_finish" in parsed_path.path and SHOULD_SKIP_WAIT and request_type is S3Opts.UploadPart:
-        print("not wait for the request to complete")
-        SHOULD_SKIP_WAIT = False
-    else:
+
+    if response_config is None:
+        response_config = ResponseConfig(parsed_path.path, request)
+
+    if not response_config.should_skip_wait:
         while True:
             event = await wrapper.next_event()
             if type(event) is h11.EndOfMessage:
                 break
             assert type(event) is h11.Data
-
-    if response_config is None:
-        response_config = ResponseConfig(parsed_path.path)
-    response_config.request_headers = request.headers
+    else:
+        print("Skipping waiting for request body")
 
     response = response_config.resolve_response(
         wrapper, request_type, head_request=method == "HEAD")
-
     await send_response(wrapper, response)
 
 

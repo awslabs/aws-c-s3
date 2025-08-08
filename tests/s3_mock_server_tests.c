@@ -435,10 +435,28 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
 }
 
 /* Total hack to flip the bytes. */
-static void s_after_prepare_upload_part_finish(struct aws_s3_request *request) {
+static void s_after_prepare_upload_part_finish(struct aws_s3_request *request, struct aws_http_message *message) {
+    (void)message;
     if (request->num_times_prepared > 1) {
         /* mock that the body buffer was messed up in memory */
         request->request_body.buffer[1]++;
+    }
+}
+
+static void s_after_prepare_upload_part_finish_retry_before_finish_sending(
+    struct aws_s3_request *request,
+    struct aws_http_message *message) {
+    if (request->num_times_prepared == 0 && message != NULL) {
+        struct aws_http_header before_finish_header = {
+            .name = aws_byte_cursor_from_c_str("before_finish"),
+            .value = aws_byte_cursor_from_c_str("true"),
+        };
+        aws_http_message_add_header(message, before_finish_header);
+        struct aws_http_header throttle_header = {
+            .name = aws_byte_cursor_from_c_str("force_throttle"),
+            .value = aws_byte_cursor_from_c_str("true"),
+        };
+        aws_http_message_add_header(message, throttle_header);
     }
 }
 
@@ -458,9 +476,10 @@ TEST_CASE(multipart_upload_checksum_with_retry_before_finish_mock_server) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->after_prepare_upload_part_finish = s_after_prepare_upload_part_finish;
+    patched_client_vtable->after_prepare_upload_part_finish =
+        s_after_prepare_upload_part_finish_retry_before_finish_sending;
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/throttle_before_finish");
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/throttle");
     {
         /* 1. Trailer checksum */
         struct aws_s3_tester_meta_request_options put_options = {
@@ -473,7 +492,6 @@ TEST_CASE(multipart_upload_checksum_with_retry_before_finish_mock_server) {
                 {
                     .object_size_mb = 10,
                     .object_path_override = object_path,
-                    .sleep_before_read_secs = 1,
                 },
             .mock_server = true,
         };

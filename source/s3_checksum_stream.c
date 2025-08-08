@@ -113,7 +113,7 @@ static void s_aws_input_checksum_stream_destroy(struct aws_checksum_stream *impl
     }
 
     /* Compute the checksum of whatever was read, if we didn't reach the end of the underlying stream. */
-    // s_finalize_checksum(impl);
+    s_finalize_checksum(impl);
 
     aws_checksum_destroy(impl->checksum);
     aws_input_stream_release(impl->old_stream);

@@ -167,6 +167,8 @@ static void s_aws_input_chunk_stream_destroy(struct aws_chunk_stream *impl) {
         }
         aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
         aws_byte_buf_clean_up(&impl->post_chunk_buffer);
+        /* Either we calculated the checksum, or we the checksum is empty. Otherwise, something was wrong. */
+        AWS_ASSERT(impl->checksum_context->checksum_calculated || impl->checksum_context->base64_checksum.len == 0);
         aws_s3_upload_request_checksum_context_release(impl->checksum_context);
         aws_mem_release(impl->allocator, impl);
     }

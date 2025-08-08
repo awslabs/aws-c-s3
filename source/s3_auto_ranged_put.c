@@ -1184,15 +1184,15 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
         aws_future_http_message_set_error(part_prep->on_complete, aws_last_error());
         goto on_done;
     }
+    if (client->vtable->after_prepare_upload_part_finish) {
+        /* TEST ONLY, allow test to stub here. */
+        client->vtable->after_prepare_upload_part_finish(request, message);
+    }
 
     /* Success! */
     aws_future_http_message_set_result_by_move(part_prep->on_complete, &message);
 
 on_done:
-    if (client->vtable->after_prepare_upload_part_finish) {
-        /* TEST ONLY, allow test to stub here. */
-        client->vtable->after_prepare_upload_part_finish(request);
-    }
     AWS_FATAL_ASSERT(aws_future_http_message_is_done(part_prep->on_complete));
     aws_future_bool_release(part_prep->asyncstep_read_part);
     aws_future_http_message_release(part_prep->on_complete);
