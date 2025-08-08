@@ -54,7 +54,7 @@ void s_populate_metrics_from_message(struct aws_s3_request *request,
     AWS_ASSERT(!err);
     request->send_data.metrics->req_resp_info_metrics.request_path_query = 
         aws_string_new_from_cursor(request->send_data.metrics->allocator, &out_path);
-    AWS_ASSERT(metrics->req_resp_info_metrics.request_path_query != NULL);
+    AWS_ASSERT(request->send_data.metrics->req_resp_info_metrics.request_path_query != NULL);
 
     /* Get the host header value */
     struct aws_byte_cursor host_header_value;
@@ -65,7 +65,7 @@ void s_populate_metrics_from_message(struct aws_s3_request *request,
     AWS_ASSERT(!err);
     request->send_data.metrics->req_resp_info_metrics.host_address = 
         aws_string_new_from_cursor(request->send_data.metrics->allocator, &host_header_value);
-    AWS_ASSERT(metrics->req_resp_info_metrics.host_address != NULL);
+    AWS_ASSERT(request->send_data.metrics->req_resp_info_metrics.host_address != NULL);
 
     request->send_data.metrics->req_resp_info_metrics.request_type = request->request_type;
     request->send_data.metrics->req_resp_info_metrics.operation_name = 
