@@ -248,7 +248,8 @@ static void s_s3_test_meta_request_telemetry(
     enum aws_s3_request_type request_type;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
     uint32_t retry_attempt = aws_s3_request_metrics_get_retry_attempt(metrics);
-    if (!aws_s3_request_metrics_get_receive_end_timestamp_ns(metrics, &time_stamp) && retry_attempt == 0 &&
+    
+    if (aws_s3_request_metrics_get_error_code(metrics) == 200 && retry_attempt == 0 &&
         (request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT || request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART)) {
         uint64_t start_time = 0;
         uint64_t end_time = 0;
