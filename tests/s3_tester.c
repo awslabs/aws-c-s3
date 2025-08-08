@@ -245,6 +245,23 @@ static void s_s3_test_meta_request_telemetry(
         AWS_FATAL_ASSERT(during_time == (end_time - start_time));
     }
 
+    enum aws_s3_request_type request_type;
+    aws_s3_request_metrics_get_request_type(metrics, &request_type);
+    uint32_t retry_attempt = aws_s3_request_metrics_get_retry_attempt(metrics);
+
+    if (aws_s3_request_metrics_get_error_code(metrics) == 200 && retry_attempt == 0 &&
+        (request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT || request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART)) {
+        uint64_t start_time = 0;
+        uint64_t end_time = 0;
+        uint64_t duration_time = 0;
+        int error = 0;
+        error |= aws_s3_request_metrics_get_mem_acquire_start_timestamp_ns(metrics, &start_time);
+        error |= aws_s3_request_metrics_get_mem_acquire_end_timestamp_ns(metrics, &end_time);
+        error |= aws_s3_request_metrics_get_mem_acquire_duration_ns(metrics, &duration_time);
+        AWS_FATAL_ASSERT(error == AWS_OP_SUCCESS);
+        AWS_FATAL_ASSERT(duration_time == (end_time - start_time));
+    }
+
     aws_s3_tester_lock_synced_data(tester);
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
     aws_s3_request_metrics_acquire(metrics);

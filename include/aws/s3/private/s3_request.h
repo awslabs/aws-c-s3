@@ -120,6 +120,8 @@ struct aws_s3_request_metrics {
         uint32_t stream_id;
         /* CRT error code when the aws_s3_request finishes. */
         int error_code;
+        /* Retry attempt. */
+        uint32_t retry_attempt;
     } crt_info_metrics;
 
     struct aws_ref_count ref_count;
@@ -306,10 +308,7 @@ AWS_S3_API
 struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request);
 
 AWS_S3_API
-struct aws_s3_request_metrics *aws_s3_request_metrics_new(
-    struct aws_allocator *allocator,
-    const struct aws_s3_request *request,
-    const struct aws_http_message *message);
+struct aws_s3_request_metrics *aws_s3_request_metrics_new(struct aws_allocator *allocator);
 
 AWS_EXTERN_C_END
 
