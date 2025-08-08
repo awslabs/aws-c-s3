@@ -51,28 +51,23 @@ class Response:
 @dataclass
 class ResponseConfig:
     path: str
-    disconnect_after_headers = False
+    request: Optional[object] = None  # Add request as a field
+    disconnect_after_headers: bool = False
     generate_body_size: Optional[int] = None
-    json_path: str = None
+    json_path: Optional[str] = None
     forced_throttle: bool = False
     force_retry: bool = False
-    should_skip_wait = False
+    should_skip_wait: bool = False
     request_headers: Optional[List[Tuple[bytes, bytes]]] = None
 
-    def __init__(self, path, request=None):
-        self.path = path
-        self.request_headers = request.headers
-        self.json_path = None
-        self.generate_body_size = None
-        self.disconnect_after_headers = False
-        self.forced_throttle = False
-        self.force_retry = False
-        self.should_skip_wait = False
-
-        if get_request_header_value(request, "before_finish") is not None:
-            self.should_skip_wait = True
-        if get_request_header_value(request, "force_throttle") is not None:
-            self.forced_throttle = True
+    def __post_init__(self):
+        """Called automatically after the dataclass __init__"""
+        if self.request is not None:
+            self.request_headers = self.request.headers
+            if get_request_header_value(self.request, "before_finish") is not None:
+                self.should_skip_wait = True
+            if get_request_header_value(self.request, "force_throttle") is not None:
+                self.forced_throttle = True
 
     def _resolve_file_path(self, wrapper, request_type):
         global SHOULD_THROTTLE
@@ -504,7 +499,7 @@ async def handle_mock_s3_request(wrapper, request):
         request_type = S3Opts.CreateMultipartUpload
 
     if response_config is None:
-        response_config = ResponseConfig(parsed_path.path, request)
+        response_config = ResponseConfig(parsed_path.path, request=request)
 
     if not response_config.should_skip_wait:
         while True:
