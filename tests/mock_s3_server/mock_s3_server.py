@@ -22,6 +22,7 @@ VERBOSE = False
 
 # Flags to keep between requests
 SHOULD_THROTTLE = True
+SHOULD_SKIP_WAIT = True
 RETRY_REQUEST_COUNT = 0
 
 
@@ -63,6 +64,7 @@ class ResponseConfig:
         if self.json_path is None:
             response_file = os.path.join(
                 base_dir, request_type.name, f"{self.path[1:]}.json")
+            print(response_file)
             if os.path.exists(response_file) == False:
                 wrapper.info(
                     response_file, "not exist, using the default response")
@@ -75,6 +77,7 @@ class ResponseConfig:
                     response_file = os.path.join(
                         base_dir, request_type.name, f"default.json")
                 else:
+                    print("throttle")
                     wrapper.info("Throttling")
                 # Flip the flag
                 SHOULD_THROTTLE = not SHOULD_THROTTLE
@@ -480,12 +483,19 @@ async def handle_mock_s3_request(wrapper, request):
         # TODO: support more type.
         wrapper.info("unsupported request:", request)
         request_type = S3Opts.CreateMultipartUpload
-
-    while True:
-        event = await wrapper.next_event()
-        if type(event) is h11.EndOfMessage:
-            break
-        assert type(event) is h11.Data
+    global SHOULD_SKIP_WAIT
+    if "before_finish" not in parsed_path.path or request_type is not S3Opts.UploadPart:
+        # restore the state
+        SHOULD_SKIP_WAIT = True
+    if "before_finish" in parsed_path.path and SHOULD_SKIP_WAIT and request_type is S3Opts.UploadPart:
+        print("not wait for the request to complete")
+        SHOULD_SKIP_WAIT = False
+    else:
+        while True:
+            event = await wrapper.next_event()
+            if type(event) is h11.EndOfMessage:
+                break
+            assert type(event) is h11.Data
 
     if response_config is None:
         response_config = ResponseConfig(parsed_path.path)
