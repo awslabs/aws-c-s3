@@ -292,6 +292,24 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
+/* Controls how client performance file I/O operations. Only applies to the file based workload. */
+struct aws_s3_file_io_option {
+    /**
+     * Skip buffering the part in memory before sending the request.
+     **/
+    bool streaming_upload;
+
+    /**
+     * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperform the kernel cache.
+     * Notes:
+     * - only support linux for now.
+     * - And check the NOTES for O_DIRECT in https://man7.org/linux/man-pages/man2/openat.2.html
+     * - Only supports upload for now.
+     * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
+     */
+    bool direct_io;
+};
+
 enum aws_s3_recv_file_option {
     /**
      * Create a new file if it doesn't exist, otherwise replace the existing file.

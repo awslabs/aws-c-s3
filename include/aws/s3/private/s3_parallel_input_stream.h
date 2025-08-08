@@ -131,14 +131,6 @@ struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     uint64_t offset,
     size_t request_body_size);
 
-/**
- * Resets the streaming input stream to start reading from the beginning again.
- * This allows reusing the same stream for multiple read operations.
- *
- * @param stream The streaming input stream to reset
- */
-void aws_streaming_input_stream_reset(struct aws_input_stream *stream);
-
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 

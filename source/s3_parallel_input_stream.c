@@ -444,7 +444,7 @@ static struct aws_input_stream_vtable s_aws_s3_mmap_part_streaming_input_stream_
     .get_length = s_aws_s3_mmap_part_streaming_input_stream_get_length,
 };
 
-void aws_streaming_input_stream_reset(struct aws_input_stream *stream) {
+static void s_streaming_input_stream_reset(struct aws_input_stream *stream) {
     struct aws_s3_mmap_part_streaming_input_stream_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_s3_mmap_part_streaming_input_stream_impl, base);
     if (impl->loading_future) {
@@ -505,6 +505,6 @@ struct aws_input_stream *aws_input_stream_new_from_parallel_stream(
     }
 
     /* Reset the input stream to start */
-    aws_streaming_input_stream_reset(&impl->base);
+    s_streaming_input_stream_reset(&impl->base);
     return &impl->base;
 }
