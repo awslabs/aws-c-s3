@@ -1850,7 +1850,6 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    AWS_LOGF_DEBUG(0, "fooo %p", request->send_data.metrics);
     if (request->send_data.metrics) {
         struct aws_s3_request_metrics *metric = request->send_data.metrics;
         aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.mem_acquire_end_timestamp_ns);
