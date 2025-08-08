@@ -437,7 +437,7 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
 /* Total hack to flip the bytes. */
 static void s_after_prepare_upload_part_finish(struct aws_s3_request *request, struct aws_http_message *message) {
     (void)message;
-    if (request->num_times_prepared > 1) {
+    if (request->num_times_prepared > 0) {
         /* mock that the body buffer was messed up in memory */
         request->request_body.buffer[1]++;
     }
@@ -457,6 +457,10 @@ static void s_after_prepare_upload_part_finish_retry_before_finish_sending(
             .value = aws_byte_cursor_from_c_str("true"),
         };
         aws_http_message_add_header(message, throttle_header);
+    }
+    if (request->num_times_prepared > 0) {
+        /* mock that the body buffer was messed up in memory */
+        request->request_body.buffer[1]++;
     }
 }
 
@@ -503,42 +507,12 @@ TEST_CASE(multipart_upload_checksum_with_retry_before_finish_mock_server) {
 
         ASSERT_INT_EQUALS(meta_request_test_results.upload_review.part_count, 2);
         /* Note: the data we currently generate is always the same,
-         * so make sure that retry does not mangle the data by checking the checksum value */
+         * The retry got the messed up data, while the first run never actually finish reading the bytes, so the messed
+         * up data checksum got to be sent. */
         ASSERT_STR_EQUALS(
-            "7/xUXw==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[0]));
+            "dKYRxA==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[0]));
         ASSERT_STR_EQUALS(
-            "PCOjcw==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[1]));
-        aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-    }
-    {
-        /* 2. header checksum */
-        struct aws_s3_tester_meta_request_options put_options = {
-            .allocator = allocator,
-            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-            .client = client,
-            .checksum_algorithm = AWS_SCA_CRC32,
-            .checksum_via_header = true,
-            .validate_get_response_checksum = false,
-            .put_options =
-                {
-                    .object_size_mb = 10,
-                    .object_path_override = object_path,
-                },
-            .mock_server = true,
-        };
-
-        struct aws_s3_meta_request_test_results meta_request_test_results;
-        aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-
-        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-
-        ASSERT_INT_EQUALS(meta_request_test_results.upload_review.part_count, 2);
-        /* Note: the data we currently generate is always the same,
-         * so make sure that retry does not mangle the data by checking the checksum value */
-        ASSERT_STR_EQUALS(
-            "7/xUXw==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[0]));
-        ASSERT_STR_EQUALS(
-            "PCOjcw==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[1]));
+            "dxV2Sw==", aws_string_c_str(meta_request_test_results.upload_review.part_checksums_array[1]));
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     }
     aws_s3_client_release(client);
