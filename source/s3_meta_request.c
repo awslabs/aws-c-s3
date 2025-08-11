@@ -228,7 +228,7 @@ int aws_s3_meta_request_init_base(
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
-    if (aws_checksum_config_storage_init(
+    if (aws_s3_meta_request_checksum_config_storage_init(
             meta_request->allocator,
             &meta_request->checksum_config,
             options->checksum_config,
@@ -500,7 +500,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Cleaning up meta request", (void *)meta_request);
 
     /* Clean up our initial http message */
-    aws_checksum_config_storage_cleanup(&meta_request->checksum_config);
+    aws_s3_meta_request_checksum_config_storage_cleanup(&meta_request->checksum_config);
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
@@ -1947,6 +1947,11 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         }
                     }
                     if (error_code == AWS_ERROR_SUCCESS) {
+                        if (request->send_data.metrics) {
+                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
+                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_start_timestamp_ns);
+                        }
+
                         if (meta_request->recv_file) {
                             /* Write the data directly to the file. No need to seek, since the event will always be
                              * delivered with the right order. */
@@ -1991,6 +1996,14 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                 (void *)meta_request,
                                 error_code,
                                 aws_error_str(error_code));
+                        }
+
+                        if (request->send_data.metrics) {
+                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
+                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_end_timestamp_ns);
+                            AWS_ASSERT(metric->time_metrics.deliver_start_timestamp_ns != 0);
+                            metric->time_metrics.deliver_duration_ns = metric->time_metrics.deliver_end_timestamp_ns -
+                                                                       metric->time_metrics.deliver_start_timestamp_ns;
                         }
                     }
                 }

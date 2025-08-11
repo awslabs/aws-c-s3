@@ -1394,6 +1394,72 @@ int aws_s3_request_metrics_get_receive_end_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *out_receive_end_time);
 
+/* Get the time stamp when the signing for the request started. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_sign_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_signing_start_time);
+
+/* Get the time stamp when the signing for the request ended. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_sign_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_signing_end_time);
+
+/* The time duration for the request singing (sign_end_timestamp_ns -
+ * sign_start_timestamp_ns).
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_signing_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_signing_duration);
+
+/* Get the time stamp when the memory acquisition for the request started. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_mem_acquire_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_mem_acquire_start_time);
+
+/* Get the time stamp when the memory acquisition for the request ended. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_mem_acquire_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_mem_acquire_end_time);
+
+/* The time duration for the request memory acquisition (mem_acquire_end_timestamp_ns -
+ * mem_acquire_start_timestamp_ns).
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_mem_acquire_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_mem_acquire_duration);
+
+/* Get the time stamp when the delivery of the request response started. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_delivery_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_delivery_start_time);
+
+/* Get the time stamp when the delivery of the request response ended. Timestamps are from
+ * `aws_high_res_clock_get_ticks` AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_delivery_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_delivery_end_time);
+
+/* The time duration for the request delivery(delivery_end_timestamp_ns -
+ * delivery_start_timestamp_ns).
+ * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_delivery_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_delivery_duration);
+
 /* The time duration for the request from start receiving to finish receiving (receive_end_timestamp_ns -
  * receive_start_timestamp_ns).
  * AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */

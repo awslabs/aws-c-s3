@@ -4,6 +4,7 @@
  */
 
 #include "aws/s3/private/s3_copy_object.h"
+#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
@@ -124,7 +125,7 @@ static void s_s3_meta_request_copy_object_destroy(struct aws_s3_meta_request *me
         struct aws_s3_mpu_part_info *part = NULL;
         aws_array_list_get_at(&copy_object->synced_data.part_list, &part, part_index);
         aws_string_destroy(part->etag);
-        aws_byte_buf_clean_up(&part->checksum_base64);
+        aws_s3_upload_request_checksum_context_release(part->checksum_context);
         aws_mem_release(meta_request->allocator, part);
     }
 

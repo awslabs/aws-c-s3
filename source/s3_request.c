@@ -198,10 +198,12 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->time_metrics.signing_duration_ns = -1;
     metrics->time_metrics.start_get_connection_timestamp_ns = -1;
     metrics->time_metrics.finish_get_connection_timestamp_ns = -1;
-    metrics->time_metrics.body_read_start_timestamp_ns = -1;
-    metrics->time_metrics.body_read_end_timestamp_ns = -1;
-    metrics->time_metrics.body_read_duration_ns = -1;
-    metrics->time_metrics.body_read_total_ns = -1;
+    metrics->time_metrics.mem_acquire_start_timestamp_ns = -1;
+    metrics->time_metrics.mem_acquire_end_timestamp_ns = -1;
+    metrics->time_metrics.mem_acquire_duration_ns = -1;
+    metrics->time_metrics.deliver_start_timestamp_ns = -1;
+    metrics->time_metrics.deliver_end_timestamp_ns = -1;
+    metrics->time_metrics.deliver_duration_ns = -1;
 
     metrics->req_resp_info_metrics.response_status = -1;
 
@@ -329,6 +331,114 @@ int aws_s3_request_metrics_get_receiving_duration_ns(
     return AWS_OP_SUCCESS;
 }
 
+int aws_s3_request_metrics_get_sign_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_signing_start_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_signing_start_time);
+    if (metrics->time_metrics.sign_start_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_signing_start_time = metrics->time_metrics.sign_start_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_sign_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_signing_end_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_signing_end_time);
+    if (metrics->time_metrics.sign_end_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_signing_end_time = metrics->time_metrics.sign_end_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_signing_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_signing_duration) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_signing_duration);
+    if (metrics->time_metrics.signing_duration_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_signing_duration = metrics->time_metrics.signing_duration_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_mem_acquire_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_mem_acquire_start_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_mem_acquire_start_time);
+    if (metrics->time_metrics.mem_acquire_start_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_mem_acquire_start_time = metrics->time_metrics.mem_acquire_start_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_mem_acquire_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_mem_acquire_end_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_mem_acquire_end_time);
+    if (metrics->time_metrics.mem_acquire_end_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_mem_acquire_end_time = metrics->time_metrics.mem_acquire_end_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_mem_acquire_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_mem_acquire_duration) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_mem_acquire_duration);
+    if (metrics->time_metrics.mem_acquire_duration_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_mem_acquire_duration = metrics->time_metrics.mem_acquire_duration_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_delivery_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_delivery_start_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_delivery_start_time);
+    if (metrics->time_metrics.deliver_start_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_delivery_start_time = metrics->time_metrics.deliver_start_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_delivery_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_delivery_end_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_delivery_end_time);
+    if (metrics->time_metrics.deliver_end_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_delivery_end_time = metrics->time_metrics.deliver_end_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_delivery_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_delivery_duration) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_delivery_duration);
+    if (metrics->time_metrics.deliver_duration_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_delivery_duration = metrics->time_metrics.deliver_duration_ns;
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_request_metrics_get_response_status_code(
     const struct aws_s3_request_metrics *metrics,
     int *response_status) {
@@ -434,38 +544,6 @@ void aws_s3_request_metrics_get_request_type(
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics) {
     AWS_PRECONDITION(metrics);
     return metrics->crt_info_metrics.error_code;
-}
-
-int aws_s3_request_metrics_get_body_read_start_timestamp_ns(
-    const struct aws_s3_request_metrics *metrics,
-    int64_t *body_read_start_timestamp_ns) {
-    *body_read_start_timestamp_ns = metrics->time_metrics.body_read_start_timestamp_ns;
-    return AWS_OP_SUCCESS;
-}
-int aws_s3_request_metrics_get_body_read_end_timestamp_ns(
-    const struct aws_s3_request_metrics *metrics,
-    int64_t *body_read_end_timestamp_ns) {
-    *body_read_end_timestamp_ns = metrics->time_metrics.body_read_end_timestamp_ns;
-    return AWS_OP_SUCCESS;
-}
-int aws_s3_request_metrics_get_body_read_duration_ns(
-    const struct aws_s3_request_metrics *metrics,
-    int64_t *body_read_duration_ns) {
-    *body_read_duration_ns = metrics->time_metrics.body_read_duration_ns;
-    return AWS_OP_SUCCESS;
-}
-int aws_s3_request_metrics_get_body_read_total_ns(
-    const struct aws_s3_request_metrics *metrics,
-    int64_t *body_read_total_ns) {
-    *body_read_total_ns = metrics->time_metrics.body_read_total_ns;
-    return AWS_OP_SUCCESS;
-}
-
-int aws_s3_request_metrics_get_body_read_total_without_reset_ns(
-    const struct aws_s3_request_metrics *metrics,
-    int64_t *body_read_total_without_reset_ns) {
-    *body_read_total_without_reset_ns = metrics->time_metrics.body_read_total_without_reset_ns;
-    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_request_metrics_get_start_get_connection_timestamp_ns(

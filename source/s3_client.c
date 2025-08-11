@@ -1851,6 +1851,14 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    if (request->send_data.metrics) {
+        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.mem_acquire_end_timestamp_ns);
+        AWS_ASSERT(metric->time_metrics.mem_acquire_start_timestamp_ns != 0);
+        metric->time_metrics.mem_acquire_duration_ns =
+            metric->time_metrics.mem_acquire_end_timestamp_ns - metric->time_metrics.mem_acquire_start_timestamp_ns;
+    }
+
     struct aws_future_s3_buffer_ticket *future_ticket = payload->buffer_future;
 
     int error_code = aws_future_s3_buffer_ticket_get_error(future_ticket);
@@ -1890,10 +1898,19 @@ void s_acquire_mem_and_prepare_request(
     void *user_data) {
 
     if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
+
+        if (request->send_data.metrics) {
+            struct aws_s3_request_metrics *metric = request->send_data.metrics;
+            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.mem_acquire_start_timestamp_ns);
+        }
+
         struct aws_allocator *allocator = request->allocator;
         struct aws_s3_meta_request *meta_request = request->meta_request;
         struct aws_s3_buffer_pool_reserve_meta meta = {
-            .client = client, .meta_request = meta_request, .size = meta_request->part_size};
+            .client = client,
+            .meta_request = meta_request,
+            .size = meta_request->part_size,
+        };
 
         struct aws_s3_reserve_memory_payload *payload =
             aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_reserve_memory_payload));
