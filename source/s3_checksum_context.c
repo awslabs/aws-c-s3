@@ -33,6 +33,10 @@ static struct aws_s3_upload_request_checksum_context *s_s3_upload_request_checks
 
     aws_ref_count_init(&context->ref_count, context, s_aws_s3_upload_request_checksum_context_destroy);
     context->allocator = allocator;
+    if (aws_mutex_init(&context->synced_data.lock)) {
+        aws_s3_upload_request_checksum_context_release(context);
+        return NULL;
+    }
     /* Handle case where no checksum config is provided */
     if (!checksum_config || checksum_config->checksum_algorithm == AWS_SCA_NONE) {
         context->algorithm = AWS_SCA_NONE;
@@ -53,10 +57,6 @@ static struct aws_s3_upload_request_checksum_context *s_s3_upload_request_checks
         return NULL;
     }
     context->encoded_checksum_size = encoded_size;
-    if (!aws_mutex_init(&context->synced_data.lock)) {
-        aws_s3_upload_request_checksum_context_release(context);
-        return NULL;
-    }
     return context;
 }
 

@@ -70,7 +70,7 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
         }
     }
     struct aws_byte_cursor checksum_result_cursor =
-        aws_s3_upload_request_checksum_context_get_checksum_cursor(&parent_stream->checksum_context);
+        aws_s3_upload_request_checksum_context_get_checksum_cursor(parent_stream->checksum_context);
     AWS_ASSERT(parent_stream->checksum_context->encoded_checksum_size == checksum_result_cursor.len);
 
     if (aws_byte_buf_init(
