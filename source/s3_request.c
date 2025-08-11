@@ -45,7 +45,7 @@ struct aws_s3_request *aws_s3_request_new(
     return request;
 }
 
-void s_populate_metrics_from_message(struct aws_s3_request *request, struct aws_http_message *message) {
+static void s_populate_metrics_from_message(struct aws_s3_request *request, struct aws_http_message *message) {
     struct aws_byte_cursor out_path;
     AWS_ZERO_STRUCT(out_path);
     int err = aws_http_message_get_request_path(message, &out_path);
