@@ -30,6 +30,7 @@ struct aws_s3_upload_request_checksum_context {
     enum aws_s3_checksum_location location;
 
     struct {
+        /* Note: don't directly access the synced_data. */
         /* Lock to make sure the checksum context is safe to be access from different threads. */
         struct aws_mutex lock;
         struct aws_byte_buf base64_checksum;
