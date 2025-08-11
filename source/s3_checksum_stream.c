@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_checksums.h"
 #include <aws/common/encoding.h>
 #include <aws/io/stream.h>
@@ -133,5 +134,33 @@ int aws_checksum_stream_finalize_checksum(struct aws_input_stream *checksum_stre
         return aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
     }
 
+    return AWS_OP_SUCCESS;
+}
+
+int aws_checksum_stream_finalize_checksum_context(
+    struct aws_input_stream *checksum_stream,
+    struct aws_s3_upload_request_checksum_context *checksum_context) {
+    struct aws_checksum_stream *impl = AWS_CONTAINER_OF(checksum_stream, struct aws_checksum_stream, base);
+
+    if (aws_checksum_finalize(impl->checksum, &impl->checksum_result) != AWS_OP_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to calculate checksum with error code %d (%s).",
+            aws_last_error(),
+            aws_error_str(aws_last_error()));
+        aws_byte_buf_reset(&impl->checksum_result, true);
+        return aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
+    }
+    struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&impl->checksum_result);
+    if (aws_s3_upload_request_checksum_context_finalize_checksum(checksum_context, checksum_result_cursor) !=
+        AWS_OP_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to finalize checksum context with error code %d (%s).",
+            aws_last_error(),
+            aws_error_str(aws_last_error()));
+        aws_byte_buf_reset(&impl->checksum_result, true);
+        return aws_raise_error(AWS_ERROR_S3_CHECKSUM_CALCULATION_FAILED);
+    }
     return AWS_OP_SUCCESS;
 }

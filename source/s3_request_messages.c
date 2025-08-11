@@ -838,13 +838,9 @@ static int s_calculate_in_memory_checksum_helper(
     struct aws_byte_cursor data,
     struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_ASSERT(checksum_context);
-    if (checksum_context->checksum_calculated) {
-        return AWS_OP_SUCCESS;
-    }
 
     int ret_code = AWS_OP_ERR;
     /* Calculate checksum for output buffer only (no header/trailer) */
-    struct aws_byte_buf *output_buffer = aws_s3_upload_request_checksum_context_get_output_buffer(checksum_context);
     struct aws_byte_buf raw_checksum;
     size_t digest_size = aws_get_digest_size_from_checksum_algorithm(checksum_context->algorithm);
     aws_byte_buf_init(&raw_checksum, allocator, digest_size);
@@ -855,18 +851,14 @@ static int s_calculate_in_memory_checksum_helper(
     }
 
     struct aws_byte_cursor raw_checksum_cursor = aws_byte_cursor_from_buf(&raw_checksum);
-    if (aws_base64_encode(&raw_checksum_cursor, output_buffer)) {
+    if (aws_s3_upload_request_checksum_context_finalize_checksum(checksum_context, raw_checksum_cursor)) {
         aws_byte_buf_clean_up(&raw_checksum);
         goto done;
     }
     aws_byte_buf_clean_up(&raw_checksum);
-    checksum_context->checksum_calculated = true;
 
     ret_code = AWS_OP_SUCCESS;
 done:
-    if (ret_code) {
-        aws_byte_buf_clean_up(output_buffer);
-    }
     aws_byte_buf_clean_up(&raw_checksum);
     return ret_code;
 }
@@ -890,7 +882,8 @@ static int s_calculate_and_add_checksum_to_header_helper(
     /* Add the encoded checksum to header. */
     const struct aws_byte_cursor header_name =
         aws_get_http_header_name_from_checksum_algorithm(checksum_context->algorithm);
-    struct aws_byte_cursor encoded_checksum_val = aws_byte_cursor_from_buf(&checksum_context->base64_checksum);
+    struct aws_byte_cursor encoded_checksum_val =
+        aws_s3_upload_request_checksum_context_get_checksum_cursor(checksum_context);
     struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
     if (aws_http_headers_set(headers, header_name, encoded_checksum_val)) {
         goto done;
