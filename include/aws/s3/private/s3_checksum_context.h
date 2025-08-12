@@ -8,6 +8,7 @@
 
 #include "aws/s3/s3_client.h"
 #include <aws/common/byte_buf.h>
+#include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 
 struct aws_s3_meta_request_checksum_config_storage;
@@ -28,9 +29,14 @@ struct aws_s3_upload_request_checksum_context {
     enum aws_s3_checksum_algorithm algorithm;
     enum aws_s3_checksum_location location;
 
-    struct aws_byte_buf base64_checksum;
-    /* The checksum already be calculated or not. */
-    bool checksum_calculated;
+    struct {
+        /* Note: don't directly access the synced_data. */
+        /* Lock to make sure the checksum context is safe to be access from different threads. */
+        struct aws_mutex lock;
+        struct aws_byte_buf base64_checksum;
+        /* The checksum already be calculated or not. */
+        bool checksum_calculated;
+    } synced_data;
 
     /* Validation */
     size_t encoded_checksum_size;
@@ -96,8 +102,7 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
  * @return true if checksum calculation is needed, false otherwise
  */
 AWS_S3_API
-bool aws_s3_upload_request_checksum_context_should_calculate(
-    const struct aws_s3_upload_request_checksum_context *context);
+bool aws_s3_upload_request_checksum_context_should_calculate(struct aws_s3_upload_request_checksum_context *context);
 
 /**
  * Check if checksum should be added to HTTP headers.
@@ -122,15 +127,18 @@ bool aws_s3_upload_request_checksum_context_should_add_trailer(
     const struct aws_s3_upload_request_checksum_context *context);
 
 /**
- * Get the checksum buffer to use for output.
- * Returns the internal buffer for storing the calculated checksum.
+ * Encode the checksum to base64 and store it in the context.
+ * This function is thread-safe and can be called from multiple threads.
+ * Returns AWS_OP_SUCCESS on success, AWS_OP_ERR otherwise
  *
  * @param context The checksum context
- * @return Pointer to the checksum buffer, or NULL if context is invalid
+ * @param raw_checksum_cursor the byte cursor to the raw checksum value.
+ * @return AWS_OP_SUCCESS on success, AWS_OP_ERR otherwise
  */
 AWS_S3_API
-struct aws_byte_buf *aws_s3_upload_request_checksum_context_get_output_buffer(
-    struct aws_s3_upload_request_checksum_context *context);
+int aws_s3_upload_request_checksum_context_finalize_checksum(
+    struct aws_s3_upload_request_checksum_context *context,
+    struct aws_byte_cursor raw_checksum_cursor);
 
 /**
  * Get a cursor to the current base64 encoded checksum value (for use in headers/trailers).
@@ -141,7 +149,7 @@ struct aws_byte_buf *aws_s3_upload_request_checksum_context_get_output_buffer(
  */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_upload_request_checksum_context_get_checksum_cursor(
-    const struct aws_s3_upload_request_checksum_context *context);
+    struct aws_s3_upload_request_checksum_context *context);
 
 AWS_EXTERN_C_END
 

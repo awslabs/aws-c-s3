@@ -1099,15 +1099,20 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             goto on_done;
         }
         struct aws_s3_upload_request_checksum_context *context = previously_uploaded_info->checksum_context;
-        /* if previously uploaded part had a checksum, compare it to what we just skipped */
-        if (context != NULL && context->checksum_calculated == true &&
-            s_verify_part_matches_checksum(
-                meta_request->allocator,
-                aws_byte_cursor_from_buf(&request->request_body),
-                meta_request->checksum_config.checksum_algorithm,
-                aws_byte_cursor_from_buf(&context->base64_checksum))) {
-            error_code = aws_last_error_or_unknown();
-            goto on_done;
+        if (context) {
+            if (!aws_s3_upload_request_checksum_context_should_calculate(context)) {
+                struct aws_byte_cursor previous_calculated_checksum =
+                    aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
+                /* if previously uploaded part had a checksum, compare it to what we just skipped */
+                if (s_verify_part_matches_checksum(
+                        meta_request->allocator,
+                        aws_byte_cursor_from_buf(&request->request_body),
+                        meta_request->checksum_config.checksum_algorithm,
+                        previous_calculated_checksum) != AWS_OP_SUCCESS) {
+                    error_code = aws_last_error_or_unknown();
+                    goto on_done;
+                }
+            }
         }
     }
 
@@ -1157,9 +1162,6 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
             checksum_context = part->checksum_context;
             /* If checksum already calculated, it means either the part being retried or the part resumed from list
              * parts. Keep reusing the old checksum in case of the request body in memory mangled */
-            AWS_ASSERT(
-                !checksum_context->checksum_calculated || request->num_times_prepared > 0 ||
-                auto_ranged_put->resume_token != NULL);
             aws_s3_meta_request_unlock_synced_data(meta_request);
         }
         /* END CRITICAL SECTION */
@@ -1184,15 +1186,15 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
         aws_future_http_message_set_error(part_prep->on_complete, aws_last_error());
         goto on_done;
     }
+    if (client->vtable->after_prepare_upload_part_finish) {
+        /* TEST ONLY, allow test to stub here. */
+        client->vtable->after_prepare_upload_part_finish(request, message);
+    }
 
     /* Success! */
     aws_future_http_message_set_result_by_move(part_prep->on_complete, &message);
 
 on_done:
-    if (client->vtable->after_prepare_upload_part_finish) {
-        /* TEST ONLY, allow test to stub here. */
-        client->vtable->after_prepare_upload_part_finish(request);
-    }
     AWS_FATAL_ASSERT(aws_future_http_message_is_done(part_prep->on_complete));
     aws_future_bool_release(part_prep->asyncstep_read_part);
     aws_future_http_message_release(part_prep->on_complete);

@@ -28,8 +28,7 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
         struct aws_byte_cursor checksum_result_cursor = aws_byte_cursor_from_buf(&compute_checksum_output);
         aws_base64_encode(&checksum_result_cursor, &compute_encoded_checksum_output);
         struct aws_input_stream *cursor_stream = aws_input_stream_new_from_cursor(allocator, input);
-        struct aws_input_stream *stream =
-            aws_checksum_stream_new(allocator, cursor_stream, algorithm, &stream_checksum_output);
+        struct aws_input_stream *stream = aws_checksum_stream_new(allocator, cursor_stream, algorithm);
         aws_input_stream_release(cursor_stream);
         struct aws_stream_status status;
         AWS_ZERO_STRUCT(status);
@@ -38,11 +37,12 @@ static int compare_checksum_stream(struct aws_allocator *allocator, struct aws_b
             read_buf.len = 0;
             ASSERT_TRUE(aws_input_stream_get_status(stream, &status) == 0);
         }
-        aws_input_stream_release(stream);
+        aws_checksum_stream_finalize_checksum(stream, &stream_checksum_output);
         ASSERT_TRUE(aws_byte_buf_eq(&compute_encoded_checksum_output, &stream_checksum_output));
         aws_byte_buf_clean_up(&compute_checksum_output);
         aws_byte_buf_clean_up(&stream_checksum_output);
         aws_byte_buf_clean_up(&compute_encoded_checksum_output);
+        aws_input_stream_release(stream);
     }
     aws_byte_buf_clean_up(&read_buf);
     return AWS_OP_SUCCESS;
