@@ -1533,6 +1533,10 @@ void aws_s3_request_metrics_get_request_type(
 AWS_S3_API
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
 
+/* Get retry attempt from request metrics. */
+AWS_S3_API
+uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
