@@ -8,38 +8,6 @@
 #include <aws/common/byte_buf.h>
 #include <aws/testing/aws_test_harness.h>
 
-static int s_test_upload_request_checksum_context_get_output_buffer(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-
-    struct aws_s3_meta_request_checksum_config_storage config = {
-        .allocator = allocator,
-        .checksum_algorithm = AWS_SCA_CRC32,
-        .location = AWS_SCL_HEADER,
-        .has_full_object_checksum = false,
-    };
-    AWS_ZERO_STRUCT(config.full_object_checksum);
-
-    /* Test get output buffer with valid context */
-    struct aws_s3_upload_request_checksum_context *context =
-        aws_s3_upload_request_checksum_context_new(allocator, &config);
-    ASSERT_NOT_NULL(context);
-
-    struct aws_byte_buf *output_buffer = aws_s3_upload_request_checksum_context_get_output_buffer(context);
-    ASSERT_NOT_NULL(output_buffer);
-    ASSERT_TRUE(output_buffer->capacity > 0);
-
-    aws_s3_upload_request_checksum_context_release(context);
-
-    /* Test get output buffer with NULL context */
-    output_buffer = aws_s3_upload_request_checksum_context_get_output_buffer(NULL);
-    ASSERT_NULL(output_buffer);
-
-    return AWS_OP_SUCCESS;
-}
-AWS_TEST_CASE(
-    test_upload_request_checksum_context_get_output_buffer,
-    s_test_upload_request_checksum_context_get_output_buffer)
-
 static int s_test_upload_request_checksum_context_get_checksum_cursor(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 

@@ -27,6 +27,7 @@ struct aws_chunk_stream {
     /* Pointing to the stream we read from */
     struct aws_input_stream *current_stream;
     struct aws_input_stream *chunk_body_stream;
+    struct aws_input_stream *checksum_stream;
 
     struct aws_s3_upload_request_checksum_context *checksum_context;
     struct aws_byte_buf pre_chunk_buffer;
@@ -61,10 +62,15 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     }
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor colon_cursor = aws_byte_cursor_from_string(s_colon);
-    /* After the checksum stream released, the checksum will be calculated. */
-    parent_stream->checksum_context->checksum_calculated = true;
+    if (parent_stream->checksum_stream) {
+        /* If we have the checksum stream, finalize the checksum now as we finished reading from it. */
+        if (aws_checksum_stream_finalize_checksum_context(
+                parent_stream->checksum_stream, parent_stream->checksum_context)) {
+            return AWS_OP_ERR;
+        }
+    }
     struct aws_byte_cursor checksum_result_cursor =
-        aws_byte_cursor_from_buf(&parent_stream->checksum_context->base64_checksum);
+        aws_s3_upload_request_checksum_context_get_checksum_cursor(parent_stream->checksum_context);
     AWS_ASSERT(parent_stream->checksum_context->encoded_checksum_size == checksum_result_cursor.len);
 
     if (aws_byte_buf_init(
@@ -159,14 +165,12 @@ static int s_aws_input_chunk_stream_get_length(struct aws_input_stream *stream, 
 
 static void s_aws_input_chunk_stream_destroy(struct aws_chunk_stream *impl) {
     if (impl) {
-        if (impl->current_stream) {
-            aws_input_stream_release(impl->current_stream);
-        }
-        if (impl->chunk_body_stream) {
-            aws_input_stream_release(impl->chunk_body_stream);
-        }
+        aws_input_stream_release(impl->current_stream);
+        aws_input_stream_release(impl->chunk_body_stream);
+        aws_input_stream_release(impl->checksum_stream);
         aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
         aws_byte_buf_clean_up(&impl->post_chunk_buffer);
+        /* Either we calculated the checksum, or we the checksum is empty. Otherwise, something was wrong. */
         aws_s3_upload_request_checksum_context_release(impl->checksum_context);
         aws_mem_release(impl->allocator, impl);
     }
@@ -194,13 +198,11 @@ struct aws_input_stream *aws_chunk_stream_new(
 
     /* Extract algorithm and buffer from context */
     enum aws_s3_checksum_algorithm algorithm = AWS_SCA_NONE;
-    struct aws_byte_buf *checksum_buffer = NULL;
 
     impl->checksum_context = aws_s3_upload_request_checksum_context_acquire(checksum_context);
 
     algorithm = checksum_context->algorithm;
-    checksum_buffer = &checksum_context->base64_checksum;
-    bool checksum_calculated = checksum_context->checksum_calculated;
+    bool should_calculate_checksum = aws_s3_upload_request_checksum_context_should_calculate(impl->checksum_context);
 
     int64_t stream_length = 0;
     int64_t final_chunk_len = 0;
@@ -223,12 +225,13 @@ struct aws_input_stream *aws_chunk_stream_new(
     if (aws_byte_buf_append(&impl->pre_chunk_buffer, &pre_chunk_cursor)) {
         goto error;
     }
-    if (!checksum_calculated) {
+    if (should_calculate_checksum) {
         /* Wrap the existing stream with checksum stream to calculate the checksum when reading from it. */
-        impl->chunk_body_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm, checksum_buffer);
-        if (impl->chunk_body_stream == NULL) {
+        impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm);
+        if (impl->checksum_stream == NULL) {
             goto error;
         }
+        impl->chunk_body_stream = aws_input_stream_acquire(impl->checksum_stream);
     } else {
         /* No need to calculate the checksum during read, use the existing stream directly. */
         impl->chunk_body_stream = aws_input_stream_acquire(existing_stream);

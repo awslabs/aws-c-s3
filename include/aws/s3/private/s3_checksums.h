@@ -62,8 +62,7 @@ struct aws_s3_meta_request_checksum_config_storage {
 };
 
 /**
- * a stream that takes in a stream, computes a running checksum as it is read, and outputs the checksum when the stream
- * is destroyed.
+ * a stream that takes in a stream
  * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
  * checksum.
  *
@@ -72,15 +71,28 @@ struct aws_s3_meta_request_checksum_config_storage {
  *                        outputs the checksum of existing stream to checksum_output upon destruction. Will be kept
  *                        alive by the checksum stream
  * @param algorithm       Checksum algorithm to use.
- * @param checksum_output Checksum of the `existing_stream`, owned by caller, which will be calculated when this stream
- *                        is destroyed.
  */
 AWS_S3_API
 struct aws_input_stream *aws_checksum_stream_new(
     struct aws_allocator *allocator,
     struct aws_input_stream *existing_stream,
-    enum aws_s3_checksum_algorithm algorithm,
-    struct aws_byte_buf *checksum_output);
+    enum aws_s3_checksum_algorithm algorithm);
+
+/**
+ * Finalize the checksum has read so far to the output checksum buf with base64 encoding.
+ * Not thread safe.
+ */
+AWS_S3_API
+int aws_checksum_stream_finalize_checksum(struct aws_input_stream *checksum_stream, struct aws_byte_buf *checksum_buf);
+
+/**
+ * Finalize the checksum has read so far to the checksum context.
+ * Not thread safe.
+ */
+AWS_S3_API
+int aws_checksum_stream_finalize_checksum_context(
+    struct aws_input_stream *checksum_stream,
+    struct aws_s3_upload_request_checksum_context *checksum_context);
 
 /**
  * TODO: properly support chunked encoding.

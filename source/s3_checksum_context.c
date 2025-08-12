@@ -8,9 +8,18 @@
 #include <aws/common/encoding.h>
 #include <aws/common/logging.h>
 
+static void s_lock_synced_data(struct aws_s3_upload_request_checksum_context *context) {
+    aws_mutex_lock(&context->synced_data.lock);
+}
+
+static void s_unlock_synced_data(struct aws_s3_upload_request_checksum_context *context) {
+    aws_mutex_unlock(&context->synced_data.lock);
+}
+
 static void s_aws_s3_upload_request_checksum_context_destroy(void *context) {
     struct aws_s3_upload_request_checksum_context *checksum_context = context;
-    aws_byte_buf_clean_up(&checksum_context->base64_checksum);
+    aws_byte_buf_clean_up(&checksum_context->synced_data.base64_checksum);
+    aws_mutex_clean_up(&checksum_context->synced_data.lock);
     aws_mem_release(checksum_context->allocator, checksum_context);
 }
 
@@ -24,6 +33,10 @@ static struct aws_s3_upload_request_checksum_context *s_s3_upload_request_checks
 
     aws_ref_count_init(&context->ref_count, context, s_aws_s3_upload_request_checksum_context_destroy);
     context->allocator = allocator;
+    if (aws_mutex_init(&context->synced_data.lock)) {
+        aws_s3_upload_request_checksum_context_release(context);
+        return NULL;
+    }
     /* Handle case where no checksum config is provided */
     if (!checksum_config || checksum_config->checksum_algorithm == AWS_SCA_NONE) {
         context->algorithm = AWS_SCA_NONE;
@@ -54,7 +67,7 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
         s_s3_upload_request_checksum_context_new_base(allocator, checksum_config);
     if (context && context->encoded_checksum_size > 0) {
         /* Initial the buffer for checksum */
-        aws_byte_buf_init(&context->base64_checksum, allocator, context->encoded_checksum_size);
+        aws_byte_buf_init(&context->synced_data.base64_checksum, allocator, context->encoded_checksum_size);
     }
     return context;
 }
@@ -79,8 +92,8 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
             aws_s3_upload_request_checksum_context_release(context);
             return NULL;
         }
-        aws_byte_buf_init_copy_from_cursor(&context->base64_checksum, allocator, existing_base64_checksum);
-        context->checksum_calculated = true;
+        aws_byte_buf_init_copy_from_cursor(&context->synced_data.base64_checksum, allocator, existing_base64_checksum);
+        context->synced_data.checksum_calculated = true;
     }
     return context;
 }
@@ -101,14 +114,18 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
     return NULL;
 }
 
-bool aws_s3_upload_request_checksum_context_should_calculate(
-    const struct aws_s3_upload_request_checksum_context *context) {
+bool aws_s3_upload_request_checksum_context_should_calculate(struct aws_s3_upload_request_checksum_context *context) {
     if (!context || context->algorithm == AWS_SCA_NONE) {
         return false;
     }
 
+    bool should_calculate = false;
+    s_lock_synced_data(context);
     /* If not previous calculated */
-    return !context->checksum_calculated;
+    should_calculate = !context->synced_data.checksum_calculated;
+    s_unlock_synced_data(context);
+
+    return should_calculate;
 }
 
 bool aws_s3_upload_request_checksum_context_should_add_header(
@@ -129,19 +146,46 @@ bool aws_s3_upload_request_checksum_context_should_add_trailer(
     return context->location == AWS_SCL_TRAILER && context->algorithm != AWS_SCA_NONE;
 }
 
-struct aws_byte_buf *aws_s3_upload_request_checksum_context_get_output_buffer(
-    struct aws_s3_upload_request_checksum_context *context) {
+int aws_s3_upload_request_checksum_context_finalize_checksum(
+    struct aws_s3_upload_request_checksum_context *context,
+    struct aws_byte_cursor raw_checksum_cursor) {
     if (!context) {
-        return NULL;
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
-    return &context->base64_checksum;
+    s_lock_synced_data(context);
+    /* If not previous calculated */
+    if (!context->synced_data.checksum_calculated) {
+        AWS_ASSERT(context->synced_data.base64_checksum.len == 0);
+
+        if (aws_base64_encode(&raw_checksum_cursor, &context->synced_data.base64_checksum)) {
+            aws_byte_buf_reset(&context->synced_data.base64_checksum, false);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Failed to base64 encode for the checksum. Raw checksum length: %zu. Output buffer capacity: %zu "
+                "length %zu",
+                raw_checksum_cursor.len,
+                context->synced_data.base64_checksum.capacity,
+                context->synced_data.base64_checksum.len);
+            s_unlock_synced_data(context);
+            return AWS_OP_ERR;
+        }
+        context->synced_data.checksum_calculated = true;
+    }
+    s_unlock_synced_data(context);
+    return AWS_OP_SUCCESS;
 }
 
 struct aws_byte_cursor aws_s3_upload_request_checksum_context_get_checksum_cursor(
-    const struct aws_s3_upload_request_checksum_context *context) {
+    struct aws_s3_upload_request_checksum_context *context) {
     struct aws_byte_cursor checksum_cursor = {0};
-    if (!context || !context->checksum_calculated) {
+    if (!context) {
         return checksum_cursor;
     }
-    return aws_byte_cursor_from_buf(&context->base64_checksum);
+    s_lock_synced_data(context);
+    /* If not previous calculated */
+    if (context->synced_data.checksum_calculated) {
+        checksum_cursor = aws_byte_cursor_from_buf(&context->synced_data.base64_checksum);
+    }
+    s_unlock_synced_data(context);
+    return checksum_cursor;
 }
