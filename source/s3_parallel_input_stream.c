@@ -13,6 +13,7 @@
 #include <aws/io/stream.h>
 
 #include <errno.h>
+#include <inttypes.h>
 
 AWS_STATIC_STRING_FROM_LITERAL(s_readonly_bytes_mode, "rb");
 
@@ -107,7 +108,10 @@ static int s_read_from_file_impl(
     /* seek to the right position and then read */
     if (aws_fseek(file_stream, (int64_t)offset, SEEK_SET)) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_GENERAL, "Failed to seek to position %llu in file %s", offset, aws_string_c_str(file_path));
+            AWS_LS_S3_GENERAL,
+            "Failed to seek to position %" PRIu64 " in file %s",
+            offset,
+            aws_string_c_str(file_path));
         goto cleanup;
     }
 
@@ -122,7 +126,7 @@ static int s_read_from_file_impl(
     output_buf->len += actually_read;
     AWS_LOGF_TRACE(
         AWS_LS_S3_GENERAL,
-        "Successfully read %zu bytes from file %s at position %llu",
+        "Successfully read %zu bytes from file %s at position %" PRIu64 "",
         actually_read,
         aws_string_c_str(file_path),
         offset);
@@ -176,12 +180,7 @@ struct aws_future_bool *s_para_from_file_read(
 
     struct read_task_impl *read_task = aws_mem_calloc(impl->base.alloc, 1, sizeof(struct read_task_impl));
 
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_GENERAL,
-        "id=%p: Read %zu bytes from offset %llu",
-        (void *)stream,
-        length,
-        (unsigned long long)offset);
+    AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Read %zu bytes from offset %" PRIu64 "", (void *)stream, length, offset);
 
     /* Initialize for one read */
     read_task->dest = dest;
