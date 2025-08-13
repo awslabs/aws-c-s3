@@ -306,8 +306,8 @@ int aws_s3_meta_request_init_base(
      * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
-        meta_request->request_body_parallel_stream =
-            client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
+        meta_request->request_body_parallel_stream = client->vtable->parallel_input_stream_new_from_file(
+            allocator, options->send_filepath, client->body_streaming_elg);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
@@ -2254,7 +2254,8 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     /* If parallel-stream, simply call read(), which must fill the buffer and/or EOF */
     if (meta_request->request_body_parallel_stream != NULL) {
-        return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
+        return aws_parallel_input_stream_read(
+            meta_request->request_body_parallel_stream, offset, buffer->capacity, buffer);
     }
 
     /* Further techniques are synchronous... */

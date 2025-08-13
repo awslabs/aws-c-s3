@@ -14,7 +14,8 @@ struct aws_parallel_input_stream_from_file_failure_impl {
 };
 
 static void s_para_from_file_failure_destroy(struct aws_parallel_input_stream *stream) {
-    struct aws_parallel_input_stream_from_file_failure_impl *impl = stream->impl;
+    struct aws_parallel_input_stream_from_file_failure_impl *impl =
+        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_failure_impl, base);
 
     aws_mem_release(stream->alloc, impl);
 }
@@ -22,17 +23,21 @@ static void s_para_from_file_failure_destroy(struct aws_parallel_input_stream *s
 struct aws_future_bool *s_para_from_file_failure_read(
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
+    size_t max_length,
     struct aws_byte_buf *dest) {
+
     (void)offset;
+    (void)max_length;
 
     struct aws_future_bool *future = aws_future_bool_new(stream->alloc);
-    struct aws_parallel_input_stream_from_file_failure_impl *impl = stream->impl;
+    struct aws_parallel_input_stream_from_file_failure_impl *impl =
+        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_failure_impl, base);
+
     size_t previous_number_read = aws_atomic_fetch_add(&impl->number_read, 1);
     if (previous_number_read == 1) {
         /* TODO: make the failure configurable */
         aws_future_bool_set_error(future, AWS_ERROR_UNIMPLEMENTED);
     } else {
-
         struct aws_byte_cursor test_string = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("This is an S3 test.");
         while (dest->len < dest->capacity) {
             size_t remaining_in_buffer = dest->capacity - dest->len;
@@ -41,7 +46,7 @@ struct aws_future_bool *s_para_from_file_failure_read(
             }
             aws_byte_buf_append(dest, &test_string);
         }
-        aws_future_bool_set_result(future, false);
+        aws_future_bool_set_result(future, true);
     }
     return future;
 }
@@ -53,8 +58,10 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file_failure_tester(
     struct aws_allocator *allocator,
-    struct aws_byte_cursor file_name) {
+    struct aws_byte_cursor file_name,
+    struct aws_event_loop_group *reading_elg) {
     (void)file_name;
+    (void)reading_elg;
 
     struct aws_parallel_input_stream_from_file_failure_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_failure_impl));
