@@ -308,6 +308,10 @@ struct aws_s3_file_io_option {
      * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
      */
     bool direct_io;
+
+    /* The estimated disk throughput. When upload with streaming, it's importand to set the disk throughput to prevent
+     * the connection starvation. */
+    size_t disk_throughput;
 };
 
 enum aws_s3_recv_file_option {
@@ -785,6 +789,8 @@ struct aws_s3_meta_request_options {
      * Do not set if the body is being passed by other means (see note above).
      */
     struct aws_byte_cursor send_filepath;
+
+    struct aws_s3_file_io_option file_io_ops;
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE
@@ -1564,21 +1570,6 @@ int aws_s3_request_metrics_get_body_read_total_without_reset_ns(
 /* Get the AWS CRT error code from request metrics. */
 AWS_S3_API
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics);
-
-/* Get the request pointer from request metrics. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
- * available */
-AWS_S3_API
-int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, void **out_request_ptr);
-
-AWS_S3_API
-int aws_s3_request_metrics_get_start_get_connection_timestamp_ns(
-    const struct aws_s3_request_metrics *metrics,
-    uint64_t *start_get_connection_timestamp_ns);
-
-AWS_S3_API
-int aws_s3_request_metrics_get_finish_get_connection_timestamp_ns(
-    const struct aws_s3_request_metrics *metrics,
-    uint64_t *finish_get_connection_timestamp_ns);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

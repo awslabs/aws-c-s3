@@ -41,9 +41,6 @@ struct aws_s3_request_metrics {
          * always be available. */
         int64_t total_duration_ns;
 
-        int64_t start_get_connection_timestamp_ns;
-        int64_t finish_get_connection_timestamp_ns;
-
         /* The time stamp when the request started to be encoded. -1 means data not available. Timestamp
          * are from `aws_high_res_clock_get_ticks` */
         int64_t send_start_timestamp_ns;
@@ -117,7 +114,6 @@ struct aws_s3_request_metrics {
         struct aws_string *ip_address;
         /* The pointer to the connection that request was made from */
         void *connection_id;
-        void *request_ptr;
         /* The aws_thread_id_t to the thread that request ran on */
         aws_thread_id_t thread_id;
         /* The stream-id, which is the idex when the stream was activated. */

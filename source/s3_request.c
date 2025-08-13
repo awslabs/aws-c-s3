@@ -182,7 +182,6 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->req_resp_info_metrics.operation_name = aws_string_new_from_string(allocator, request->operation_name);
 
     /* Set the request pointer */
-    metrics->crt_info_metrics.request_ptr = (void *)request;
 
     metrics->time_metrics.start_timestamp_ns = -1;
     metrics->time_metrics.end_timestamp_ns = -1;
@@ -196,8 +195,6 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(
     metrics->time_metrics.sign_start_timestamp_ns = -1;
     metrics->time_metrics.sign_end_timestamp_ns = -1;
     metrics->time_metrics.signing_duration_ns = -1;
-    metrics->time_metrics.start_get_connection_timestamp_ns = -1;
-    metrics->time_metrics.finish_get_connection_timestamp_ns = -1;
     metrics->time_metrics.mem_acquire_start_timestamp_ns = -1;
     metrics->time_metrics.mem_acquire_end_timestamp_ns = -1;
     metrics->time_metrics.mem_acquire_duration_ns = -1;
@@ -544,38 +541,4 @@ void aws_s3_request_metrics_get_request_type(
 int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *metrics) {
     AWS_PRECONDITION(metrics);
     return metrics->crt_info_metrics.error_code;
-}
-
-int aws_s3_request_metrics_get_start_get_connection_timestamp_ns(
-    const struct aws_s3_request_metrics *metrics,
-    uint64_t *start_get_connection_timestamp_ns) {
-    AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(start_get_connection_timestamp_ns);
-    if (metrics->time_metrics.start_get_connection_timestamp_ns < 0) {
-        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
-    }
-    *start_get_connection_timestamp_ns = metrics->time_metrics.start_get_connection_timestamp_ns;
-    return AWS_OP_SUCCESS;
-}
-
-int aws_s3_request_metrics_get_finish_get_connection_timestamp_ns(
-    const struct aws_s3_request_metrics *metrics,
-    uint64_t *finish_get_connection_timestamp_ns) {
-    AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(finish_get_connection_timestamp_ns);
-    if (metrics->time_metrics.finish_get_connection_timestamp_ns < 0) {
-        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
-    }
-    *finish_get_connection_timestamp_ns = metrics->time_metrics.finish_get_connection_timestamp_ns;
-    return AWS_OP_SUCCESS;
-}
-
-int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, void **out_request_ptr) {
-    AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(out_request_ptr);
-    if (metrics->crt_info_metrics.request_ptr == NULL) {
-        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
-    }
-    *out_request_ptr = metrics->crt_info_metrics.request_ptr;
-    return AWS_OP_SUCCESS;
 }

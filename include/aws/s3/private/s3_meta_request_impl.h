@@ -12,7 +12,6 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
-#include <aws/common/thread.h>
 #include <aws/http/request_response.h>
 
 #include "aws/s3/private/s3_checksums.h"
@@ -125,16 +124,6 @@ struct aws_s3_meta_request_vtable {
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 };
 
-struct s3_data_read_metrics {
-    uint64_t offset;
-    uint64_t size;
-    uint64_t start_timestamp;
-    uint64_t end_timestamp;
-    aws_thread_id_t thread_id;
-    /* The pointer to the connection that request was made from */
-    void *request_ptr;
-};
-
 /**
  * This represents one meta request, ie, one accelerated file transfer.  One S3 meta request can represent multiple S3
  * requests.
@@ -143,7 +132,6 @@ struct aws_s3_meta_request {
     struct aws_allocator *allocator;
 
     struct aws_ref_count ref_count;
-    int count;
 
     void *impl;
 
