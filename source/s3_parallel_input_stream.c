@@ -14,9 +14,6 @@
 
 #include <errno.h>
 
-#define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
-#define MAX_TIMEOUT_NS_P (600 * ONE_SEC_IN_NS_P)
-
 AWS_STATIC_STRING_FROM_LITERAL(s_readonly_bytes_mode, "rb");
 
 void aws_parallel_input_stream_init_base(
