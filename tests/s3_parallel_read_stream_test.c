@@ -434,7 +434,78 @@ static int s_validate_stream_content(
     aws_byte_buf_init(&expected_buf, allocator, expected_length);
     struct aws_input_stream *file_stream = aws_input_stream_new_from_file(allocator, file_path);
     ASSERT_SUCCESS(aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN));
-    ASSERT_SUCCESS(aws_input_stream_read(file_stream, &expected_buf));
+
+    while (expected_buf.len < expected_buf.capacity) {
+        struct aws_stream_status status;
+        ASSERT_SUCCESS(aws_input_stream_get_status(file_stream, &status));
+        ASSERT_TRUE(status.is_valid);
+        if (status.is_end_of_stream) {
+            break;
+        }
+        ASSERT_SUCCESS(aws_input_stream_read(file_stream, &expected_buf));
+    }
+    ASSERT_UINT_EQUALS(expected_length, expected_buf.len);
+
+    struct aws_byte_cursor expected_cursor = aws_byte_cursor_from_buf(&expected_buf);
+    struct aws_byte_cursor read_cursor = aws_byte_cursor_from_buf(&read_buf);
+    ASSERT_TRUE(aws_byte_cursor_eq(&expected_cursor, &read_cursor));
+
+    aws_byte_buf_clean_up(&read_buf);
+    aws_byte_buf_clean_up(&expected_buf);
+    aws_input_stream_release(file_stream);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Helper function to validate stream content against file */
+static int s_validate_stream_content_with_chunks(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *stream,
+    const char *file_path,
+    size_t offset,
+    size_t total_expected_length,
+    size_t chunk_size) {
+
+    struct aws_byte_buf read_buf;
+    aws_byte_buf_init(&read_buf, allocator, total_expected_length);
+    /* Read entire file and compare with expected content */
+    struct aws_byte_buf chunk_buf;
+    aws_byte_buf_init(&chunk_buf, allocator, chunk_size);
+    /* Read in chunks until we reach end of stream */
+    while (true) {
+        struct aws_stream_status status;
+        ASSERT_SUCCESS(aws_input_stream_get_status(stream, &status));
+        ASSERT_TRUE(status.is_valid);
+        if (status.is_end_of_stream) {
+            break;
+        }
+
+        aws_byte_buf_reset(&chunk_buf, 0);
+        ASSERT_SUCCESS(aws_input_stream_read(stream, &chunk_buf));
+
+        /* Append chunk to accumulated buffer */
+        struct aws_byte_cursor chunk_cursor = aws_byte_cursor_from_buf(&chunk_buf);
+        aws_byte_buf_append(&read_buf, &chunk_cursor);
+    }
+
+    aws_byte_buf_clean_up(&chunk_buf);
+    ASSERT_UINT_EQUALS(total_expected_length, read_buf.len);
+
+    /* Compare with expected content from file */
+    struct aws_byte_buf expected_buf;
+    aws_byte_buf_init(&expected_buf, allocator, total_expected_length);
+    struct aws_input_stream *file_stream = aws_input_stream_new_from_file(allocator, file_path);
+    ASSERT_SUCCESS(aws_input_stream_seek(file_stream, offset, AWS_SSB_BEGIN));
+    while (expected_buf.len < expected_buf.capacity) {
+        struct aws_stream_status status;
+        ASSERT_SUCCESS(aws_input_stream_get_status(file_stream, &status));
+        ASSERT_TRUE(status.is_valid);
+        if (status.is_end_of_stream) {
+            break;
+        }
+        ASSERT_SUCCESS(aws_input_stream_read(file_stream, &expected_buf));
+    }
+    ASSERT_UINT_EQUALS(total_expected_length, expected_buf.len);
 
     struct aws_byte_cursor expected_cursor = aws_byte_cursor_from_buf(&expected_buf);
     struct aws_byte_cursor read_cursor = aws_byte_cursor_from_buf(&read_buf);
@@ -465,11 +536,6 @@ TEST_CASE(part_streaming_stream_from_large_file_test) {
     ASSERT_TRUE(status.is_valid);
     ASSERT_FALSE(status.is_end_of_stream);
 
-    /* Test get_length */
-    int64_t stream_length = 0;
-    ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream, &stream_length));
-    ASSERT_UINT_EQUALS(file_length, (size_t)stream_length);
-
     /* Validate content */
     ASSERT_SUCCESS(s_validate_stream_content(allocator, part_streaming_stream, fixture.file_path, 0, file_length));
 
@@ -494,11 +560,6 @@ TEST_CASE(part_streaming_stream_offset_test) {
         aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, offset, read_size);
     ASSERT_NOT_NULL(part_streaming_stream);
 
-    /* Test get_length returns the request_body_size, not the file length */
-    int64_t stream_length = 0;
-    ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream, &stream_length));
-    ASSERT_UINT_EQUALS(read_size, (size_t)stream_length);
-
     /* Validate content */
     ASSERT_SUCCESS(s_validate_stream_content(allocator, part_streaming_stream, fixture.file_path, offset, read_size));
 
@@ -517,50 +578,14 @@ TEST_CASE(part_streaming_stream_chunked_read_test) {
     ASSERT_SUCCESS(s_part_streaming_test_setup(
         allocator, &fixture, "s3_part_streaming_stream_chunked_test.txt", file_length, MB_TO_BYTES(2)));
 
-    {
-        /* Test reading in small chunks */
-        struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
-            allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
-        ASSERT_NOT_NULL(part_streaming_stream);
+    /* Test reading in small chunks */
+    struct aws_input_stream *part_streaming_stream =
+        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    ASSERT_NOT_NULL(part_streaming_stream);
 
-        struct aws_byte_buf accumulated_buf;
-        aws_byte_buf_init(&accumulated_buf, allocator, file_length);
-
-        struct aws_byte_buf chunk_buf;
-        aws_byte_buf_init(&chunk_buf, allocator, chunk_size);
-        /* Read in chunks until we reach end of stream */
-        while (true) {
-            struct aws_stream_status status;
-            ASSERT_SUCCESS(aws_input_stream_get_status(part_streaming_stream, &status));
-            ASSERT_TRUE(status.is_valid);
-            if (status.is_end_of_stream) {
-                break;
-            }
-
-            aws_byte_buf_reset(&chunk_buf, 0);
-            ASSERT_SUCCESS(aws_input_stream_read(part_streaming_stream, &chunk_buf));
-
-            /* Append chunk to accumulated buffer */
-            struct aws_byte_cursor chunk_cursor = aws_byte_cursor_from_buf(&chunk_buf);
-            aws_byte_buf_append(&accumulated_buf, &chunk_cursor);
-        }
-        aws_byte_buf_clean_up(&chunk_buf);
-
-        /* Verify we read the entire file */
-        ASSERT_UINT_EQUALS(file_length, accumulated_buf.len);
-
-        /* Compare with expected content */
-        struct aws_byte_buf expected_buf;
-        aws_byte_buf_init(&expected_buf, allocator, file_length);
-        struct aws_input_stream *file_stream = aws_input_stream_new_from_file(allocator, fixture.file_path);
-        ASSERT_SUCCESS(aws_input_stream_read(file_stream, &expected_buf));
-        ASSERT_TRUE(aws_byte_buf_eq(&expected_buf, &accumulated_buf));
-
-        aws_byte_buf_clean_up(&accumulated_buf);
-        aws_byte_buf_clean_up(&expected_buf);
-        aws_input_stream_release(file_stream);
-        aws_input_stream_release(part_streaming_stream);
-    }
+    ASSERT_SUCCESS(s_validate_stream_content_with_chunks(
+        allocator, part_streaming_stream, fixture.file_path, 0, file_length, chunk_size));
+    aws_input_stream_release(part_streaming_stream);
 
     s_part_streaming_test_cleanup(&fixture);
     return AWS_OP_SUCCESS;
@@ -569,21 +594,23 @@ TEST_CASE(part_streaming_stream_chunked_read_test) {
 TEST_CASE(part_streaming_stream_unaligned_offset_test) {
     (void)ctx;
     struct part_streaming_test_fixture fixture;
-    size_t file_length = MB_TO_BYTES(2);
+    size_t file_length = MB_TO_BYTES(10);
     /* Use an offset that's not aligned to 4KB page boundary */
     size_t offset = KB_TO_BYTES(4) + 1234; /* 4KB + 1234 bytes */
-    size_t read_size = KB_TO_BYTES(255);
+    /* small chunks */
+    size_t chunk_size = KB_TO_BYTES(123);
 
     ASSERT_SUCCESS(s_part_streaming_test_setup(
         allocator, &fixture, "s3_part_streaming_stream_unaligned_test.txt", file_length, MB_TO_BYTES(1)));
 
     /* Test reading from unaligned offset */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, offset, read_size);
+    /* We can create the input stream with more than the file has. And it should still work. */
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, offset, 2 * file_length);
     ASSERT_NOT_NULL(part_streaming_stream);
 
-    /* Validate content */
-    ASSERT_SUCCESS(s_validate_stream_content(allocator, part_streaming_stream, fixture.file_path, offset, read_size));
+    ASSERT_SUCCESS(s_validate_stream_content_with_chunks(
+        allocator, part_streaming_stream, fixture.file_path, offset, file_length - offset, chunk_size));
 
     aws_input_stream_release(part_streaming_stream);
     s_part_streaming_test_cleanup(&fixture);

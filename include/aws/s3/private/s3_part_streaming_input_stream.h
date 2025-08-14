@@ -22,6 +22,7 @@ AWS_EXTERN_C_BEGIN
  *
  * @param allocator The allocator to use for memory allocation
  * @param para_stream The parallel input stream to read from
+ * @param buffer_ticket The buffer pool ticket to use for buffering
  * @param offset The starting offset in the stream
  * @param request_body_size The total size to read
  * @return A new input stream that reads from the parallel input stream

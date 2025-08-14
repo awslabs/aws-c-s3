@@ -79,7 +79,7 @@ static int s_part_streaming_input_stream_seek(
 
 static void s_kick_off_next_load(struct aws_s3_part_streaming_input_stream_impl *impl) {
 
-    size_t length_after_chunk_read = impl->total_length_read + impl->reading_chunk_buf->len;
+    size_t length_after_chunk_read = impl->total_length_read + (impl->reading_chunk_buf->len - impl->in_chunk_offset);
 
     size_t new_offset = impl->offset + length_after_chunk_read;
     impl->page_aligned_offset = new_offset % impl->page_size;
@@ -193,13 +193,14 @@ static int s_part_streaming_input_stream_read(struct aws_input_stream *stream, s
     /* We finished reading the chunk or we reached the expected EOS. */
     if (impl->in_chunk_offset == impl->reading_chunk_buf->len || impl->total_length_read == impl->total_length) {
         /* We finished reading the reading buffer, reset it. */
-        aws_byte_buf_reset(impl->reading_chunk_buf, false);
+
         if (impl->eos_loaded_from_para_stream || impl->total_length_read == impl->total_length) {
             /* We reached the end of the stream. */
             impl->eos_reached = true;
             AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "id=%p: End of stream reached", (void *)impl);
-            AWS_ASSERT(impl->total_length_read == impl->total_length);
+            AWS_ASSERT(impl->total_length_read <= impl->total_length);
         }
+        aws_byte_buf_reset(impl->reading_chunk_buf, false);
         impl->in_chunk_offset = 0;
     }
 
@@ -220,11 +221,12 @@ static int s_part_streaming_input_stream_get_status(struct aws_input_stream *str
 }
 
 static int s_part_streaming_input_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
-    AWS_ASSERT(stream != NULL);
-    struct aws_s3_part_streaming_input_stream_impl *impl =
-        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
-    *out_length = (int64_t)impl->total_length;
-    return AWS_OP_SUCCESS;
+    (void)stream;
+    (void)out_length;
+
+    AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Get length operation not supported on part streaming input stream");
+
+    return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
 }
 
 static void s_part_streaming_input_stream_destroy(void *user_data) {
@@ -277,8 +279,7 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
 
     /* TODO: Hard code to 4KB for the page size for now. */
     impl->page_size = KB_TO_BYTES(4);
-    impl->page_aligned_offset = offset % impl->page_size;
-    impl->offset = offset - impl->page_aligned_offset;
+    impl->offset = offset;
     impl->total_length = request_body_size;
 
     impl->para_stream = aws_parallel_input_stream_acquire(para_stream);
