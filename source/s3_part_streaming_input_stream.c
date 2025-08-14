@@ -34,7 +34,7 @@ struct aws_s3_part_streaming_input_stream_impl {
 
     /* Settings won't be changed during read. */
     size_t page_size;
-    size_t offset;
+    uint64_t offset;
     size_t total_length;
     size_t chunk_load_size;
 
@@ -81,7 +81,7 @@ static void s_kick_off_next_load(struct aws_s3_part_streaming_input_stream_impl 
 
     size_t length_after_chunk_read = impl->total_length_read + (impl->reading_chunk_buf->len - impl->in_chunk_offset);
 
-    size_t new_offset = impl->offset + length_after_chunk_read;
+    uint64_t new_offset = impl->offset + length_after_chunk_read;
     impl->page_aligned_offset = new_offset % impl->page_size;
     new_offset -= impl->page_aligned_offset;
 
@@ -107,7 +107,7 @@ static void s_kick_off_next_load(struct aws_s3_part_streaming_input_stream_impl 
             AWS_LS_S3_GENERAL,
             "id=%p: Starting background load - offset=%" PRIu64 ", size=%zu",
             (void *)impl,
-            (uint64_t)new_offset,
+            new_offset,
             load_size);
 
         /* Kick off loading the next chunk. */
