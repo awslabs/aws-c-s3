@@ -314,6 +314,37 @@ enum aws_s3_recv_file_option {
      */
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
 };
+
+/* Controls how client performance file I/O operations. Only applies to the file based workload. */
+struct aws_s3_file_io_option {
+    /**
+     * Skip buffering the part in memory before sending the request.
+     * If set, set the `disk_throughput` to be reasonable align with the available disk throughput.
+     * Otherwise, the transfer may fail with connection starvation.
+     * Default to false.
+     **/
+    bool streaming_upload;
+
+    /**
+     * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperform the kernel cache.
+     * Notes:
+     * - only support linux for now.
+     * - And check the NOTES for O_DIRECT in https://man7.org/linux/man-pages/man2/openat.2.html
+     * - Only supports upload for now.
+     * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
+     */
+    bool direct_io;
+
+    /**
+     * The estimated disk throughput.
+     * When upload with streaming, it's importand to set the disk throughput to prevent the connection starvation.
+     * Notes: There are possibilities that cannot reach the all available disk throughput:
+     * 1. Disk is busy with ohter application
+     * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
+     **/
+    size_t disk_throughput;
+};
+
 /**
  * Info about a single part, for you to review before the upload completes.
  */
@@ -767,6 +798,20 @@ struct aws_s3_meta_request_options {
      * Do not set if the body is being passed by other means (see note above).
      */
     struct aws_byte_cursor send_filepath;
+
+    /**
+     * Optional.
+     * If set, this controls how the meta request interact with file I/O.
+     * Read `aws_s3_file_io_option` for details.
+     *  Notes: Only applies when `send_filepath` is set.
+     *  TODO: adapt it to `recv_filepath`.
+     *
+     * eg:
+     * - When the file is too large to fit in the buffer, set `streaming_upload` to avoid buffering the whole parts in
+     *  memory.
+     * - When the disk I/O is faster than OS cache, set `direct_io` to bypass the OS cache.
+     */
+    struct aws_s3_file_io_option *file_io_ops;
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE

@@ -1763,6 +1763,18 @@ static bool s_s3_client_should_update_meta_request(
         }
     }
 
+    if (meta_request->file_io_ops.streaming_upload) {
+        /**
+         * When upload with streaming, the prepare stage will not read into buffer.
+         * Prevent the number of request in flight to be larger han the max_active_connections, which is the
+         * max_requests_prepare.
+         * So that the request will not staying in the queue to wait for the connection available.
+         * Prevents the credentials to be expired during waiting for too long.
+         */
+        if (num_requests_in_flight >= max_requests_prepare) {
+            return false;
+        }
+    }
     /**
      * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
      * be in the preparation stage.
@@ -1908,7 +1920,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = meta_request->part_size,
+            .size = request->buffer_size,
         };
 
         struct aws_s3_reserve_memory_payload *payload =
