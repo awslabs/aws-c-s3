@@ -102,6 +102,7 @@ static int s_read_from_file_impl(
     int rt_code = AWS_OP_ERR;
     FILE *file_stream = aws_fopen_safe(file_path, s_readonly_bytes_mode);
     if (file_stream == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to open file %s", aws_string_c_str(file_path));
         return AWS_OP_ERR;
     }
 
