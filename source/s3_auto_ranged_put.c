@@ -850,7 +850,7 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
      * reading. */
     bool parallel_prepare =
         (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
-    if (parallel_prepare && meta_request->file_io_ops.streaming_upload) {
+    if (parallel_prepare && meta_request->fio_opts.streaming_upload) {
         request->fio_streaming = true;
     }
 

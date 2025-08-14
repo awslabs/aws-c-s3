@@ -290,7 +290,7 @@ struct aws_s3_meta_request {
     bool recv_file_delete_on_failure;
 
     /* File I/O options. */
-    struct aws_s3_file_io_option file_io_ops;
+    struct aws_s3_file_io_option fio_opts;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */

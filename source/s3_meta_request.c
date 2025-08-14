@@ -179,8 +179,10 @@ int aws_s3_meta_request_init_base(
     meta_request->type = options->type;
 
     /* Deep copy the file io options. */
-    if (options->file_io_ops) {
-        meta_request->file_io_ops = *options->file_io_ops;
+    if (options->fio_opts) {
+        meta_request->fio_opts = *options->fio_opts;
+    } else {
+        meta_request->fio_opts = client->fio_opts;
     }
 
     /* Set up reference count. */

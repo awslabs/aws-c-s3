@@ -336,13 +336,15 @@ struct aws_s3_file_io_option {
     bool direct_io;
 
     /**
-     * The estimated disk throughput.
+     * The estimated disk throughput. Only be applied when `streaming_upload` is true.
+     * in gigabits per second (Gbps) that available to us.
+     *
      * When upload with streaming, it's importand to set the disk throughput to prevent the connection starvation.
      * Notes: There are possibilities that cannot reach the all available disk throughput:
      * 1. Disk is busy with ohter application
      * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
      **/
-    size_t disk_throughput;
+    double disk_throughput;
 };
 
 /**
@@ -468,6 +470,20 @@ struct aws_s3_client_config {
      * is ENABLED, this is required. Otherwise, this is optional.
      */
     const struct aws_tls_connection_options *tls_connection_options;
+
+    /**
+     * Optional.
+     * If set, this controls how the client interact with file I/O.
+     * Read `aws_s3_file_io_option` for details.
+     *  Notes: Only applies when AWS_S3_META_REQUEST_TYPE_PUT_OBJECT is set.
+     *  TODO: adapt it to `recv_filepath`.
+     *
+     * eg:
+     * - When the file is too large to fit in the buffer, set `streaming_upload` to avoid buffering the whole parts in
+     *  memory.
+     * - When the disk I/O is faster than OS cache, set `direct_io` to bypass the OS cache.
+     */
+    struct aws_s3_file_io_option *fio_opts;
 
     /**
      * Required.
@@ -801,6 +817,7 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
+     * Overrides the client config if set.
      * If set, this controls how the meta request interact with file I/O.
      * Read `aws_s3_file_io_option` for details.
      *  Notes: Only applies when `send_filepath` is set.
@@ -811,7 +828,7 @@ struct aws_s3_meta_request_options {
      *  memory.
      * - When the disk I/O is faster than OS cache, set `direct_io` to bypass the OS cache.
      */
-    struct aws_s3_file_io_option *file_io_ops;
+    struct aws_s3_file_io_option *fio_opts;
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE
