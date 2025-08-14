@@ -181,7 +181,7 @@ int aws_s3_meta_request_init_base(
     /* Deep copy the file io options. */
     if (options->fio_opts) {
         meta_request->fio_opts = *options->fio_opts;
-    } else {
+    } else if (client != NULL) {
         meta_request->fio_opts = client->fio_opts;
     }
 
