@@ -235,6 +235,9 @@ struct aws_s3_client {
      * to meta requests for use. */
     const uint64_t max_part_size;
 
+    /* File I/O options. */
+    struct aws_s3_file_io_option fio_opts;
+
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
      * request. Uploads over this size will automatically use a multipart upload strategy, while uploads smaller or
      * equal to this threshold will use a single request to upload the whole object. If not set, `part_size` will be
