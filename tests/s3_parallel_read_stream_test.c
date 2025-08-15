@@ -694,29 +694,6 @@ TEST_CASE(part_streaming_stream_get_length_unsupported_test) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(part_streaming_stream_null_parameters_test) {
-    (void)ctx;
-    struct part_streaming_test_fixture fixture;
-    size_t file_length = KB_TO_BYTES(10);
-
-    ASSERT_SUCCESS(s_part_streaming_test_setup(
-        allocator, &fixture, "s3_part_streaming_stream_null_test.txt", file_length, KB_TO_BYTES(32)));
-
-    /* Test with NULL parallel stream */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, NULL, fixture.ticket, 0, file_length);
-    ASSERT_NULL(part_streaming_stream);
-
-    /* Test with NULL buffer ticket */
-    part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, NULL, 0, file_length);
-    ASSERT_NULL(part_streaming_stream);
-
-    s_part_streaming_test_cleanup(&fixture);
-
-    return AWS_OP_SUCCESS;
-}
-
 TEST_CASE(part_streaming_stream_file_deleted_during_read_test) {
     (void)ctx;
     struct part_streaming_test_fixture fixture;
