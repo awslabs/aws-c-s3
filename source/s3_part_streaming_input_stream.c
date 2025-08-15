@@ -312,14 +312,15 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
 
     AWS_LOGF_TRACE(
         AWS_LS_S3_GENERAL,
-        "id=%p: Created part streaming input stream - offset=%" PRIu64 ", request_body_size=%zu, chunk_load_size=%zu",
+        "id=%p: Created part streaming input stream - offset=%" PRIu64
+        ", total_length_to_read=%zu, chunk_load_size=%zu",
         (void *)impl,
         offset,
-        request_body_size,
+        impl->total_length,
         impl->chunk_load_size);
 
     /* Handle zero-length request case */
-    if (request_body_size == 0) {
+    if (impl->total_length == 0) {
         impl->eos_reached = true;
         AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Zero-length request, immediately setting EOS", (void *)impl);
     } else {
