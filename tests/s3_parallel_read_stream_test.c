@@ -671,7 +671,7 @@ TEST_CASE(part_streaming_stream_seek_unsupported_test) {
     return AWS_OP_SUCCESS;
 }
 
-TEST_CASE(part_streaming_stream_get_length_unsupported_test) {
+TEST_CASE(part_streaming_stream_get_length_test) {
     (void)ctx;
     struct part_streaming_test_fixture fixture;
     size_t file_length = KB_TO_BYTES(10);
@@ -679,16 +679,54 @@ TEST_CASE(part_streaming_stream_get_length_unsupported_test) {
     ASSERT_SUCCESS(s_part_streaming_test_setup(
         allocator, &fixture, "s3_part_streaming_stream_get_length_test.txt", file_length, KB_TO_BYTES(32)));
 
-    /* Test that get_length operation is not supported */
+    /* Test that get_length operation is now supported */
     struct aws_input_stream *part_streaming_stream =
         aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     int64_t length;
-    ASSERT_FAILS(aws_input_stream_get_length(part_streaming_stream, &length));
-    ASSERT_UINT_EQUALS(AWS_ERROR_UNSUPPORTED_OPERATION, aws_last_error());
+    ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream, &length));
+    ASSERT_UINT_EQUALS(file_length, (size_t)length);
+
+    /* Test with a different length */
+    size_t custom_length = KB_TO_BYTES(5);
+    struct aws_input_stream *part_streaming_stream2 =
+        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, custom_length);
+    ASSERT_NOT_NULL(part_streaming_stream2);
+
+    ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream2, &length));
+    ASSERT_UINT_EQUALS(custom_length, (size_t)length);
+
+    /* Test with an offset */
+    size_t offset = KB_TO_BYTES(2);
+    struct aws_input_stream *part_streaming_stream3 = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, offset, custom_length);
+    ASSERT_NOT_NULL(part_streaming_stream3);
+
+    ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream3, &length));
+    ASSERT_UINT_EQUALS(custom_length, (size_t)length);
+
+    /* Test with an offset and passed-in length is larger than available */
+    struct aws_input_stream *part_streaming_stream4 = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, offset, file_length);
+    ASSERT_NOT_NULL(part_streaming_stream4);
+
+    ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream4, &length));
+    ASSERT_UINT_EQUALS(file_length - offset, (size_t)length);
+
+    /* Test with an offset is larger than available */
+    struct aws_input_stream *part_streaming_stream5 = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, file_length + offset, file_length);
+    ASSERT_NOT_NULL(part_streaming_stream5);
+
+    ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream5, &length));
+    ASSERT_UINT_EQUALS(0, (size_t)length);
 
     aws_input_stream_release(part_streaming_stream);
+    aws_input_stream_release(part_streaming_stream2);
+    aws_input_stream_release(part_streaming_stream3);
+    aws_input_stream_release(part_streaming_stream4);
+    aws_input_stream_release(part_streaming_stream5);
     s_part_streaming_test_cleanup(&fixture);
 
     return AWS_OP_SUCCESS;

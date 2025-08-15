@@ -221,12 +221,11 @@ static int s_part_streaming_input_stream_get_status(struct aws_input_stream *str
 }
 
 static int s_part_streaming_input_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
-    (void)stream;
-    (void)out_length;
-
-    AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Get length operation not supported on part streaming input stream");
-
-    return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    AWS_ASSERT(stream != NULL);
+    struct aws_s3_part_streaming_input_stream_impl *impl =
+        AWS_CONTAINER_OF(stream, struct aws_s3_part_streaming_input_stream_impl, base);
+    *out_length = (int64_t)impl->total_length;
+    return AWS_OP_SUCCESS;
 }
 
 static void s_part_streaming_input_stream_destroy(void *user_data) {
@@ -280,7 +279,18 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
     /* TODO: Hard code to 4KB for the page size for now. */
     impl->page_size = KB_TO_BYTES(4);
     impl->offset = offset;
-    impl->total_length = request_body_size;
+    int64_t para_stream_total_length = 0;
+    if (aws_parallel_input_stream_get_length(para_stream, &para_stream_total_length)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "id=%p: Failed to get length from parallel input stream with error %s",
+            (void *)impl,
+            aws_error_debug_str(aws_last_error()));
+        aws_mem_release(allocator, impl);
+        return NULL;
+    }
+    uint64_t total_available_length = aws_sub_u64_saturating((uint64_t)para_stream_total_length, offset);
+    impl->total_length = (size_t)aws_min_u64((uint64_t)request_body_size, total_available_length);
 
     impl->para_stream = aws_parallel_input_stream_acquire(para_stream);
     impl->ticket = aws_s3_buffer_ticket_acquire(buffer_ticket);

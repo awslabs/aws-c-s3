@@ -44,6 +44,14 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
     return NULL;
 }
 
+int aws_parallel_input_stream_get_length(struct aws_parallel_input_stream *stream, int64_t *out_length) {
+    if (stream->vtable->get_length) {
+        return stream->vtable->get_length(stream, out_length);
+    } else {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+}
+
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
@@ -200,9 +208,23 @@ struct aws_future_bool *s_para_from_file_read(
     return future;
 }
 
+int s_para_from_file_get_length(struct aws_parallel_input_stream *stream, int64_t *length) {
+    struct aws_parallel_input_stream_from_file_impl *impl =
+        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
+    FILE *file = aws_fopen_safe(impl->file_path, s_readonly_bytes_mode);
+    if (!file) {
+        return aws_raise_error(AWS_ERROR_FILE_INVALID_PATH);
+    }
+
+    int ret_val = aws_file_get_length(file, length);
+    fclose(file);
+    return ret_val;
+}
+
 static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file_vtable = {
     .destroy = s_para_from_file_destroy,
     .read = s_para_from_file_read,
+    .get_length = s_para_from_file_get_length,
 };
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
