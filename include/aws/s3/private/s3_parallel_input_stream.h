@@ -47,6 +47,15 @@ struct aws_parallel_input_stream_vtable {
      */
     struct aws_future_bool *(
         *read)(struct aws_parallel_input_stream *stream, uint64_t offset, size_t max_length, struct aws_byte_buf *dest);
+
+    /**
+     * Get the length of the stream.
+     *
+     * @param stream            The stream to get length from
+     * @param out_length        The output length
+     * @return                  AWS_OP_SUCCESS if success, otherwise AWS_OP_ERR
+     */
+    int (*get_length)(struct aws_parallel_input_stream *stream, int64_t *out_length);
 };
 
 AWS_EXTERN_C_BEGIN
@@ -94,6 +103,16 @@ struct aws_future_bool *aws_parallel_input_stream_read(
     uint64_t offset,
     size_t max_length,
     struct aws_byte_buf *dest);
+
+/**
+ * Get the total length of the parallel input stream.
+ *
+ * @param stream
+ * @param out_length
+ * @return AWS_S3_API
+ */
+AWS_S3_API
+int aws_parallel_input_stream_get_length(struct aws_parallel_input_stream *stream, int64_t *out_length);
 
 /**
  * Creates a new parallel input stream that reads from a file.
