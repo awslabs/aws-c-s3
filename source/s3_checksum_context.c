@@ -170,6 +170,11 @@ int aws_s3_upload_request_checksum_context_finalize_checksum(
             return AWS_OP_ERR;
         }
         context->synced_data.checksum_calculated = true;
+    } else {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL, "Checksum already finalized. This should not happen. Please file a bug report.");
+        s_unlock_synced_data(context);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
     s_unlock_synced_data(context);
     return AWS_OP_SUCCESS;

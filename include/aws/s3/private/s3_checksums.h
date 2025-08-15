@@ -104,15 +104,6 @@ AWS_S3_API
 int aws_checksum_stream_finalize_checksum(struct aws_input_stream *checksum_stream, struct aws_byte_buf *checksum_buf);
 
 /**
- * Finalize the checksum has read so far to the checksum context.
- * Not thread safe.
- */
-AWS_S3_API
-int aws_checksum_stream_finalize_checksum_context(
-    struct aws_input_stream *checksum_stream,
-    struct aws_s3_upload_request_checksum_context *checksum_context);
-
-/**
  * TODO: properly support chunked encoding.
  * Creates a chunked encoding stream that wraps an existing stream and adds checksum trailers.
  *
