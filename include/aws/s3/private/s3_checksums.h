@@ -62,6 +62,24 @@ struct aws_s3_meta_request_checksum_config_storage {
 };
 
 /**
+ * a stream that takes in a stream.
+ * The context will be only finalized when the checksum stream has read to the end of stream.
+ * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
+ * checksum.
+ *
+ * @param allocator
+ * @param existing_stream The real content to read from. Destroying the checksum stream destroys the existing stream.
+ *                        outputs the checksum of existing stream to checksum_output upon destruction. Will be kept
+ *                        alive by the checksum stream
+ * @param algorithm       Checksum algorithm to use.
+ */
+AWS_S3_API
+struct aws_input_stream *aws_checksum_stream_new_with_context(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *existing_stream,
+    struct aws_s3_upload_request_checksum_context *context);
+
+/**
  * a stream that takes in a stream
  * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
  * checksum.

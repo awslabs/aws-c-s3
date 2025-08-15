@@ -14,6 +14,7 @@ struct aws_checksum_stream {
 
     struct aws_input_stream *old_stream;
     struct aws_s3_checksum *checksum;
+    struct aws_s3_upload_request_checksum_context *context;
     struct aws_byte_buf checksum_result;
 };
 
@@ -100,6 +101,32 @@ struct aws_input_stream *aws_checksum_stream_new(
     aws_ref_count_init(
         &impl->base.ref_count, impl, (aws_simple_completion_callback *)s_aws_input_checksum_stream_destroy);
 
+    return &impl->base;
+on_error:
+    aws_mem_release(impl->allocator, impl);
+    return NULL;
+}
+
+struct aws_input_stream *aws_checksum_stream_new_with_context(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *existing_stream,
+    struct aws_s3_upload_request_checksum_context *context) {
+    AWS_PRECONDITION(existing_stream);
+    AWS_PRECONDITION(context);
+
+    struct aws_checksum_stream *impl = aws_mem_calloc(allocator, 1, sizeof(struct aws_checksum_stream));
+    impl->allocator = allocator;
+    impl->base.vtable = &s_aws_input_checksum_stream_vtable;
+
+    impl->checksum = aws_checksum_new(allocator, context->algorithm);
+    if (impl->checksum == NULL) {
+        goto on_error;
+    }
+    aws_byte_buf_init(&impl->checksum_result, allocator, impl->checksum->digest_size);
+    impl->old_stream = aws_input_stream_acquire(existing_stream);
+    aws_ref_count_init(
+        &impl->base.ref_count, impl, (aws_simple_completion_callback *)s_aws_input_checksum_stream_destroy);
+    impl->context = context;
     return &impl->base;
 on_error:
     aws_mem_release(impl->allocator, impl);
