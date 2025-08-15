@@ -27,7 +27,6 @@ struct aws_chunk_stream {
     /* Pointing to the stream we read from */
     struct aws_input_stream *current_stream;
     struct aws_input_stream *chunk_body_stream;
-    struct aws_input_stream *checksum_stream;
 
     struct aws_s3_upload_request_checksum_context *checksum_context;
     struct aws_byte_buf pre_chunk_buffer;
@@ -62,13 +61,6 @@ static int s_set_post_chunk_stream(struct aws_chunk_stream *parent_stream) {
     }
     struct aws_byte_cursor post_trailer_cursor = aws_byte_cursor_from_string(s_post_trailer);
     struct aws_byte_cursor colon_cursor = aws_byte_cursor_from_string(s_colon);
-    if (parent_stream->checksum_stream) {
-        /* If we have the checksum stream, finalize the checksum now as we finished reading from it. */
-        if (aws_checksum_stream_finalize_checksum_context(
-                parent_stream->checksum_stream, parent_stream->checksum_context)) {
-            return AWS_OP_ERR;
-        }
-    }
     struct aws_byte_cursor checksum_result_cursor =
         aws_s3_upload_request_checksum_context_get_checksum_cursor(parent_stream->checksum_context);
     AWS_ASSERT(parent_stream->checksum_context->encoded_checksum_size == checksum_result_cursor.len);
@@ -167,7 +159,6 @@ static void s_aws_input_chunk_stream_destroy(struct aws_chunk_stream *impl) {
     if (impl) {
         aws_input_stream_release(impl->current_stream);
         aws_input_stream_release(impl->chunk_body_stream);
-        aws_input_stream_release(impl->checksum_stream);
         aws_byte_buf_clean_up(&impl->pre_chunk_buffer);
         aws_byte_buf_clean_up(&impl->post_chunk_buffer);
         /* Either we calculated the checksum, or we the checksum is empty. Otherwise, something was wrong. */
@@ -227,11 +218,11 @@ struct aws_input_stream *aws_chunk_stream_new(
     }
     if (should_calculate_checksum) {
         /* Wrap the existing stream with checksum stream to calculate the checksum when reading from it. */
-        impl->checksum_stream = aws_checksum_stream_new(allocator, existing_stream, algorithm);
-        if (impl->checksum_stream == NULL) {
+        impl->chunk_body_stream =
+            aws_checksum_stream_new_with_context(allocator, existing_stream, impl->checksum_context);
+        if (impl->chunk_body_stream == NULL) {
             goto error;
         }
-        impl->chunk_body_stream = aws_input_stream_acquire(impl->checksum_stream);
     } else {
         /* No need to calculate the checksum during read, use the existing stream directly. */
         impl->chunk_body_stream = aws_input_stream_acquire(existing_stream);
