@@ -1223,7 +1223,7 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
         message = aws_s3_upload_part_message_new_streaming(
             meta_request->allocator,
             meta_request->initial_request_message,
-            &request->request_body_stream,
+            request->request_body_stream,
             request->part_number,
             auto_ranged_put->upload_id,
             meta_request->should_compute_content_md5,

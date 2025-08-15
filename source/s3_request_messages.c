@@ -361,7 +361,6 @@ struct aws_http_message *aws_s3_upload_part_message_new_streaming(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_input_stream *input_stream,
-    int64_t stream_length,
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,
@@ -959,8 +958,8 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
-    if (byte_buf && stream || !byte_buf && !stream) {
-        /* Should pass either stream or byte buf.  */
+    if (!byte_buf == !stream) {
+        /* Should pass one and only one of them. */
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
