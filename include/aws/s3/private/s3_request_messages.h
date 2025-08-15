@@ -52,6 +52,7 @@ AWS_S3_API
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
+    struct aws_input_stream *stream,
     struct aws_http_message *out_message,
     struct aws_s3_upload_request_checksum_context *checksum_context);
 

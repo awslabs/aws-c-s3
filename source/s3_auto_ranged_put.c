@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_list_parts.h"
+#include "aws/s3/private/s3_part_streaming_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/clock.h>
@@ -1082,8 +1083,9 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         aws_input_stream_release(request->request_body_stream);
         uint64_t offset = 0;
         size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-        /* TODO: finish the request_body_stream */
-        request->request_body_stream = NULL;
+        AWS_ASSERT(meta_request->request_body_parallel_stream != NULL);
+        request->request_body_stream = aws_part_streaming_input_stream_new(
+            allocator, meta_request->request_body_parallel_stream, request->ticket, offset, request_body_size);
         request->content_length = request_body_size;
         int error_code = AWS_ERROR_SUCCESS;
 
@@ -1218,14 +1220,14 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
     /* Create a new put-object message to upload a part. */
     struct aws_http_message *message = NULL;
     if (request->request_body_stream != NULL) {
-        /* TODO */
-        // message = aws_s3_upload_part_message_new_streaming(
-        //     meta_request->allocator,
-        //     meta_request->initial_request_message,
-        //     request->part_number,
-        //     request->request_body_stream,
-        //     request->content_length,
-        //     auto_ranged_put->upload_id);
+        message = aws_s3_upload_part_message_new_streaming(
+            meta_request->allocator,
+            meta_request->initial_request_message,
+            &request->request_body_stream,
+            request->part_number,
+            auto_ranged_put->upload_id,
+            meta_request->should_compute_content_md5,
+            checksum_context);
     } else {
         message = aws_s3_upload_part_message_new(
             meta_request->allocator,
