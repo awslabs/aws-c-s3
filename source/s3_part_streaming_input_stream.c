@@ -308,7 +308,13 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
         request_body_size,
         impl->chunk_load_size);
 
-    /* Start to load into the loading buffer. */
-    s_kick_off_next_load(impl);
+    /* Handle zero-length request case */
+    if (request_body_size == 0) {
+        impl->eos_reached = true;
+        AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Zero-length request, immediately setting EOS", (void *)impl);
+    } else {
+        /* Start to load into the loading buffer. */
+        s_kick_off_next_load(impl);
+    }
     return &impl->base;
 }

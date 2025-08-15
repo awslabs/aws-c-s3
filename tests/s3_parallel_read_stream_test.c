@@ -670,3 +670,165 @@ TEST_CASE(part_streaming_stream_seek_unsupported_test) {
 
     return AWS_OP_SUCCESS;
 }
+
+TEST_CASE(part_streaming_stream_get_length_unsupported_test) {
+    (void)ctx;
+    struct part_streaming_test_fixture fixture;
+    size_t file_length = KB_TO_BYTES(10);
+
+    ASSERT_SUCCESS(s_part_streaming_test_setup(
+        allocator, &fixture, "s3_part_streaming_stream_get_length_test.txt", file_length, KB_TO_BYTES(32)));
+
+    /* Test that get_length operation is not supported */
+    struct aws_input_stream *part_streaming_stream =
+        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    ASSERT_NOT_NULL(part_streaming_stream);
+
+    int64_t length;
+    ASSERT_FAILS(aws_input_stream_get_length(part_streaming_stream, &length));
+    ASSERT_UINT_EQUALS(AWS_ERROR_UNSUPPORTED_OPERATION, aws_last_error());
+
+    aws_input_stream_release(part_streaming_stream);
+    s_part_streaming_test_cleanup(&fixture);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(part_streaming_stream_null_parameters_test) {
+    (void)ctx;
+    struct part_streaming_test_fixture fixture;
+    size_t file_length = KB_TO_BYTES(10);
+
+    ASSERT_SUCCESS(s_part_streaming_test_setup(
+        allocator, &fixture, "s3_part_streaming_stream_null_test.txt", file_length, KB_TO_BYTES(32)));
+
+    /* Test with NULL parallel stream */
+    struct aws_input_stream *part_streaming_stream =
+        aws_part_streaming_input_stream_new(allocator, NULL, fixture.ticket, 0, file_length);
+    ASSERT_NULL(part_streaming_stream);
+
+    /* Test with NULL buffer ticket */
+    part_streaming_stream =
+        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, NULL, 0, file_length);
+    ASSERT_NULL(part_streaming_stream);
+
+    s_part_streaming_test_cleanup(&fixture);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(part_streaming_stream_file_deleted_during_read_test) {
+    (void)ctx;
+    struct part_streaming_test_fixture fixture;
+    size_t file_length = MB_TO_BYTES(1);
+
+    ASSERT_SUCCESS(s_part_streaming_test_setup(
+        allocator, &fixture, "s3_part_streaming_stream_delete_test.txt", file_length, KB_TO_BYTES(16)));
+
+    /* Create the part streaming stream */
+    struct aws_input_stream *part_streaming_stream =
+        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    ASSERT_NOT_NULL(part_streaming_stream);
+
+    /* Delete the file while the stream is still active */
+    remove(fixture.file_path);
+    struct aws_byte_buf read_buf;
+    aws_byte_buf_init(&read_buf, allocator, file_length);
+
+    /* Keep reading until we get an error or reach end of stream */
+    int error_code = AWS_OP_SUCCESS;
+    while (read_buf.len < read_buf.capacity) {
+        struct aws_stream_status status;
+        ASSERT_SUCCESS(aws_input_stream_get_status(part_streaming_stream, &status));
+        ASSERT_TRUE(status.is_valid);
+
+        if (status.is_end_of_stream) {
+            break;
+        }
+
+        if (aws_input_stream_read(part_streaming_stream, &read_buf) != AWS_OP_SUCCESS) {
+            /* Error occurred - this is expected when file is deleted during read */
+            error_code = aws_last_error();
+            break;
+        }
+    }
+
+    ASSERT_TRUE(error_code != AWS_OP_SUCCESS);
+
+    aws_byte_buf_clean_up(&read_buf);
+    aws_input_stream_release(part_streaming_stream);
+
+    /* Clean up the rest of the fixture (file is already deleted) */
+    aws_event_loop_group_release(fixture.reading_elg);
+    aws_parallel_input_stream_release(fixture.parallel_read_stream);
+    aws_s3_buffer_ticket_release(fixture.ticket);
+    aws_s3_default_buffer_pool_destroy(fixture.buffer_pool);
+    aws_s3_tester_clean_up(&fixture.tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(part_streaming_stream_zero_length_request_test) {
+    (void)ctx;
+    struct part_streaming_test_fixture fixture;
+    size_t file_length = KB_TO_BYTES(10);
+
+    ASSERT_SUCCESS(s_part_streaming_test_setup(
+        allocator, &fixture, "s3_part_streaming_stream_zero_length_test.txt", file_length, KB_TO_BYTES(32)));
+
+    /* Test with zero length request */
+    struct aws_input_stream *part_streaming_stream =
+        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, 0);
+    ASSERT_NOT_NULL(part_streaming_stream);
+
+    /* Check initial status - should be end of stream immediately */
+    struct aws_stream_status status;
+    ASSERT_SUCCESS(aws_input_stream_get_status(part_streaming_stream, &status));
+    ASSERT_TRUE(status.is_valid);
+    ASSERT_TRUE(status.is_end_of_stream);
+
+    /* Try to read - should return immediately with no data */
+    struct aws_byte_buf read_buf;
+    aws_byte_buf_init(&read_buf, allocator, KB_TO_BYTES(1));
+    ASSERT_SUCCESS(aws_input_stream_read(part_streaming_stream, &read_buf));
+    ASSERT_UINT_EQUALS(0, read_buf.len);
+
+    aws_byte_buf_clean_up(&read_buf);
+    aws_input_stream_release(part_streaming_stream);
+    s_part_streaming_test_cleanup(&fixture);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(part_streaming_stream_large_offset_test) {
+    (void)ctx;
+    struct part_streaming_test_fixture fixture;
+    size_t file_length = KB_TO_BYTES(10);
+
+    ASSERT_SUCCESS(s_part_streaming_test_setup(
+        allocator, &fixture, "s3_part_streaming_stream_large_offset_test.txt", file_length, KB_TO_BYTES(32)));
+
+    /* Test with offset larger than file size */
+    uint64_t large_offset = file_length * 2;
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, large_offset, file_length);
+    ASSERT_NOT_NULL(part_streaming_stream);
+
+    /* Try to read - should reach end of stream immediately */
+    struct aws_byte_buf read_buf;
+    aws_byte_buf_init(&read_buf, allocator, KB_TO_BYTES(1));
+    ASSERT_SUCCESS(aws_input_stream_read(part_streaming_stream, &read_buf));
+    ASSERT_UINT_EQUALS(0, read_buf.len);
+
+    /* Check status - should be end of stream */
+    struct aws_stream_status status;
+    ASSERT_SUCCESS(aws_input_stream_get_status(part_streaming_stream, &status));
+    ASSERT_TRUE(status.is_valid);
+    ASSERT_TRUE(status.is_end_of_stream);
+
+    aws_byte_buf_clean_up(&read_buf);
+    aws_input_stream_release(part_streaming_stream);
+    s_part_streaming_test_cleanup(&fixture);
+
+    return AWS_OP_SUCCESS;
+}
