@@ -149,6 +149,19 @@ void aws_s3_set_dns_ttl(size_t ttl) {
     s_dns_host_address_ttl_seconds = ttl;
 }
 
+/**
+ * Determine how many connections are ideal by dividing target-throughput by throughput-per-connection.
+ * TODO: we may consider to alter this, upload to regular s3 can use more connections, and s3 express
+ * can use less connections to reach the target throughput..
+ **/
+static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_gps) {
+    double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
+    /* round up and clamp */
+    ideal_connection_count_double = ceil(ideal_connection_count_double);
+    ideal_connection_count_double = aws_min_double(UINT32_MAX, ideal_connection_count_double);
+    return (uint32_t)ideal_connection_count_double;
+}
+
 /* Returns the max number of connections allowed.
  *
  * When meta request is NULL, this will return the overall allowed number of connections.
@@ -163,10 +176,18 @@ uint32_t aws_s3_client_get_max_active_connections(
     (void)meta_request;
 
     uint32_t max_active_connections = client->ideal_connection_count;
-
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
+    }
+    if (meta_request && meta_request->fio_opts.streaming_upload && meta_request->fio_opts.disk_throughput > 0) {
+        return aws_min_u32(
+            s_get_ideal_connection_number_from_throughput(meta_request->fio_opts.disk_throughput),
+            max_active_connections);
+    }
+    if (client->fio_opts.streaming_upload && client->fio_opts.disk_throughput > 0) {
+        return aws_min_u32(
+            s_get_ideal_connection_number_from_throughput(client->fio_opts.disk_throughput), max_active_connections);
     }
 
     return max_active_connections;
@@ -357,6 +378,10 @@ struct aws_s3_client *aws_s3_client_new(
         } else {
             max_part_size = (size_t)client_config->max_part_size;
         }
+    }
+
+    if (client_config->fio_opts) {
+        client->fio_opts = *client_config->fio_opts;
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
@@ -566,15 +591,8 @@ struct aws_s3_client *aws_s3_client_new(
     *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
         client_config->compute_content_md5;
 
-    /* Determine how many connections are ideal by dividing target-throughput by throughput-per-connection. */
-    {
-        double ideal_connection_count_double = client->throughput_target_gbps / s_throughput_per_connection_gbps;
-        /* round up and clamp */
-        ideal_connection_count_double = ceil(ideal_connection_count_double);
-        ideal_connection_count_double = aws_max_double(g_min_num_connections, ideal_connection_count_double);
-        ideal_connection_count_double = aws_min_double(UINT32_MAX, ideal_connection_count_double);
-        *(uint32_t *)&client->ideal_connection_count = (uint32_t)ideal_connection_count_double;
-    }
+    *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
+        g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
 
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
     if (client_config->enable_s3express) {
@@ -1763,6 +1781,17 @@ static bool s_s3_client_should_update_meta_request(
         }
     }
 
+    if (meta_request->fio_opts.streaming_upload) {
+        /**
+         * When upload with streaming, the prepare stage will not read into buffer.
+         * Prevent the number of request in flight to be larger han the max_active_connections.
+         * So that the request will not staying in the queue to wait for the connection available.
+         * Prevents the credentials to be expired during waiting for too long.
+         */
+        if (num_requests_in_flight >= aws_s3_client_get_max_active_connections(client, meta_request)) {
+            return false;
+        }
+    }
     /**
      * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
      * be in the preparation stage.
@@ -1908,7 +1937,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = meta_request->part_size,
+            .size = request->buffer_size,
         };
 
         struct aws_s3_reserve_memory_payload *payload =

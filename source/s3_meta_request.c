@@ -177,6 +177,14 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
     meta_request->type = options->type;
+
+    /* Deep copy the file io options. */
+    if (options->fio_opts) {
+        meta_request->fio_opts = *options->fio_opts;
+    } else if (client != NULL) {
+        meta_request->fio_opts = client->fio_opts;
+    }
+
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);

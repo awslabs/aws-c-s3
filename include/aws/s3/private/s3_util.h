@@ -150,6 +150,10 @@ extern const struct aws_byte_cursor g_delete_method;
 AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
 
+AWS_S3_API
+/* TODO: now this is hard-coded as 8MB, but maybe something else is better. */
+extern const size_t g_streaming_buffer_size;
+
 /**
  * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
  */

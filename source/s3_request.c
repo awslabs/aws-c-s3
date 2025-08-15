@@ -42,6 +42,13 @@ struct aws_s3_request *aws_s3_request_new(
 
     request->send_data.metrics = aws_s3_request_metrics_new(request->allocator);
 
+    if (meta_request->fio_opts.streaming_upload && meta_request->request_body_parallel_stream != NULL) {
+        /* The request buffer size should be two times the buffer size to allow one buffer to be read async. */
+        request->buffer_size = 2 * g_streaming_buffer_size;
+    } else {
+        request->buffer_size = meta_request->part_size;
+    }
+
     return request;
 }
 
