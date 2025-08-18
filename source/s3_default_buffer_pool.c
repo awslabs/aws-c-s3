@@ -156,6 +156,7 @@ static inline bool s_check_bits(uint16_t num, size_t position, size_t n) {
 }
 
 static void s_aws_ticket_wrapper_destroy(void *data);
+static void s_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper);
 
 struct aws_byte_buf s_default_ticket_claim(struct aws_s3_buffer_ticket *ticket_wrapper) {
     struct aws_s3_default_buffer_ticket *ticket = ticket_wrapper->impl;
@@ -174,6 +175,8 @@ struct aws_s3_buffer_ticket *s_wrap_default_ticket(struct aws_s3_default_buffer_
     aws_ref_count_init(
         &ticket_wrapper->ref_count, ticket_wrapper, (aws_simple_completion_callback *)s_aws_ticket_wrapper_destroy);
 
+    /* Keep the pool outlive the ticket */
+    aws_s3_buffer_pool_acquire(ticket->pool);
     return ticket_wrapper;
 }
 
@@ -269,12 +272,12 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = buffer_pool;
     pool->vtable = &s_default_pool_vtable;
-    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
+    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)s_s3_default_buffer_pool_destroy);
 
     return pool;
 }
 
-void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper) {
+static void s_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper) {
     if (buffer_pool_wrapper == NULL) {
         return;
     }
@@ -305,6 +308,10 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
     aws_mutex_clean_up(&buffer_pool->mutex);
     struct aws_allocator *base = buffer_pool->base_allocator;
     aws_mem_release(base, buffer_pool);
+}
+
+void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper) {
+    aws_s3_buffer_pool_release(buffer_pool_wrapper);
 }
 
 void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
@@ -450,6 +457,8 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
         aws_linked_list_pop_front(&pending_reserves_to_complete);
         aws_mem_release(buffer_pool->base_allocator, pending);
     }
+    /* Release the pool from the ticket wrapper. */
+    aws_s3_buffer_pool_release(pool);
 }
 
 struct aws_s3_default_buffer_ticket *s_try_reserve(

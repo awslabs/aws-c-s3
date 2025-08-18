@@ -1056,7 +1056,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
         } else if (aws_s3_upload_request_checksum_context_should_calculate(checksum_context)) {
             /* The checksum won't be uploaded, but we still need it for the upload review callback */
             struct aws_input_stream *checksum_stream =
-                aws_checksum_stream_new(allocator, input_stream, checksum_context->algorithm);
+                aws_checksum_stream_new_with_context(allocator, input_stream, checksum_context);
             if (!checksum_stream) {
                 goto error_clean_up;
             }
