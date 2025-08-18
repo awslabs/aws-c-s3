@@ -21,6 +21,7 @@
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
+#include <aws/common/file.h>
 #include <aws/common/json.h>
 #include <aws/common/priority_queue.h>
 #include <aws/common/string.h>
@@ -1188,6 +1189,39 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     }
     if (options->send_filepath.len > 0) {
         ++body_source_count;
+        if (!content_length_found) {
+            /* The content length was not set, but it's a file based upload. Derive the content length from the file
+             * length */
+            struct aws_string *file_path = aws_string_new_from_cursor(client->allocator, &options->send_filepath);
+            struct aws_string *readonly_bytes_mode = aws_string_new_from_c_str(client->allocator, "rb");
+            FILE *file = aws_fopen_safe(file_path, readonly_bytes_mode);
+            int error = true;
+            if (!file) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create meta request."
+                    "the send file path %s is invalid",
+                    aws_string_c_str(file_path));
+                aws_raise_error(AWS_ERROR_FILE_INVALID_PATH);
+            } else if (aws_file_get_length(file, (int64_t *)&content_length)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create meta request."
+                    "failed to get the length from the send file path %s",
+                    aws_string_c_str(file_path));
+            } else {
+                error = false;
+            }
+            if (file) {
+                fclose(file);
+            }
+            aws_string_destroy(file_path);
+            aws_string_destroy(readonly_bytes_mode);
+            if (error) {
+                return NULL;
+            }
+            content_length_found = true;
+        }
     }
     if (options->send_using_async_writes == true) {
         if (options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {

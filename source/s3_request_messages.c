@@ -1085,7 +1085,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     return input_stream;
 
 error_clean_up:
-    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
+    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer.");
     aws_input_stream_release(input_stream);
     aws_byte_buf_clean_up(&content_encoding_header_buf);
     return NULL;

@@ -2141,7 +2141,10 @@ static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocat
     return 0;
 }
 
-static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator, bool file_on_disk) {
+static int s_test_s3_put_object_multiple_helper(
+    struct aws_allocator *allocator,
+    bool file_on_disk,
+    bool enable_streaming) {
 
     enum s_numbers { NUM_REQUESTS = 5 };
 
@@ -2167,6 +2170,10 @@ static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator,
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
+    /* Configure file I/O options for streaming upload */
+    struct aws_s3_file_io_option fio_opts = {
+        .streaming_upload = enable_streaming,
+    };
     size_t content_length = MB_TO_BYTES(10);
 
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
@@ -2199,6 +2206,7 @@ static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator,
                 allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
         }
         options.message = messages[i];
+        options.fio_opts = &fio_opts;
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
         /* Trigger accelerating of our Put Object request. */
@@ -2248,13 +2256,21 @@ static int s_test_s3_put_object_multiple_helper(struct aws_allocator *allocator,
 AWS_TEST_CASE(test_s3_put_object_multiple, s_test_s3_put_object_multiple)
 static int s_test_s3_put_object_multiple(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
-    return s_test_s3_put_object_multiple_helper(allocator, false);
+    return s_test_s3_put_object_multiple_helper(allocator, false, false);
 }
 
 AWS_TEST_CASE(test_s3_put_object_multiple_with_filepath, s_test_s3_put_object_multiple_with_filepath)
 static int s_test_s3_put_object_multiple_with_filepath(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
-    return s_test_s3_put_object_multiple_helper(allocator, true);
+    return s_test_s3_put_object_multiple_helper(allocator, true, false);
+}
+
+AWS_TEST_CASE(
+    test_s3_put_object_multiple_with_filepath_streaming,
+    s_test_s3_put_object_multiple_with_filepath_streaming)
+static int s_test_s3_put_object_multiple_with_filepath_streaming(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_test_s3_put_object_multiple_helper(allocator, true, true);
 }
 
 AWS_TEST_CASE(test_s3_put_object_less_than_part_size, s_test_s3_put_object_less_than_part_size)
@@ -4604,10 +4620,6 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
     tester.bound_to_client = false;
 
     /*** GET FILE with part_size > fileSize ***/
-    /* TODO: Enable this test once the checksum issue is resolved. Currently, when the S3 GetObject API is called with
-     * the range 0-contentLength, it returns a checksum of checksums without the -numParts portion. This leads to a
-     * checksum mismatch error, as it is incorrectly validated as a part checksum. */
-    /*
     client_options.part_size = MB_TO_BYTES(20);
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -4615,7 +4627,6 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
-    */
     aws_byte_buf_clean_up(&path_buf);
     aws_s3_tester_clean_up(&tester);
 
@@ -4775,7 +4786,10 @@ static int s_test_s3_round_trip_with_filepath_helper(
     struct aws_allocator *allocator,
     struct aws_byte_cursor key,
     int object_size_mb,
-    bool unknown_content_length) {
+    bool unknown_content_length,
+    bool streaming,
+    bool via_header,
+    enum aws_s3_tester_full_object_checksum full_object_checksum) {
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -4798,17 +4812,26 @@ static int s_test_s3_round_trip_with_filepath_helper(
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(allocator, &path_buf, key));
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+    /* Configure file I/O options for streaming upload */
+    struct aws_s3_file_io_option fio_opts = {
+        .streaming_upload = streaming,
+    };
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .fio_opts = &fio_opts,
+        .checksum_via_header = via_header,
         .put_options =
             {
                 .object_size_mb = object_size_mb,
                 .object_path_override = object_path,
                 .file_on_disk = true,
                 .skip_content_length = unknown_content_length,
+                .full_object_checksum = full_object_checksum,
             },
     };
 
@@ -4823,6 +4846,8 @@ static int s_test_s3_round_trip_with_filepath_helper(
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
         .get_options =
             {
                 .object_path = object_path,
@@ -4846,7 +4871,13 @@ AWS_TEST_CASE(test_s3_round_trip_with_filepath, s_test_s3_round_trip_with_filepa
 static int s_test_s3_round_trip_with_filepath(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     return s_test_s3_round_trip_with_filepath_helper(
-        allocator, aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath"), 1, false /*unknown_content_length*/);
+        allocator,
+        aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath"),
+        1,
+        false /*unknown_content_length*/,
+        false /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_NONE);
 }
 
 AWS_TEST_CASE(test_s3_round_trip_mpu_with_filepath, s_test_s3_round_trip_mpu_with_filepath)
@@ -4856,7 +4887,10 @@ static int s_test_s3_round_trip_mpu_with_filepath(struct aws_allocator *allocato
         allocator,
         aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu"),
         50,
-        false /*unknown_content_length*/);
+        false /*unknown_content_length*/,
+        false /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_NONE);
 }
 
 AWS_TEST_CASE(test_s3_round_trip_with_filepath_no_content_length, s_test_s3_round_trip_with_filepath_no_content_length)
@@ -4866,7 +4900,10 @@ static int s_test_s3_round_trip_with_filepath_no_content_length(struct aws_alloc
         allocator,
         aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_no_content_length"),
         1,
-        true /*unknown_content_length*/);
+        true /*unknown_content_length*/,
+        false /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_NONE);
 }
 
 AWS_TEST_CASE(
@@ -4878,7 +4915,134 @@ static int s_test_s3_round_trip_mpu_with_filepath_no_content_length(struct aws_a
         allocator,
         aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu_no_content_length"),
         50,
-        true /*unknown_content_length*/);
+        true /*unknown_content_length*/,
+        false /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_NONE);
+}
+
+AWS_TEST_CASE(test_s3_round_trip_mpu_with_filepath_streaming, s_test_s3_round_trip_mpu_with_filepath_streaming)
+static int s_test_s3_round_trip_mpu_with_filepath_streaming(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_test_s3_round_trip_with_filepath_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu_streaming"),
+        50,
+        false /*unknown_content_length*/,
+        true /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_NONE);
+}
+
+AWS_TEST_CASE(
+    test_s3_round_trip_mpu_with_filepath_no_content_length_streaming,
+    s_test_s3_round_trip_mpu_with_filepath_no_content_length_streaming)
+static int s_test_s3_round_trip_mpu_with_filepath_no_content_length_streaming(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+    return s_test_s3_round_trip_with_filepath_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu_no_content_length_streaming"),
+        50,
+        true /*unknown_content_length*/,
+        true /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_NONE);
+}
+
+AWS_TEST_CASE(
+    test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum_header,
+    s_test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum_header)
+static int s_test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum_header(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+    return s_test_s3_round_trip_with_filepath_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu_streaming"),
+        50,
+        false /*unknown_content_length*/,
+        true /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_HEADER);
+}
+
+AWS_TEST_CASE(
+    test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum_via_callback,
+    s_test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum_via_callback)
+static int s_test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum_via_callback(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+    return s_test_s3_round_trip_with_filepath_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu_streaming"),
+        50,
+        false /*unknown_content_length*/,
+        true /*streaming*/,
+        false /*checksum via_header*/,
+        AWS_TEST_FOC_CALLBACK);
+}
+
+/* When streaming, the data will be read after the headers are sent, so, we don't support set the parts level checksum
+ * via headers when streaming. */
+AWS_TEST_CASE(
+    test_s3_mpu_with_filepath_streaming_dont_support_parts_checksum_via_header,
+    s_test_s3_mpu_with_filepath_streaming_dont_support_parts_checksum_via_header)
+static int s_test_s3_mpu_with_filepath_streaming_dont_support_parts_checksum_via_header(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf); /* Configure file I/O options for streaming upload */
+    struct aws_s3_file_io_option fio_opts = {
+        .streaming_upload = true,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/with_filepath_mpu_streaming")));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .validate_get_response_checksum = false,
+        .fio_opts = &fio_opts,
+        .checksum_via_header = true,
+        /* Expect to fail. */
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .object_size_mb = 50,
+                .object_path_override = object_path,
+                .file_on_disk = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
+    ASSERT_UINT_EQUALS(test_results.finished_error_code, AWS_ERROR_INVALID_ARGUMENT);
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
 }
 
 AWS_TEST_CASE(test_s3_chunked_then_unchunked, s_test_s3_chunked_then_unchunked)

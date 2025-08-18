@@ -195,6 +195,15 @@ int aws_s3_meta_request_init_base(
         goto error;
     }
 
+    if (meta_request->fio_opts.streaming_upload && options->checksum_config->location == AWS_SCL_HEADER) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Invalid meta request configuration - Cannot use checksum via header with streaming upload.",
+            (void *)meta_request);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+
     if (options->body_callback != NULL && options->body_callback_ex != NULL) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,

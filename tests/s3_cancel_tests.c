@@ -198,6 +198,7 @@ static int s3_cancel_test_helper_ex(
     struct aws_allocator *allocator,
     enum s3_update_cancel_type cancel_type,
     bool async_input_stream,
+    bool file_streaming,
     bool pause) {
 
     AWS_ASSERT(allocator);
@@ -231,16 +232,21 @@ static int s3_cancel_test_helper_ex(
 
         struct aws_s3_meta_request_test_results meta_request_test_results;
         aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+        struct aws_s3_file_io_option fio_opts = {
+            .streaming_upload = file_streaming,
+        };
 
         struct aws_s3_tester_meta_request_options options = {
             .allocator = allocator,
             .client = client,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+            .fio_opts = &fio_opts,
             .put_options =
                 {
                     .ensure_multipart = true,
                     .async_input_stream = async_input_stream,
+                    .file_on_disk = file_streaming,
                 },
         };
 
@@ -346,7 +352,8 @@ static int s3_cancel_test_helper_ex(
 }
 
 static int s3_cancel_test_helper(struct aws_allocator *allocator, enum s3_update_cancel_type cancel_type) {
-    return s3_cancel_test_helper_ex(allocator, cancel_type, false /*async_input_stream*/, false /*pause*/);
+    return s3_cancel_test_helper_ex(
+        allocator, cancel_type, false /*async_input_stream*/, false /*file_streaming*/, false /*pause*/);
 }
 
 static int s3_cancel_test_helper_fc(
@@ -522,7 +529,27 @@ static int s_test_s3_cancel_mpu_one_part_completed_async(struct aws_allocator *a
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper_ex(
-        allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED, true /*async_input_stream*/, false /*pause*/));
+        allocator,
+        S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED,
+        true /*async_input_stream*/,
+        false /*file_streaming*/,
+        false /*pause*/));
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_cancel_mpu_one_part_completed_file_streaming,
+    s_test_s3_cancel_mpu_one_part_completed_file_streaming)
+static int s_test_s3_cancel_mpu_one_part_completed_file_streaming(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    ASSERT_SUCCESS(s3_cancel_test_helper_ex(
+        allocator,
+        S3_UPDATE_CANCEL_TYPE_MPU_ONE_PART_COMPLETED,
+        false /*async_input_stream*/,
+        true /*file_streaming*/,
+        false /*pause*/));
 
     return 0;
 }
@@ -550,7 +577,11 @@ static int s_test_s3_pause_mpu_cancellable_requests(struct aws_allocator *alloca
     (void)ctx;
 
     ASSERT_SUCCESS(s3_cancel_test_helper_ex(
-        allocator, S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS, false /*async_input_stream*/, true /*pause*/));
+        allocator,
+        S3_UPDATE_CANCEL_TYPE_MPU_ONGOING_HTTP_REQUESTS,
+        false /*async_input_stream*/,
+        false /*file_streaming*/,
+        true /*pause*/));
 
     return 0;
 }
