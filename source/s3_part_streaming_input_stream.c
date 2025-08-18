@@ -233,12 +233,16 @@ static void s_part_streaming_input_stream_destroy(void *user_data) {
     struct aws_s3_part_streaming_input_stream_impl *impl = user_data;
 
     if (impl->loading_future) {
-        /**
-         * If there is a loading future, release the future without waiting for it.
-         **/
-        /* TODO: probably better to cancel the future, but we don't support cancel yet */
         AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "id=%p: Waiting for pending load to complete before destroy", (void *)impl);
-        impl->loading_future = aws_future_bool_release(impl->loading_future);
+        if (aws_future_bool_is_done(impl->loading_future)) {
+            aws_future_bool_release(impl->loading_future);
+        } else {
+            /* If there is a loading future, wait for it to complete.
+             * Don't block the thead, to avoid dead lock when the future needs the thread to complete.*/
+            /* TODO: probably better to cancel the future, but we don't support cancel yet */
+            aws_future_bool_register_callback(impl->loading_future, s_part_streaming_input_stream_destroy, impl);
+            return;
+        }
     }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
