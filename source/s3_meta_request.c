@@ -2241,11 +2241,13 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
      * (eg: input stream) */
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
 
-    struct aws_future_void *shutdown_future =
-        aws_parallel_input_stream_get_shutdown_future(meta_request->request_body_parallel_stream);
-    aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
-    aws_future_void_wait(shutdown_future, MAX_TIMEOUT_NS_P);
-    aws_future_void_release(shutdown_future);
+    if (meta_request->request_body_parallel_stream) {
+        struct aws_future_void *shutdown_future =
+            aws_parallel_input_stream_get_shutdown_future(meta_request->request_body_parallel_stream);
+        aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
+        aws_future_void_wait(shutdown_future, MAX_TIMEOUT_NS_P);
+        aws_future_void_release(shutdown_future);
+    }
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
     if (meta_request->checksum_config.validate_response_checksum) {
         /* validate checksum finish */
