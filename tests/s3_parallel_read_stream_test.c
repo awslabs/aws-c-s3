@@ -258,7 +258,9 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
     }
 
     remove(file_path);
+    struct aws_future_void *shutdown_future = aws_parallel_input_stream_get_shutdown_future(parallel_read_stream);
     aws_parallel_input_stream_release(parallel_read_stream);
+    aws_future_void_wait(shutdown_future, SIZE_MAX);
     aws_event_loop_group_release(el_group);
     aws_event_loop_group_release(reading_elg);
     aws_s3_tester_clean_up(&tester);
@@ -345,7 +347,9 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
     remove(file_path);
     aws_event_loop_group_release(el_group);
     aws_event_loop_group_release(reading_elg);
+    struct aws_future_void *shutdown_future = aws_parallel_input_stream_get_shutdown_future(parallel_read_stream);
     aws_parallel_input_stream_release(parallel_read_stream);
+    aws_future_void_wait(shutdown_future, SIZE_MAX);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
@@ -400,7 +404,10 @@ static int s_part_streaming_test_setup(
 static void s_part_streaming_test_cleanup(struct part_streaming_test_fixture *fixture) {
     remove(fixture->file_path);
     aws_event_loop_group_release(fixture->reading_elg);
+    struct aws_future_void *shutdown_future =
+        aws_parallel_input_stream_get_shutdown_future(fixture->parallel_read_stream);
     aws_parallel_input_stream_release(fixture->parallel_read_stream);
+    aws_future_void_wait(shutdown_future, SIZE_MAX);
     aws_s3_buffer_ticket_release(fixture->ticket);
     aws_s3_default_buffer_pool_destroy(fixture->buffer_pool);
     aws_s3_tester_clean_up(&fixture->tester);
@@ -775,7 +782,10 @@ TEST_CASE(part_streaming_stream_file_deleted_during_read_test) {
 
     /* Clean up the rest of the fixture (file is already deleted) */
     aws_event_loop_group_release(fixture.reading_elg);
+    struct aws_future_void *shutdown_future =
+        aws_parallel_input_stream_get_shutdown_future(fixture.parallel_read_stream);
     aws_parallel_input_stream_release(fixture.parallel_read_stream);
+    aws_future_void_wait(shutdown_future, SIZE_MAX);
     aws_s3_buffer_ticket_release(fixture.ticket);
     aws_s3_default_buffer_pool_destroy(fixture.buffer_pool);
     aws_s3_tester_clean_up(&fixture.tester);

@@ -27,6 +27,7 @@ void aws_parallel_input_stream_init_base(
     stream->alloc = alloc;
     stream->vtable = vtable;
     stream->impl = impl;
+    stream->shutdown_future = aws_future_void_new(alloc);
     aws_ref_count_init(&stream->ref_count, stream, (aws_simple_completion_callback *)vtable->destroy);
 }
 
@@ -69,6 +70,10 @@ struct aws_future_bool *aws_parallel_input_stream_read(
     return future;
 }
 
+struct aws_future_void *aws_parallel_input_stream_get_shutdown_future(struct aws_parallel_input_stream *stream) {
+    return stream->shutdown_future;
+}
+
 struct aws_parallel_input_stream_from_file_impl {
     struct aws_parallel_input_stream base;
 
@@ -83,13 +88,15 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     aws_string_destroy(impl->file_path);
     aws_event_loop_group_release(impl->reading_elg);
 
+    aws_future_void_set_result(stream->shutdown_future);
+    aws_future_void_release(stream->shutdown_future);
     aws_mem_release(stream->alloc, impl);
 
     return;
 }
 
 struct read_task_impl {
-    struct aws_parallel_input_stream_from_file_impl *para_impl;
+    struct aws_parallel_input_stream *para_stream;
 
     struct aws_future_bool *end_future;
     uint64_t offset;
@@ -150,7 +157,9 @@ cleanup:
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task_status;
     struct read_task_impl *read_task = arg;
-    struct aws_parallel_input_stream_from_file_impl *impl = read_task->para_impl;
+    struct aws_parallel_input_stream *stream = read_task->para_stream;
+    struct aws_parallel_input_stream_from_file_impl *impl =
+        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
     struct aws_future_bool *end_future = read_task->end_future;
     bool eof_reached = false;
 
@@ -163,8 +172,9 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     }
 
     aws_future_bool_release(end_future);
-    aws_mem_release(impl->base.alloc, task);
-    aws_mem_release(impl->base.alloc, read_task);
+    aws_mem_release(stream->alloc, task);
+    aws_mem_release(stream->alloc, read_task);
+    aws_parallel_input_stream_release(stream);
 }
 
 struct aws_future_bool *s_para_from_file_read(
@@ -198,8 +208,7 @@ struct aws_future_bool *s_para_from_file_read(
     read_task->offset = offset;
     read_task->length = length;
     read_task->end_future = aws_future_bool_acquire(future);
-    /* May need to keep the impl alive */
-    read_task->para_impl = impl;
+    read_task->para_stream = aws_parallel_input_stream_acquire(&impl->base);
 
     struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(impl->reading_elg);
     struct aws_task *task = aws_mem_calloc(impl->base.alloc, 1, sizeof(struct aws_task));

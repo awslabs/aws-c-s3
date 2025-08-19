@@ -29,6 +29,9 @@
 #include <errno.h>
 #include <inttypes.h>
 
+#define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
+#define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
+
 static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
@@ -2237,8 +2240,11 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
      * hold. So that, the downstream high level language doesn't need to wait for shutdown to clean related resource
      * (eg: input stream) */
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
-    meta_request->request_body_parallel_stream =
-        aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
+
+    struct aws_future_void *shutdown_future =
+        aws_parallel_input_stream_get_shutdown_future(meta_request->request_body_parallel_stream);
+    aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
+    aws_future_void_wait(shutdown_future, MAX_TIMEOUT_NS_P);
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
     if (meta_request->checksum_config.validate_response_checksum) {
         /* validate checksum finish */
