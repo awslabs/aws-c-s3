@@ -89,7 +89,6 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     aws_event_loop_group_release(impl->reading_elg);
 
     aws_future_void_set_result(stream->shutdown_future);
-    aws_future_void_release(stream->shutdown_future);
     aws_mem_release(stream->alloc, impl);
 
     return;
