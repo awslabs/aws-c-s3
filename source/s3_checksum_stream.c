@@ -101,6 +101,7 @@ static void s_aws_input_checksum_stream_destroy(struct aws_checksum_stream *impl
     aws_checksum_destroy(impl->checksum);
     aws_input_stream_release(impl->old_stream);
     aws_byte_buf_clean_up(&impl->checksum_result);
+    aws_s3_upload_request_checksum_context_release(impl->context);
     aws_mem_release(impl->allocator, impl);
 }
 
@@ -156,7 +157,7 @@ struct aws_input_stream *aws_checksum_stream_new_with_context(
     struct aws_checksum_stream *impl =
         s_aws_checksum_input_checksum_stream_new(allocator, existing_stream, context->algorithm);
     if (impl) {
-        impl->context = context;
+        impl->context = aws_s3_upload_request_checksum_context_acquire(context);
         return &impl->base;
     }
     return NULL;
