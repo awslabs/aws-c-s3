@@ -139,6 +139,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
  * The future will be completed when every refcount on the stream has been released.
  * And all the resource has been released.
  * Don't hold any refcount of the stream while waiting on the future, otherwise, deadlock can happen.
+ * You need to release the future after using it.
  */
 AWS_S3_API
 struct aws_future_void *aws_parallel_input_stream_get_shutdown_future(struct aws_parallel_input_stream *stream);

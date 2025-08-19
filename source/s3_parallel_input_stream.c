@@ -71,7 +71,7 @@ struct aws_future_bool *aws_parallel_input_stream_read(
 }
 
 struct aws_future_void *aws_parallel_input_stream_get_shutdown_future(struct aws_parallel_input_stream *stream) {
-    return stream->shutdown_future;
+    return aws_future_void_acquire(stream->shutdown_future);
 }
 
 struct aws_parallel_input_stream_from_file_impl {
@@ -89,6 +89,7 @@ static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
     aws_event_loop_group_release(impl->reading_elg);
 
     aws_future_void_set_result(stream->shutdown_future);
+    aws_future_void_release(stream->shutdown_future);
     aws_mem_release(stream->alloc, impl);
 
     return;
