@@ -81,7 +81,7 @@ struct aws_parallel_input_stream_from_file_impl {
     struct aws_event_loop_group *reading_elg;
 };
 
-static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
+static void s_parallel_from_file_destroy(struct aws_parallel_input_stream *stream) {
     struct aws_parallel_input_stream_from_file_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
 
@@ -177,7 +177,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     aws_parallel_input_stream_release(stream);
 }
 
-struct aws_future_bool *s_para_from_file_read(
+struct aws_future_bool *s_parallel_from_file_read(
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
     size_t max_length,
@@ -217,12 +217,12 @@ struct aws_future_bool *s_para_from_file_read(
     return future;
 }
 
-int s_para_from_file_get_length(struct aws_parallel_input_stream *stream, int64_t *length) {
+int s_parallel_from_file_get_length(struct aws_parallel_input_stream *stream, int64_t *length) {
     struct aws_parallel_input_stream_from_file_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
     FILE *file = aws_fopen_safe(impl->file_path, s_readonly_bytes_mode);
     if (!file) {
-        return aws_raise_error(AWS_ERROR_FILE_INVALID_PATH);
+        return AWS_OP_ERR;
     }
 
     int ret_val = aws_file_get_length(file, length);
@@ -231,9 +231,9 @@ int s_para_from_file_get_length(struct aws_parallel_input_stream *stream, int64_
 }
 
 static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file_vtable = {
-    .destroy = s_para_from_file_destroy,
-    .read = s_para_from_file_read,
-    .get_length = s_para_from_file_get_length,
+    .destroy = s_parallel_from_file_destroy,
+    .read = s_parallel_from_file_read,
+    .get_length = s_parallel_from_file_get_length,
 };
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
@@ -251,7 +251,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     if (!aws_path_exists(impl->file_path)) {
         /* If file path not exists, raise error from errno. */
         aws_translate_and_raise_io_error(errno);
-        s_para_from_file_destroy(&impl->base);
+        s_parallel_from_file_destroy(&impl->base);
         return NULL;
     }
 

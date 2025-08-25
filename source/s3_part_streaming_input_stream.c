@@ -22,8 +22,8 @@
 
 #include <inttypes.h>
 
-#define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
-#define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
+/* 60 secs. */
+static const uint64_t s_max_timeout_ns = 60 * (uint64_t)AWS_TIMESTAMP_NANOS;
 
 struct aws_s3_part_streaming_input_stream_impl {
     struct aws_input_stream base;
@@ -88,7 +88,7 @@ static void s_kick_off_next_load(struct aws_s3_part_streaming_input_stream_impl 
     size_t remaining_length = impl->total_length - length_after_chunk_read + impl->page_aligned_offset;
 
     if (remaining_length > 0 && !impl->eos_loaded_from_para_stream) {
-        /* Algin the remaining length with the page size. */
+        /* Align the remaining length with the page size. */
         if (remaining_length < impl->chunk_load_size) {
             size_t aligned_remaining_length = remaining_length % impl->page_size;
             /* Read more tha needed to align with the page size. */
@@ -133,7 +133,7 @@ static int s_part_streaming_input_stream_read(struct aws_input_stream *stream, s
 
         AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Waiting for background load to complete", (void *)impl);
         /* TODO: the HTTP interface doesn't support async streaming, we have to block the thread here. */
-        if (!aws_future_bool_wait(impl->loading_future, MAX_TIMEOUT_NS_P)) {
+        if (!aws_future_bool_wait(impl->loading_future, s_max_timeout_ns)) {
             /* Timeout */
             AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "id=%p: Timeout waiting for background load", (void *)impl);
             return AWS_OP_ERR;
