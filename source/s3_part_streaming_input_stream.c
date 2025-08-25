@@ -22,8 +22,8 @@
 
 #include <inttypes.h>
 
-#define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
-#define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
+/* 10 secs. */
+static const uint64_t s_max_timeout_ns = 10 * (uint64_t)AWS_TIMESTAMP_NANOS;
 
 struct aws_s3_part_streaming_input_stream_impl {
     struct aws_input_stream base;
@@ -132,7 +132,7 @@ static int s_part_streaming_input_stream_read(struct aws_input_stream *stream, s
         }
 
         AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Waiting for background load to complete", (void *)impl);
-        if (!aws_future_bool_wait(impl->loading_future, MAX_TIMEOUT_NS_P)) {
+        if (!aws_future_bool_wait(impl->loading_future, s_max_timeout_ns)) {
             /* Timeout */
             AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "id=%p: Timeout waiting for background load", (void *)impl);
             return AWS_OP_ERR;
@@ -242,7 +242,7 @@ static void s_part_streaming_input_stream_destroy(void *user_data) {
         /* If there is a loading future, wait for it to complete. */
         /* TODO: probably better to cancel the future, but we don't support cancel yet */
         AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "id=%p: Waiting for pending load to complete before destroy", (void *)impl);
-        aws_future_bool_wait(impl->loading_future, MAX_TIMEOUT_NS_P);
+        aws_future_bool_wait(impl->loading_future, s_max_timeout_ns);
         aws_future_bool_release(impl->loading_future);
     }
 
