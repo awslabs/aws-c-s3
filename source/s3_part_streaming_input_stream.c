@@ -22,8 +22,8 @@
 
 #include <inttypes.h>
 
-/* 10 secs. */
-static const uint64_t s_max_timeout_ns = 10 * (uint64_t)AWS_TIMESTAMP_NANOS;
+/* 60 secs. */
+static const uint64_t s_max_timeout_ns = 60 * (uint64_t)AWS_TIMESTAMP_NANOS;
 
 struct aws_s3_part_streaming_input_stream_impl {
     struct aws_input_stream base;
