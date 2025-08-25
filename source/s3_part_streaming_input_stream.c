@@ -88,7 +88,7 @@ static void s_kick_off_next_load(struct aws_s3_part_streaming_input_stream_impl 
     size_t remaining_length = impl->total_length - length_after_chunk_read + impl->page_aligned_offset;
 
     if (remaining_length > 0 && !impl->eos_loaded_from_para_stream) {
-        /* Algin the remaining length with the page size. */
+        /* Align the remaining length with the page size. */
         if (remaining_length < impl->chunk_load_size) {
             size_t aligned_remaining_length = remaining_length % impl->page_size;
             /* Read more tha needed to align with the page size. */
