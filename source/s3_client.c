@@ -72,9 +72,7 @@ const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old b
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
- * Default max part size is 5GiB as the server limit. Object size limit is 5TiB for now.
- *        max number of upload parts is 10000.
- * TODO Provide more information on other values.
+ * Default max part size is 5GiB as the server limit.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 5368709120ULL;

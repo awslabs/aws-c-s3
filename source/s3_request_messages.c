@@ -383,6 +383,9 @@ struct aws_http_message *aws_s3_upload_part_message_new_streaming(
     if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, false, message)) {
         goto error_clean_up;
     }
+    /* Acquire the extra refcount on the input stream, since the assign_body will transfer the ownership of the input
+     * stream to the message, while here we still want to the ownership of the input stream separately. */
+    aws_input_stream_acquire(input_stream);
     if (aws_s3_message_util_assign_body(allocator, NULL /*body_buf*/, input_stream, message, checksum_context) ==
         NULL) {
         goto error_clean_up;

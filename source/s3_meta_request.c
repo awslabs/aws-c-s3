@@ -332,6 +332,20 @@ int aws_s3_meta_request_init_base(
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
+        if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.streaming_upload) {
+            size_t page_size = aws_system_info_page_size();
+            if (part_size % page_size != 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Invalid meta request configuration - direct_io without streaming upload requires part size "
+                    "to be aligned with page size. part size is:%zu, while page size is:%zu",
+                    (void *)meta_request,
+                    part_size,
+                    page_size);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                goto error;
+            }
+        }
 
     } else if (options->send_async_stream != NULL) {
         meta_request->request_body_async_stream = aws_async_input_stream_acquire(options->send_async_stream);

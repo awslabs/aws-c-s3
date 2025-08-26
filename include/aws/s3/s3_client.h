@@ -514,9 +514,7 @@ struct aws_s3_client_config {
      */
     uint64_t part_size;
 
-    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to. On 32
-     * bit machine, it will be forced to SIZE_MAX, which is around 4GiB. The server limit is 5GiB, but object size limit
-     * is 5TiB for now. We should be good enough for all the cases. */
+    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to. */
     uint64_t max_part_size;
 
     /**
