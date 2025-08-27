@@ -86,7 +86,7 @@ static void s_parse_app_ctx(int argc, char *const argv[], struct app_ctx *app_ct
                 app_ctx->region = aws_cli_optarg;
                 break;
             case 't':
-                app_ctx->throughput_target_gbps = atod(aws_cli_optarg);
+                app_ctx->throughput_target_gbps = atof(aws_cli_optarg);
                 break;
             case 'v':
                 if (!strcmp(aws_cli_optarg, "TRACE")) {
