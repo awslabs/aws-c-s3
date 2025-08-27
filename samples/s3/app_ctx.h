@@ -19,6 +19,7 @@ struct app_ctx {
     bool execution_completed;
     struct aws_signing_config_aws signing_config;
     const char *region;
+    double throughput_target_gbps;
     enum aws_log_level log_level;
     bool help_requested;
     void *sub_command_data;

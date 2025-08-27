@@ -62,6 +62,7 @@ static void s_setup_logger(struct app_ctx *app_ctx) {
 
 static struct aws_cli_option s_long_options[] = {
     {"region", AWS_CLI_OPTIONS_REQUIRED_ARGUMENT, NULL, 'r'},
+    {"throughput-target-gbps", AWS_CLI_OPTIONS_REQUIRED_ARGUMENT, NULL, 't'},
     {"verbose", AWS_CLI_OPTIONS_REQUIRED_ARGUMENT, NULL, 'v'},
     {"help", AWS_CLI_OPTIONS_NO_ARGUMENT, NULL, 'h'},
     /* Per getopt(3) the last element of the array has to be filled with all zeros */
@@ -83,6 +84,9 @@ static void s_parse_app_ctx(int argc, char *const argv[], struct app_ctx *app_ct
                 break;
             case 'r':
                 app_ctx->region = aws_cli_optarg;
+                break;
+            case 't':
+                app_ctx->throughput_target_gbps = atod(aws_cli_optarg);
                 break;
             case 'v':
                 if (!strcmp(aws_cli_optarg, "TRACE")) {
@@ -125,6 +129,7 @@ static void s_parse_app_ctx(int argc, char *const argv[], struct app_ctx *app_ct
     AWS_ZERO_STRUCT(client_config);
     client_config.client_bootstrap = app_ctx->client_bootstrap;
     client_config.region = aws_byte_cursor_from_c_str(app_ctx->region);
+    client_config.throughput_target_gbps = app_ctx->throughput_target_gbps;
     client_config.signing_config = &app_ctx->signing_config;
     app_ctx->client = aws_s3_client_new(app_ctx->allocator, &client_config);
 }
