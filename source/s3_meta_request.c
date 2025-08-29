@@ -334,7 +334,7 @@ int aws_s3_meta_request_init_base(
         }
         if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.should_stream) {
             /* TODO: aws_system_info_page_size */
-            size_t page_size = KB_TO_BYTES(4);
+            size_t page_size = aws_system_info_page_size();
             if (part_size % page_size != 0) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
