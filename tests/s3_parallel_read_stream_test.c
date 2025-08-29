@@ -536,8 +536,8 @@ TEST_CASE(part_streaming_stream_from_large_file_test) {
     ASSERT_SUCCESS(s_part_streaming_test_setup(
         allocator, &fixture, "s3_part_streaming_stream_read_large.txt", file_length, KB_TO_BYTES(16)));
     /* Test reading from unaligned offset */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     /* Test initial status */
@@ -566,8 +566,8 @@ TEST_CASE(part_streaming_stream_offset_test) {
         allocator, &fixture, "s3_part_streaming_stream_offset_test.txt", file_length, MB_TO_BYTES(4)));
 
     /* Test reading from offset */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, offset, read_size);
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, offset, read_size, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     /* Validate content */
@@ -589,8 +589,8 @@ TEST_CASE(part_streaming_stream_chunked_read_test) {
         allocator, &fixture, "s3_part_streaming_stream_chunked_test.txt", file_length, MB_TO_BYTES(2)));
 
     /* Test reading in small chunks */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     ASSERT_SUCCESS(s_validate_stream_content_with_chunks(
@@ -616,7 +616,7 @@ TEST_CASE(part_streaming_stream_unaligned_offset_test) {
     /* Test reading from unaligned offset */
     /* We can create the input stream with more than the file has. And it should still work. */
     struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
-        allocator, fixture.parallel_read_stream, fixture.ticket, offset, 2 * file_length);
+        allocator, fixture.parallel_read_stream, fixture.ticket, offset, 2 * file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     ASSERT_SUCCESS(s_validate_stream_content_with_chunks(
@@ -634,13 +634,18 @@ TEST_CASE(part_streaming_stream_small_buffer_test) {
     size_t file_length = MB_TO_BYTES(10);
 
     ASSERT_SUCCESS(s_part_streaming_test_setup(
-        allocator, &fixture, "s3_part_streaming_stream_small_buffer_test.txt", file_length, KB_TO_BYTES(16)));
+        allocator, &fixture, "s3_part_streaming_stream_small_buffer_test.txt", file_length, KB_TO_BYTES(1)));
 
-    /* Test with small buffer that requires multiple loads */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    /* Test that the buffer is smaller than the page size will fail the creating when alignment is required */
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, true);
+    ASSERT_NULL(part_streaming_stream);
+    ASSERT_UINT_EQUALS(AWS_ERROR_INVALID_ARGUMENT, aws_last_error());
+
+    /* But will still work without alignment */
+    part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, false);
     ASSERT_NOT_NULL(part_streaming_stream);
-
     /* Validate content */
     ASSERT_SUCCESS(s_validate_stream_content(allocator, part_streaming_stream, fixture.file_path, 0, file_length));
 
@@ -659,8 +664,8 @@ TEST_CASE(part_streaming_stream_seek_unsupported_test) {
         allocator, &fixture, "s3_part_streaming_stream_seek_test.txt", file_length, KB_TO_BYTES(32)));
 
     /* Test that seek operation is not supported */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     /* Test seek operations - all should fail */
@@ -690,8 +695,8 @@ TEST_CASE(part_streaming_stream_get_length_test) {
         allocator, &fixture, "s3_part_streaming_stream_get_length_test.txt", file_length, KB_TO_BYTES(32)));
 
     /* Test that get_length operation is now supported */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     int64_t length;
@@ -700,8 +705,8 @@ TEST_CASE(part_streaming_stream_get_length_test) {
 
     /* Test with a different length */
     size_t custom_length = KB_TO_BYTES(5);
-    struct aws_input_stream *part_streaming_stream2 =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, custom_length);
+    struct aws_input_stream *part_streaming_stream2 = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, custom_length, true);
     ASSERT_NOT_NULL(part_streaming_stream2);
 
     ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream2, &length));
@@ -710,7 +715,7 @@ TEST_CASE(part_streaming_stream_get_length_test) {
     /* Test with an offset */
     size_t offset = KB_TO_BYTES(2);
     struct aws_input_stream *part_streaming_stream3 = aws_part_streaming_input_stream_new(
-        allocator, fixture.parallel_read_stream, fixture.ticket, offset, custom_length);
+        allocator, fixture.parallel_read_stream, fixture.ticket, offset, custom_length, true);
     ASSERT_NOT_NULL(part_streaming_stream3);
 
     ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream3, &length));
@@ -718,7 +723,7 @@ TEST_CASE(part_streaming_stream_get_length_test) {
 
     /* Test with an offset and passed-in length is larger than available */
     struct aws_input_stream *part_streaming_stream4 = aws_part_streaming_input_stream_new(
-        allocator, fixture.parallel_read_stream, fixture.ticket, offset, file_length);
+        allocator, fixture.parallel_read_stream, fixture.ticket, offset, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream4);
 
     ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream4, &length));
@@ -726,7 +731,7 @@ TEST_CASE(part_streaming_stream_get_length_test) {
 
     /* Test with an offset is larger than available */
     struct aws_input_stream *part_streaming_stream5 = aws_part_streaming_input_stream_new(
-        allocator, fixture.parallel_read_stream, fixture.ticket, file_length + offset, file_length);
+        allocator, fixture.parallel_read_stream, fixture.ticket, file_length + offset, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream5);
 
     ASSERT_SUCCESS(aws_input_stream_get_length(part_streaming_stream5, &length));
@@ -751,8 +756,8 @@ TEST_CASE(part_streaming_stream_file_deleted_during_read_test) {
         allocator, &fixture, "s3_part_streaming_stream_delete_test.txt", file_length, KB_TO_BYTES(16)));
 
     /* Create the part streaming stream */
-    struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length);
+    struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
+        allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     /* Delete the file while the stream is still active */
@@ -807,7 +812,7 @@ TEST_CASE(part_streaming_stream_zero_length_request_test) {
 
     /* Test with zero length request */
     struct aws_input_stream *part_streaming_stream =
-        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, 0);
+        aws_part_streaming_input_stream_new(allocator, fixture.parallel_read_stream, fixture.ticket, 0, 0, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     /* Check initial status - should be end of stream immediately */
@@ -840,7 +845,7 @@ TEST_CASE(part_streaming_stream_large_offset_test) {
     /* Test with offset larger than file size */
     uint64_t large_offset = file_length * 2;
     struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
-        allocator, fixture.parallel_read_stream, fixture.ticket, large_offset, file_length);
+        allocator, fixture.parallel_read_stream, fixture.ticket, large_offset, file_length, true);
     ASSERT_NOT_NULL(part_streaming_stream);
 
     /* Try to read - should reach end of stream immediately */

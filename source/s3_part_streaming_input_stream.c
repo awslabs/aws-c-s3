@@ -268,7 +268,8 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
     struct aws_parallel_input_stream *para_stream,
     struct aws_s3_buffer_ticket *buffer_ticket,
     uint64_t offset,
-    size_t request_body_size) {
+    size_t request_body_size,
+    bool page_aligned) {
     AWS_PRECONDITION(para_stream);
     AWS_PRECONDITION(buffer_ticket);
 
@@ -278,20 +279,23 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
     aws_ref_count_init(
         &impl->base.ref_count, impl, (aws_simple_completion_callback *)s_part_streaming_input_stream_destroy);
     impl->allocator = allocator;
-
     impl->base.vtable = &s_part_streaming_input_stream_vtable;
 
-    impl->page_size = aws_system_info_page_size();
+    if (page_aligned) {
+        impl->page_size = aws_system_info_page_size();
+    } else {
+        /* Disable page alignment by using 1 as the page size */
+        impl->page_size = 1;
+    }
     impl->offset = offset;
     int64_t para_stream_total_length = 0;
     if (aws_parallel_input_stream_get_length(para_stream, &para_stream_total_length)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_GENERAL,
-            "id=%p: Failed to get length from parallel input stream with error %s",
+            "id=%p: Failed to create part_streaming_input_stream: get length from parallel input stream with error %s",
             (void *)impl,
             aws_error_debug_str(aws_last_error()));
-        aws_mem_release(allocator, impl);
-        return NULL;
+        goto error;
     }
     uint64_t total_available_length = aws_sub_u64_saturating((uint64_t)para_stream_total_length, offset);
     impl->total_length = (size_t)aws_min_u64((uint64_t)request_body_size, total_available_length);
@@ -300,11 +304,36 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
     impl->ticket = aws_s3_buffer_ticket_acquire(buffer_ticket);
 
     struct aws_byte_buf buffer = aws_s3_buffer_ticket_claim(impl->ticket);
-    AWS_FATAL_ASSERT(buffer.capacity % 2 == 0);
+    if (buffer.capacity % 2 != 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "id=%p: Failed to create part_streaming_input_stream: Only supports even length of buffer from the ticket.",
+            (void *)impl);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+    if (buffer.buffer == NULL || buffer.capacity == 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "id=%p: Failed to create part_streaming_input_stream: The buffer from ticket is invalid.",
+            (void *)impl);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
     impl->chunk_load_size = buffer.capacity / 2;
 
-    AWS_FATAL_ASSERT(buffer.buffer);
+    if (impl->chunk_load_size < impl->page_size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "id=%p: Failed to create part_streaming_input_stream: The buffer from ticket is smaller than the two times "
+            "of page size. Cannot align the page.",
+            (void *)impl);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+
     /* Split the buffer to the first and second half. */
+    /* There is no need to clean up the buffer acquired from the ticket, only need to release the ticket itself. */
     impl->chunk_buf_1 = aws_byte_buf_from_array(buffer.buffer, impl->chunk_load_size);
     impl->chunk_buf_2 = aws_byte_buf_from_array(buffer.buffer + impl->chunk_load_size, impl->chunk_load_size);
 
@@ -328,8 +357,13 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
         impl->eos_reached = true;
         AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Zero-length request, immediately setting EOS", (void *)impl);
     } else {
-        /* Start to load into the loading buffer. */
+        /* Start to load into the loading buffer. Cannot fail the create function after this. */
         s_kick_off_next_load(impl);
     }
     return &impl->base;
+error:
+    aws_parallel_input_stream_release(impl->para_stream);
+    aws_s3_buffer_ticket_release(impl->ticket);
+    aws_mem_release(allocator, impl);
+    return NULL;
 }
