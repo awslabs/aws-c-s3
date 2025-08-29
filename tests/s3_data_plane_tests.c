@@ -2173,6 +2173,7 @@ static int s_test_s3_put_object_multiple_helper(
     /* Configure file I/O options for streaming upload */
     struct aws_s3_file_io_options fio_opts = {
         .should_stream = enable_streaming,
+        .direct_io = true,
     };
     size_t content_length = MB_TO_BYTES(10);
 
@@ -4815,6 +4816,7 @@ static int s_test_s3_round_trip_with_filepath_helper(
     /* Configure file I/O options for streaming upload */
     struct aws_s3_file_io_options fio_opts = {
         .should_stream = streaming,
+        .direct_io = true,
     };
 
     struct aws_s3_tester_meta_request_options put_options = {
@@ -5011,6 +5013,7 @@ static int s_test_s3_mpu_with_filepath_streaming_dont_support_parts_checksum_via
     AWS_ZERO_STRUCT(path_buf); /* Configure file I/O options for streaming upload */
     struct aws_s3_file_io_options fio_opts = {
         .should_stream = true,
+        .direct_io = true,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(

@@ -232,8 +232,9 @@ static int s3_cancel_test_helper_ex(
 
         struct aws_s3_meta_request_test_results meta_request_test_results;
         aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-        struct aws_s3_file_io_options fio_opts = {
-            .should_stream = file_streaming,
+        struct aws_s3_file_io_option fio_opts = {
+            .streaming_upload = file_streaming,
+            .direct_io = true,
         };
 
         struct aws_s3_tester_meta_request_options options = {

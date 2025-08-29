@@ -184,7 +184,7 @@ TEST_CASE(parallel_read_stream_from_file_sanity_test) {
     ASSERT_NOT_NULL(reading_elg);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, path_cursor, reading_elg);
+        aws_parallel_input_stream_new_from_file(allocator, path_cursor, reading_elg, false /*direct_io*/);
     ASSERT_NOT_NULL(parallel_read_stream);
 
     aws_parallel_input_stream_acquire(parallel_read_stream);
@@ -286,7 +286,7 @@ TEST_CASE(parallel_read_stream_from_large_file_test) {
     struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
 
     struct aws_parallel_input_stream *parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, path_cursor, reading_elg);
+        aws_parallel_input_stream_new_from_file(allocator, path_cursor, reading_elg, false /*direct_io*/);
     ASSERT_NOT_NULL(parallel_read_stream);
 
     {
@@ -385,7 +385,7 @@ static int s_part_streaming_test_setup(
 
     struct aws_byte_cursor path_cursor = aws_byte_cursor_from_c_str(file_path);
     fixture->parallel_read_stream =
-        aws_parallel_input_stream_new_from_file(allocator, path_cursor, fixture->reading_elg);
+        aws_parallel_input_stream_new_from_file(allocator, path_cursor, fixture->reading_elg, false /*direct_io*/);
     ASSERT_NOT_NULL(fixture->parallel_read_stream);
 
     fixture->buffer_pool = aws_s3_default_buffer_pool_new(

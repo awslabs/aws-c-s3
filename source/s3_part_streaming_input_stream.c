@@ -13,6 +13,7 @@
 #include <aws/common/file.h>
 #include <aws/common/logging.h>
 #include <aws/common/string.h>
+#include <aws/common/system_info.h>
 #include <aws/common/task_scheduler.h>
 #include <aws/common/thread.h>
 
@@ -280,8 +281,7 @@ struct aws_input_stream *aws_part_streaming_input_stream_new(
 
     impl->base.vtable = &s_part_streaming_input_stream_vtable;
 
-    /* TODO: Hard code to 4KB for the page size for now. */
-    impl->page_size = KB_TO_BYTES(4);
+    impl->page_size = aws_system_info_page_size();
     impl->offset = offset;
     int64_t para_stream_total_length = 0;
     if (aws_parallel_input_stream_get_length(para_stream, &para_stream_total_length)) {
