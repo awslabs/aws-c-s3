@@ -198,7 +198,7 @@ int aws_s3_meta_request_init_base(
         goto error;
     }
 
-    if (meta_request->fio_opts.streaming_upload && options->checksum_config &&
+    if (meta_request->fio_opts.should_stream && options->checksum_config &&
         options->checksum_config->location == AWS_SCL_HEADER) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -332,7 +332,7 @@ int aws_s3_meta_request_init_base(
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
         }
-        if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.streaming_upload) {
+        if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.should_stream) {
             size_t page_size = aws_system_info_page_size();
             if (part_size % page_size != 0) {
                 AWS_LOGF_ERROR(

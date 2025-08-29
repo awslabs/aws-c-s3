@@ -2171,8 +2171,8 @@ static int s_test_s3_put_object_multiple_helper(
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
 
     /* Configure file I/O options for streaming upload */
-    struct aws_s3_file_io_option fio_opts = {
-        .streaming_upload = enable_streaming,
+    struct aws_s3_file_io_options fio_opts = {
+        .should_stream = enable_streaming,
     };
     size_t content_length = MB_TO_BYTES(10);
 
@@ -4813,8 +4813,8 @@ static int s_test_s3_round_trip_with_filepath_helper(
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
     /* Configure file I/O options for streaming upload */
-    struct aws_s3_file_io_option fio_opts = {
-        .streaming_upload = streaming,
+    struct aws_s3_file_io_options fio_opts = {
+        .should_stream = streaming,
     };
 
     struct aws_s3_tester_meta_request_options put_options = {
@@ -5009,8 +5009,8 @@ static int s_test_s3_mpu_with_filepath_streaming_dont_support_parts_checksum_via
     aws_s3_meta_request_test_results_init(&test_results, allocator);
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf); /* Configure file I/O options for streaming upload */
-    struct aws_s3_file_io_option fio_opts = {
-        .streaming_upload = true,
+    struct aws_s3_file_io_options fio_opts = {
+        .should_stream = true,
     };
 
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(

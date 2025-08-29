@@ -621,8 +621,8 @@ TEST_CASE(multipart_upload_checksum_fio_with_retry_mock_server) {
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
-    struct aws_s3_file_io_option fio_opts = {
-        .streaming_upload = true,
+    struct aws_s3_file_io_options fio_opts = {
+        .should_stream = true,
         .direct_io = true,
     };
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/throttle");

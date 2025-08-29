@@ -851,7 +851,7 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
      * reading. */
     bool parallel_prepare =
         (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
-    if (parallel_prepare && meta_request->fio_opts.streaming_upload) {
+    if (parallel_prepare && meta_request->fio_opts.should_stream) {
         request->fio_streaming = true;
     }
 
@@ -975,8 +975,8 @@ struct aws_future_http_message *s_s3_prepare_create_multipart_upload(struct aws_
     return future;
 }
 
-/* When prepare the request for the first, after the request finished reading the body or set up the body stream. Create
- * the new part info and push to the list. */
+/* When preparing the request for the first time, after the request finished reading the body or setting up the body
+ * stream, create the new part info and push to the list. */
 static int s_s3_new_upload_part_info_after_body(
     struct aws_s3_request *request,
     struct aws_s3_meta_request *meta_request,
@@ -1078,7 +1078,7 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     part_prep->on_complete = aws_future_http_message_acquire(message_future);
 
     if (request->fio_streaming) {
-        /* Creat the request body stream for the HTTP to read directly from the file. If retry happens, just recreate
+        /* Create the request body stream for the HTTP to read directly from the file. If retry happens, just recreate
          * it. */
         aws_input_stream_release(request->request_body_stream);
         uint64_t offset = 0;

@@ -292,7 +292,7 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
-enum aws_s3_recv_file_option {
+enum aws_s3_recv_file_options {
     /**
      * Create a new file if it doesn't exist, otherwise replace the existing file.
      */
@@ -316,32 +316,32 @@ enum aws_s3_recv_file_option {
 };
 
 /* Controls how client performance file I/O operations. Only applies to the file based workload. */
-struct aws_s3_file_io_option {
+struct aws_s3_file_io_options {
     /**
      * Skip buffering the part in memory before sending the request.
      * If set, set the `disk_throughput` to be reasonable align with the available disk throughput.
      * Otherwise, the transfer may fail with connection starvation.
      * Default to false.
      **/
-    bool streaming_upload;
+    bool should_stream;
 
     /**
-     * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperform the kernel cache.
+     * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperforms the kernel cache.
      * Notes:
-     * - only support linux for now.
-     * - And check the NOTES for O_DIRECT in https://man7.org/linux/man-pages/man2/openat.2.html
+     * - Only supported on linux.
      * - Only supports upload for now.
+     * - Check NOTES for O_DIRECT for additional info https://man7.org/linux/man-pages/man2/openat.2.html
      * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
      */
     bool direct_io;
 
     /**
      * The estimated disk throughput. Only be applied when `streaming_upload` is true.
-     * in gigabits per second (Gbps) that available to us.
+     * in gigabits per second (Gbps).
      *
-     * When upload with streaming, it's importand to set the disk throughput to prevent the connection starvation.
+     * When doing upload with streaming, it's important to set the disk throughput to prevent the connection starvation.
      * Notes: There are possibilities that cannot reach the all available disk throughput:
-     * 1. Disk is busy with ohter application
+     * 1. Disk is busy with other applications
      * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
      **/
     double disk_throughput;
@@ -474,16 +474,16 @@ struct aws_s3_client_config {
     /**
      * Optional.
      * If set, this controls how the client interact with file I/O.
-     * Read `aws_s3_file_io_option` for details.
+     * Read `aws_s3_file_io_options` for details.
      *  Notes: Only applies when AWS_S3_META_REQUEST_TYPE_PUT_OBJECT is set.
      *  TODO: adapt it to `recv_filepath`.
      *
      * eg:
-     * - When the file is too large to fit in the buffer, set `streaming_upload` to avoid buffering the whole parts in
+     * - When the file is too large to fit in the buffer, set `should_stream` to avoid buffering the whole parts in
      *  memory.
      * - When the disk I/O is faster than OS cache, set `direct_io` to bypass the OS cache.
      */
-    struct aws_s3_file_io_option *fio_opts;
+    struct aws_s3_file_io_options *fio_opts;
 
     /**
      * Required.
@@ -782,7 +782,7 @@ struct aws_s3_meta_request_options {
      * If set, the received data will be written into this file.
      * the `body_callback` will NOT be invoked.
      * This gives a better performance when receiving data to write to a file.
-     * See `aws_s3_recv_file_option` for the configuration on the receive file.
+     * See `aws_s3_recv_file_options` for the configuration on the receive file.
      */
     struct aws_byte_cursor recv_filepath;
 
@@ -790,9 +790,9 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Default to AWS_S3_RECV_FILE_CREATE_OR_REPLACE.
      * This only works with recv_filepath set.
-     * See `aws_s3_recv_file_option`.
+     * See `aws_s3_recv_file_options`.
      */
-    enum aws_s3_recv_file_option recv_file_option;
+    enum aws_s3_recv_file_options recv_file_option;
     /**
      * Optional.
      * The specified position to start writing at for the recv file when `recv_file_option` is set to
@@ -817,16 +817,16 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Overrides the client config if set.
      * If set, this controls how the meta request interact with file I/O.
-     * Read `aws_s3_file_io_option` for details.
+     * Read `aws_s3_file_io_options` for details.
      *  Notes: Only applies when `send_filepath` is set.
      *  TODO: adapt it to `recv_filepath`.
      *
      * eg:
-     * - When the file is too large to fit in the buffer, set `streaming_upload` to avoid buffering the whole parts in
+     * - When the file is too large to fit in the buffer, set `should_stream` to avoid buffering the whole parts in
      *  memory.
      * - When the disk I/O is faster than OS cache, set `direct_io` to bypass the OS cache.
      */
-    struct aws_s3_file_io_option *fio_opts;
+    struct aws_s3_file_io_options *fio_opts;
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE

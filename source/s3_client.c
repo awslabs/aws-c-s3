@@ -69,6 +69,9 @@ static const double s_throughput_per_connection_gbps = 100.0 / 250;
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
+/* Magic value based on: 10000 is picked randomly to be reasonable. Based on s_throughput_per_connection_gbps, that will
+ * be 2500 Gbps. */
+const uint32_t g_max_num_connections = 10000;
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
@@ -157,16 +160,17 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
     double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
     /* round up and clamp */
     ideal_connection_count_double = ceil(ideal_connection_count_double);
-    ideal_connection_count_double = aws_min_double(UINT32_MAX, ideal_connection_count_double);
+    ideal_connection_count_double = aws_min_double(g_max_num_connections, ideal_connection_count_double);
     return (uint32_t)ideal_connection_count_double;
 }
 
 /* Returns the max number of connections allowed.
  *
- * When meta request is NULL, this will return the overall allowed number of connections.
+ * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
+ * configurations.
  *
- * If meta_request is not NULL, this will give the max number of connections allowed for that meta request type on
- * that endpoint.
+ * If meta_request is not NULL, this will return the number of connections allowed based on the meta request
+ * configurations.
  */
 uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
@@ -179,12 +183,12 @@ uint32_t aws_s3_client_get_max_active_connections(
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
     }
-    if (meta_request && meta_request->fio_opts.streaming_upload && meta_request->fio_opts.disk_throughput > 0) {
+    if (meta_request && meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput > 0) {
         return aws_min_u32(
             s_get_ideal_connection_number_from_throughput(meta_request->fio_opts.disk_throughput),
             max_active_connections);
     }
-    if (client->fio_opts.streaming_upload && client->fio_opts.disk_throughput > 0) {
+    if (client->fio_opts.should_stream && client->fio_opts.disk_throughput > 0) {
         return aws_min_u32(
             s_get_ideal_connection_number_from_throughput(client->fio_opts.disk_throughput), max_active_connections);
     }
@@ -1813,7 +1817,7 @@ static bool s_s3_client_should_update_meta_request(
         }
     }
 
-    if (meta_request->fio_opts.streaming_upload) {
+    if (meta_request->fio_opts.should_stream) {
         /**
          * When upload with streaming, the prepare stage will not read into buffer.
          * Prevent the number of request in flight to be larger han the max_active_connections.
