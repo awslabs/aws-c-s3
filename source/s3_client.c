@@ -21,6 +21,7 @@
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
+#include <aws/common/file.h>
 #include <aws/common/json.h>
 #include <aws/common/priority_queue.h>
 #include <aws/common/string.h>
@@ -68,12 +69,13 @@ static const double s_throughput_per_connection_gbps = 100.0 / 250;
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
+/* Magic value based on: 10000 is picked randomly to be reasonable. Based on s_throughput_per_connection_gbps, that will
+ * be 2500 Gbps. */
+const uint32_t g_max_num_connections = 10000;
 
 /**
  * Default part size is 8 MiB to reach the best performance from the experiments we had.
- * Default max part size is 5GiB as the server limit. Object size limit is 5TiB for now.
- *        max number of upload parts is 10000.
- * TODO Provide more information on other values.
+ * Default max part size is 5GiB as the server limit.
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 5368709120ULL;
@@ -149,12 +151,26 @@ void aws_s3_set_dns_ttl(size_t ttl) {
     s_dns_host_address_ttl_seconds = ttl;
 }
 
+/**
+ * Determine how many connections are ideal by dividing target-throughput by throughput-per-connection.
+ * TODO: we may consider to alter this, upload to regular s3 can use more connections, and s3 express
+ * can use less connections to reach the target throughput..
+ **/
+static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_gps) {
+    double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
+    /* round up and clamp */
+    ideal_connection_count_double = ceil(ideal_connection_count_double);
+    ideal_connection_count_double = aws_min_double(g_max_num_connections, ideal_connection_count_double);
+    return (uint32_t)ideal_connection_count_double;
+}
+
 /* Returns the max number of connections allowed.
  *
- * When meta request is NULL, this will return the overall allowed number of connections.
+ * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
+ * configurations.
  *
- * If meta_request is not NULL, this will give the max number of connections allowed for that meta request type on
- * that endpoint.
+ * If meta_request is not NULL, this will return the number of connections allowed based on the meta request
+ * configurations.
  */
 uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
@@ -163,10 +179,18 @@ uint32_t aws_s3_client_get_max_active_connections(
     (void)meta_request;
 
     uint32_t max_active_connections = client->ideal_connection_count;
-
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
+    }
+    if (meta_request && meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput > 0) {
+        return aws_min_u32(
+            s_get_ideal_connection_number_from_throughput(meta_request->fio_opts.disk_throughput),
+            max_active_connections);
+    }
+    if (client->fio_opts.should_stream && client->fio_opts.disk_throughput > 0) {
+        return aws_min_u32(
+            s_get_ideal_connection_number_from_throughput(client->fio_opts.disk_throughput), max_active_connections);
     }
 
     return max_active_connections;
@@ -357,6 +381,10 @@ struct aws_s3_client *aws_s3_client_new(
         } else {
             max_part_size = (size_t)client_config->max_part_size;
         }
+    }
+
+    if (client_config->fio_opts) {
+        client->fio_opts = *client_config->fio_opts;
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
@@ -566,15 +594,8 @@ struct aws_s3_client *aws_s3_client_new(
     *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
         client_config->compute_content_md5;
 
-    /* Determine how many connections are ideal by dividing target-throughput by throughput-per-connection. */
-    {
-        double ideal_connection_count_double = client->throughput_target_gbps / s_throughput_per_connection_gbps;
-        /* round up and clamp */
-        ideal_connection_count_double = ceil(ideal_connection_count_double);
-        ideal_connection_count_double = aws_max_double(g_min_num_connections, ideal_connection_count_double);
-        ideal_connection_count_double = aws_min_double(UINT32_MAX, ideal_connection_count_double);
-        *(uint32_t *)&client->ideal_connection_count = (uint32_t)ideal_connection_count_double;
-    }
+    *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
+        g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
 
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
     if (client_config->enable_s3express) {
@@ -1170,6 +1191,39 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     }
     if (options->send_filepath.len > 0) {
         ++body_source_count;
+        if (!content_length_found) {
+            /* The content length was not set, but it's a file based upload. Derive the content length from the file
+             * length */
+            struct aws_string *file_path = aws_string_new_from_cursor(client->allocator, &options->send_filepath);
+            struct aws_string *readonly_bytes_mode = aws_string_new_from_c_str(client->allocator, "rb");
+            FILE *file = aws_fopen_safe(file_path, readonly_bytes_mode);
+            int error = true;
+            if (!file) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create meta request."
+                    "the send file path %s is invalid",
+                    aws_string_c_str(file_path));
+                aws_raise_error(AWS_ERROR_FILE_INVALID_PATH);
+            } else if (aws_file_get_length(file, (int64_t *)&content_length)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create meta request."
+                    "failed to get the length from the send file path %s",
+                    aws_string_c_str(file_path));
+            } else {
+                error = false;
+            }
+            if (file) {
+                fclose(file);
+            }
+            aws_string_destroy(file_path);
+            aws_string_destroy(readonly_bytes_mode);
+            if (error) {
+                return NULL;
+            }
+            content_length_found = true;
+        }
     }
     if (options->send_using_async_writes == true) {
         if (options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
@@ -1763,6 +1817,17 @@ static bool s_s3_client_should_update_meta_request(
         }
     }
 
+    if (meta_request->fio_opts.should_stream) {
+        /**
+         * When upload with streaming, the prepare stage will not read into buffer.
+         * Prevent the number of request in flight to be larger han the max_active_connections.
+         * So that the request will not staying in the queue to wait for the connection available.
+         * Prevents the credentials to be expired during waiting for too long.
+         */
+        if (num_requests_in_flight >= aws_s3_client_get_max_active_connections(client, meta_request)) {
+            return false;
+        }
+    }
     /**
      * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
      * be in the preparation stage.
@@ -1908,7 +1973,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = meta_request->part_size,
+            .size = request->buffer_size,
         };
 
         struct aws_s3_reserve_memory_payload *payload =

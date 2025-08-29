@@ -64,6 +64,7 @@ const struct aws_byte_cursor g_user_agent_header_unknown = AWS_BYTE_CUR_INIT_FRO
 
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
+const size_t g_streaming_buffer_size = MB_TO_BYTES(8);
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);

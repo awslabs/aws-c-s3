@@ -20,6 +20,10 @@ AWS_EXTERN_C_BEGIN
  * This adapter allows using a parallel input stream with APIs that expect a standard input stream.
  * The adapter uses double-buffering to read ahead and provide efficient streaming.
  *
+ * Note: The input stream only provides a blocking API to read, if reading from the same thread that
+ *      will be used from `para_stream` to handle the parallel read, it's subjected to a dead lock!!
+ *      Make sure the input stream is read from a different thread/thread pool that executes the `para_stream` reads.
+ *
  * @param allocator The allocator to use for memory allocation
  * @param para_stream The parallel input stream to read from
  * @param buffer_ticket The buffer pool ticket to use for buffering

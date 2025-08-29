@@ -17,6 +17,8 @@ static void s_para_from_file_failure_destroy(struct aws_parallel_input_stream *s
     struct aws_parallel_input_stream_from_file_failure_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_failure_impl, base);
 
+    aws_future_void_set_result(stream->shutdown_future);
+    aws_future_void_release(stream->shutdown_future);
     aws_mem_release(stream->alloc, impl);
 }
 
