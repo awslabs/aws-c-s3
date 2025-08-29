@@ -438,7 +438,6 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
 static void s_after_prepare_upload_part_finish(struct aws_s3_request *request, struct aws_http_message *message) {
     (void)message;
     if (request->num_times_prepared == 0 && message != NULL) {
-        aws_http_message_add_header(message, before_finish_header);
         struct aws_http_header throttle_header = {
             .name = aws_byte_cursor_from_c_str("force_throttle"),
             .value = aws_byte_cursor_from_c_str("true"),
